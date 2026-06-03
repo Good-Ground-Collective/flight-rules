@@ -1,0 +1,24 @@
+{
+  "name": "@good-ground-collective/flight-rules",
+  "version": "0.1.0",
+  "description": "Claude Code Skills for the Good Ground Collective org",
+  "license": "UNLICENSED",
+  "author": "",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "build": "esbuild src/index.ts --bundle --platform=node --outfile=bin/index.js && chmod +x bin/index.js",
+    "fmt": "sort-package-json && oxfmt",
+    "fmt:check": "sort-package-json --check && oxfmt --check",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^25.9.1",
+    "esbuild": "^0.28.0",
+    "oxfmt": "^0.52.0",
+    "sort-package-json": "^3.6.1",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.60.0"
+  }
+}

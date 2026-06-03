@@ -1,0 +1,25 @@
+{
+  "editor.formatOnSave": true,
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "explicit"
+  },
+  "[typescript]": {
+    "editor.defaultFormatter": "oxc.oxc-vscode"
+  },
+  "[typescriptreact]": {
+    "editor.defaultFormatter": "oxc.oxc-vscode"
+  },
+  "emeraldwalk.runonsave": {
+    "commands": [
+      {
+        "match": "package.json",
+        "cmd": "npx sort-package-json ${file}"
+      }
+    ]
+  },
+  "eslint.validate": ["typescript", "typescriptreact", "json"],
+  "eslint.useFlatConfig": true,
+  "eslint.options": {
+    "overrideConfigFile": ".config/eslint.config.js"
+  }
+}
