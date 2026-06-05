@@ -256,12 +256,12 @@ export class GitHubTracker implements TaskTracker {
             nodes: Array<{
               id: string
               body: string
-              author: { login: string }
+              author: { login: string } | null
               createdAt: string
               updatedAt: string
             }>
           }
-        }
+        } | null
       }
     }>(
       `query GetDiscussion($owner: String!, $repo: String!, $number: Int!) {
@@ -278,6 +278,9 @@ export class GitHubTracker implements TaskTracker {
     )
 
     const discussion = data.repository.discussion
+    if (discussion === null) {
+      throw new Error(`Discussion #${id} not found`)
+    }
     const epicMatch = frEpicRegex.exec(discussion.body)
     const epicId = epicMatch !== null && epicMatch[1] !== undefined ? epicMatch[1] : ''
 
@@ -288,7 +291,7 @@ export class GitHubTracker implements TaskTracker {
       comments: discussion.comments.nodes.map((n) => ({
         id: n.id,
         body: n.body,
-        author: n.author.login,
+        author: n.author?.login ?? '',
         createdAt: n.createdAt,
         updatedAt: n.updatedAt,
       })),
