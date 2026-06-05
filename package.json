@@ -7,7 +7,7 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "build": "esbuild src/index.ts --bundle --platform=node --format=esm --external:@octokit/graphql --external:@octokit/rest --external:gray-matter --external:zod --outfile=bin/flight-rules && chmod +x bin/flight-rules",
+    "build": "esbuild src/index.ts --bundle --platform=node --format=esm --outfile=bin/flight-rules && chmod +x bin/flight-rules",
     "fmt": "sort-package-json && oxfmt",
     "fmt:check": "sort-package-json --check && oxfmt --check",
     "test": "vitest run",
@@ -26,7 +26,6 @@
   "dependencies": {
     "@octokit/graphql": "^9.0.3",
     "@octokit/rest": "^22.0.1",
-    "gray-matter": "^4.0.3",
     "zod": "^4.4.3"
   }
 }
