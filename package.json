@@ -7,10 +7,11 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "build": "esbuild src/index.ts --bundle --platform=node --outfile=bin/index.js && chmod +x bin/index.js",
+    "build": "esbuild src/index.ts --bundle --platform=node --outfile=bin/flight-rules && chmod +x bin/flight-rules",
     "fmt": "sort-package-json && oxfmt",
     "fmt:check": "sort-package-json --check && oxfmt --check",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -19,6 +20,13 @@
     "oxfmt": "^0.52.0",
     "sort-package-json": "^3.6.1",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.60.0"
+    "typescript-eslint": "^8.60.0",
+    "vitest": "^4.1.8"
+  },
+  "dependencies": {
+    "@octokit/graphql": "^9.0.3",
+    "@octokit/rest": "^22.0.1",
+    "gray-matter": "^4.0.3",
+    "zod": "^4.4.3"
   }
 }
