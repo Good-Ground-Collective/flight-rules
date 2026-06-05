@@ -1,1 +1,437 @@
-flight-rules.cjs
+#!/usr/bin/env node
+
+// src/index.ts
+import { join } from "node:path";
+
+// src/config.ts
+import { readFileSync } from "node:fs";
+import matter from "gray-matter";
+import { z } from "zod";
+var ConfigSchema = z.object({
+  tracker: z.enum(["github", "jira"]),
+  repo: z.string(),
+  defaultLabels: z.array(z.string()).default([])
+});
+function readConfig(configPath) {
+  const contents = readFileSync(configPath, "utf-8");
+  const { data } = matter(contents);
+  return ConfigSchema.parse(data);
+}
+
+// src/task-tracker/github/github-tracker.ts
+import { Octokit } from "@octokit/rest";
+import { graphql } from "@octokit/graphql";
+var frTicketsRegex = /<!-- fr-tickets: (\[.*?\]) -->/s;
+var frTddRegex = /<!-- fr-tdd: (\d+) -->/;
+var frEpicRegex = /<!-- fr-epic: (\d+) -->/;
+function parseTicketIds(body) {
+  const match = frTicketsRegex.exec(body);
+  if (match === null || match[1] === void 0) return [];
+  try {
+    const parsed = JSON.parse(match[1]);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((x) => typeof x === "number");
+  } catch {
+    return [];
+  }
+}
+function parseTddId(body) {
+  const match = frTddRegex.exec(body);
+  if (match === null || match[1] === void 0) return null;
+  return parseInt(match[1], 10);
+}
+function upsertFrTickets(body, ticketIds) {
+  const tag = `<!-- fr-tickets: ${JSON.stringify(ticketIds)} -->`;
+  if (frTicketsRegex.test(body)) return body.replace(frTicketsRegex, tag);
+  return `${body}
+${tag}`;
+}
+function upsertFrTdd(body, tddId) {
+  const tag = `<!-- fr-tdd: ${tddId} -->`;
+  if (frTddRegex.test(body)) return body.replace(frTddRegex, tag);
+  return `${body}
+${tag}`;
+}
+function labelName(label) {
+  if (typeof label === "string") return label;
+  return label.name ?? "";
+}
+function mapComment(c) {
+  return {
+    id: String(c.id),
+    body: c.body ?? "",
+    author: c.user?.login ?? "",
+    createdAt: c.created_at,
+    updatedAt: c.updated_at
+  };
+}
+function mapTicket(issue, comments) {
+  return {
+    id: String(issue.number),
+    status: issue.state,
+    labels: issue.labels.map(labelName).filter(Boolean),
+    title: issue.title,
+    body: issue.body ?? "",
+    comments: comments.map(mapComment),
+    assignee: issue.assignee?.login ?? null,
+    updatedAt: issue.updated_at
+  };
+}
+var GitHubTracker = class {
+  octokit;
+  gql;
+  owner;
+  repo;
+  constructor(config) {
+    this.octokit = new Octokit({ auth: config.token });
+    this.gql = graphql.defaults({ headers: { authorization: `token ${config.token}` } });
+    this.owner = config.owner;
+    this.repo = config.repo;
+  }
+  async createEpic(input) {
+    const { data } = await this.octokit.rest.issues.create({
+      owner: this.owner,
+      repo: this.repo,
+      title: input.title,
+      body: input.body,
+      labels: ["epic", ...input.labels]
+    });
+    return {
+      id: String(data.number),
+      status: data.state,
+      labels: data.labels.map(labelName).filter(Boolean),
+      title: data.title,
+      body: data.body ?? "",
+      childIssues: [],
+      comments: [],
+      updatedAt: data.updated_at
+    };
+  }
+  async getEpic(id) {
+    const issueNumber = parseInt(id, 10);
+    const [issueResponse, commentsResponse] = await Promise.all([
+      this.octokit.rest.issues.get({ owner: this.owner, repo: this.repo, issue_number: issueNumber }),
+      this.octokit.rest.issues.listComments({ owner: this.owner, repo: this.repo, issue_number: issueNumber })
+    ]);
+    const issue = issueResponse.data;
+    const body = issue.body ?? "";
+    const ticketIds = parseTicketIds(body);
+    const childIssues = await Promise.all(ticketIds.map((n) => this.getTicket(String(n))));
+    let tdd;
+    const tddId = parseTddId(body);
+    if (tddId !== null) {
+      tdd = await this.getTechnicalDesign(String(tddId));
+    }
+    return {
+      id,
+      status: issue.state,
+      labels: issue.labels.map(labelName).filter(Boolean),
+      title: issue.title,
+      body,
+      childIssues,
+      comments: commentsResponse.data.map(mapComment),
+      tdd,
+      updatedAt: issue.updated_at
+    };
+  }
+  async createTicket(input) {
+    const body = `${input.body}
+<!-- fr-epic: ${input.epicId} -->`;
+    const { data } = await this.octokit.rest.issues.create({
+      owner: this.owner,
+      repo: this.repo,
+      title: input.title,
+      body,
+      labels: ["ticket", ...input.labels],
+      ...input.assignee !== void 0 ? { assignee: input.assignee } : {}
+    });
+    await this.linkTicketToEpic(String(data.number), input.epicId);
+    return mapTicket(data, []);
+  }
+  async getTicket(id) {
+    const issueNumber = parseInt(id, 10);
+    const [issueResponse, commentsResponse] = await Promise.all([
+      this.octokit.rest.issues.get({ owner: this.owner, repo: this.repo, issue_number: issueNumber }),
+      this.octokit.rest.issues.listComments({ owner: this.owner, repo: this.repo, issue_number: issueNumber })
+    ]);
+    return mapTicket(issueResponse.data, commentsResponse.data);
+  }
+  async linkTicketToEpic(ticketId, epicId) {
+    const epicNumber = parseInt(epicId, 10);
+    const { data } = await this.octokit.rest.issues.get({
+      owner: this.owner,
+      repo: this.repo,
+      issue_number: epicNumber
+    });
+    const currentBody = data.body ?? "";
+    const existingIds = parseTicketIds(currentBody);
+    const ticketNumber = parseInt(ticketId, 10);
+    if (existingIds.includes(ticketNumber)) return;
+    const newBody = upsertFrTickets(currentBody, [...existingIds, ticketNumber]);
+    await this.octokit.rest.issues.update({
+      owner: this.owner,
+      repo: this.repo,
+      issue_number: epicNumber,
+      body: newBody
+    });
+  }
+  async createTechnicalDesign(input) {
+    const repoData = await this.gql(
+      `query GetRepoAndCategory($owner: String!, $repo: String!, $slug: String!) {
+        repository(owner: $owner, name: $repo) {
+          id
+          discussionCategory(slug: $slug) { id }
+        }
+      }`,
+      { owner: this.owner, repo: this.repo, slug: "tdds" }
+    );
+    const categoryId = repoData.repository.discussionCategory?.id;
+    if (categoryId === void 0) {
+      throw new Error(`No "TDDs" discussion category found. Create it in the repo's GitHub Discussions settings.`);
+    }
+    const body = `${input.body}
+<!-- fr-epic: ${input.epicId} -->`;
+    const createData = await this.gql(
+      `mutation CreateDiscussion($repositoryId: ID!, $categoryId: ID!, $title: String!, $body: String!) {
+        createDiscussion(input: { repositoryId: $repositoryId, categoryId: $categoryId, title: $title, body: $body }) {
+          discussion { number body updatedAt }
+        }
+      }`,
+      { repositoryId: repoData.repository.id, categoryId, title: input.title, body }
+    );
+    const discussion = createData.createDiscussion.discussion;
+    const epicResponse = await this.octokit.rest.issues.get({
+      owner: this.owner,
+      repo: this.repo,
+      issue_number: parseInt(input.epicId, 10)
+    });
+    await this.octokit.rest.issues.update({
+      owner: this.owner,
+      repo: this.repo,
+      issue_number: parseInt(input.epicId, 10),
+      body: upsertFrTdd(epicResponse.data.body ?? "", discussion.number)
+    });
+    return {
+      id: String(discussion.number),
+      epicId: input.epicId,
+      body: discussion.body,
+      comments: [],
+      updatedAt: discussion.updatedAt
+    };
+  }
+  async getTechnicalDesign(id) {
+    const data = await this.gql(
+      `query GetDiscussion($owner: String!, $repo: String!, $number: Int!) {
+        repository(owner: $owner, name: $repo) {
+          discussion(number: $number) {
+            number body updatedAt
+            comments(first: 100) {
+              nodes { id body author { login } createdAt updatedAt }
+            }
+          }
+        }
+      }`,
+      { owner: this.owner, repo: this.repo, number: parseInt(id, 10) }
+    );
+    const discussion = data.repository.discussion;
+    const epicMatch = frEpicRegex.exec(discussion.body);
+    const epicId = epicMatch !== null && epicMatch[1] !== void 0 ? epicMatch[1] : "";
+    return {
+      id,
+      epicId,
+      body: discussion.body,
+      comments: discussion.comments.nodes.map((n) => ({
+        id: n.id,
+        body: n.body,
+        author: n.author.login,
+        createdAt: n.createdAt,
+        updatedAt: n.updatedAt
+      })),
+      updatedAt: discussion.updatedAt
+    };
+  }
+  async addComment(entityId, body) {
+    const { data } = await this.octokit.rest.issues.createComment({
+      owner: this.owner,
+      repo: this.repo,
+      issue_number: parseInt(entityId, 10),
+      body
+    });
+    return {
+      id: String(data.id),
+      body: data.body ?? "",
+      author: data.user?.login ?? "",
+      createdAt: data.created_at,
+      updatedAt: data.updated_at
+    };
+  }
+};
+
+// src/commands/epic.ts
+function parseFlags(args) {
+  const flags = {};
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg !== void 0 && arg.startsWith("--")) {
+      const key = arg.slice(2);
+      const value = args[i + 1];
+      if (value !== void 0 && !value.startsWith("--")) {
+        flags[key] = value;
+        i++;
+      }
+    }
+  }
+  return flags;
+}
+async function runEpicCommand(args, tracker) {
+  const subcommand = args[0];
+  if (subcommand === "create") {
+    const flags = parseFlags(args.slice(1));
+    const epic = await tracker.createEpic({
+      title: flags["title"] ?? "",
+      body: flags["body"] ?? "",
+      labels: flags["labels"] !== void 0 ? flags["labels"].split(",") : []
+    });
+    process.stdout.write(JSON.stringify(epic) + "\n");
+    return;
+  }
+  if (subcommand === "get") {
+    const epic = await tracker.getEpic(args[1] ?? "");
+    process.stdout.write(JSON.stringify(epic) + "\n");
+    return;
+  }
+  process.stderr.write(`Unknown epic subcommand: ${subcommand ?? "(none)"}
+`);
+  process.exit(1);
+}
+
+// src/commands/ticket.ts
+function parseFlags2(args) {
+  const flags = {};
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg !== void 0 && arg.startsWith("--")) {
+      const key = arg.slice(2);
+      const value = args[i + 1];
+      if (value !== void 0 && !value.startsWith("--")) {
+        flags[key] = value;
+        i++;
+      }
+    }
+  }
+  return flags;
+}
+async function runTicketCommand(args, tracker) {
+  const subcommand = args[0];
+  if (subcommand === "create") {
+    const flags = parseFlags2(args.slice(1));
+    const input = {
+      title: flags["title"] ?? "",
+      body: flags["body"] ?? "",
+      epicId: flags["epic-id"] ?? "",
+      labels: flags["labels"] !== void 0 ? flags["labels"].split(",") : [],
+      ...flags["assignee"] !== void 0 ? { assignee: flags["assignee"] } : {}
+    };
+    const ticket = await tracker.createTicket(input);
+    process.stdout.write(JSON.stringify(ticket) + "\n");
+    return;
+  }
+  if (subcommand === "get") {
+    const ticket = await tracker.getTicket(args[1] ?? "");
+    process.stdout.write(JSON.stringify(ticket) + "\n");
+    return;
+  }
+  process.stderr.write(`Unknown ticket subcommand: ${subcommand ?? "(none)"}
+`);
+  process.exit(1);
+}
+
+// src/commands/tdd.ts
+function parseFlags3(args) {
+  const flags = {};
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg !== void 0 && arg.startsWith("--")) {
+      const key = arg.slice(2);
+      const value = args[i + 1];
+      if (value !== void 0 && !value.startsWith("--")) {
+        flags[key] = value;
+        i++;
+      }
+    }
+  }
+  return flags;
+}
+async function runTddCommand(args, tracker) {
+  const subcommand = args[0];
+  if (subcommand === "create") {
+    const flags = parseFlags3(args.slice(1));
+    const tdd = await tracker.createTechnicalDesign({
+      title: flags["title"] ?? "",
+      body: flags["body"] ?? "",
+      epicId: flags["epic-id"] ?? ""
+    });
+    process.stdout.write(JSON.stringify(tdd) + "\n");
+    return;
+  }
+  if (subcommand === "get") {
+    const tdd = await tracker.getTechnicalDesign(args[1] ?? "");
+    process.stdout.write(JSON.stringify(tdd) + "\n");
+    return;
+  }
+  process.stderr.write(`Unknown tdd subcommand: ${subcommand ?? "(none)"}
+`);
+  process.exit(1);
+}
+
+// src/index.ts
+function buildTracker() {
+  const configPath = process.env["FLIGHT_RULES_CONFIG"] ?? join(process.cwd(), ".claude", "flight-rules.local.md");
+  const config = readConfig(configPath);
+  if (config.tracker === "github") {
+    const token = process.env["GITHUB_TOKEN"];
+    if (token === void 0) throw new Error("GITHUB_TOKEN environment variable is required");
+    const parts = config.repo.split("/");
+    const owner = parts[0];
+    const repo = parts[1];
+    if (owner === void 0 || repo === void 0) {
+      throw new Error(`Invalid repo format "${config.repo}" \u2014 expected "owner/repo"`);
+    }
+    return new GitHubTracker({ token, owner, repo });
+  }
+  throw new Error(`Unsupported tracker: ${config.tracker}`);
+}
+async function run(args) {
+  const command = args[0];
+  const rest = args.slice(1);
+  const tracker = buildTracker();
+  if (command === "epic") {
+    await runEpicCommand(rest, tracker);
+    return;
+  }
+  if (command === "ticket") {
+    await runTicketCommand(rest, tracker);
+    return;
+  }
+  if (command === "tdd") {
+    await runTddCommand(rest, tracker);
+    return;
+  }
+  process.stderr.write(
+    `Unknown command: ${command ?? "(none)"}
+Usage: flight-rules <epic|ticket|tdd> <subcommand> [flags]
+`
+  );
+  process.exit(1);
+}
+var isMain = process.argv[1]?.endsWith("flight-rules") === true || process.argv[1]?.endsWith("index.js") === true;
+if (isMain) {
+  run(process.argv.slice(2)).catch((err) => {
+    process.stderr.write(`${err instanceof Error ? err.message : String(err)}
+`);
+    process.exit(1);
+  });
+}
+export {
+  run
+};
