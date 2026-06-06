@@ -28,7 +28,7 @@ flight-rules git commit \
 ```
 
 - `--file` — repeated flag; each value is a path to stage. Agents should pass small, focused sets of files consistent with the project ethos of small commits.
-- `--type`, `--scope`, `--description` — conventional commit components. Scope is optional.
+- `--type`, `--scope`, `--description` — conventional commit components. All three are required; missing any one exits with code 1.
 - `--body` — optional multi-line body (single `--body` flag value).
 - `--footer` — repeated flag for any caller-supplied trailers.
 - `--model` — optional; omitted from the commit if not provided.
@@ -36,8 +36,7 @@ flight-rules git commit \
 **Constructed commit message format:**
 
 ```
-<type>(<scope>): <description>    ← if --scope provided
-<type>: <description>             ← if --scope omitted
+<type>(<scope>): <description>
 
 <body>                            ← omitted if --body not provided
 
@@ -177,7 +176,7 @@ Add `semantic-release` and its plugins as devDependencies.
 
 - `parse-flags.test.ts` — verify single-value flags return strings, repeated flags return arrays, mixed usage works correctly
 - `executor.test.ts` — verify `NodeGitExecutor` calls `execFile` with correct `git` arguments; mock `child_process.execFile`
-- `git.test.ts` — verify `runGitCommitCommand` constructs the correct commit message (with and without `--body`, `--footer`, `--model`), calls `executor.stage` then `executor.commit` in order, outputs correct JSON
+- `git.test.ts` — verify `runGitCommitCommand` constructs the correct commit message (with and without `--body`, `--footer`, `--model`), calls `executor.stage` then `executor.commit` in order, outputs correct JSON; verify exits with code 1 when `--type`, `--scope`, or `--description` is missing
 - `AI_AGENT` parsing — covered in `git.test.ts` via `vi.stubEnv`
 
 ---
