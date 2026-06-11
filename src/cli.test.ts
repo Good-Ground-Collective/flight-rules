@@ -43,17 +43,24 @@ describe('run', () => {
     vi.unstubAllEnvs()
   })
 
-  it('routes "epic create" through the GitHubTracker and prints JSON', async () => {
-    const dir = join(tmpdir(), `fr-index-test-${Date.now()}`)
+  it('routes "epic create" through the tracker and prints JSON', async () => {
+    const dir = join(tmpdir(), `fr-cli-test-${Date.now()}`)
     const configPath = writeConfig(dir, `---\ntracker: github\nrepo: acme/proj\n---\n`)
     vi.stubEnv('GITHUB_TOKEN', 'test-token')
     vi.stubEnv('FLIGHT_RULES_CONFIG', configPath)
 
     const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
-    const { run } = await import('./index.js')
+    const { run } = await import('./cli.js')
     await run(['epic', 'create', '--title', 'T', '--body', 'B'])
 
     expect(output).toHaveBeenCalledWith(expect.stringContaining('"id":"1"') as string)
     output.mockRestore()
+  })
+
+  it('does not require GITHUB_TOKEN to show help', async () => {
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    const { run } = await import('./cli.js')
+    // program-level exitOverride makes --help reject rather than process.exit
+    await expect(run(['--help'])).rejects.toThrow()
   })
 })
