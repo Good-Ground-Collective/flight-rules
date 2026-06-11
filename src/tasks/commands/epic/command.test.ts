@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import type { TaskTracker, Epic } from '../task-tracker/types.js'
-import { runEpicCommand } from './epic.js'
+import type { TaskTracker, Epic } from '../../task-tracker/task-tracker.js'
+import { createEpicCommand } from './command.js'
 
 const mockEpic: Epic = {
   id: '42',
@@ -24,15 +24,16 @@ const makeTracker = (): TaskTracker => ({
   addComment: vi.fn(),
 })
 
-describe('runEpicCommand', () => {
+const run = (tracker: TaskTracker, args: string[]) =>
+  createEpicCommand(() => tracker).exitOverride().parseAsync(args, { from: 'user' })
+
+describe('epic command', () => {
   beforeEach(() => vi.clearAllMocks())
 
   it('calls createEpic and prints JSON for "create"', async () => {
     const tracker = makeTracker()
     const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
-
-    await runEpicCommand(['create', '--title', 'My Epic', '--body', 'Epic body'], tracker)
-
+    await run(tracker, ['create', '--title', 'My Epic', '--body', 'Epic body'])
     expect(tracker.createEpic).toHaveBeenCalledWith({ title: 'My Epic', body: 'Epic body', labels: [] })
     expect(output).toHaveBeenCalledWith(JSON.stringify(mockEpic) + '\n')
     output.mockRestore()
@@ -41,9 +42,7 @@ describe('runEpicCommand', () => {
   it('splits --labels on comma', async () => {
     const tracker = makeTracker()
     const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
-
-    await runEpicCommand(['create', '--title', 'T', '--body', 'B', '--labels', 'bug,feature'], tracker)
-
+    await run(tracker, ['create', '--title', 'T', '--body', 'B', '--labels', 'bug,feature'])
     expect(tracker.createEpic).toHaveBeenCalledWith({ title: 'T', body: 'B', labels: ['bug', 'feature'] })
     output.mockRestore()
   })
@@ -51,20 +50,16 @@ describe('runEpicCommand', () => {
   it('calls getEpic and prints JSON for "get"', async () => {
     const tracker = makeTracker()
     const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
-
-    await runEpicCommand(['get', '42'], tracker)
-
+    await run(tracker, ['get', '42'])
     expect(tracker.getEpic).toHaveBeenCalledWith('42')
     expect(output).toHaveBeenCalledWith(JSON.stringify(mockEpic) + '\n')
     output.mockRestore()
   })
 
-  it('exits with code 1 for unknown subcommand', async () => {
+  it('rejects "create" when --title is missing', async () => {
     const tracker = makeTracker()
-    const exit = vi.spyOn(process, 'exit').mockImplementation(() => { throw new Error('exit') })
-
-    await expect(runEpicCommand(['unknown'], tracker)).rejects.toThrow('exit')
-    expect(exit).toHaveBeenCalledWith(1)
-    exit.mockRestore()
+    vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+    await expect(run(tracker, ['create', '--body', 'B'])).rejects.toThrow()
+    expect(tracker.createEpic).not.toHaveBeenCalled()
   })
 })
