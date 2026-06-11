@@ -7,6 +7,8 @@ import { createEpicCommand } from './tasks/commands/epic/command.js'
 import { createTicketCommand } from './tasks/commands/ticket/command.js'
 import { createTddCommand } from './tasks/commands/tdd/command.js'
 import type { TaskTracker } from './tasks/task-tracker/task-tracker.js'
+import { NodeGitExecutor } from './git/git-executor/git-executor.js'
+import { createGitCommand } from './git/commands/commit/command.js'
 
 function buildTracker(): TaskTracker {
   const configPath =
@@ -34,6 +36,7 @@ export function buildProgram(getTracker: () => TaskTracker): Command {
   program.addCommand(createEpicCommand(getTracker))
   program.addCommand(createTicketCommand(getTracker))
   program.addCommand(createTddCommand(getTracker))
+  program.addCommand(createGitCommand(() => new NodeGitExecutor()))
   return program
 }
 
