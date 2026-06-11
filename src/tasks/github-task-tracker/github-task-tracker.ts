@@ -9,7 +9,7 @@ import type {
   TaskTracker,
   TechnicalDesign,
   Ticket,
-} from '../types.js'
+} from '../task-tracker/task-tracker.js'
 
 interface GitHubTrackerConfig {
   token: string
@@ -83,7 +83,7 @@ function mapTicket(issue: OctokitIssueData, comments: OctokitCommentData[]): Tic
   }
 }
 
-export class GitHubTracker implements TaskTracker {
+export class GitHubTaskTracker implements TaskTracker {
   private octokit: Octokit
   private gql: ReturnType<typeof graphql.defaults>
   private owner: string

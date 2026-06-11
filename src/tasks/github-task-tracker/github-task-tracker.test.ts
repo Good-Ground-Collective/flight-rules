@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { GitHubTracker } from './github-tracker.js'
+import { GitHubTaskTracker } from './github-task-tracker.js'
 
 vi.mock('@octokit/rest', () => ({
   Octokit: vi.fn().mockImplementation(function () {
@@ -23,7 +23,7 @@ vi.mock('@octokit/graphql', () => ({
   }),
 }))
 
-const makeTracker = () => new GitHubTracker({ token: 'tok', owner: 'acme', repo: 'proj' })
+const makeTracker = () => new GitHubTaskTracker({ token: 'tok', owner: 'acme', repo: 'proj' })
 
 describe('GitHubTracker.createEpic', () => {
   beforeEach(() => vi.clearAllMocks())
