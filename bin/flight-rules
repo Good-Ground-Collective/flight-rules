@@ -22080,59 +22080,69 @@ var NodeGitExecutor = class {
   }
 };
 
-// src/git/commands/commit/command.ts
+// src/git/commit-message-builder/commit-message-builder.ts
 import { readFileSync as readFileSync2 } from "node:fs";
 import { dirname, join } from "node:path";
-function readPluginVersion(binPath) {
-  try {
-    const pkgPath = join(dirname(binPath), "..", "package.json");
-    const parsed = JSON.parse(readFileSync2(pkgPath, "utf-8"));
-    if (typeof parsed === "object" && parsed !== null && "version" in parsed && typeof parsed.version === "string") {
-      return parsed.version;
+var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
+  pluginVersion;
+  harnessVersion;
+  constructor(binPath, agentEnv) {
+    this.pluginVersion = _DefaultCommitMessageBuilder.readPluginVersion(binPath);
+    this.harnessVersion = _DefaultCommitMessageBuilder.parseHarnessVersion(agentEnv);
+  }
+  build(input) {
+    const sections = [];
+    sections.push(`${input.type}(${input.scope}): ${input.description}`);
+    if (input.body !== void 0) {
+      sections.push(input.body);
     }
-    return "unknown";
-  } catch {
-    return "unknown";
+    const trailers = [
+      ...input.footers,
+      `Flight-Rules-Version: ${this.pluginVersion}`,
+      ...this.harnessVersion !== void 0 ? [`Harness-Version: ${this.harnessVersion}`] : [],
+      ...input.model !== void 0 ? [`Model-Used: ${input.model}`] : []
+    ];
+    sections.push(trailers.join("\n"));
+    return sections.join("\n\n");
   }
-}
-function parseHarnessVersion(agentEnv) {
-  if (!agentEnv) return void 0;
-  const match = /^(.+)_(\d+-\d+-\d+)_agent$/.exec(agentEnv);
-  if (match?.[1] === void 0 || match?.[2] === void 0) return void 0;
-  return `${match[1]}@${match[2].replace(/-/g, ".")}`;
-}
-function buildCommitMessage(opts) {
-  const sections = [];
-  sections.push(`${opts.type}(${opts.scope}): ${opts.description}`);
-  if (opts.body !== void 0) {
-    sections.push(opts.body);
+  static readPluginVersion(binPath) {
+    try {
+      const pkgPath = join(dirname(binPath), "..", "package.json");
+      const parsed = JSON.parse(readFileSync2(pkgPath, "utf-8"));
+      if (typeof parsed === "object" && parsed !== null && "version" in parsed && typeof parsed.version === "string") {
+        return parsed.version;
+      }
+      return "unknown";
+    } catch {
+      return "unknown";
+    }
   }
-  const trailers = [
-    ...opts.footers,
-    `Flight-Rules-Version: ${opts.pluginVersion}`,
-    ...opts.harnessVersion !== void 0 ? [`Harness-Version: ${opts.harnessVersion}`] : [],
-    ...opts.model !== void 0 ? [`Model-Used: ${opts.model}`] : []
-  ];
-  sections.push(trailers.join("\n"));
-  return sections.join("\n\n");
-}
+  static parseHarnessVersion(agentEnv) {
+    if (!agentEnv) return void 0;
+    const match = /^(.+)_(\d+-\d+-\d+)_agent$/.exec(agentEnv);
+    if (match?.[1] === void 0 || match?.[2] === void 0) return void 0;
+    return `${match[1]}@${match[2].replace(/-/g, ".")}`;
+  }
+};
+
+// src/git/commands/commit/command.ts
 function collect(value, previous) {
   return [...previous, value];
 }
 function createGitCommand(getExecutor) {
   const git = new Command("git");
   git.command("commit").exitOverride().requiredOption("--type <type>", "conventional commit type").requiredOption("--scope <scope>", "conventional commit scope").requiredOption("--description <description>", "commit description").option("--file <file>", "file to stage (repeatable)", collect, []).option("--body <body>", "commit body").option("--footer <footer>", "commit footer (repeatable)", collect, []).option("--model <model>", "model identifier").action(async (opts) => {
-    const pluginVersion = readPluginVersion(process.argv[1] ?? "");
-    const harnessVersion = parseHarnessVersion(process.env["AI_AGENT"]);
-    const message = buildCommitMessage({
+    const builder = new DefaultCommitMessageBuilder(
+      process.argv[1] ?? "",
+      process.env["AI_AGENT"]
+    );
+    const message = builder.build({
       type: opts.type,
       scope: opts.scope,
       description: opts.description,
       ...opts.body !== void 0 ? { body: opts.body } : {},
       footers: opts.footer,
-      pluginVersion,
-      harnessVersion,
-      model: opts.model
+      ...opts.model !== void 0 ? { model: opts.model } : {}
     });
     const executor = getExecutor();
     await executor.stage(opts.file);
