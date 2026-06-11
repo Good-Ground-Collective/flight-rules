@@ -6,7 +6,7 @@ import {
   CreateEpicInputSchema,
   CreateTicketInputSchema,
   CreateTechnicalDesignInputSchema,
-} from './types.js'
+} from './task-tracker.js'
 
 describe('CommentSchema', () => {
   it('parses a valid comment', () => {
