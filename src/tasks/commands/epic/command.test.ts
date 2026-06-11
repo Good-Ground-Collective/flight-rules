@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { CommanderError } from 'commander'
 import type { TaskTracker, Epic } from '../../task-tracker/task-tracker.js'
 import { createEpicCommand } from './command.js'
 
@@ -58,8 +59,9 @@ describe('epic command', () => {
 
   it('rejects "create" when --title is missing', async () => {
     const tracker = makeTracker()
-    vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
-    await expect(run(tracker, ['create', '--body', 'B'])).rejects.toThrow()
+    const errOutput = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+    await expect(run(tracker, ['create', '--body', 'B'])).rejects.toThrow(CommanderError)
     expect(tracker.createEpic).not.toHaveBeenCalled()
+    errOutput.mockRestore()
   })
 })
