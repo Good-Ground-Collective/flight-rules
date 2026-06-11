@@ -110,4 +110,11 @@ export default defineConfig([
       ],
     },
   },
+  {
+    files: ["**/*.test.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": "off",
+      "@typescript-eslint/no-unsafe-type-assertion": "off",
+    },
+  },
 ]);
