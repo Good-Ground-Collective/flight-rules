@@ -168,7 +168,7 @@ interface PlannerTicket {
 
 interface DependencyPlan {
   waves: PlannerTicket[][] // wave[0] = ready now; wave[n] depends only on < n
-  cycles: string[][]       // ticket IDs participating in dependency cycles
+  cycles: string[]         // open ticket IDs that cannot be scheduled
 }
 
 function planDependencies(tickets: PlannerTicket[]): DependencyPlan
@@ -183,8 +183,11 @@ Semantics:
   all live in earlier waves.
 - **Closed** tickets are excluded from the waves (they're done) but still count
   as satisfied blockers for others.
-- Tickets that participate in a dependency **cycle** can never enter a wave;
-  they are collected into `cycles` instead. This guarantees termination.
+- When wave assignment stalls, every remaining unscheduled *open* ticket is
+  reported in `cycles` — these tickets are part of, or transitively blocked by,
+  a dependency cycle. A non-empty `cycles` therefore means the graph has a
+  cycle. This guarantees termination. (Flat list rather than per-cycle grouping
+  is deliberate: it's an advisory error signal; resolve the cycle and re-run.)
 - Ordering within a wave follows the input order (creation order from `getEpic`).
 
 ---
