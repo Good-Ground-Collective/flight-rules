@@ -4,6 +4,7 @@ import { GitHubTaskTracker } from './github-task-tracker.js'
 vi.mock('@octokit/rest', () => ({
   Octokit: vi.fn().mockImplementation(function () {
     return {
+      request: vi.fn(),
       rest: {
         issues: {
           create: vi.fn(),
@@ -62,7 +63,7 @@ describe('GitHubTracker.createEpic', () => {
 describe('GitHubTracker.getEpic', () => {
   beforeEach(() => vi.clearAllMocks())
 
-  it('returns an epic with no child issues when body has no fr-tickets comment', async () => {
+  it('returns an epic with no child issues when it has no sub-issues', async () => {
     const tracker = makeTracker()
     // @ts-expect-error — accessing private field for test setup
     const mockGet = vi.mocked(tracker.octokit.rest.issues.get)
@@ -83,6 +84,10 @@ describe('GitHubTracker.getEpic', () => {
 
     mockListComments.mockResolvedValueOnce({ data: [] } as never)
 
+    // @ts-expect-error — accessing private field for test setup
+    const mockRequest = vi.mocked(tracker.octokit.request)
+    mockRequest.mockResolvedValue({ data: [] } as never)
+
     const epic = await tracker.getEpic('42')
     expect(epic.id).toBe('42')
     expect(epic.childIssues).toEqual([])
@@ -93,41 +98,41 @@ describe('GitHubTracker.getEpic', () => {
 describe('GitHubTracker.linkTicketToEpic', () => {
   beforeEach(() => vi.clearAllMocks())
 
-  it('appends the ticket number to the epic body', async () => {
+  it('adds the ticket as a native sub-issue of the epic', async () => {
     const tracker = makeTracker()
     // @ts-expect-error — accessing private field for test setup
-    const mockGet = vi.mocked(tracker.octokit.rest.issues.get)
+    const mockRequest = vi.mocked(tracker.octokit.request)
     // @ts-expect-error — accessing private field for test setup
-    const mockUpdate = vi.mocked(tracker.octokit.rest.issues.update)
+    const mockGet = vi.mocked(tracker.octokit.rest.issues.get)
 
-    mockGet.mockResolvedValueOnce({
-      data: { number: 10, body: 'Epic body' },
-    } as never)
-    mockUpdate.mockResolvedValueOnce({} as never)
+    mockRequest.mockImplementation((route: string) => {
+      if (route.startsWith('GET')) return Promise.resolve({ data: [] } as never)
+      return Promise.resolve({ data: {} } as never)
+    })
+    // resolveIssueId(7) → global id 999
+    mockGet.mockResolvedValueOnce({ data: { id: 999, number: 7 } } as never)
 
     await tracker.linkTicketToEpic('7', '10')
 
-    expect(mockUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        issue_number: 10,
-        body: expect.stringContaining('<!-- fr-tickets: [7] -->') as string,
-      }),
+    expect(mockRequest).toHaveBeenCalledWith(
+      'POST /repos/{owner}/{repo}/issues/{issue_number}/sub_issues',
+      { owner: 'acme', repo: 'proj', issue_number: 10, sub_issue_id: 999 },
     )
   })
 
-  it('does not duplicate a ticket already in the list', async () => {
+  it('does not re-add a ticket already a sub-issue', async () => {
     const tracker = makeTracker()
     // @ts-expect-error — accessing private field for test setup
-    const mockGet = vi.mocked(tracker.octokit.rest.issues.get)
-    // @ts-expect-error — accessing private field for test setup
-    const mockUpdate = vi.mocked(tracker.octokit.rest.issues.update)
+    const mockRequest = vi.mocked(tracker.octokit.request)
 
-    mockGet.mockResolvedValueOnce({
-      data: { number: 10, body: 'Epic body\n<!-- fr-tickets: [7] -->' },
-    } as never)
+    mockRequest.mockResolvedValueOnce({ data: [{ number: 7 }] } as never)
 
     await tracker.linkTicketToEpic('7', '10')
 
-    expect(mockUpdate).not.toHaveBeenCalled()
+    expect(mockRequest).toHaveBeenCalledTimes(1)
+    expect(mockRequest).toHaveBeenCalledWith(
+      'GET /repos/{owner}/{repo}/issues/{issue_number}/sub_issues',
+      { owner: 'acme', repo: 'proj', issue_number: 10 },
+    )
   })
 })

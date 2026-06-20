@@ -1,5 +1,6 @@
 import { Octokit } from '@octokit/rest'
 import { graphql } from '@octokit/graphql'
+import { z } from 'zod'
 import type {
   Comment,
   CreateEpicInput,
@@ -21,32 +22,15 @@ type OctokitIssueData = Awaited<ReturnType<Octokit['rest']['issues']['get']>>['d
 type OctokitCommentData = Awaited<ReturnType<Octokit['rest']['issues']['listComments']>>['data'][number]
 type OctokitLabelData = OctokitIssueData['labels'][number]
 
-const frTicketsRegex = /<!-- fr-tickets: (\[.*?\]) -->/s
 const frTddRegex = /<!-- fr-tdd: (\d+) -->/
 const frEpicRegex = /<!-- fr-epic: (\d+) -->/
 
-function parseTicketIds(body: string): number[] {
-  const match = frTicketsRegex.exec(body)
-  if (match === null || match[1] === undefined) return []
-  try {
-    const parsed: unknown = JSON.parse(match[1])
-    if (!Array.isArray(parsed)) return []
-    return parsed.filter((x): x is number => typeof x === 'number')
-  } catch {
-    return []
-  }
-}
+const IssueRefListSchema = z.array(z.object({ number: z.number() }))
 
 function parseTddId(body: string): number | null {
   const match = frTddRegex.exec(body)
   if (match === null || match[1] === undefined) return null
   return parseInt(match[1], 10)
-}
-
-function upsertFrTickets(body: string, ticketIds: number[]): string {
-  const tag = `<!-- fr-tickets: ${JSON.stringify(ticketIds)} -->`
-  if (frTicketsRegex.test(body)) return body.replace(frTicketsRegex, tag)
-  return `${body}\n${tag}`
 }
 
 function upsertFrTdd(body: string, tddId: number): string {
@@ -125,15 +109,20 @@ export class GitHubTaskTracker implements TaskTracker {
 
   async getEpic(id: string): Promise<Epic> {
     const issueNumber = parseInt(id, 10)
-    const [issueResponse, commentsResponse] = await Promise.all([
+    const [issueResponse, commentsResponse, subIssuesResponse] = await Promise.all([
       this.octokit.rest.issues.get({ owner: this.owner, repo: this.repo, issue_number: issueNumber }),
       this.octokit.rest.issues.listComments({ owner: this.owner, repo: this.repo, issue_number: issueNumber }),
+      this.octokit.request('GET /repos/{owner}/{repo}/issues/{issue_number}/sub_issues', {
+        owner: this.owner,
+        repo: this.repo,
+        issue_number: issueNumber,
+      }),
     ])
     const issue = issueResponse.data
     const body = issue.body ?? ''
 
-    const ticketIds = parseTicketIds(body)
-    const childIssues = await Promise.all(ticketIds.map((n) => this.getTicket(String(n))))
+    const childNumbers = IssueRefListSchema.parse(subIssuesResponse.data).map((ref) => String(ref.number))
+    const childIssues = await Promise.all(childNumbers.map((n) => this.getTicket(n)))
 
     let tdd: TechnicalDesign | undefined
     const tddId = parseTddId(body)
@@ -155,12 +144,11 @@ export class GitHubTaskTracker implements TaskTracker {
   }
 
   async createTicket(input: CreateTicketInput): Promise<Ticket> {
-    const body = `${input.body}\n<!-- fr-epic: ${input.epicId} -->`
     const { data } = await this.octokit.rest.issues.create({
       owner: this.owner,
       repo: this.repo,
       title: input.title,
-      body,
+      body: input.body,
       labels: ['ticket', ...input.labels],
       ...(input.assignee !== undefined ? { assignee: input.assignee } : {}),
     })
@@ -179,21 +167,19 @@ export class GitHubTaskTracker implements TaskTracker {
 
   async linkTicketToEpic(ticketId: string, epicId: string): Promise<void> {
     const epicNumber = parseInt(epicId, 10)
-    const { data } = await this.octokit.rest.issues.get({
-      owner: this.owner,
-      repo: this.repo,
-      issue_number: epicNumber,
-    })
-    const currentBody = data.body ?? ''
-    const existingIds = parseTicketIds(currentBody)
     const ticketNumber = parseInt(ticketId, 10)
-    if (existingIds.includes(ticketNumber)) return
-    const newBody = upsertFrTickets(currentBody, [...existingIds, ticketNumber])
-    await this.octokit.rest.issues.update({
+    const existing = await this.octokit.request(
+      'GET /repos/{owner}/{repo}/issues/{issue_number}/sub_issues',
+      { owner: this.owner, repo: this.repo, issue_number: epicNumber },
+    )
+    const childNumbers = IssueRefListSchema.parse(existing.data).map((ref) => ref.number)
+    if (childNumbers.includes(ticketNumber)) return
+    const subIssueId = await this.resolveIssueId(ticketNumber)
+    await this.octokit.request('POST /repos/{owner}/{repo}/issues/{issue_number}/sub_issues', {
       owner: this.owner,
       repo: this.repo,
       issue_number: epicNumber,
-      body: newBody,
+      sub_issue_id: subIssueId,
     })
   }
 
@@ -320,5 +306,14 @@ export class GitHubTaskTracker implements TaskTracker {
       createdAt: data.created_at,
       updatedAt: data.updated_at,
     }
+  }
+
+  private async resolveIssueId(issueNumber: number): Promise<number> {
+    const { data } = await this.octokit.rest.issues.get({
+      owner: this.owner,
+      repo: this.repo,
+      issue_number: issueNumber,
+    })
+    return data.id
   }
 }
