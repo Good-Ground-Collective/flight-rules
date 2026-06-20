@@ -75,6 +75,8 @@ export interface TaskTracker {
   createTicket(input: CreateTicketInput): Promise<Ticket>
   getTicket(id: string): Promise<Ticket>
   linkTicketToEpic(ticketId: string, epicId: string): Promise<void>
+  blockTicket(ticketId: string, blockedById: string): Promise<void>
+  unblockTicket(ticketId: string, blockedById: string): Promise<void>
   createTechnicalDesign(input: CreateTechnicalDesignInput): Promise<TechnicalDesign>
   getTechnicalDesign(id: string): Promise<TechnicalDesign>
   addComment(entityId: string, body: string): Promise<Comment>

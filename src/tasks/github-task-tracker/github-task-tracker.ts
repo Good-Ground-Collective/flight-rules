@@ -195,6 +195,32 @@ export class GitHubTaskTracker implements TaskTracker {
     })
   }
 
+  async blockTicket(ticketId: string, blockedById: string): Promise<void> {
+    if (ticketId === blockedById) throw new Error('a ticket cannot block itself')
+    const ticketNumber = parseInt(ticketId, 10)
+    const blockerNumber = parseInt(blockedById, 10)
+    const existing = await this.octokit.request(
+      'GET /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocked_by',
+      { owner: this.owner, repo: this.repo, issue_number: ticketNumber },
+    )
+    const blockerNumbers = IssueRefListSchema.parse(existing.data).map((ref) => ref.number)
+    if (blockerNumbers.includes(blockerNumber)) return
+    const issueId = await this.resolveIssueId(blockerNumber)
+    await this.octokit.request(
+      'POST /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocked_by',
+      { owner: this.owner, repo: this.repo, issue_number: ticketNumber, issue_id: issueId },
+    )
+  }
+
+  async unblockTicket(ticketId: string, blockedById: string): Promise<void> {
+    const ticketNumber = parseInt(ticketId, 10)
+    const issueId = await this.resolveIssueId(parseInt(blockedById, 10))
+    await this.octokit.request(
+      'DELETE /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocked_by/{issue_id}',
+      { owner: this.owner, repo: this.repo, issue_number: ticketNumber, issue_id: issueId },
+    )
+  }
+
   async createTechnicalDesign(input: CreateTechnicalDesignInput): Promise<TechnicalDesign> {
     const repoData = await this.gql<{
       repository: { id: string; discussionCategory: { id: string } | null }

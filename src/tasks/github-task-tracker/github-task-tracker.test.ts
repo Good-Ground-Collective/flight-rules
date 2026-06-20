@@ -173,3 +173,67 @@ describe('GitHubTracker.linkTicketToEpic', () => {
     )
   })
 })
+
+describe('GitHubTracker.blockTicket', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('adds a native blocked_by dependency using the blocker global id', async () => {
+    const tracker = makeTracker()
+    // @ts-expect-error — accessing private field for test setup
+    const mockGet = vi.mocked(tracker.octokit.rest.issues.get)
+    // @ts-expect-error — accessing private field for test setup
+    const mockRequest = vi.mocked(tracker.octokit.request)
+
+    mockRequest.mockImplementation(((route: string) => {
+      if (route.startsWith('GET')) return Promise.resolve({ data: [] })
+      return Promise.resolve({ data: {} })
+    }) as never)
+    // resolveIssueId(3) → global id 555
+    mockGet.mockResolvedValueOnce({ data: { id: 555, number: 3 } } as never)
+
+    await tracker.blockTicket('7', '3')
+
+    expect(mockRequest).toHaveBeenCalledWith(
+      'POST /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocked_by',
+      { owner: 'acme', repo: 'proj', issue_number: 7, issue_id: 555 },
+    )
+  })
+
+  it('does not re-add an existing blocker', async () => {
+    const tracker = makeTracker()
+    // @ts-expect-error — accessing private field for test setup
+    const mockRequest = vi.mocked(tracker.octokit.request)
+    mockRequest.mockResolvedValueOnce({ data: [{ number: 3 }] } as never)
+
+    await tracker.blockTicket('7', '3')
+
+    expect(mockRequest).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects a self-block', async () => {
+    const tracker = makeTracker()
+    await expect(tracker.blockTicket('7', '7')).rejects.toThrow('cannot block itself')
+  })
+})
+
+describe('GitHubTracker.unblockTicket', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('deletes the blocked_by dependency using the blocker global id', async () => {
+    const tracker = makeTracker()
+    // @ts-expect-error — accessing private field for test setup
+    const mockGet = vi.mocked(tracker.octokit.rest.issues.get)
+    // @ts-expect-error — accessing private field for test setup
+    const mockRequest = vi.mocked(tracker.octokit.request)
+
+    mockGet.mockResolvedValueOnce({ data: { id: 555, number: 3 } } as never)
+    mockRequest.mockResolvedValue({ data: {} } as never)
+
+    await tracker.unblockTicket('7', '3')
+
+    expect(mockRequest).toHaveBeenCalledWith(
+      'DELETE /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocked_by/{issue_id}',
+      { owner: 'acme', repo: 'proj', issue_number: 7, issue_id: 555 },
+    )
+  })
+})
