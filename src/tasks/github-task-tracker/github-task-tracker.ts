@@ -70,7 +70,12 @@ function mapComment(c: OctokitCommentData): Comment {
   }
 }
 
-function mapTicket(issue: OctokitIssueData, comments: OctokitCommentData[]): Ticket {
+function mapTicket(
+  issue: OctokitIssueData,
+  comments: OctokitCommentData[],
+  blockedBy: string[] = [],
+  blocking: string[] = [],
+): Ticket {
   return {
     id: String(issue.number),
     status: issue.state,
@@ -79,6 +84,8 @@ function mapTicket(issue: OctokitIssueData, comments: OctokitCommentData[]): Tic
     body: issue.body ?? '',
     comments: comments.map(mapComment),
     assignee: issue.assignee?.login ?? null,
+    blockedBy,
+    blocking,
     updatedAt: issue.updated_at,
   }
 }

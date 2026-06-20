@@ -24,6 +24,8 @@ export const TicketSchema = z.object({
   body: z.string(),
   comments: z.array(CommentSchema),
   assignee: z.string().nullable(),
+  blockedBy: z.array(z.string()).default([]),
+  blocking: z.array(z.string()).default([]),
   updatedAt: z.string(),
 })
 
