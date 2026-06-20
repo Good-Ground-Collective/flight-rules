@@ -95,6 +95,43 @@ describe('GitHubTracker.getEpic', () => {
   })
 })
 
+describe('GitHubTracker.getTicket', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('populates blockedBy and blocking from the dependency endpoints', async () => {
+    const tracker = makeTracker()
+    // @ts-expect-error — accessing private field for test setup
+    const mockGet = vi.mocked(tracker.octokit.rest.issues.get)
+    // @ts-expect-error — accessing private field for test setup
+    const mockListComments = vi.mocked(tracker.octokit.rest.issues.listComments)
+    // @ts-expect-error — accessing private field for test setup
+    const mockRequest = vi.mocked(tracker.octokit.request)
+
+    mockGet.mockResolvedValueOnce({
+      data: {
+        number: 7,
+        state: 'open',
+        labels: [{ name: 'ticket' }],
+        title: 'Fix login',
+        body: 'Details',
+        updated_at: '2026-01-01T00:00:00Z',
+        assignee: null,
+      },
+    } as never)
+    mockListComments.mockResolvedValueOnce({ data: [] } as never)
+    mockRequest.mockImplementation((route: string) => {
+      if (route.includes('/dependencies/blocked_by')) return Promise.resolve({ data: [{ number: 3 }] } as never)
+      if (route.includes('/dependencies/blocking')) return Promise.resolve({ data: [{ number: 9 }] } as never)
+      return Promise.resolve({ data: [] } as never)
+    })
+
+    const ticket = await tracker.getTicket('7')
+
+    expect(ticket.blockedBy).toEqual(['3'])
+    expect(ticket.blocking).toEqual(['9'])
+  })
+})
+
 describe('GitHubTracker.linkTicketToEpic', () => {
   beforeEach(() => vi.clearAllMocks())
 

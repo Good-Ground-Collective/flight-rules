@@ -158,11 +158,23 @@ export class GitHubTaskTracker implements TaskTracker {
 
   async getTicket(id: string): Promise<Ticket> {
     const issueNumber = parseInt(id, 10)
-    const [issueResponse, commentsResponse] = await Promise.all([
+    const [issueResponse, commentsResponse, blockedByResponse, blockingResponse] = await Promise.all([
       this.octokit.rest.issues.get({ owner: this.owner, repo: this.repo, issue_number: issueNumber }),
       this.octokit.rest.issues.listComments({ owner: this.owner, repo: this.repo, issue_number: issueNumber }),
+      this.octokit.request('GET /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocked_by', {
+        owner: this.owner,
+        repo: this.repo,
+        issue_number: issueNumber,
+      }),
+      this.octokit.request('GET /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocking', {
+        owner: this.owner,
+        repo: this.repo,
+        issue_number: issueNumber,
+      }),
     ])
-    return mapTicket(issueResponse.data, commentsResponse.data)
+    const blockedBy = IssueRefListSchema.parse(blockedByResponse.data).map((ref) => String(ref.number))
+    const blocking = IssueRefListSchema.parse(blockingResponse.data).map((ref) => String(ref.number))
+    return mapTicket(issueResponse.data, commentsResponse.data, blockedBy, blocking)
   }
 
   async linkTicketToEpic(ticketId: string, epicId: string): Promise<void> {
