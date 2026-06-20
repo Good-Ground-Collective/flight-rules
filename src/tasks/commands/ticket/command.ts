@@ -41,5 +41,23 @@ export function createTicketCommand(getTracker: () => TaskTracker): Command {
       process.stdout.write(JSON.stringify(result) + '\n')
     })
 
+  ticket
+    .command('block')
+    .exitOverride()
+    .argument('<id>', 'ticket id to block')
+    .requiredOption('--by <blockerId>', 'id of the ticket that must close first')
+    .action(async (id: string, opts: { by: string }) => {
+      await getTracker().blockTicket(id, opts.by)
+    })
+
+  ticket
+    .command('unblock')
+    .exitOverride()
+    .argument('<id>', 'ticket id to unblock')
+    .requiredOption('--by <blockerId>', 'id of the blocking ticket to remove')
+    .action(async (id: string, opts: { by: string }) => {
+      await getTracker().unblockTicket(id, opts.by)
+    })
+
   return ticket
 }

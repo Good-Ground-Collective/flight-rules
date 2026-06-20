@@ -78,4 +78,24 @@ describe('ticket command', () => {
     expect(tracker.createTicket).not.toHaveBeenCalled()
     errOutput.mockRestore()
   })
+
+  it('calls blockTicket for "block"', async () => {
+    const tracker = makeTracker()
+    await run(tracker, ['block', '7', '--by', '3'])
+    expect(tracker.blockTicket).toHaveBeenCalledWith('7', '3')
+  })
+
+  it('calls unblockTicket for "unblock"', async () => {
+    const tracker = makeTracker()
+    await run(tracker, ['unblock', '7', '--by', '3'])
+    expect(tracker.unblockTicket).toHaveBeenCalledWith('7', '3')
+  })
+
+  it('rejects "block" when --by is missing', async () => {
+    const tracker = makeTracker()
+    const errOutput = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+    await expect(run(tracker, ['block', '7'])).rejects.toThrow(CommanderError)
+    expect(tracker.blockTicket).not.toHaveBeenCalled()
+    errOutput.mockRestore()
+  })
 })
