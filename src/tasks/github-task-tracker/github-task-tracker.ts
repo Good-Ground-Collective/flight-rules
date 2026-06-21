@@ -189,16 +189,60 @@ export class GitHubTaskTracker implements TaskTracker {
     })
   }
 
-  async updateEpicMetadata(_epicId: string, _patch: Partial<EntityMetadata>): Promise<void> {
-    // TODO: Implement in Task 4
+  async updateEpicMetadata(epicId: string, patch: Partial<EntityMetadata>): Promise<void> {
+    const issueNumber = parseInt(epicId, 10)
+    const { data } = await this.octokit.rest.issues.get({
+      owner: this.owner,
+      repo: this.repo,
+      issue_number: issueNumber,
+    })
+    await this.octokit.rest.issues.update({
+      owner: this.owner,
+      repo: this.repo,
+      issue_number: issueNumber,
+      body: this.bodyMetadata.splice(data.body ?? '', patch),
+    })
   }
 
-  async updateTicketMetadata(_ticketId: string, _patch: Partial<EntityMetadata>): Promise<void> {
-    // TODO: Implement in Task 4
+  async updateTicketMetadata(ticketId: string, patch: Partial<EntityMetadata>): Promise<void> {
+    const issueNumber = parseInt(ticketId, 10)
+    const { data } = await this.octokit.rest.issues.get({
+      owner: this.owner,
+      repo: this.repo,
+      issue_number: issueNumber,
+    })
+    await this.octokit.rest.issues.update({
+      owner: this.owner,
+      repo: this.repo,
+      issue_number: issueNumber,
+      body: this.bodyMetadata.splice(data.body ?? '', patch),
+    })
   }
 
-  async updateTddMetadata(_tddId: string, _patch: Partial<EntityMetadata>): Promise<void> {
-    // TODO: Implement in Task 4
+  async updateTddMetadata(tddId: string, patch: Partial<EntityMetadata>): Promise<void> {
+    const fetchData = await this.gql<{
+      repository: { discussion: { id: string; body: string } | null }
+    }>(
+      `query GetDiscussionForUpdate($owner: String!, $repo: String!, $number: Int!) {
+        repository(owner: $owner, name: $repo) {
+          discussion(number: $number) { id body }
+        }
+      }`,
+      { owner: this.owner, repo: this.repo, number: parseInt(tddId, 10) },
+    )
+    const discussion = fetchData.repository.discussion
+    if (discussion === null) throw new Error(`Discussion #${tddId} not found`)
+    await this.gql(
+      `mutation UpdateDiscussion($discussionId: ID!, $body: String!) {
+        updateDiscussion(input: { discussionId: $discussionId, body: $body }) {
+          discussion { number }
+        }
+      }`,
+      {
+        discussionId: discussion.id,
+        body: this.bodyMetadata.splice(discussion.body, patch),
+      },
+    )
   }
 
   async createTechnicalDesign(input: CreateTechnicalDesignInput): Promise<TechnicalDesign> {

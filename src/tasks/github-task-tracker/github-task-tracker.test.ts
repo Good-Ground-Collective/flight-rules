@@ -184,6 +184,79 @@ describe('GitHubTracker.getTicket metadata', () => {
   })
 })
 
+describe('GitHubTracker.updateEpicMetadata', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('fetches the epic body, splices the patch, and updates the issue', async () => {
+    const tracker = makeTracker()
+    // @ts-expect-error — accessing private field for test setup
+    const mockGet = vi.mocked(tracker.octokit.rest.issues.get)
+    // @ts-expect-error — accessing private field for test setup
+    const mockUpdate = vi.mocked(tracker.octokit.rest.issues.update)
+
+    mockGet.mockResolvedValueOnce({ data: { body: 'Epic body' } } as never)
+    mockUpdate.mockResolvedValueOnce({} as never)
+
+    await tracker.updateEpicMetadata('42', { tddId: 7 })
+
+    expect(mockGet).toHaveBeenCalledWith({ owner: 'acme', repo: 'proj', issue_number: 42 })
+    expect(mockUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        issue_number: 42,
+        body: expect.stringContaining('tddId: 7') as string,
+      }),
+    )
+  })
+})
+
+describe('GitHubTracker.updateTicketMetadata', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('fetches the ticket body, splices the patch, and updates the issue', async () => {
+    const tracker = makeTracker()
+    // @ts-expect-error — accessing private field for test setup
+    const mockGet = vi.mocked(tracker.octokit.rest.issues.get)
+    // @ts-expect-error — accessing private field for test setup
+    const mockUpdate = vi.mocked(tracker.octokit.rest.issues.update)
+
+    mockGet.mockResolvedValueOnce({ data: { body: 'Ticket body' } } as never)
+    mockUpdate.mockResolvedValueOnce({} as never)
+
+    await tracker.updateTicketMetadata('7', { notes: 'Use JWT rotation' })
+
+    expect(mockGet).toHaveBeenCalledWith({ owner: 'acme', repo: 'proj', issue_number: 7 })
+    expect(mockUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        issue_number: 7,
+        body: expect.stringContaining('Use JWT rotation') as string,
+      }),
+    )
+  })
+})
+
+describe('GitHubTracker.updateTddMetadata', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('fetches the discussion by node id and calls the update mutation', async () => {
+    const tracker = makeTracker()
+    // @ts-expect-error — accessing private field for test setup
+    const mockGql = vi.mocked(tracker.gql)
+
+    mockGql
+      .mockResolvedValueOnce({
+        repository: { discussion: { id: 'D_kwDOABC123', body: 'TDD body' } },
+      } as never)
+      .mockResolvedValueOnce({ updateDiscussion: { discussion: { number: 3 } } } as never)
+
+    await tracker.updateTddMetadata('3', { epicId: 10 })
+
+    expect(mockGql).toHaveBeenCalledTimes(2)
+    const mutVars = mockGql.mock.calls[1]?.[1] as { discussionId: string; body: string } | undefined
+    expect(mutVars?.discussionId).toBe('D_kwDOABC123')
+    expect(mutVars?.body).toContain('epicId: 10')
+  })
+})
+
 describe('GitHubTracker.createTechnicalDesign metadata', () => {
   beforeEach(() => vi.clearAllMocks())
 
