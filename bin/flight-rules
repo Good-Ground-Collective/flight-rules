@@ -22034,26 +22034,37 @@ var GitHubTaskTracker = class {
 // src/tasks/dependency-planner/dependency-planner.ts
 var DependencyPlannerService = class {
   plan(tickets) {
-    const byId = new Map(tickets.map((ticket) => [ticket.id, ticket]));
-    const isOpen = (ticket) => ticket.status !== "closed";
-    const isSatisfied = (blockerId) => {
-      const blocker = byId.get(blockerId);
-      return blocker === void 0 || !isOpen(blocker);
-    };
+    const byId = new Map(tickets.map((t) => [t.id, t]));
+    const isOpen = (t) => t.status !== "closed";
     const openTickets = tickets.filter(isOpen);
-    const placed = /* @__PURE__ */ new Set();
-    const waves = [];
-    let iterations = 0;
-    while (iterations < openTickets.length + 1) {
-      iterations++;
-      const wave = openTickets.filter(
-        (ticket) => !placed.has(ticket.id) && ticket.blockedBy.every((blocker) => isSatisfied(blocker) || placed.has(blocker))
-      );
-      if (wave.length === 0) break;
-      wave.forEach((ticket) => placed.add(ticket.id));
-      waves.push(wave);
-    }
-    const cycles = openTickets.filter((ticket) => !placed.has(ticket.id)).map((ticket) => ticket.id);
+    const waveOf = /* @__PURE__ */ new Map();
+    const failed = /* @__PURE__ */ new Set();
+    const visiting = /* @__PURE__ */ new Set();
+    const computeWave = (id) => {
+      if (failed.has(id)) return null;
+      if (waveOf.has(id)) return waveOf.get(id) ?? null;
+      const ticket = byId.get(id);
+      if (ticket === void 0 || !isOpen(ticket)) return -1;
+      if (visiting.has(id)) return null;
+      visiting.add(id);
+      const blockerWaves = ticket.blockedBy.map(computeWave);
+      visiting.delete(id);
+      if (blockerWaves.some((w) => w === null)) {
+        failed.add(id);
+        return null;
+      }
+      const wave = Math.max(-1, ...blockerWaves.filter((w) => w !== null)) + 1;
+      waveOf.set(id, wave);
+      return wave;
+    };
+    openTickets.forEach((t) => computeWave(t.id));
+    const scheduled = openTickets.filter((t) => waveOf.has(t.id));
+    const cycles = openTickets.filter((t) => !waveOf.has(t.id)).map((t) => t.id);
+    const maxWave = scheduled.reduce((max, t) => Math.max(max, waveOf.get(t.id) ?? 0), -1);
+    const waves = Array.from(
+      { length: maxWave + 1 },
+      (_, i) => scheduled.filter((t) => waveOf.get(t.id) === i)
+    );
     return { waves, cycles };
   }
 };
