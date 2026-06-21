@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createRequire } from 'module'; const require = createRequire(import.meta.url);
 var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -7494,7 +7495,7 @@ var require_dist2 = __commonJS({
 });
 
 // src/cli.ts
-import { join as join2 } from "node:path";
+import { join as join3 } from "node:path";
 
 // node_modules/commander/lib/error.js
 var CommanderError = class extends Error {
@@ -10866,6 +10867,7 @@ var program = new Command();
 
 // src/config.ts
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 // node_modules/zod/v4/classic/external.js
 var external_exports = {};
@@ -25385,7 +25387,9 @@ config(en_default());
 var ConfigSchema = external_exports.object({
   tracker: external_exports.enum(["github", "jira"]),
   repo: external_exports.string(),
-  defaultLabels: external_exports.array(external_exports.string()).default([])
+  defaultLabels: external_exports.array(external_exports.string()).default([]),
+  rfcStorage: external_exports.enum(["local", "global"]).default("local"),
+  rfcStoragePath: external_exports.string().optional()
 });
 function parseFrontmatter(contents) {
   const match = contents.match(/^---\n([\s\S]*?)\n---/);
@@ -25452,6 +25456,15 @@ function readConfig(configPath) {
   const contents = readFileSync(configPath, "utf-8");
   const data = parseFrontmatter(contents);
   return ConfigSchema.parse(data);
+}
+function getRfcDir(config2, cwd) {
+  if (config2.rfcStorage === "global") {
+    if (config2.rfcStoragePath === void 0) {
+      throw new Error("rfcStoragePath is required when rfcStorage is global");
+    }
+    return config2.rfcStoragePath;
+  }
+  return join(cwd, "rfcs");
 }
 
 // node_modules/universal-user-agent/index.js
@@ -29479,6 +29492,13 @@ var GitHubTaskTracker = class {
       updatedAt: data.updated_at
     };
   }
+  async getUsers() {
+    const { data } = await this.octokit.rest.orgs.listMembers({
+      org: this.owner,
+      per_page: 100
+    });
+    return data.map((member) => member.login);
+  }
   async resolveIssueId(issueNumber) {
     const { data } = await this.octokit.rest.issues.get({
       owner: this.owner,
@@ -29633,6 +29653,43 @@ function createTddCommand(getTracker) {
   return tdd;
 }
 
+// src/tasks/commands/users/command.ts
+function createUsersCommand(getTracker) {
+  const users = new Command("users");
+  users.command("get").exitOverride().action(async () => {
+    const result = await getTracker().getUsers();
+    process.stdout.write(JSON.stringify(result) + "\n");
+  });
+  return users;
+}
+
+// src/tasks/commands/rfc/command.ts
+import { readdirSync } from "node:fs";
+function getNextRfcId(rfcDir) {
+  let files;
+  try {
+    files = readdirSync(rfcDir);
+  } catch {
+    return "RFC-001";
+  }
+  const ids = files.map((f) => f.match(/^RFC-(\d+)\.md$/)).filter((m) => m !== null).map((m) => parseInt(m[1] ?? "0", 10));
+  if (ids.length === 0) return "RFC-001";
+  return `RFC-${(Math.max(...ids) + 1).toString().padStart(3, "0")}`;
+}
+function createRfcCommand(getConfig, getCwd = () => process.cwd()) {
+  const rfc = new Command("rfc");
+  rfc.command("next-id").exitOverride().action(() => {
+    const rfcDir = getRfcDir(getConfig(), getCwd());
+    process.stdout.write(`${getNextRfcId(rfcDir)}
+`);
+  });
+  rfc.command("dir").exitOverride().action(() => {
+    process.stdout.write(`${getRfcDir(getConfig(), getCwd())}
+`);
+  });
+  return rfc;
+}
+
 // src/git/git-executor/git-executor.ts
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -29657,7 +29714,7 @@ var NodeGitExecutor = class {
 
 // src/git/commit-message-builder/commit-message-builder.ts
 import { readFileSync as readFileSync2 } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join as join2 } from "node:path";
 var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
   pluginVersion;
   harnessVersion;
@@ -29682,7 +29739,7 @@ var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
   }
   static readPluginVersion(binPath) {
     try {
-      const pkgPath = join(dirname(binPath), "..", "package.json");
+      const pkgPath = join2(dirname(binPath), "..", "package.json");
       const parsed = JSON.parse(readFileSync2(pkgPath, "utf-8"));
       if (typeof parsed === "object" && parsed !== null && "version" in parsed && typeof parsed.version === "string") {
         return parsed.version;
@@ -29730,7 +29787,7 @@ function createGitCommand(getExecutor) {
 
 // src/cli.ts
 function buildTracker() {
-  const configPath = process.env["FLIGHT_RULES_CONFIG"] ?? join2(process.cwd(), ".claude", "flight-rules.local.md");
+  const configPath = process.env["FLIGHT_RULES_CONFIG"] ?? join3(process.cwd(), ".claude", "flight-rules.local.md");
   const config2 = readConfig(configPath);
   if (config2.tracker === "github") {
     const token = process.env["GITHUB_TOKEN"];
@@ -29745,17 +29802,23 @@ function buildTracker() {
   }
   throw new Error(`Unsupported tracker: ${config2.tracker}`);
 }
-function buildProgram(getTracker) {
+function getConfigFromEnv() {
+  const configPath = process.env["FLIGHT_RULES_CONFIG"] ?? join3(process.cwd(), ".claude", "flight-rules.local.md");
+  return readConfig(configPath);
+}
+function buildProgram(getTracker, getConfig) {
   const program2 = new Command("flight-rules");
   program2.exitOverride();
   program2.addCommand(createEpicCommand(getTracker));
   program2.addCommand(createTicketCommand(getTracker));
   program2.addCommand(createTddCommand(getTracker));
   program2.addCommand(createGitCommand(() => new NodeGitExecutor()));
+  program2.addCommand(createUsersCommand(getTracker));
+  program2.addCommand(createRfcCommand(getConfig));
   return program2;
 }
 async function run(argv) {
-  await buildProgram(buildTracker).parseAsync(argv, { from: "user" });
+  await buildProgram(buildTracker, getConfigFromEnv).parseAsync(argv, { from: "user" });
 }
 var isMain = process.argv[1]?.endsWith("flight-rules") === true || process.argv[1]?.endsWith("cli.js") === true;
 if (isMain) {

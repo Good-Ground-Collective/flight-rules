@@ -7,7 +7,7 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "build": "esbuild src/cli.ts --bundle --platform=node --format=esm --outfile=bin/flight-rules && chmod +x bin/flight-rules",
+    "build": "esbuild src/cli.ts --bundle --platform=node --format=esm --banner:js=\"import { createRequire } from 'module'; const require = createRequire(import.meta.url);\" --outfile=bin/flight-rules && chmod +x bin/flight-rules",
     "fmt": "sort-package-json && oxfmt",
     "fmt:check": "sort-package-json --check && oxfmt --check",
     "release": "semantic-release",
