@@ -50,17 +50,14 @@ jobs:
 
       - run: npm ci
 
+      # semantic-release's @semantic-release/git plugin commits the version bump
+      # and rebuilt binary back to main, so it needs a git identity.
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
       - name: Release
         run: npx semantic-release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Rebuild binary
-        run: npm run build
-
-      - name: Commit binary
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add bin/flight-rules
-          git diff --cached --quiet || (git commit -m "chore: rebuild binary for release [skip ci]" && git push)

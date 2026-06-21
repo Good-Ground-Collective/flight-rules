@@ -12,6 +12,7 @@ import { createRfcCommand } from './tasks/commands/rfc/command.js'
 import type { TaskTracker } from './tasks/task-tracker/task-tracker.js'
 import { NodeGitExecutor } from './git/git-executor/git-executor.js'
 import { createGitCommand } from './git/commands/commit/command.js'
+import { appVersion } from './version.js'
 
 function buildTracker(): TaskTracker {
   const configPath =
@@ -44,6 +45,7 @@ export function buildProgram(
   getConfig: () => Config,
 ): Command {
   const program = new Command('flight-rules')
+  program.version(appVersion)
   program.exitOverride()
   program.addCommand(createEpicCommand(getTracker))
   program.addCommand(createTicketCommand(getTracker))
