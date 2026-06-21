@@ -29116,6 +29116,8 @@ var TicketSchema = external_exports.object({
   body: external_exports.string(),
   comments: external_exports.array(CommentSchema),
   assignee: external_exports.string().nullable(),
+  blockedBy: external_exports.array(external_exports.string()).default([]),
+  blocking: external_exports.array(external_exports.string()).default([]),
   metadata: EntityMetadataSchema.default({}),
   updatedAt: external_exports.string()
 });
@@ -29196,24 +29198,7 @@ ${block}`;
 };
 
 // src/tasks/github-task-tracker/github-task-tracker.ts
-var frTicketsRegex = /<!-- fr-tickets: (\[.*?\]) -->/s;
-function parseTicketIds(body) {
-  const match = frTicketsRegex.exec(body);
-  if (match === null || match[1] === void 0) return [];
-  try {
-    const parsed = JSON.parse(match[1]);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((x) => typeof x === "number");
-  } catch {
-    return [];
-  }
-}
-function upsertFrTickets(body, ticketIds) {
-  const tag = `<!-- fr-tickets: ${JSON.stringify(ticketIds)} -->`;
-  if (frTicketsRegex.test(body)) return body.replace(frTicketsRegex, tag);
-  return `${body}
-${tag}`;
-}
+var IssueRefListSchema = external_exports.array(external_exports.object({ number: external_exports.number() }));
 var GitHubTaskTracker = class {
   octokit;
   gql;
@@ -29249,15 +29234,20 @@ var GitHubTaskTracker = class {
   }
   async getEpic(id) {
     const issueNumber = parseInt(id, 10);
-    const [issueResponse, commentsResponse] = await Promise.all([
+    const [issueResponse, commentsResponse, subIssuesResponse] = await Promise.all([
       this.octokit.rest.issues.get({ owner: this.owner, repo: this.repo, issue_number: issueNumber }),
-      this.octokit.rest.issues.listComments({ owner: this.owner, repo: this.repo, issue_number: issueNumber })
+      this.octokit.rest.issues.listComments({ owner: this.owner, repo: this.repo, issue_number: issueNumber }),
+      this.octokit.request("GET /repos/{owner}/{repo}/issues/{issue_number}/sub_issues", {
+        owner: this.owner,
+        repo: this.repo,
+        issue_number: issueNumber
+      })
     ]);
     const issue2 = issueResponse.data;
     const body = issue2.body ?? "";
     const metadata = this.bodyMetadata.parse(body);
-    const ticketIds = parseTicketIds(body);
-    const childIssues = await Promise.all(ticketIds.map((n) => this.getTicket(String(n))));
+    const childNumbers = IssueRefListSchema.parse(subIssuesResponse.data).map((ref) => String(ref.number));
+    const childIssues = await Promise.all(childNumbers.map((n) => this.getTicket(n)));
     let tdd;
     if (metadata.tddId !== void 0) {
       tdd = await this.getTechnicalDesign(String(metadata.tddId));
@@ -29286,36 +29276,70 @@ var GitHubTaskTracker = class {
       ...input.assignee !== void 0 ? { assignee: input.assignee } : {}
     });
     await this.linkTicketToEpic(String(data.number), input.epicId);
-    return this.mapTicket(data, [], {});
+    return this.mapTicket(data, [], [], [], this.bodyMetadata.parse(data.body ?? ""));
   }
   async getTicket(id) {
     const issueNumber = parseInt(id, 10);
-    const [issueResponse, commentsResponse] = await Promise.all([
+    const [issueResponse, commentsResponse, blockedByResponse, blockingResponse] = await Promise.all([
       this.octokit.rest.issues.get({ owner: this.owner, repo: this.repo, issue_number: issueNumber }),
-      this.octokit.rest.issues.listComments({ owner: this.owner, repo: this.repo, issue_number: issueNumber })
+      this.octokit.rest.issues.listComments({ owner: this.owner, repo: this.repo, issue_number: issueNumber }),
+      this.octokit.request("GET /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocked_by", {
+        owner: this.owner,
+        repo: this.repo,
+        issue_number: issueNumber
+      }),
+      this.octokit.request("GET /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocking", {
+        owner: this.owner,
+        repo: this.repo,
+        issue_number: issueNumber
+      })
     ]);
     const body = issueResponse.data.body ?? "";
     const metadata = this.bodyMetadata.parse(body);
-    return this.mapTicket(issueResponse.data, commentsResponse.data, metadata);
+    const blockedBy = IssueRefListSchema.parse(blockedByResponse.data).map((ref) => String(ref.number));
+    const blocking = IssueRefListSchema.parse(blockingResponse.data).map((ref) => String(ref.number));
+    return this.mapTicket(issueResponse.data, commentsResponse.data, blockedBy, blocking, metadata);
   }
   async linkTicketToEpic(ticketId, epicId) {
     const epicNumber = parseInt(epicId, 10);
-    const { data } = await this.octokit.rest.issues.get({
-      owner: this.owner,
-      repo: this.repo,
-      issue_number: epicNumber
-    });
-    const currentBody = data.body ?? "";
-    const existingIds = parseTicketIds(currentBody);
     const ticketNumber = parseInt(ticketId, 10);
-    if (existingIds.includes(ticketNumber)) return;
-    const newBody = upsertFrTickets(currentBody, [...existingIds, ticketNumber]);
-    await this.octokit.rest.issues.update({
+    const existing = await this.octokit.request(
+      "GET /repos/{owner}/{repo}/issues/{issue_number}/sub_issues",
+      { owner: this.owner, repo: this.repo, issue_number: epicNumber }
+    );
+    const childNumbers = IssueRefListSchema.parse(existing.data).map((ref) => ref.number);
+    if (childNumbers.includes(ticketNumber)) return;
+    const subIssueId = await this.resolveIssueId(ticketNumber);
+    await this.octokit.request("POST /repos/{owner}/{repo}/issues/{issue_number}/sub_issues", {
       owner: this.owner,
       repo: this.repo,
       issue_number: epicNumber,
-      body: newBody
+      sub_issue_id: subIssueId
     });
+  }
+  async blockTicket(ticketId, blockedById) {
+    if (ticketId === blockedById) throw new Error("a ticket cannot block itself");
+    const ticketNumber = parseInt(ticketId, 10);
+    const blockerNumber = parseInt(blockedById, 10);
+    const existing = await this.octokit.request(
+      "GET /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocked_by",
+      { owner: this.owner, repo: this.repo, issue_number: ticketNumber }
+    );
+    const blockerNumbers = IssueRefListSchema.parse(existing.data).map((ref) => ref.number);
+    if (blockerNumbers.includes(blockerNumber)) return;
+    const issueId = await this.resolveIssueId(blockerNumber);
+    await this.octokit.request(
+      "POST /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocked_by",
+      { owner: this.owner, repo: this.repo, issue_number: ticketNumber, issue_id: issueId }
+    );
+  }
+  async unblockTicket(ticketId, blockedById) {
+    const ticketNumber = parseInt(ticketId, 10);
+    const issueId = await this.resolveIssueId(parseInt(blockedById, 10));
+    await this.octokit.request(
+      "DELETE /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocked_by/{issue_id}",
+      { owner: this.owner, repo: this.repo, issue_number: ticketNumber, issue_id: issueId }
+    );
   }
   async updateEpicMetadata(epicId, patch) {
     const issueNumber = parseInt(epicId, 10);
@@ -29455,6 +29479,14 @@ var GitHubTaskTracker = class {
       updatedAt: data.updated_at
     };
   }
+  async resolveIssueId(issueNumber) {
+    const { data } = await this.octokit.rest.issues.get({
+      owner: this.owner,
+      repo: this.repo,
+      issue_number: issueNumber
+    });
+    return data.id;
+  }
   labelName(label) {
     if (typeof label === "string") return label;
     return label.name ?? "";
@@ -29468,7 +29500,7 @@ var GitHubTaskTracker = class {
       updatedAt: c.updated_at
     };
   }
-  mapTicket(issue2, comments, metadata = {}) {
+  mapTicket(issue2, comments, blockedBy = [], blocking = [], metadata = {}) {
     return {
       id: String(issue2.number),
       status: issue2.state,
@@ -29477,9 +29509,49 @@ var GitHubTaskTracker = class {
       body: issue2.body ?? "",
       comments: comments.map((c) => this.mapComment(c)),
       assignee: issue2.assignee?.login ?? null,
+      blockedBy,
+      blocking,
       metadata,
       updatedAt: issue2.updated_at
     };
+  }
+};
+
+// src/tasks/dependency-planner/dependency-planner.ts
+var DependencyPlannerService = class {
+  plan(tickets) {
+    const byId = new Map(tickets.map((t) => [t.id, t]));
+    const isOpen = (t) => t.status !== "closed";
+    const openTickets = tickets.filter(isOpen);
+    const waveOf = /* @__PURE__ */ new Map();
+    const failed = /* @__PURE__ */ new Set();
+    const visiting = /* @__PURE__ */ new Set();
+    const computeWave = (id) => {
+      if (failed.has(id)) return null;
+      if (waveOf.has(id)) return waveOf.get(id) ?? null;
+      const ticket = byId.get(id);
+      if (ticket === void 0 || !isOpen(ticket)) return -1;
+      if (visiting.has(id)) return null;
+      visiting.add(id);
+      const blockerWaves = ticket.blockedBy.map(computeWave);
+      visiting.delete(id);
+      if (blockerWaves.some((w) => w === null)) {
+        failed.add(id);
+        return null;
+      }
+      const wave = Math.max(-1, ...blockerWaves.filter((w) => w !== null)) + 1;
+      waveOf.set(id, wave);
+      return wave;
+    };
+    openTickets.forEach((t) => computeWave(t.id));
+    const scheduled = openTickets.filter((t) => waveOf.has(t.id));
+    const cycles = openTickets.filter((t) => !waveOf.has(t.id)).map((t) => t.id);
+    const maxWave = scheduled.reduce((max, t) => Math.max(max, waveOf.get(t.id) ?? 0), -1);
+    const waves = Array.from(
+      { length: maxWave + 1 },
+      (_, i) => scheduled.filter((t) => waveOf.get(t.id) === i)
+    );
+    return { waves, cycles };
   }
 };
 
@@ -29497,6 +29569,21 @@ function createEpicCommand(getTracker) {
   epic.command("get").exitOverride().argument("<id>", "epic id").action(async (id) => {
     const result = await getTracker().getEpic(id);
     process.stdout.write(JSON.stringify(result) + "\n");
+  });
+  epic.command("plan").exitOverride().argument("<id>", "epic id").action(async (id) => {
+    const epicData = await getTracker().getEpic(id);
+    const planner = new DependencyPlannerService();
+    const plan = planner.plan(
+      epicData.childIssues.map((ticket) => ({
+        id: ticket.id,
+        status: ticket.status,
+        blockedBy: ticket.blockedBy
+      }))
+    );
+    process.stdout.write(JSON.stringify(plan) + "\n");
+    if (plan.cycles.length > 0) {
+      throw new Error(`dependency cycle detected among tickets: ${plan.cycles.join(", ")}`);
+    }
   });
   return epic;
 }
@@ -29518,6 +29605,12 @@ function createTicketCommand(getTracker) {
   ticket.command("get").exitOverride().argument("<id>", "ticket id").action(async (id) => {
     const result = await getTracker().getTicket(id);
     process.stdout.write(JSON.stringify(result) + "\n");
+  });
+  ticket.command("block").exitOverride().argument("<id>", "ticket id to block").requiredOption("--by <blockerId>", "id of the ticket that must close first").action(async (id, opts) => {
+    await getTracker().blockTicket(id, opts.by);
+  });
+  ticket.command("unblock").exitOverride().argument("<id>", "ticket id to unblock").requiredOption("--by <blockerId>", "id of the blocking ticket to remove").action(async (id, opts) => {
+    await getTracker().unblockTicket(id, opts.by);
   });
   return ticket;
 }

@@ -35,6 +35,8 @@ export const TicketSchema = z.object({
   body: z.string(),
   comments: z.array(CommentSchema),
   assignee: z.string().nullable(),
+  blockedBy: z.array(z.string()).default([]),
+  blocking: z.array(z.string()).default([]),
   metadata: EntityMetadataSchema.default({}),
   updatedAt: z.string(),
 })
@@ -89,6 +91,8 @@ export interface TaskTracker {
   createTicket(input: CreateTicketInput): Promise<Ticket>
   getTicket(id: string): Promise<Ticket>
   linkTicketToEpic(ticketId: string, epicId: string): Promise<void>
+  blockTicket(ticketId: string, blockedById: string): Promise<void>
+  unblockTicket(ticketId: string, blockedById: string): Promise<void>
   updateEpicMetadata(epicId: string, patch: Partial<EntityMetadata>): Promise<void>
   updateTicketMetadata(ticketId: string, patch: Partial<EntityMetadata>): Promise<void>
   updateTddMetadata(tddId: string, patch: Partial<EntityMetadata>): Promise<void>
