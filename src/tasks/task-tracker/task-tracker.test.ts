@@ -36,6 +36,21 @@ describe('TicketSchema', () => {
     expect(result.id).toBe('1')
     expect(result.assignee).toBeNull()
   })
+
+  it('defaults blockedBy and blocking to empty arrays', () => {
+    const result = TicketSchema.parse({
+      id: '1',
+      status: 'open',
+      labels: [],
+      title: 'T',
+      body: 'B',
+      comments: [],
+      assignee: null,
+      updatedAt: '2026-01-01T00:00:00Z',
+    })
+    expect(result.blockedBy).toEqual([])
+    expect(result.blocking).toEqual([])
+  })
 })
 
 describe('EpicSchema', () => {

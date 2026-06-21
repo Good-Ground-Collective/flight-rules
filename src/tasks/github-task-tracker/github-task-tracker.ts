@@ -1,5 +1,6 @@
 import { Octokit } from '@octokit/rest'
 import { graphql } from '@octokit/graphql'
+import { z } from 'zod'
 import type {
   Comment,
   CreateEpicInput,
@@ -21,21 +22,10 @@ type OctokitIssueData = Awaited<ReturnType<Octokit['rest']['issues']['get']>>['d
 type OctokitCommentData = Awaited<ReturnType<Octokit['rest']['issues']['listComments']>>['data'][number]
 type OctokitLabelData = OctokitIssueData['labels'][number]
 
-const frTicketsRegex = /<!-- fr-tickets: (\[.*?\]) -->/s
 const frTddRegex = /<!-- fr-tdd: (\d+) -->/
 const frEpicRegex = /<!-- fr-epic: (\d+) -->/
 
-function parseTicketIds(body: string): number[] {
-  const match = frTicketsRegex.exec(body)
-  if (match === null || match[1] === undefined) return []
-  try {
-    const parsed: unknown = JSON.parse(match[1])
-    if (!Array.isArray(parsed)) return []
-    return parsed.filter((x): x is number => typeof x === 'number')
-  } catch {
-    return []
-  }
-}
+const IssueRefListSchema = z.array(z.object({ number: z.number() }))
 
 function parseTddId(body: string): number | null {
   const match = frTddRegex.exec(body)
@@ -43,44 +33,10 @@ function parseTddId(body: string): number | null {
   return parseInt(match[1], 10)
 }
 
-function upsertFrTickets(body: string, ticketIds: number[]): string {
-  const tag = `<!-- fr-tickets: ${JSON.stringify(ticketIds)} -->`
-  if (frTicketsRegex.test(body)) return body.replace(frTicketsRegex, tag)
-  return `${body}\n${tag}`
-}
-
 function upsertFrTdd(body: string, tddId: number): string {
   const tag = `<!-- fr-tdd: ${tddId} -->`
   if (frTddRegex.test(body)) return body.replace(frTddRegex, tag)
   return `${body}\n${tag}`
-}
-
-function labelName(label: OctokitLabelData): string {
-  if (typeof label === 'string') return label
-  return label.name ?? ''
-}
-
-function mapComment(c: OctokitCommentData): Comment {
-  return {
-    id: String(c.id),
-    body: c.body ?? '',
-    author: c.user?.login ?? '',
-    createdAt: c.created_at,
-    updatedAt: c.updated_at,
-  }
-}
-
-function mapTicket(issue: OctokitIssueData, comments: OctokitCommentData[]): Ticket {
-  return {
-    id: String(issue.number),
-    status: issue.state,
-    labels: issue.labels.map(labelName).filter(Boolean),
-    title: issue.title,
-    body: issue.body ?? '',
-    comments: comments.map(mapComment),
-    assignee: issue.assignee?.login ?? null,
-    updatedAt: issue.updated_at,
-  }
 }
 
 export class GitHubTaskTracker implements TaskTracker {
@@ -107,7 +63,7 @@ export class GitHubTaskTracker implements TaskTracker {
     return {
       id: String(data.number),
       status: data.state,
-      labels: data.labels.map(labelName).filter(Boolean),
+      labels: data.labels.map((l) => this.labelName(l)).filter(Boolean),
       title: data.title,
       body: data.body ?? '',
       childIssues: [],
@@ -118,15 +74,20 @@ export class GitHubTaskTracker implements TaskTracker {
 
   async getEpic(id: string): Promise<Epic> {
     const issueNumber = parseInt(id, 10)
-    const [issueResponse, commentsResponse] = await Promise.all([
+    const [issueResponse, commentsResponse, subIssuesResponse] = await Promise.all([
       this.octokit.rest.issues.get({ owner: this.owner, repo: this.repo, issue_number: issueNumber }),
       this.octokit.rest.issues.listComments({ owner: this.owner, repo: this.repo, issue_number: issueNumber }),
+      this.octokit.request('GET /repos/{owner}/{repo}/issues/{issue_number}/sub_issues', {
+        owner: this.owner,
+        repo: this.repo,
+        issue_number: issueNumber,
+      }),
     ])
     const issue = issueResponse.data
     const body = issue.body ?? ''
 
-    const ticketIds = parseTicketIds(body)
-    const childIssues = await Promise.all(ticketIds.map((n) => this.getTicket(String(n))))
+    const childNumbers = IssueRefListSchema.parse(subIssuesResponse.data).map((ref) => String(ref.number))
+    const childIssues = await Promise.all(childNumbers.map((n) => this.getTicket(n)))
 
     let tdd: TechnicalDesign | undefined
     const tddId = parseTddId(body)
@@ -137,57 +98,92 @@ export class GitHubTaskTracker implements TaskTracker {
     return {
       id,
       status: issue.state,
-      labels: issue.labels.map(labelName).filter(Boolean),
+      labels: issue.labels.map((l) => this.labelName(l)).filter(Boolean),
       title: issue.title,
       body,
       childIssues,
-      comments: commentsResponse.data.map(mapComment),
+      comments: commentsResponse.data.map((c) => this.mapComment(c)),
       tdd,
       updatedAt: issue.updated_at,
     }
   }
 
   async createTicket(input: CreateTicketInput): Promise<Ticket> {
-    const body = `${input.body}\n<!-- fr-epic: ${input.epicId} -->`
     const { data } = await this.octokit.rest.issues.create({
       owner: this.owner,
       repo: this.repo,
       title: input.title,
-      body,
+      body: input.body,
       labels: ['ticket', ...input.labels],
       ...(input.assignee !== undefined ? { assignee: input.assignee } : {}),
     })
     await this.linkTicketToEpic(String(data.number), input.epicId)
-    return mapTicket(data, [])
+    return this.mapTicket(data, [])
   }
 
   async getTicket(id: string): Promise<Ticket> {
     const issueNumber = parseInt(id, 10)
-    const [issueResponse, commentsResponse] = await Promise.all([
+    const [issueResponse, commentsResponse, blockedByResponse, blockingResponse] = await Promise.all([
       this.octokit.rest.issues.get({ owner: this.owner, repo: this.repo, issue_number: issueNumber }),
       this.octokit.rest.issues.listComments({ owner: this.owner, repo: this.repo, issue_number: issueNumber }),
+      this.octokit.request('GET /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocked_by', {
+        owner: this.owner,
+        repo: this.repo,
+        issue_number: issueNumber,
+      }),
+      this.octokit.request('GET /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocking', {
+        owner: this.owner,
+        repo: this.repo,
+        issue_number: issueNumber,
+      }),
     ])
-    return mapTicket(issueResponse.data, commentsResponse.data)
+    const blockedBy = IssueRefListSchema.parse(blockedByResponse.data).map((ref) => String(ref.number))
+    const blocking = IssueRefListSchema.parse(blockingResponse.data).map((ref) => String(ref.number))
+    return this.mapTicket(issueResponse.data, commentsResponse.data, blockedBy, blocking)
   }
 
   async linkTicketToEpic(ticketId: string, epicId: string): Promise<void> {
     const epicNumber = parseInt(epicId, 10)
-    const { data } = await this.octokit.rest.issues.get({
-      owner: this.owner,
-      repo: this.repo,
-      issue_number: epicNumber,
-    })
-    const currentBody = data.body ?? ''
-    const existingIds = parseTicketIds(currentBody)
     const ticketNumber = parseInt(ticketId, 10)
-    if (existingIds.includes(ticketNumber)) return
-    const newBody = upsertFrTickets(currentBody, [...existingIds, ticketNumber])
-    await this.octokit.rest.issues.update({
+    const existing = await this.octokit.request(
+      'GET /repos/{owner}/{repo}/issues/{issue_number}/sub_issues',
+      { owner: this.owner, repo: this.repo, issue_number: epicNumber },
+    )
+    const childNumbers = IssueRefListSchema.parse(existing.data).map((ref) => ref.number)
+    if (childNumbers.includes(ticketNumber)) return
+    const subIssueId = await this.resolveIssueId(ticketNumber)
+    await this.octokit.request('POST /repos/{owner}/{repo}/issues/{issue_number}/sub_issues', {
       owner: this.owner,
       repo: this.repo,
       issue_number: epicNumber,
-      body: newBody,
+      sub_issue_id: subIssueId,
     })
+  }
+
+  async blockTicket(ticketId: string, blockedById: string): Promise<void> {
+    if (ticketId === blockedById) throw new Error('a ticket cannot block itself')
+    const ticketNumber = parseInt(ticketId, 10)
+    const blockerNumber = parseInt(blockedById, 10)
+    const existing = await this.octokit.request(
+      'GET /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocked_by',
+      { owner: this.owner, repo: this.repo, issue_number: ticketNumber },
+    )
+    const blockerNumbers = IssueRefListSchema.parse(existing.data).map((ref) => ref.number)
+    if (blockerNumbers.includes(blockerNumber)) return
+    const issueId = await this.resolveIssueId(blockerNumber)
+    await this.octokit.request(
+      'POST /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocked_by',
+      { owner: this.owner, repo: this.repo, issue_number: ticketNumber, issue_id: issueId },
+    )
+  }
+
+  async unblockTicket(ticketId: string, blockedById: string): Promise<void> {
+    const ticketNumber = parseInt(ticketId, 10)
+    const issueId = await this.resolveIssueId(parseInt(blockedById, 10))
+    await this.octokit.request(
+      'DELETE /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocked_by/{issue_id}',
+      { owner: this.owner, repo: this.repo, issue_number: ticketNumber, issue_id: issueId },
+    )
   }
 
   async createTechnicalDesign(input: CreateTechnicalDesignInput): Promise<TechnicalDesign> {
@@ -312,6 +308,50 @@ export class GitHubTaskTracker implements TaskTracker {
       author: data.user?.login ?? '',
       createdAt: data.created_at,
       updatedAt: data.updated_at,
+    }
+  }
+
+  private async resolveIssueId(issueNumber: number): Promise<number> {
+    const { data } = await this.octokit.rest.issues.get({
+      owner: this.owner,
+      repo: this.repo,
+      issue_number: issueNumber,
+    })
+    return data.id
+  }
+
+  private labelName(label: OctokitLabelData): string {
+    if (typeof label === 'string') return label
+    return label.name ?? ''
+  }
+
+  private mapComment(c: OctokitCommentData): Comment {
+    return {
+      id: String(c.id),
+      body: c.body ?? '',
+      author: c.user?.login ?? '',
+      createdAt: c.created_at,
+      updatedAt: c.updated_at,
+    }
+  }
+
+  private mapTicket(
+    issue: OctokitIssueData,
+    comments: OctokitCommentData[],
+    blockedBy: string[] = [],
+    blocking: string[] = [],
+  ): Ticket {
+    return {
+      id: String(issue.number),
+      status: issue.state,
+      labels: issue.labels.map((l) => this.labelName(l)).filter(Boolean),
+      title: issue.title,
+      body: issue.body ?? '',
+      comments: comments.map((c) => this.mapComment(c)),
+      assignee: issue.assignee?.login ?? null,
+      blockedBy,
+      blocking,
+      updatedAt: issue.updated_at,
     }
   }
 }
