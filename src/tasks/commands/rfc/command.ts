@@ -6,7 +6,7 @@ import type { Config } from '../../../config.js'
 function getNextRfcId(rfcDir: string): string {
   let files: string[]
   try {
-    files = readdirSync(rfcDir) as string[]
+    files = readdirSync(rfcDir)
   } catch {
     return 'RFC-001'
   }
