@@ -1,5 +1,15 @@
 import { z } from 'zod'
 
+export const EntityMetadataSchema = z
+  .object({
+    tddId: z.number().optional(),
+    epicId: z.number().optional(),
+    notes: z.string().optional(),
+  })
+  .passthrough()
+
+export type EntityMetadata = z.infer<typeof EntityMetadataSchema>
+
 export const CommentSchema = z.object({
   id: z.string(),
   body: z.string(),

@@ -28,6 +28,7 @@
     "@octokit/graphql": "^9.0.3",
     "@octokit/rest": "^22.0.1",
     "commander": "^15.0.0",
+    "yaml": "^2.9.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
