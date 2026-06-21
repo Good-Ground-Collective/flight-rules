@@ -3,6 +3,5 @@
   "version": "0.1.0",
   "description": "PM-to-engineering pipeline for Good Ground Collective",
   "repository": "https://github.com/good-ground-collective/flight-rules",
-  "skills": "./skills/",
-  "agents": "./agents/"
+  "skills": "./skills/"
 }
