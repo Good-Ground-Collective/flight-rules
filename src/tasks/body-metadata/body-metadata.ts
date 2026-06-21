@@ -3,15 +3,12 @@ import { EntityMetadataSchema, type EntityMetadata } from '../task-tracker/task-
 
 const sentinelComment = '<!-- flight-rules:metadata -->'
 
-const yamlBlockRe =
-  /<!-- flight-rules:metadata -->\n\n```yaml\n([\s\S]*?)\n```/
-
 const detailsBlockRe =
-  /<details>\n<summary>LLM Context<\/summary>\n<!-- flight-rules:metadata -->\n\n```yaml\n[\s\S]*?\n```\n\n<\/details>/
+  /<details>\n<summary>LLM Context<\/summary>\n<!-- flight-rules:metadata -->\n\n```yaml\n([\s\S]*?)\n```\n\n<\/details>/
 
 export class BodyMetadataService {
   parse(body: string): EntityMetadata {
-    const match = yamlBlockRe.exec(body)
+    const match = detailsBlockRe.exec(body)
     if (match === null || match[1] === undefined) return {}
     const content = match[1].trim()
     if (content === '') return {}

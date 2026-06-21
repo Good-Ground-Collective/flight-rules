@@ -296,3 +296,30 @@ describe('GitHubTracker.createTechnicalDesign metadata', () => {
     )
   })
 })
+
+describe('GitHubTracker.getTechnicalDesign metadata', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('populates metadata from the body sentinel block', async () => {
+    const tracker = makeTracker()
+    // @ts-expect-error — accessing private field for test setup
+    const mockGql = vi.mocked(tracker.gql)
+
+    const body =
+      'TDD body\n\n<details>\n<summary>LLM Context</summary>\n<!-- flight-rules:metadata -->\n\n```yaml\nepicId: 10\n```\n\n</details>'
+    mockGql.mockResolvedValueOnce({
+      repository: {
+        discussion: {
+          number: 5,
+          body,
+          updatedAt: '2026-01-01T00:00:00Z',
+          comments: { nodes: [] },
+        },
+      },
+    } as never)
+
+    const tdd = await tracker.getTechnicalDesign('5')
+    expect(tdd.metadata.epicId).toBe(10)
+    expect(tdd.epicId).toBe('10')
+  })
+})

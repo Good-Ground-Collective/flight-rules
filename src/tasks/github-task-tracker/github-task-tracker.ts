@@ -282,17 +282,7 @@ export class GitHubTaskTracker implements TaskTracker {
 
     const discussion = createData.createDiscussion.discussion
 
-    const epicResponse = await this.octokit.rest.issues.get({
-      owner: this.owner,
-      repo: this.repo,
-      issue_number: parseInt(input.epicId, 10),
-    })
-    await this.octokit.rest.issues.update({
-      owner: this.owner,
-      repo: this.repo,
-      issue_number: parseInt(input.epicId, 10),
-      body: this.bodyMetadata.splice(epicResponse.data.body ?? '', { tddId: discussion.number }),
-    })
+    await this.updateEpicMetadata(input.epicId, { tddId: discussion.number })
 
     return {
       id: String(discussion.number),
