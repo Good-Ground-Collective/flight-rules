@@ -29154,11 +29154,10 @@ var CreateTechnicalDesignInputSchema = external_exports.object({
 
 // src/tasks/body-metadata/body-metadata.ts
 var sentinelComment = "<!-- flight-rules:metadata -->";
-var yamlBlockRe = /<!-- flight-rules:metadata -->\n\n```yaml\n([\s\S]*?)\n```/;
-var detailsBlockRe = /<details>\n<summary>LLM Context<\/summary>\n<!-- flight-rules:metadata -->\n\n```yaml\n[\s\S]*?\n```\n\n<\/details>/;
+var detailsBlockRe = /<details>\n<summary>LLM Context<\/summary>\n<!-- flight-rules:metadata -->\n\n```yaml\n([\s\S]*?)\n```\n\n<\/details>/;
 var BodyMetadataService = class {
   parse(body) {
-    const match = yamlBlockRe.exec(body);
+    const match = detailsBlockRe.exec(body);
     if (match === null || match[1] === void 0) return {};
     const content = match[1].trim();
     if (content === "") return {};
@@ -29215,32 +29214,6 @@ function upsertFrTickets(body, ticketIds) {
   return `${body}
 ${tag}`;
 }
-function labelName(label) {
-  if (typeof label === "string") return label;
-  return label.name ?? "";
-}
-function mapComment(c) {
-  return {
-    id: String(c.id),
-    body: c.body ?? "",
-    author: c.user?.login ?? "",
-    createdAt: c.created_at,
-    updatedAt: c.updated_at
-  };
-}
-function mapTicket(issue2, comments, metadata = {}) {
-  return {
-    id: String(issue2.number),
-    status: issue2.state,
-    labels: issue2.labels.map(labelName).filter(Boolean),
-    title: issue2.title,
-    body: issue2.body ?? "",
-    comments: comments.map(mapComment),
-    assignee: issue2.assignee?.login ?? null,
-    metadata,
-    updatedAt: issue2.updated_at
-  };
-}
 var GitHubTaskTracker = class {
   octokit;
   gql;
@@ -29265,7 +29238,7 @@ var GitHubTaskTracker = class {
     return {
       id: String(data.number),
       status: data.state,
-      labels: data.labels.map(labelName).filter(Boolean),
+      labels: data.labels.map((l) => this.labelName(l)).filter(Boolean),
       title: data.title,
       body: data.body ?? "",
       childIssues: [],
@@ -29292,11 +29265,11 @@ var GitHubTaskTracker = class {
     return {
       id,
       status: issue2.state,
-      labels: issue2.labels.map(labelName).filter(Boolean),
+      labels: issue2.labels.map((l) => this.labelName(l)).filter(Boolean),
       title: issue2.title,
       body,
       childIssues,
-      comments: commentsResponse.data.map(mapComment),
+      comments: commentsResponse.data.map((c) => this.mapComment(c)),
       tdd,
       metadata,
       updatedAt: issue2.updated_at
@@ -29313,7 +29286,7 @@ var GitHubTaskTracker = class {
       ...input.assignee !== void 0 ? { assignee: input.assignee } : {}
     });
     await this.linkTicketToEpic(String(data.number), input.epicId);
-    return mapTicket(data, [], {});
+    return this.mapTicket(data, [], {});
   }
   async getTicket(id) {
     const issueNumber = parseInt(id, 10);
@@ -29323,7 +29296,7 @@ var GitHubTaskTracker = class {
     ]);
     const body = issueResponse.data.body ?? "";
     const metadata = this.bodyMetadata.parse(body);
-    return mapTicket(issueResponse.data, commentsResponse.data, metadata);
+    return this.mapTicket(issueResponse.data, commentsResponse.data, metadata);
   }
   async linkTicketToEpic(ticketId, epicId) {
     const epicNumber = parseInt(epicId, 10);
@@ -29422,17 +29395,7 @@ var GitHubTaskTracker = class {
       { repositoryId: repoData.repository.id, categoryId, title: input.title, body }
     );
     const discussion = createData.createDiscussion.discussion;
-    const epicResponse = await this.octokit.rest.issues.get({
-      owner: this.owner,
-      repo: this.repo,
-      issue_number: parseInt(input.epicId, 10)
-    });
-    await this.octokit.rest.issues.update({
-      owner: this.owner,
-      repo: this.repo,
-      issue_number: parseInt(input.epicId, 10),
-      body: this.bodyMetadata.splice(epicResponse.data.body ?? "", { tddId: discussion.number })
-    });
+    await this.updateEpicMetadata(input.epicId, { tddId: discussion.number });
     return {
       id: String(discussion.number),
       epicId: input.epicId,
@@ -29490,6 +29453,32 @@ var GitHubTaskTracker = class {
       author: data.user?.login ?? "",
       createdAt: data.created_at,
       updatedAt: data.updated_at
+    };
+  }
+  labelName(label) {
+    if (typeof label === "string") return label;
+    return label.name ?? "";
+  }
+  mapComment(c) {
+    return {
+      id: String(c.id),
+      body: c.body ?? "",
+      author: c.user?.login ?? "",
+      createdAt: c.created_at,
+      updatedAt: c.updated_at
+    };
+  }
+  mapTicket(issue2, comments, metadata = {}) {
+    return {
+      id: String(issue2.number),
+      status: issue2.state,
+      labels: issue2.labels.map((l) => this.labelName(l)).filter(Boolean),
+      title: issue2.title,
+      body: issue2.body ?? "",
+      comments: comments.map((c) => this.mapComment(c)),
+      assignee: issue2.assignee?.login ?? null,
+      metadata,
+      updatedAt: issue2.updated_at
     };
   }
 };
