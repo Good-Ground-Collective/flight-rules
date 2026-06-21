@@ -2,10 +2,13 @@
 import { join } from 'node:path'
 import { Command, CommanderError } from 'commander'
 import { readConfig } from './config.js'
+import type { Config } from './config.js'
 import { GitHubTaskTracker } from './tasks/github-task-tracker/github-task-tracker.js'
 import { createEpicCommand } from './tasks/commands/epic/command.js'
 import { createTicketCommand } from './tasks/commands/ticket/command.js'
 import { createTddCommand } from './tasks/commands/tdd/command.js'
+import { createUsersCommand } from './tasks/commands/users/command.js'
+import { createRfcCommand } from './tasks/commands/rfc/command.js'
 import type { TaskTracker } from './tasks/task-tracker/task-tracker.js'
 import { NodeGitExecutor } from './git/git-executor/git-executor.js'
 import { createGitCommand } from './git/commands/commit/command.js'
@@ -30,18 +33,29 @@ function buildTracker(): TaskTracker {
   throw new Error(`Unsupported tracker: ${config.tracker}`)
 }
 
-export function buildProgram(getTracker: () => TaskTracker): Command {
+function getConfigFromEnv(): Config {
+  const configPath =
+    process.env['FLIGHT_RULES_CONFIG'] ?? join(process.cwd(), '.claude', 'flight-rules.local.md')
+  return readConfig(configPath)
+}
+
+export function buildProgram(
+  getTracker: () => TaskTracker,
+  getConfig: () => Config,
+): Command {
   const program = new Command('flight-rules')
   program.exitOverride()
   program.addCommand(createEpicCommand(getTracker))
   program.addCommand(createTicketCommand(getTracker))
   program.addCommand(createTddCommand(getTracker))
   program.addCommand(createGitCommand(() => new NodeGitExecutor()))
+  program.addCommand(createUsersCommand(getTracker))
+  program.addCommand(createRfcCommand(getConfig))
   return program
 }
 
 export async function run(argv: string[]): Promise<void> {
-  await buildProgram(buildTracker).parseAsync(argv, { from: 'user' })
+  await buildProgram(buildTracker, getConfigFromEnv).parseAsync(argv, { from: 'user' })
 }
 
 const isMain =

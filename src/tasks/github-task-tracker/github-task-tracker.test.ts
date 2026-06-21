@@ -13,6 +13,9 @@ vi.mock('@octokit/rest', () => ({
           createComment: vi.fn(),
           listComments: vi.fn(),
         },
+        orgs: {
+          listMembers: vi.fn(),
+        },
       },
     }
   }),
@@ -433,5 +436,30 @@ describe('GitHubTracker.getTechnicalDesign metadata', () => {
     const tdd = await tracker.getTechnicalDesign('5')
     expect(tdd.metadata.epicId).toBe(10)
     expect(tdd.epicId).toBe('10')
+  })
+})
+
+describe('GitHubTracker.getUsers', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('returns login strings for all org members', async () => {
+    const tracker = makeTracker()
+    // @ts-expect-error — accessing private field for test setup
+    const mockListMembers = vi.mocked(tracker.octokit.rest.orgs.listMembers)
+    mockListMembers.mockResolvedValueOnce({
+      data: [{ login: 'alice' }, { login: 'bob' }],
+    } as never)
+    const result = await tracker.getUsers()
+    expect(result).toEqual(['alice', 'bob'])
+    expect(mockListMembers).toHaveBeenCalledWith({ org: 'acme', per_page: 100 })
+  })
+
+  it('returns empty array when org has no members', async () => {
+    const tracker = makeTracker()
+    // @ts-expect-error — accessing private field for test setup
+    const mockListMembers = vi.mocked(tracker.octokit.rest.orgs.listMembers)
+    mockListMembers.mockResolvedValueOnce({ data: [] } as never)
+    const result = await tracker.getUsers()
+    expect(result).toEqual([])
   })
 })

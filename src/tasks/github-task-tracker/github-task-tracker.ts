@@ -356,6 +356,14 @@ export class GitHubTaskTracker implements TaskTracker {
     }
   }
 
+  async getUsers(): Promise<string[]> {
+    const { data } = await this.octokit.rest.orgs.listMembers({
+      org: this.owner,
+      per_page: 100,
+    })
+    return data.map((member) => member.login)
+  }
+
   private async resolveIssueId(issueNumber: number): Promise<number> {
     const { data } = await this.octokit.rest.issues.get({
       owner: this.owner,

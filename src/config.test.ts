@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest'
-import { readConfig } from './config.js'
+import { readConfig, getRfcDir } from './config.js'
 import { writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import type { Config } from './config.js'
 
 const setupFixture = (content: string): string => {
   const dir = join(tmpdir(), `flight-rules-test-${Date.now()}`)
@@ -44,5 +45,28 @@ repo: acme/my-project
 ---
 `)
     expect(() => readConfig(filePath)).toThrow()
+  })
+})
+
+const base: Config = {
+  tracker: 'github',
+  repo: 'acme/proj',
+  defaultLabels: [],
+  rfcStorage: 'local',
+}
+
+describe('getRfcDir', () => {
+  it('returns <cwd>/rfcs for local storage', () => {
+    expect(getRfcDir(base, '/workspace')).toBe('/workspace/rfcs')
+  })
+
+  it('returns rfcStoragePath for global storage', () => {
+    const config: Config = { ...base, rfcStorage: 'global', rfcStoragePath: '/shared/rfcs' }
+    expect(getRfcDir(config, '/workspace')).toBe('/shared/rfcs')
+  })
+
+  it('throws when global storage has no path configured', () => {
+    const config: Config = { ...base, rfcStorage: 'global' }
+    expect(() => getRfcDir(config, '/workspace')).toThrow('rfcStoragePath is required')
   })
 })

@@ -26,6 +26,7 @@ const makeTracker = (): TaskTracker => ({
   createTechnicalDesign: vi.fn().mockResolvedValue(mockTdd),
   getTechnicalDesign: vi.fn().mockResolvedValue(mockTdd),
   addComment: vi.fn(),
+  getUsers: vi.fn(),
 })
 
 const run = (tracker: TaskTracker, args: string[]) =>
