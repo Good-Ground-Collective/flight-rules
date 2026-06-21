@@ -39,41 +39,6 @@ function upsertFrTdd(body: string, tddId: number): string {
   return `${body}\n${tag}`
 }
 
-function labelName(label: OctokitLabelData): string {
-  if (typeof label === 'string') return label
-  return label.name ?? ''
-}
-
-function mapComment(c: OctokitCommentData): Comment {
-  return {
-    id: String(c.id),
-    body: c.body ?? '',
-    author: c.user?.login ?? '',
-    createdAt: c.created_at,
-    updatedAt: c.updated_at,
-  }
-}
-
-function mapTicket(
-  issue: OctokitIssueData,
-  comments: OctokitCommentData[],
-  blockedBy: string[] = [],
-  blocking: string[] = [],
-): Ticket {
-  return {
-    id: String(issue.number),
-    status: issue.state,
-    labels: issue.labels.map(labelName).filter(Boolean),
-    title: issue.title,
-    body: issue.body ?? '',
-    comments: comments.map(mapComment),
-    assignee: issue.assignee?.login ?? null,
-    blockedBy,
-    blocking,
-    updatedAt: issue.updated_at,
-  }
-}
-
 export class GitHubTaskTracker implements TaskTracker {
   private octokit: Octokit
   private gql: ReturnType<typeof graphql.defaults>
@@ -98,7 +63,7 @@ export class GitHubTaskTracker implements TaskTracker {
     return {
       id: String(data.number),
       status: data.state,
-      labels: data.labels.map(labelName).filter(Boolean),
+      labels: data.labels.map((l) => this.labelName(l)).filter(Boolean),
       title: data.title,
       body: data.body ?? '',
       childIssues: [],
@@ -133,11 +98,11 @@ export class GitHubTaskTracker implements TaskTracker {
     return {
       id,
       status: issue.state,
-      labels: issue.labels.map(labelName).filter(Boolean),
+      labels: issue.labels.map((l) => this.labelName(l)).filter(Boolean),
       title: issue.title,
       body,
       childIssues,
-      comments: commentsResponse.data.map(mapComment),
+      comments: commentsResponse.data.map((c) => this.mapComment(c)),
       tdd,
       updatedAt: issue.updated_at,
     }
@@ -153,7 +118,7 @@ export class GitHubTaskTracker implements TaskTracker {
       ...(input.assignee !== undefined ? { assignee: input.assignee } : {}),
     })
     await this.linkTicketToEpic(String(data.number), input.epicId)
-    return mapTicket(data, [])
+    return this.mapTicket(data, [])
   }
 
   async getTicket(id: string): Promise<Ticket> {
@@ -174,7 +139,7 @@ export class GitHubTaskTracker implements TaskTracker {
     ])
     const blockedBy = IssueRefListSchema.parse(blockedByResponse.data).map((ref) => String(ref.number))
     const blocking = IssueRefListSchema.parse(blockingResponse.data).map((ref) => String(ref.number))
-    return mapTicket(issueResponse.data, commentsResponse.data, blockedBy, blocking)
+    return this.mapTicket(issueResponse.data, commentsResponse.data, blockedBy, blocking)
   }
 
   async linkTicketToEpic(ticketId: string, epicId: string): Promise<void> {
@@ -353,5 +318,40 @@ export class GitHubTaskTracker implements TaskTracker {
       issue_number: issueNumber,
     })
     return data.id
+  }
+
+  private labelName(label: OctokitLabelData): string {
+    if (typeof label === 'string') return label
+    return label.name ?? ''
+  }
+
+  private mapComment(c: OctokitCommentData): Comment {
+    return {
+      id: String(c.id),
+      body: c.body ?? '',
+      author: c.user?.login ?? '',
+      createdAt: c.created_at,
+      updatedAt: c.updated_at,
+    }
+  }
+
+  private mapTicket(
+    issue: OctokitIssueData,
+    comments: OctokitCommentData[],
+    blockedBy: string[] = [],
+    blocking: string[] = [],
+  ): Ticket {
+    return {
+      id: String(issue.number),
+      status: issue.state,
+      labels: issue.labels.map((l) => this.labelName(l)).filter(Boolean),
+      title: issue.title,
+      body: issue.body ?? '',
+      comments: comments.map((c) => this.mapComment(c)),
+      assignee: issue.assignee?.login ?? null,
+      blockedBy,
+      blocking,
+      updatedAt: issue.updated_at,
+    }
   }
 }

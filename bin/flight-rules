@@ -21766,33 +21766,6 @@ function upsertFrTdd(body, tddId) {
   return `${body}
 ${tag}`;
 }
-function labelName(label) {
-  if (typeof label === "string") return label;
-  return label.name ?? "";
-}
-function mapComment(c) {
-  return {
-    id: String(c.id),
-    body: c.body ?? "",
-    author: c.user?.login ?? "",
-    createdAt: c.created_at,
-    updatedAt: c.updated_at
-  };
-}
-function mapTicket(issue2, comments, blockedBy = [], blocking = []) {
-  return {
-    id: String(issue2.number),
-    status: issue2.state,
-    labels: issue2.labels.map(labelName).filter(Boolean),
-    title: issue2.title,
-    body: issue2.body ?? "",
-    comments: comments.map(mapComment),
-    assignee: issue2.assignee?.login ?? null,
-    blockedBy,
-    blocking,
-    updatedAt: issue2.updated_at
-  };
-}
 var GitHubTaskTracker = class {
   octokit;
   gql;
@@ -21815,7 +21788,7 @@ var GitHubTaskTracker = class {
     return {
       id: String(data.number),
       status: data.state,
-      labels: data.labels.map(labelName).filter(Boolean),
+      labels: data.labels.map((l) => this.labelName(l)).filter(Boolean),
       title: data.title,
       body: data.body ?? "",
       childIssues: [],
@@ -21846,11 +21819,11 @@ var GitHubTaskTracker = class {
     return {
       id,
       status: issue2.state,
-      labels: issue2.labels.map(labelName).filter(Boolean),
+      labels: issue2.labels.map((l) => this.labelName(l)).filter(Boolean),
       title: issue2.title,
       body,
       childIssues,
-      comments: commentsResponse.data.map(mapComment),
+      comments: commentsResponse.data.map((c) => this.mapComment(c)),
       tdd,
       updatedAt: issue2.updated_at
     };
@@ -21865,7 +21838,7 @@ var GitHubTaskTracker = class {
       ...input.assignee !== void 0 ? { assignee: input.assignee } : {}
     });
     await this.linkTicketToEpic(String(data.number), input.epicId);
-    return mapTicket(data, []);
+    return this.mapTicket(data, []);
   }
   async getTicket(id) {
     const issueNumber = parseInt(id, 10);
@@ -21885,7 +21858,7 @@ var GitHubTaskTracker = class {
     ]);
     const blockedBy = IssueRefListSchema.parse(blockedByResponse.data).map((ref) => String(ref.number));
     const blocking = IssueRefListSchema.parse(blockingResponse.data).map((ref) => String(ref.number));
-    return mapTicket(issueResponse.data, commentsResponse.data, blockedBy, blocking);
+    return this.mapTicket(issueResponse.data, commentsResponse.data, blockedBy, blocking);
   }
   async linkTicketToEpic(ticketId, epicId) {
     const epicNumber = parseInt(epicId, 10);
@@ -22029,30 +22002,59 @@ var GitHubTaskTracker = class {
     });
     return data.id;
   }
+  labelName(label) {
+    if (typeof label === "string") return label;
+    return label.name ?? "";
+  }
+  mapComment(c) {
+    return {
+      id: String(c.id),
+      body: c.body ?? "",
+      author: c.user?.login ?? "",
+      createdAt: c.created_at,
+      updatedAt: c.updated_at
+    };
+  }
+  mapTicket(issue2, comments, blockedBy = [], blocking = []) {
+    return {
+      id: String(issue2.number),
+      status: issue2.state,
+      labels: issue2.labels.map((l) => this.labelName(l)).filter(Boolean),
+      title: issue2.title,
+      body: issue2.body ?? "",
+      comments: comments.map((c) => this.mapComment(c)),
+      assignee: issue2.assignee?.login ?? null,
+      blockedBy,
+      blocking,
+      updatedAt: issue2.updated_at
+    };
+  }
 };
 
 // src/tasks/dependency-planner/dependency-planner.ts
-function planDependencies(tickets) {
-  const byId = new Map(tickets.map((ticket) => [ticket.id, ticket]));
-  const isOpen = (ticket) => ticket.status !== "closed";
-  const isSatisfied = (blockerId) => {
-    const blocker = byId.get(blockerId);
-    return blocker === void 0 || !isOpen(blocker);
-  };
-  const openTickets = tickets.filter(isOpen);
-  const placed = /* @__PURE__ */ new Set();
-  const waves = [];
-  for (; ; ) {
-    const wave = openTickets.filter(
-      (ticket) => !placed.has(ticket.id) && ticket.blockedBy.every((blocker) => isSatisfied(blocker) || placed.has(blocker))
-    );
-    if (wave.length === 0) break;
-    for (const ticket of wave) placed.add(ticket.id);
-    waves.push(wave);
+var DependencyPlannerService = class {
+  plan(tickets) {
+    const byId = new Map(tickets.map((ticket) => [ticket.id, ticket]));
+    const isOpen = (ticket) => ticket.status !== "closed";
+    const isSatisfied = (blockerId) => {
+      const blocker = byId.get(blockerId);
+      return blocker === void 0 || !isOpen(blocker);
+    };
+    const openTickets = tickets.filter(isOpen);
+    const placed = /* @__PURE__ */ new Set();
+    const waves = [];
+    for (; ; ) {
+      const wave = openTickets.filter(
+        (ticket) => !placed.has(ticket.id) && ticket.blockedBy.every((blocker) => isSatisfied(blocker) || placed.has(blocker))
+      );
+      if (wave.length === 0) break;
+      for (const ticket of wave) placed.add(ticket.id);
+      waves.push(wave);
+    }
+    const cycles = openTickets.filter((ticket) => !placed.has(ticket.id)).map((ticket) => ticket.id);
+    return { waves, cycles };
   }
-  const cycles = openTickets.filter((ticket) => !placed.has(ticket.id)).map((ticket) => ticket.id);
-  return { waves, cycles };
-}
+};
 
 // src/tasks/commands/epic/command.ts
 function createEpicCommand(getTracker) {
@@ -22071,7 +22073,8 @@ function createEpicCommand(getTracker) {
   });
   epic.command("plan").exitOverride().argument("<id>", "epic id").action(async (id) => {
     const epicData = await getTracker().getEpic(id);
-    const plan = planDependencies(
+    const planner = new DependencyPlannerService();
+    const plan = planner.plan(
       epicData.childIssues.map((ticket) => ({
         id: ticket.id,
         status: ticket.status,

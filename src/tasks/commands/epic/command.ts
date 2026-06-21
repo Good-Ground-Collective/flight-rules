@@ -1,6 +1,6 @@
 import { Command } from 'commander'
 import type { TaskTracker } from '../../task-tracker/task-tracker.js'
-import { planDependencies } from '../../dependency-planner/dependency-planner.js'
+import { DependencyPlannerService } from '../../dependency-planner/dependency-planner.js'
 
 type CreateEpicOptions = { title: string; body: string; labels?: string }
 
@@ -37,7 +37,8 @@ export function createEpicCommand(getTracker: () => TaskTracker): Command {
     .argument('<id>', 'epic id')
     .action(async (id: string) => {
       const epicData = await getTracker().getEpic(id)
-      const plan = planDependencies(
+      const planner = new DependencyPlannerService()
+      const plan = planner.plan(
         epicData.childIssues.map((ticket) => ({
           id: ticket.id,
           status: ticket.status,
