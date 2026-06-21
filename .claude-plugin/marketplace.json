@@ -1,0 +1,14 @@
+{
+  "name": "flight-rules",
+  "owner": {
+    "name": "Good Ground Collective",
+    "url": "https://github.com/good-ground-collective"
+  },
+  "plugins": [
+    {
+      "name": "flight-rules",
+      "source": "./",
+      "description": "PM-to-engineering pipeline for Good Ground Collective"
+    }
+  ]
+}
