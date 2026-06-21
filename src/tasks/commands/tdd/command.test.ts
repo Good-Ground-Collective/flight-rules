@@ -8,6 +8,7 @@ const mockTdd: TechnicalDesign = {
   epicId: '42',
   body: 'Design doc body',
   comments: [],
+  metadata: {},
   updatedAt: '2026-01-01T00:00:00Z',
 }
 
@@ -19,6 +20,9 @@ const makeTracker = (): TaskTracker => ({
   linkTicketToEpic: vi.fn(),
   blockTicket: vi.fn(),
   unblockTicket: vi.fn(),
+  updateEpicMetadata: vi.fn(),
+  updateTicketMetadata: vi.fn(),
+  updateTddMetadata: vi.fn(),
   createTechnicalDesign: vi.fn().mockResolvedValue(mockTdd),
   getTechnicalDesign: vi.fn().mockResolvedValue(mockTdd),
   addComment: vi.fn(),

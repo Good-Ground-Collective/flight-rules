@@ -13,6 +13,7 @@ const mockTicket: Ticket = {
   assignee: null,
   blockedBy: [],
   blocking: [],
+  metadata: {},
   updatedAt: '2026-01-01T00:00:00Z',
 }
 
@@ -24,6 +25,9 @@ const makeTracker = (): TaskTracker => ({
   linkTicketToEpic: vi.fn(),
   blockTicket: vi.fn(),
   unblockTicket: vi.fn(),
+  updateEpicMetadata: vi.fn(),
+  updateTicketMetadata: vi.fn(),
+  updateTddMetadata: vi.fn(),
   createTechnicalDesign: vi.fn(),
   getTechnicalDesign: vi.fn(),
   addComment: vi.fn(),

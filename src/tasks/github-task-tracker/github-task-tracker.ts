@@ -1,11 +1,13 @@
 import { Octokit } from '@octokit/rest'
 import { graphql } from '@octokit/graphql'
+import { BodyMetadataService } from '../body-metadata/body-metadata.js'
 import { z } from 'zod'
 import type {
   Comment,
   CreateEpicInput,
   CreateTicketInput,
   CreateTechnicalDesignInput,
+  EntityMetadata,
   Epic,
   TaskTracker,
   TechnicalDesign,
@@ -22,28 +24,14 @@ type OctokitIssueData = Awaited<ReturnType<Octokit['rest']['issues']['get']>>['d
 type OctokitCommentData = Awaited<ReturnType<Octokit['rest']['issues']['listComments']>>['data'][number]
 type OctokitLabelData = OctokitIssueData['labels'][number]
 
-const frTddRegex = /<!-- fr-tdd: (\d+) -->/
-const frEpicRegex = /<!-- fr-epic: (\d+) -->/
-
 const IssueRefListSchema = z.array(z.object({ number: z.number() }))
-
-function parseTddId(body: string): number | null {
-  const match = frTddRegex.exec(body)
-  if (match === null || match[1] === undefined) return null
-  return parseInt(match[1], 10)
-}
-
-function upsertFrTdd(body: string, tddId: number): string {
-  const tag = `<!-- fr-tdd: ${tddId} -->`
-  if (frTddRegex.test(body)) return body.replace(frTddRegex, tag)
-  return `${body}\n${tag}`
-}
 
 export class GitHubTaskTracker implements TaskTracker {
   private octokit: Octokit
   private gql: ReturnType<typeof graphql.defaults>
   private owner: string
   private repo: string
+  private readonly bodyMetadata = new BodyMetadataService()
 
   constructor(config: GitHubTrackerConfig) {
     this.octokit = new Octokit({ auth: config.token })
@@ -53,11 +41,12 @@ export class GitHubTaskTracker implements TaskTracker {
   }
 
   async createEpic(input: CreateEpicInput): Promise<Epic> {
+    const body = this.bodyMetadata.splice(input.body, input.metadata ?? {})
     const { data } = await this.octokit.rest.issues.create({
       owner: this.owner,
       repo: this.repo,
       title: input.title,
-      body: input.body,
+      body,
       labels: ['epic', ...input.labels],
     })
     return {
@@ -68,6 +57,7 @@ export class GitHubTaskTracker implements TaskTracker {
       body: data.body ?? '',
       childIssues: [],
       comments: [],
+      metadata: this.bodyMetadata.parse(data.body ?? ''),
       updatedAt: data.updated_at,
     }
   }
@@ -85,14 +75,14 @@ export class GitHubTaskTracker implements TaskTracker {
     ])
     const issue = issueResponse.data
     const body = issue.body ?? ''
+    const metadata = this.bodyMetadata.parse(body)
 
     const childNumbers = IssueRefListSchema.parse(subIssuesResponse.data).map((ref) => String(ref.number))
     const childIssues = await Promise.all(childNumbers.map((n) => this.getTicket(n)))
 
     let tdd: TechnicalDesign | undefined
-    const tddId = parseTddId(body)
-    if (tddId !== null) {
-      tdd = await this.getTechnicalDesign(String(tddId))
+    if (metadata.tddId !== undefined) {
+      tdd = await this.getTechnicalDesign(String(metadata.tddId))
     }
 
     return {
@@ -104,21 +94,23 @@ export class GitHubTaskTracker implements TaskTracker {
       childIssues,
       comments: commentsResponse.data.map((c) => this.mapComment(c)),
       tdd,
+      metadata,
       updatedAt: issue.updated_at,
     }
   }
 
   async createTicket(input: CreateTicketInput): Promise<Ticket> {
+    const body = this.bodyMetadata.splice(input.body, input.metadata ?? {})
     const { data } = await this.octokit.rest.issues.create({
       owner: this.owner,
       repo: this.repo,
       title: input.title,
-      body: input.body,
+      body,
       labels: ['ticket', ...input.labels],
       ...(input.assignee !== undefined ? { assignee: input.assignee } : {}),
     })
     await this.linkTicketToEpic(String(data.number), input.epicId)
-    return this.mapTicket(data, [])
+    return this.mapTicket(data, [], [], [], this.bodyMetadata.parse(data.body ?? ''))
   }
 
   async getTicket(id: string): Promise<Ticket> {
@@ -137,9 +129,11 @@ export class GitHubTaskTracker implements TaskTracker {
         issue_number: issueNumber,
       }),
     ])
+    const body = issueResponse.data.body ?? ''
+    const metadata = this.bodyMetadata.parse(body)
     const blockedBy = IssueRefListSchema.parse(blockedByResponse.data).map((ref) => String(ref.number))
     const blocking = IssueRefListSchema.parse(blockingResponse.data).map((ref) => String(ref.number))
-    return this.mapTicket(issueResponse.data, commentsResponse.data, blockedBy, blocking)
+    return this.mapTicket(issueResponse.data, commentsResponse.data, blockedBy, blocking, metadata)
   }
 
   async linkTicketToEpic(ticketId: string, epicId: string): Promise<void> {
@@ -186,6 +180,62 @@ export class GitHubTaskTracker implements TaskTracker {
     )
   }
 
+  async updateEpicMetadata(epicId: string, patch: Partial<EntityMetadata>): Promise<void> {
+    const issueNumber = parseInt(epicId, 10)
+    const { data } = await this.octokit.rest.issues.get({
+      owner: this.owner,
+      repo: this.repo,
+      issue_number: issueNumber,
+    })
+    await this.octokit.rest.issues.update({
+      owner: this.owner,
+      repo: this.repo,
+      issue_number: issueNumber,
+      body: this.bodyMetadata.splice(data.body ?? '', patch),
+    })
+  }
+
+  async updateTicketMetadata(ticketId: string, patch: Partial<EntityMetadata>): Promise<void> {
+    const issueNumber = parseInt(ticketId, 10)
+    const { data } = await this.octokit.rest.issues.get({
+      owner: this.owner,
+      repo: this.repo,
+      issue_number: issueNumber,
+    })
+    await this.octokit.rest.issues.update({
+      owner: this.owner,
+      repo: this.repo,
+      issue_number: issueNumber,
+      body: this.bodyMetadata.splice(data.body ?? '', patch),
+    })
+  }
+
+  async updateTddMetadata(tddId: string, patch: Partial<EntityMetadata>): Promise<void> {
+    const fetchData = await this.gql<{
+      repository: { discussion: { id: string; body: string } | null }
+    }>(
+      `query GetDiscussionForUpdate($owner: String!, $repo: String!, $number: Int!) {
+        repository(owner: $owner, name: $repo) {
+          discussion(number: $number) { id body }
+        }
+      }`,
+      { owner: this.owner, repo: this.repo, number: parseInt(tddId, 10) },
+    )
+    const discussion = fetchData.repository.discussion
+    if (discussion === null) throw new Error(`Discussion #${tddId} not found`)
+    await this.gql(
+      `mutation UpdateDiscussion($discussionId: ID!, $body: String!) {
+        updateDiscussion(input: { discussionId: $discussionId, body: $body }) {
+          discussion { number }
+        }
+      }`,
+      {
+        discussionId: discussion.id,
+        body: this.bodyMetadata.splice(discussion.body, patch),
+      },
+    )
+  }
+
   async createTechnicalDesign(input: CreateTechnicalDesignInput): Promise<TechnicalDesign> {
     const repoData = await this.gql<{
       repository: { id: string; discussionCategory: { id: string } | null }
@@ -204,7 +254,10 @@ export class GitHubTaskTracker implements TaskTracker {
       throw new Error('No "TDDs" discussion category found. Create it in the repo\'s GitHub Discussions settings.')
     }
 
-    const body = `${input.body}\n<!-- fr-epic: ${input.epicId} -->`
+    const body = this.bodyMetadata.splice(input.body, {
+      epicId: parseInt(input.epicId, 10),
+      ...input.metadata,
+    })
     const createData = await this.gql<{
       createDiscussion: {
         discussion: { number: number; body: string; updatedAt: string }
@@ -220,23 +273,14 @@ export class GitHubTaskTracker implements TaskTracker {
 
     const discussion = createData.createDiscussion.discussion
 
-    const epicResponse = await this.octokit.rest.issues.get({
-      owner: this.owner,
-      repo: this.repo,
-      issue_number: parseInt(input.epicId, 10),
-    })
-    await this.octokit.rest.issues.update({
-      owner: this.owner,
-      repo: this.repo,
-      issue_number: parseInt(input.epicId, 10),
-      body: upsertFrTdd(epicResponse.data.body ?? '', discussion.number),
-    })
+    await this.updateEpicMetadata(input.epicId, { tddId: discussion.number })
 
     return {
       id: String(discussion.number),
       epicId: input.epicId,
       body: discussion.body,
       comments: [],
+      metadata: this.bodyMetadata.parse(discussion.body),
       updatedAt: discussion.updatedAt,
     }
   }
@@ -277,8 +321,8 @@ export class GitHubTaskTracker implements TaskTracker {
     if (discussion === null) {
       throw new Error(`Discussion #${id} not found`)
     }
-    const epicMatch = frEpicRegex.exec(discussion.body)
-    const epicId = epicMatch !== null && epicMatch[1] !== undefined ? epicMatch[1] : ''
+    const metadata = this.bodyMetadata.parse(discussion.body)
+    const epicId = metadata.epicId !== undefined ? String(metadata.epicId) : ''
 
     return {
       id,
@@ -291,6 +335,7 @@ export class GitHubTaskTracker implements TaskTracker {
         createdAt: n.createdAt,
         updatedAt: n.updatedAt,
       })),
+      metadata,
       updatedAt: discussion.updatedAt,
     }
   }
@@ -340,6 +385,7 @@ export class GitHubTaskTracker implements TaskTracker {
     comments: OctokitCommentData[],
     blockedBy: string[] = [],
     blocking: string[] = [],
+    metadata: EntityMetadata = {},
   ): Ticket {
     return {
       id: String(issue.number),
@@ -351,6 +397,7 @@ export class GitHubTaskTracker implements TaskTracker {
       assignee: issue.assignee?.login ?? null,
       blockedBy,
       blocking,
+      metadata,
       updatedAt: issue.updated_at,
     }
   }
