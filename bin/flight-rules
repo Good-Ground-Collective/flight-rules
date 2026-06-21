@@ -29785,6 +29785,9 @@ function createGitCommand(getExecutor) {
   return git;
 }
 
+// src/version.ts
+var appVersion = false ? "0.0.0-dev" : "0.1.0";
+
 // src/cli.ts
 function buildTracker() {
   const configPath = process.env["FLIGHT_RULES_CONFIG"] ?? join3(process.cwd(), ".claude", "flight-rules.local.md");
@@ -29808,6 +29811,7 @@ function getConfigFromEnv() {
 }
 function buildProgram(getTracker, getConfig) {
   const program2 = new Command("flight-rules");
+  program2.version(appVersion);
   program2.exitOverride();
   program2.addCommand(createEpicCommand(getTracker));
   program2.addCommand(createTicketCommand(getTracker));

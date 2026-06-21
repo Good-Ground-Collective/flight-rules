@@ -7,7 +7,7 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "build": "esbuild src/cli.ts --bundle --platform=node --format=esm --banner:js=\"import { createRequire } from 'module'; const require = createRequire(import.meta.url);\" --outfile=bin/flight-rules && chmod +x bin/flight-rules",
+    "build": "node scripts/build.mjs",
     "fmt": "sort-package-json && oxfmt",
     "fmt:check": "sort-package-json --check && oxfmt --check",
     "release": "semantic-release",
@@ -21,6 +21,23 @@
     "plugins": [
       "@semantic-release/commit-analyzer",
       "@semantic-release/release-notes-generator",
+      [
+        "@semantic-release/exec",
+        {
+          "prepareCmd": "node scripts/set-version.mjs ${nextRelease.version} && npm run build"
+        }
+      ],
+      [
+        "@semantic-release/git",
+        {
+          "assets": [
+            "package.json",
+            ".claude-plugin/plugin.json",
+            "bin/flight-rules"
+          ],
+          "message": "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}"
+        }
+      ],
       "@semantic-release/github"
     ]
   },
@@ -34,6 +51,8 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@semantic-release/commit-analyzer": "^13.0.1",
+    "@semantic-release/exec": "^7.1.0",
+    "@semantic-release/git": "^10.0.1",
     "@semantic-release/github": "^12.0.8",
     "@semantic-release/release-notes-generator": "^14.1.1",
     "@types/node": "^25.9.1",
