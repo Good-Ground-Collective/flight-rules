@@ -23,14 +23,16 @@ export class DependencyPlannerService {
     const placed = new Set<string>()
     const waves: PlannerTicket[][] = []
 
-    for (;;) {
+    let iterations = 0
+    while (iterations < openTickets.length + 1) {
+      iterations++
       const wave = openTickets.filter(
         (ticket) =>
           !placed.has(ticket.id) &&
           ticket.blockedBy.every((blocker) => isSatisfied(blocker) || placed.has(blocker)),
       )
       if (wave.length === 0) break
-      for (const ticket of wave) placed.add(ticket.id)
+      wave.forEach((ticket) => placed.add(ticket.id))
       waves.push(wave)
     }
 
