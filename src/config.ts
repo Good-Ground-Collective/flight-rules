@@ -1,10 +1,13 @@
 import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { z } from 'zod'
 
 const ConfigSchema = z.object({
   tracker: z.enum(['github', 'jira']),
   repo: z.string(),
   defaultLabels: z.array(z.string()).default([]),
+  rfcStorage: z.enum(['local', 'global']).default('local'),
+  rfcStoragePath: z.string().optional(),
 })
 
 export type Config = z.infer<typeof ConfigSchema>
@@ -94,4 +97,14 @@ export function readConfig(configPath: string): Config {
   const contents = readFileSync(configPath, 'utf-8')
   const data = parseFrontmatter(contents)
   return ConfigSchema.parse(data)
+}
+
+export function getRfcDir(config: Config, cwd: string): string {
+  if (config.rfcStorage === 'global') {
+    if (config.rfcStoragePath === undefined) {
+      throw new Error('rfcStoragePath is required when rfcStorage is global')
+    }
+    return config.rfcStoragePath
+  }
+  return join(cwd, 'rfcs')
 }
