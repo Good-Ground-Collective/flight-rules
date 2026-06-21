@@ -99,4 +99,5 @@ export interface TaskTracker {
   createTechnicalDesign(input: CreateTechnicalDesignInput): Promise<TechnicalDesign>
   getTechnicalDesign(id: string): Promise<TechnicalDesign>
   addComment(entityId: string, body: string): Promise<Comment>
+  getUsers(): Promise<string[]>
 }
