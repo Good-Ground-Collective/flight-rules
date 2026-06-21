@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   CommentSchema,
+  EntityMetadataSchema,
   TicketSchema,
   EpicSchema,
   CreateEpicInputSchema,
@@ -72,5 +73,51 @@ describe('CreateTechnicalDesignInputSchema', () => {
   it('parses all fields', () => {
     const result = CreateTechnicalDesignInputSchema.parse({ title: 'T', body: 'B', epicId: '1' })
     expect(result.epicId).toBe('1')
+  })
+})
+
+describe('EntityMetadataSchema', () => {
+  it('parses known fields', () => {
+    const result = EntityMetadataSchema.parse({ tddId: 1, epicId: 2, notes: 'hi' })
+    expect(result.tddId).toBe(1)
+    expect(result.epicId).toBe(2)
+    expect(result.notes).toBe('hi')
+  })
+
+  it('passes unknown keys through', () => {
+    const result = EntityMetadataSchema.parse({ tddId: 1, foo: 'bar' })
+    expect((result as Record<string, unknown>)['foo']).toBe('bar')
+  })
+})
+
+describe('EpicSchema metadata', () => {
+  it('defaults metadata to empty object', () => {
+    const result = EpicSchema.parse({
+      id: '10',
+      status: 'open',
+      labels: [],
+      title: 'T',
+      body: 'B',
+      childIssues: [],
+      comments: [],
+      updatedAt: '2026-01-01T00:00:00Z',
+    })
+    expect(result.metadata).toEqual({})
+  })
+})
+
+describe('TicketSchema metadata', () => {
+  it('defaults metadata to empty object', () => {
+    const result = TicketSchema.parse({
+      id: '1',
+      status: 'open',
+      labels: [],
+      title: 'T',
+      body: 'B',
+      comments: [],
+      assignee: null,
+      updatedAt: '2026-01-01T00:00:00Z',
+    })
+    expect(result.metadata).toEqual({})
   })
 })

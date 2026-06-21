@@ -5,6 +5,7 @@ import type {
   CreateEpicInput,
   CreateTicketInput,
   CreateTechnicalDesignInput,
+  EntityMetadata,
   Epic,
   TaskTracker,
   TechnicalDesign,
@@ -79,6 +80,7 @@ function mapTicket(issue: OctokitIssueData, comments: OctokitCommentData[]): Tic
     body: issue.body ?? '',
     comments: comments.map(mapComment),
     assignee: issue.assignee?.login ?? null,
+    metadata: {},
     updatedAt: issue.updated_at,
   }
 }
@@ -112,6 +114,7 @@ export class GitHubTaskTracker implements TaskTracker {
       body: data.body ?? '',
       childIssues: [],
       comments: [],
+      metadata: {},
       updatedAt: data.updated_at,
     }
   }
@@ -143,6 +146,7 @@ export class GitHubTaskTracker implements TaskTracker {
       childIssues,
       comments: commentsResponse.data.map(mapComment),
       tdd,
+      metadata: {},
       updatedAt: issue.updated_at,
     }
   }
@@ -188,6 +192,18 @@ export class GitHubTaskTracker implements TaskTracker {
       issue_number: epicNumber,
       body: newBody,
     })
+  }
+
+  async updateEpicMetadata(_epicId: string, _patch: Partial<EntityMetadata>): Promise<void> {
+    // TODO: Implement in Task 4
+  }
+
+  async updateTicketMetadata(_ticketId: string, _patch: Partial<EntityMetadata>): Promise<void> {
+    // TODO: Implement in Task 4
+  }
+
+  async updateTddMetadata(_tddId: string, _patch: Partial<EntityMetadata>): Promise<void> {
+    // TODO: Implement in Task 4
   }
 
   async createTechnicalDesign(input: CreateTechnicalDesignInput): Promise<TechnicalDesign> {
@@ -241,6 +257,7 @@ export class GitHubTaskTracker implements TaskTracker {
       epicId: input.epicId,
       body: discussion.body,
       comments: [],
+      metadata: {},
       updatedAt: discussion.updatedAt,
     }
   }
@@ -295,6 +312,7 @@ export class GitHubTaskTracker implements TaskTracker {
         createdAt: n.createdAt,
         updatedAt: n.updatedAt,
       })),
+      metadata: {},
       updatedAt: discussion.updatedAt,
     }
   }

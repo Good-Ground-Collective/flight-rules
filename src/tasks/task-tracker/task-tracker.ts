@@ -23,6 +23,7 @@ export const TechnicalDesignSchema = z.object({
   epicId: z.string(),
   body: z.string(),
   comments: z.array(CommentSchema),
+  metadata: EntityMetadataSchema.default({}),
   updatedAt: z.string(),
 })
 
@@ -34,6 +35,7 @@ export const TicketSchema = z.object({
   body: z.string(),
   comments: z.array(CommentSchema),
   assignee: z.string().nullable(),
+  metadata: EntityMetadataSchema.default({}),
   updatedAt: z.string(),
 })
 
@@ -46,6 +48,7 @@ export const EpicSchema = z.object({
   childIssues: z.array(TicketSchema),
   comments: z.array(CommentSchema),
   tdd: TechnicalDesignSchema.optional(),
+  metadata: EntityMetadataSchema.default({}),
   updatedAt: z.string(),
 })
 
@@ -53,6 +56,7 @@ export const CreateEpicInputSchema = z.object({
   title: z.string(),
   body: z.string(),
   labels: z.array(z.string()).default([]),
+  metadata: EntityMetadataSchema.partial().optional(),
 })
 
 export const CreateTicketInputSchema = z.object({
@@ -61,12 +65,14 @@ export const CreateTicketInputSchema = z.object({
   epicId: z.string(),
   labels: z.array(z.string()).default([]),
   assignee: z.string().optional(),
+  metadata: EntityMetadataSchema.partial().optional(),
 })
 
 export const CreateTechnicalDesignInputSchema = z.object({
   title: z.string(),
   body: z.string(),
   epicId: z.string(),
+  metadata: EntityMetadataSchema.partial().optional(),
 })
 
 export type Comment = z.infer<typeof CommentSchema>
@@ -83,6 +89,9 @@ export interface TaskTracker {
   createTicket(input: CreateTicketInput): Promise<Ticket>
   getTicket(id: string): Promise<Ticket>
   linkTicketToEpic(ticketId: string, epicId: string): Promise<void>
+  updateEpicMetadata(epicId: string, patch: Partial<EntityMetadata>): Promise<void>
+  updateTicketMetadata(ticketId: string, patch: Partial<EntityMetadata>): Promise<void>
+  updateTddMetadata(tddId: string, patch: Partial<EntityMetadata>): Promise<void>
   createTechnicalDesign(input: CreateTechnicalDesignInput): Promise<TechnicalDesign>
   getTechnicalDesign(id: string): Promise<TechnicalDesign>
   addComment(entityId: string, body: string): Promise<Comment>
