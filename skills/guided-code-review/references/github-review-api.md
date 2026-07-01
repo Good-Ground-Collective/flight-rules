@@ -68,10 +68,18 @@ gh api --method POST repos/{owner}/{repo}/pulls/<pr-number>/reviews --input revi
 {
   "body": "<the PR explanation + approve-vs-escalate recommendation, Markdown>",
   "comments": [
-    { "path": "src/foo.ts", "line": 42, "side": "RIGHT", "body": "<finding>" },
+    { "path": "src/foo.ts", "line": 42, "side": "RIGHT", "body": "<finding — two-section format>" },
     { "path": "src/bar.ts", "start_line": 10, "line": 14, "side": "RIGHT", "body": "<finding spanning lines 10-14>" }
   ]
 }
+```
+
+Each comment `body` uses the **two-section format** from the skill: a 1–3 sentence
+human-facing summary, followed by a collapsed `<details>` block labeled
+`Details For LLM`. Newlines are `\n` inside the JSON string, e.g.:
+
+```json
+"body": "`role = \"admin\"` is an assignment, not a comparison, so this always grants admin.\n\n<details>\n<summary>Details For LLM</summary>\n\n`if (role = \"admin\")` assigns then coerces truthy. Use `role === \"admin\"` and add a test asserting `grantAccess(\"user\") === false`, since this gates access.\n</details>"
 ```
 
 Rules for `comments`:
