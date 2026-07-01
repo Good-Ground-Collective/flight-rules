@@ -137,12 +137,45 @@ Show the reviewer the full assembled review in chat before touching GitHub:
 - The **summary body** (the Step 2 explanation + the Step 4 recommendation).
 - Every **confirmed inline comment**, each with its `path:line` and text.
 
-Ask for explicit confirmation. On approval, create the **pending** review
-(reference §4). If a comment anchor is rejected, relocate that finding into the
-summary body rather than dropping it (reference §5), and tell the reviewer.
+Every inline comment must follow the **two-section format** below. Ask for
+explicit confirmation. On approval, create the **pending** review (reference §4).
+If a comment anchor is rejected, relocate that finding into the summary body
+rather than dropping it (reference §5), and tell the reviewer.
 
 Then tell the reviewer the review is waiting for them in a pending state on the
 PR, where they can edit comments and choose approve / request changes / comment.
+
+---
+
+## Inline comment format
+
+Every inline review comment has two sections, in this order:
+
+1. **Human-facing summary (1–3 sentences).** State the finding plainly. This is
+   written for the human reviewer, who is expected to **rewrite it in their own
+   words** before submitting — proving they understand the issue rather than
+   rubber-stamping it. Keep it tight: what the problem is and why it matters. No
+   code dumps here.
+2. **A collapsed `<details>` block labeled `Details For LLM`.** This holds
+   everything another agent would need to pick the finding up cold: the full
+   reasoning, the suggested fix, relevant code, and file/line references. The
+   human **leaves this untouched** — it is agent-to-agent handoff context, not
+   part of the human ↔ human conversation.
+
+So the first section is human ↔ human; the expandable section is agent ↔ agent.
+
+Each comment `body` (the `body` field in reference §4) is Markdown shaped like:
+
+```markdown
+<1–3 sentence human-facing description of the finding>
+
+<details>
+<summary>Details For LLM</summary>
+
+<full context to bootstrap another agent: the problem, why it matters, the
+suggested fix, and any relevant snippets or file:line references>
+</details>
+```
 
 ---
 
