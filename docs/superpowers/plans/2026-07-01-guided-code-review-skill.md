@@ -96,10 +96,12 @@ Build a JSON payload and post it. **Omit the `event` field** — that is what
 leaves the review in PENDING state, visible only to the author until they
 submit it on GitHub.
 
-Write the payload to a temp file, then post it:
+Write the payload to a temp file, then post it. Replace `<pr-number>` with the
+PR number from step 1 — `gh api` substitutes `{owner}` and `{repo}` for the
+current repo, but it does **not** fill in the PR number:
 
 ```bash
-gh api --method POST repos/{owner}/{repo}/pulls/PR_NUMBER/reviews --input review.json
+gh api --method POST repos/{owner}/{repo}/pulls/<pr-number>/reviews --input review.json
 ```
 
 `review.json` shape:
