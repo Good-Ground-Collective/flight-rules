@@ -1,7 +1,9 @@
-# Initiative RFCs + Epic↔Initiative Linking — Design Spec
+# [REJECTED] Initiative RFCs + Epic↔Initiative Linking — Design Spec
 
 **Date:** 2026-06-22
-**Status:** Approved
+**Status:** REJECTED
+
+> **Rejected 2026-07-04.** Superseded by a new direction that prioritizes minimal friction to get started. This document is retained for historical context.
 **Builds on:** [`2026-06-21-anthropogenic-spec-skill-design.md`](2026-06-21-anthropogenic-spec-skill-design.md)
 
 ---
