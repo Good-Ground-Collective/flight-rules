@@ -78,7 +78,7 @@ When the user provides a spec file:
    - **Gaps**: are there obvious edge cases or scope ambiguities the author hasn't surfaced?
 3. Ask follow-up questions on anything thin, vague, or disconnected
 4. Do not declare the spec ready until every required section is solid
-5. Proceed to Frontmatter Collection
+5. Proceed to Sizing the Work
 
 ---
 
@@ -93,6 +93,63 @@ After each section is solid:
   3. **Rewrite** — produce a clean version while preserving their intent
 
 Err toward verbatim. A human voice in each section is the point — polished agent output defeats the purpose.
+
+---
+
+## Sizing the Work
+
+Once the sections are solid, size the work before collecting frontmatter. Do not ask the user to pick a size cold — **propose** one from what they wrote, then let them confirm or override.
+
+| Size | What it is | Rough scale (guidance, not a gate) |
+|---|---|---|
+| **ticket** | A single unit of work — one PR | ≤ ~1000 lines of reviewable code |
+| **epic** | A bundle of smaller tickets | several tickets, ~100–330 reviewable lines each |
+| **initiative** | A bundle of epics | several epics |
+
+Read the RFC and weigh:
+
+- How many independent deliverables are described?
+- Does the whole thing ship as one unit, or as several?
+- Does it span multiple repos or teams?
+- Rough scale against the table above.
+
+Then propose, with your reasoning. For example:
+
+> "You've described three independent deliverables that span two repos and don't ship as one unit — that reads like an **initiative**, not a ticket. Size it as an initiative, or would you draw the line differently?"
+
+The user confirms or overrides. Their call is final — the line counts are intuition, not rules. Record the agreed size; it becomes the `size` frontmatter field and drives the size-specific section below.
+
+---
+
+## Size-Specific Section
+
+Append exactly one section based on the agreed size. Add nothing for the sizes that don't apply. Keep it rough — enough to justify the size and let a reviewer sanity-check it, never a full breakdown (that is downstream work).
+
+### ticket → Acceptance Criteria
+
+Ask:
+
+> "What are the checkable conditions that tell us this ticket is done? Two to five, each independently verifiable."
+
+Save as a bulleted checklist.
+
+### epic → Ticket Sketch
+
+Ask:
+
+> "Roughly what tickets make this up? One line each — just enough to show the shape. Note ordering only where it matters."
+
+Save as a bulleted list. Do not expand these into full tickets; that is a downstream task.
+
+### initiative → Epic Sketch + Definition of Success
+
+Ask two questions:
+
+> "Roughly what epics make this up? One line each."
+
+> "How will we know this initiative succeeded — in product-outcome terms, not code?"
+
+Save the epic sketch as a bulleted list and the Definition of Success as a short paragraph or bulleted outcomes.
 
 ---
 
