@@ -1,13 +1,15 @@
 ---
-name: draft-spec
-description: "Forces a human to author an RFC before any agent touches a codebase. Either builds one interactively via Socratic dialogue or interrogates an existing spec file. Always the first step in the software factory pipeline."
+name: draft-request-for-comments
+description: "Forces a human to author an RFC before any agent touches a codebase, then sizes the work as a ticket, epic, or initiative. Builds the RFC interactively via Socratic dialogue or interrogates an existing file. Always the first step in the software factory pipeline."
 ---
 
-# Draft Spec
+# Draft Request for Comments
 
-This skill forces a human to author an RFC before any agent starts planning or building. It either accepts an existing spec file and interrogates it, or guides the user through writing one from scratch via Socratic questions — no canned options, free-form answers only.
+This skill forces a human to author an RFC before any agent starts planning or building. It either accepts an existing file and interrogates it, or guides the user through writing one from scratch via Socratic questions — no canned options, free-form answers only. It closes by sizing the work — ticket, epic, or initiative — so the rest of the pipeline knows what to do next.
 
-The RFC this skill produces is the grounding source for all downstream agents: initiative-planner, ticket-planner, system-architect, and senior-engineer. Nothing proceeds without a merged RFC. The RFC is a human artifact that agents read, not an agent artifact that humans rubber-stamp.
+This document is an **RFC** — the upstream "what and why" that collects comments — not a spec. A true spec is a downstream artifact that lives alongside its delivery (the code, the PR). Keep this skill lean; it must never grow into an implementation spec.
+
+The RFC this skill produces is the grounding source for all downstream agents. Nothing proceeds without a merged RFC. The RFC is a human artifact that agents read, not an agent artifact that humans rubber-stamp.
 
 ## Entry Modes
 

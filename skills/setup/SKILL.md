@@ -114,7 +114,7 @@ flight-rules users get
 ```
 
 - If it returns a JSON array (even empty): setup is complete. Tell the user:
-  > "Setup complete. `flight-rules` is configured for `<repo>`. Try `/draft-spec` to author your first RFC."
+  > "Setup complete. `flight-rules` is configured for `<repo>`. Try `/draft-request-for-comments` to author your first RFC."
 - If it returns an error: show the error and explain likely causes:
   - 401/403 — token lacks `read:org` scope or doesn't have access to the org
   - 404 — the org in the repo field doesn't exist or the token can't see it
