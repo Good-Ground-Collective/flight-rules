@@ -157,6 +157,8 @@ Save the epic sketch as a bulleted list and the Definition of Success as a short
 
 Once all sections are solid, collect the following in order:
 
+**Size** is already agreed from the Sizing step above — do not re-ask. Carry it into the `size` frontmatter field below.
+
 **1. Title**
 Ask for a short title if the spec doesn't already have one.
 
@@ -203,6 +205,7 @@ title: <title>
 date: <today's date in YYYY-MM-DD>
 author: <git user name>
 status: draft
+size: <ticket | epic | initiative>
 reviewers:
   - <reviewer1>
   - <reviewer2>
@@ -231,9 +234,14 @@ repos:
 ## Known Gaps and Edge Cases
 
 <gaps text>
+
+<Size-specific section for the agreed size — see "Size-Specific Section" above.
+ ticket → "## Acceptance Criteria" (checklist);
+ epic → "## Ticket Sketch" (bulleted one-liners);
+ initiative → "## Epic Sketch" (bulleted one-liners) and "## Definition of Success" (outcomes).>
 ```
 
-Omit optional sections entirely (including their heading) if the user skipped them.
+Omit optional sections entirely (including their heading) if the user skipped them. The size-specific section is required — include the one (or two, for an initiative) that matches the `size` field.
 
 ---
 
@@ -254,7 +262,7 @@ Open the PR with reviewer requests:
 ```bash
 gh pr create \
   --title "<id>: <title>" \
-  --body "RFC for review. See the document for full context." \
+  --body "RFC for review — proposed size: **<size>**. Reviewers: please confirm the size or challenge it as part of your review. See the document for full context." \
   --reviewer <reviewer1> \
   --reviewer <reviewer2>
 ```
@@ -272,3 +280,6 @@ A solid RFC before it leaves this skill:
 - At least one human-written sentence exists in every included section
 - All frontmatter fields are populated — no empty `title`, `reviewers`, or `repos`
 - Reviewers are real team members who must approve before agents begin work
+- A size is agreed (`ticket`, `epic`, or `initiative`) and recorded in the `size` frontmatter field
+- The size-specific section for that size is present and non-empty (Acceptance Criteria, Ticket Sketch, or Epic Sketch + Definition of Success)
+- The PR body states the proposed size and asks reviewers to confirm or challenge it
