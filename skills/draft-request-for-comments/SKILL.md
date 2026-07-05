@@ -15,7 +15,7 @@ The RFC this skill produces is the grounding source for all downstream agents. N
 
 Ask the user:
 
-> "Do you have a spec file you'd like me to review, or would you like to write one from scratch?"
+> "Do you have an existing document you'd like me to review, or would you like to write one from scratch?"
 
 - **File provided** → use the File Review Flow
 - **Start from scratch** → use the Interactive Flow
@@ -69,7 +69,7 @@ This can be as brief as "we already use Octokit, follow that pattern" or as deta
 
 ## File Review Flow
 
-When the user provides a spec file:
+When the user provides an existing document:
 
 1. Read the file
 2. Check every section against these standards:
@@ -77,7 +77,7 @@ When the user provides a spec file:
    - **Solution**: connects directly to the problem, concrete enough to act on
    - **Gaps**: are there obvious edge cases or scope ambiguities the author hasn't surfaced?
 3. Ask follow-up questions on anything thin, vague, or disconnected
-4. Do not declare the spec ready until every required section is solid
+4. Do not declare the RFC ready until every required section is solid
 5. Proceed to Sizing the Work
 
 ---
@@ -149,7 +149,7 @@ Ask two questions:
 
 > "How will we know this initiative succeeded — in product-outcome terms, not code?"
 
-Save the epic sketch as a bulleted list and the Definition of Success as a short paragraph or bulleted outcomes.
+Save the epic sketch as a bulleted list and the Definition of Success as a short paragraph or bulleted outcomes. Do not expand the epic sketch into full epics; that is a downstream task.
 
 ---
 
@@ -160,7 +160,7 @@ Once all sections are solid, collect the following in order:
 **Size** is already agreed from the Sizing step above — do not re-ask. Carry it into the `size` frontmatter field below.
 
 **1. Title**
-Ask for a short title if the spec doesn't already have one.
+Ask for a short title if the document doesn't already have one.
 
 **2. Repos**
 > "Which repository or repositories will this work touch? Use org/repo format."
