@@ -1,0 +1,104 @@
+# Decomposition & Technical Planning — Design Spec
+
+**Date:** 2026-07-05
+**Status:** Draft
+**Builds on:** [`2026-07-04-sizing-driven-rfc-design.md`](2026-07-04-sizing-driven-rfc-design.md)
+
+---
+
+## Problem Statement
+
+A merged RFC states *what* and *why*, but nothing in the pipeline translates it into code-grounded, right-sized deliverables an execution agent can build — so the pipeline dead-ends at the RFC.
+
+---
+
+## Solution
+
+Add a single recursive **decomposition-and-planning skill** — persona: a staff engineer working tightly with a PM — that picks up a merged RFC and produces the next altitude of work down, grounded in the actual codebase via a parallel research fan-out. It reads the RFC's `size` and knows how far to go and how deep to analyze:
+
+- **initiative → epics** — high-level, cross-repo system analysis; defines the epics with basic analysis, then **stops**. Each epic is re-run through the skill later.
+- **epic → tickets** — deep, executable-grade technical analysis; defines tickets a "dumber" execution model (e.g. Sonnet) can build.
+- **ticket-sized RFC** — skips decomposition and goes straight to the deep pass; the executable ticket *is* the output.
+
+It is **one skill, invoked once per altitude**, not three skills and not two personas. Analysis depth scales with how low you're going. The expensive, parallelizable part of every altitude — reading code across N repos/subsystems — is handled by a **single research-agent type**, dispatched wide and parametrized by *what to look for* and *how deep*. The skill orchestrates the fan-out and does the synthesis itself, where the RFC context lives.
+
+Every decomposed node is a **layered artifact**, mirroring the three reading-depths of our code-review output (human summary → human deep-dive → LLM context):
+
+- **Problem Statement** — grounding; everything ties back to it
+- **Solution** — human-readable
+- **Acceptance Criteria** — product-driven, verifiable by a human or a bot (epics *and* tickets)
+- **High-level technical writeup** — what's being built, at the altitude-appropriate depth
+
+Tickets additionally carry:
+
+- **Guided technical writeup** — walking a junior engineer (or Sonnet) through the task, tucked into an LLM-agent-context expansion when dense.
+
+Layered onto the epic→ticket pass is **Sharpen the Saw** (below): flagging a small number of leaf tickets for a human to keep core engineering skills warm.
+
+---
+
+## Background
+
+The pipeline's founding ethos is that the grounding artifacts stay human-driven — the RFC is a human document agents *read*, not an agent document humans rubber-stamp. That same "keep it sharp by hand" instinct extends to *code*: if agents do all the building, senior engineers' foundational skills atrophy. **Sharpen the Saw** is the mechanism that keeps a trickle of real, worthwhile work in human hands.
+
+This stage was previously imagined as a `system-architect` / `initiative-planner` role. We deliberately drop the "architecture" framing (too grand, too static) and the staff-vs-senior split — that split is an **anthropogenic trap**: the machine doesn't need role *identity*, it needs altitude-appropriate *instructions*. "Staff does init→epic, senior does epic→ticket" is really just "the same skill, run at a lower altitude, with a deeper analysis budget."
+
+This also supersedes the rejected [initiative-RFCs approach](2026-06-22-initiative-rfcs-design.md): rather than multiple RFC-drafting skills per altitude, one sizing-driven RFC feeds one recursive decomposition skill.
+
+---
+
+## Technical Notes
+
+### The recursive skill
+
+- Reads `size` from RFC frontmatter to determine target altitude and analysis depth.
+- Runs **one altitude-hop per invocation**. An initiative pass emits epic nodes that re-enter the skill later; an epic pass emits ticket nodes; a ticket-sized RFC goes straight to the deep pass. There is no fourth "ticket → plan" altitude — the epic→ticket pass *is* the deep pass, and its tickets are the executable artifact.
+- **Research fan-out:** one research-agent type, dispatched in parallel across repos/subsystems, parametrized by focus and depth. Synthesis (the actual decomposition) happens in the skill.
+- Emits the **layered artifact** described above into the relevant platform (GitHub/Jira) via the `flight-rules` CLI.
+
+### Sharpen the Saw
+
+- **Trigger:** during epic→ticket decomposition, the agent flags tickets that exercise a foundational skill worth keeping warm.
+- **Not a different artifact:** a saw ticket is a **normal ticket with a label** (`sharpen-the-saw`, optionally `sharpen-the-saw:<competency>`). Strip the label → the pipeline swallows it like any other ticket. The pipeline-runner engineer decides keep-or-strip.
+- **Handoff mechanism (agentically-aided TDD):** a small, **hand-run** companion skill that an engineer invokes when starting the ticket — it creates a branch, writes a failing test suite pinning the contract, and stops. The engineer implements to green. Tests-pass = done, the same bar an agent would be held to.
+- **Candidacy rubric — intersection of three filters:** *interview signal* (a load-bearing fundamental) ∩ *real work* (a ticket that needed doing anyway) ∩ *TDD-fenceable* (a clear input→output contract a failing suite can pin). This deliberately excludes contrived puzzles and unfenceable work (system design, race conditions, UI polish).
+- **Seed competency list** (configurable per team; label may carry which one):
+
+  1. Define a schema / validator
+  2. Wire an endpoint
+  3. Write a migration
+  4. Implement a pure transform
+  5. Write a query (SQL/ORM)
+  6. Build a mapper/adapter
+  7. Harden a function's edge cases
+  8. Encode a business rule
+  9. Wrap an external API client
+  10. Implement reducer/state logic
+  11. Async coordination (retry/debounce/queue)
+  12. Auth/permission check
+
+  Ceiling is deliberately here — no "refactor a module behind its interface" in the seed set (harder to fence with a clean failing-test handoff); teams can add such items later.
+- **Justification required:** the agent must record *why* a ticket is a good candidate (which competency, why it's cleanly fenced, why it's ~30–90 min) in the ticket, so the runner can judge keep-or-strip in seconds. Never label silently.
+- **Anti-stall controls (v1):**
+  - **Per-epic cap** of ~1 saw ticket (a percentage collapses to "at most one" for typical 4–8-ticket epics anyway). Enforced at synthesis time, where the skill has the whole epic in context — no cross-epic state, no monitor.
+  - **Leaf-only eligibility:** a saw ticket must be a **non-blocking leaf** (nothing else in the epic depends on it). This converts the stall risk into a harmless backlog — automated work flows around an un-worked saw ticket instead of hanging on it. Note this is the same set of tickets the competency list already selects for.
+- **Reduced guided writeup:** for a saw ticket the guided walkthrough should be suppressed or reduced to hints — the tests carry the spec, the human does the thinking. (Exact level settled with the leaf-format work.)
+
+---
+
+## Known Gaps and Edge Cases
+
+**Deferred to v2:**
+- **Fleet-wide WIP monitoring** — tracking open-and-unclaimed saw tickets across all running epics and throttling once too many are outstanding. Needs a persistent check (CLI querying the tracker on a schedule); out of scope for v1.
+- **Auto-revert safety valve** — a saw ticket sitting unclaimed past a timeout reverting to normal agent execution, so the pipeline never hangs indefinitely.
+
+**To resolve during planning:**
+- **Naming** of the decomposition skill and the hand-run saw companion skill (avoiding "architect").
+- **Node re-entry / linking** — how an emitted epic node references its parent initiative and re-enters the skill for its own epic→ticket pass (mirror the RFC `id`/linking conventions).
+- **Per-epic cap for large epics** — whether the ~1 cap becomes 1-per-N for unusually large epics, and what N is.
+- **Guided-writeup suppression level** for saw tickets — settle alongside the leaf artifact format.
+- **Research-agent parametrization** — the concrete shape of the "what to look for / how deep" inputs per altitude.
+
+**Out of scope:**
+- Higher-altitude saw candidates (refactors, caching layers) that resist a clean failing-test handoff.
+- Enforcing the fleet cadence target (2–3 saw tickets/engineer/week) — that's a human selection decision, not a skill responsibility.
