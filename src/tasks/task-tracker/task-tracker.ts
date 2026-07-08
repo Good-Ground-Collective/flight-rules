@@ -112,6 +112,7 @@ export interface TaskTracker {
   updateTicketMetadata(ticketId: string, patch: Partial<EntityMetadata>): Promise<void>
   updateTddMetadata(tddId: string, patch: Partial<EntityMetadata>): Promise<void>
   createInitiative(input: CreateInitiativeInput): Promise<Initiative>
+  linkEpicToInitiative(epicId: string, initiativeId: string): Promise<void>
   createTechnicalDesign(input: CreateTechnicalDesignInput): Promise<TechnicalDesign>
   getTechnicalDesign(id: string): Promise<TechnicalDesign>
   addComment(entityId: string, body: string): Promise<Comment>

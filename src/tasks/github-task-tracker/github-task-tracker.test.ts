@@ -487,3 +487,23 @@ describe('GitHubTracker.createInitiative', () => {
     expect(initiative).toEqual({ id: '7', title: 'Q3 Platform', body: 'The big push', epics: [] })
   })
 })
+
+describe('GitHubTracker.linkEpicToInitiative', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('sets the epic issue milestone to the initiative number', async () => {
+    const tracker = makeTracker()
+    // @ts-expect-error — accessing private field for test setup
+    const mockUpdate = vi.mocked(tracker.octokit.rest.issues.update)
+    mockUpdate.mockResolvedValueOnce({ data: {} } as never)
+
+    await tracker.linkEpicToInitiative('19', '7')
+
+    expect(mockUpdate).toHaveBeenCalledWith({
+      owner: 'acme',
+      repo: 'proj',
+      issue_number: 19,
+      milestone: 7,
+    })
+  })
+})
