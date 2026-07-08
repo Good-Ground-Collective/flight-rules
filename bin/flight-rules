@@ -29101,11 +29101,12 @@ var Octokit2 = Octokit.plugin(requestLog, legacyRestEndpointMethods, paginateRes
 var import_yaml = __toESM(require_dist2(), 1);
 
 // src/tasks/task-tracker/task-tracker.ts
+var entitySizes = ["ticket", "epic", "initiative"];
 var EntityMetadataSchema = external_exports.object({
   tddId: external_exports.number().optional(),
   epicId: external_exports.number().optional(),
   notes: external_exports.string().optional(),
-  size: external_exports.enum(["ticket", "epic", "initiative"]).optional()
+  size: external_exports.enum(entitySizes).optional()
 }).passthrough();
 var CommentSchema = external_exports.object({
   id: external_exports.string(),
@@ -29638,11 +29639,12 @@ var DependencyPlannerService = class {
 // src/tasks/commands/epic/command.ts
 function createEpicCommand(getTracker) {
   const epic = new Command("epic");
-  epic.command("create").exitOverride().requiredOption("--title <title>", "epic title").requiredOption("--body <body>", "epic body").option("--labels <labels>", "comma-separated labels").action(async (opts) => {
+  epic.command("create").exitOverride().requiredOption("--title <title>", "epic title").requiredOption("--body <body>", "epic body").option("--labels <labels>", "comma-separated labels").addOption(new Option("--size <size>", "work size for the LLM-Context metadata").choices([...entitySizes])).action(async (opts) => {
     const result = await getTracker().createEpic({
       title: opts.title,
       body: opts.body,
-      labels: opts.labels !== void 0 ? opts.labels.split(",") : []
+      labels: opts.labels !== void 0 ? opts.labels.split(",") : [],
+      ...opts.size !== void 0 ? { metadata: { size: opts.size } } : {}
     });
     process.stdout.write(JSON.stringify(result) + "\n");
   });
@@ -29688,13 +29690,14 @@ function createInitiativeCommand(getTracker) {
 // src/tasks/commands/ticket/command.ts
 function createTicketCommand(getTracker) {
   const ticket = new Command("ticket");
-  ticket.command("create").exitOverride().requiredOption("--title <title>", "ticket title").requiredOption("--body <body>", "ticket body").requiredOption("--epic-id <id>", "parent epic id").option("--labels <labels>", "comma-separated labels").option("--assignee <user>", "assignee login").action(async (opts) => {
+  ticket.command("create").exitOverride().requiredOption("--title <title>", "ticket title").requiredOption("--body <body>", "ticket body").requiredOption("--epic-id <id>", "parent epic id").option("--labels <labels>", "comma-separated labels").option("--assignee <user>", "assignee login").addOption(new Option("--size <size>", "work size for the LLM-Context metadata").choices([...entitySizes])).action(async (opts) => {
     const input = {
       title: opts.title,
       body: opts.body,
       epicId: opts.epicId,
       labels: opts.labels !== void 0 ? opts.labels.split(",") : [],
-      ...opts.assignee !== void 0 ? { assignee: opts.assignee } : {}
+      ...opts.assignee !== void 0 ? { assignee: opts.assignee } : {},
+      ...opts.size !== void 0 ? { metadata: { size: opts.size } } : {}
     };
     const result = await getTracker().createTicket(input);
     process.stdout.write(JSON.stringify(result) + "\n");

@@ -71,6 +71,14 @@ describe('ticket command', () => {
     output.mockRestore()
   })
 
+  it('passes size as metadata for "create"', async () => {
+    const tracker = makeTracker()
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(tracker, ['create', '--title', 'T', '--body', 'B', '--epic-id', '5', '--size', 'ticket'])
+    expect(tracker.createTicket).toHaveBeenCalledWith({ title: 'T', body: 'B', epicId: '5', labels: [], metadata: { size: 'ticket' } })
+    output.mockRestore()
+  })
+
   it('calls getTicket and prints JSON for "get"', async () => {
     const tracker = makeTracker()
     const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)

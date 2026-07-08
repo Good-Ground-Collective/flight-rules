@@ -1,5 +1,6 @@
-import { Command } from 'commander'
-import type { CreateTicketInput, TaskTracker } from '../../task-tracker/task-tracker.js'
+import { Command, Option } from 'commander'
+import type { CreateTicketInput, EntitySize, TaskTracker } from '../../task-tracker/task-tracker.js'
+import { entitySizes } from '../../task-tracker/task-tracker.js'
 
 type CreateTicketOptions = {
   title: string
@@ -7,6 +8,7 @@ type CreateTicketOptions = {
   epicId: string
   labels?: string
   assignee?: string
+  size?: EntitySize
 }
 
 export function createTicketCommand(getTracker: () => TaskTracker): Command {
@@ -20,6 +22,7 @@ export function createTicketCommand(getTracker: () => TaskTracker): Command {
     .requiredOption('--epic-id <id>', 'parent epic id')
     .option('--labels <labels>', 'comma-separated labels')
     .option('--assignee <user>', 'assignee login')
+    .addOption(new Option('--size <size>', 'work size for the LLM-Context metadata').choices([...entitySizes]))
     .action(async (opts: CreateTicketOptions) => {
       const input: CreateTicketInput = {
         title: opts.title,
@@ -27,6 +30,7 @@ export function createTicketCommand(getTracker: () => TaskTracker): Command {
         epicId: opts.epicId,
         labels: opts.labels !== undefined ? opts.labels.split(',') : [],
         ...(opts.assignee !== undefined ? { assignee: opts.assignee } : {}),
+        ...(opts.size !== undefined ? { metadata: { size: opts.size } } : {}),
       }
       const result = await getTracker().createTicket(input)
       process.stdout.write(JSON.stringify(result) + '\n')
