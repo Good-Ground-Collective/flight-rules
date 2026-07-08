@@ -38,3 +38,42 @@ describe('NodeGitExecutor.getCommitSha', () => {
     expect(exec).toHaveBeenCalledWith('git', ['rev-parse', 'HEAD'])
   })
 })
+
+describe('NodeGitExecutor.checkout', () => {
+  it('builds a semantic branch name and creates it off current HEAD', async () => {
+    const exec = makeExec()
+    const executor = new NodeGitExecutor(exec)
+    const branch = await executor.checkout({ type: 'feat', scope: '25', description: 'sharpen-the-saw' })
+    expect(branch).toBe('feat/25-sharpen-the-saw')
+    expect(exec).toHaveBeenCalledWith('git', ['checkout', '-b', 'feat/25-sharpen-the-saw'])
+  })
+
+  it('omits the description slug when not provided', async () => {
+    const exec = makeExec()
+    const executor = new NodeGitExecutor(exec)
+    const branch = await executor.checkout({ type: 'fix', scope: '30' })
+    expect(branch).toBe('fix/30')
+    expect(exec).toHaveBeenCalledWith('git', ['checkout', '-b', 'fix/30'])
+  })
+
+  it('branches off a given base when from is provided (stacking)', async () => {
+    const exec = makeExec()
+    const executor = new NodeGitExecutor(exec)
+    await executor.checkout({ type: 'feat', scope: '25', description: 'saw' }, 'feat/22-research-agent')
+    expect(exec).toHaveBeenCalledWith('git', ['checkout', '-b', 'feat/25-saw', 'feat/22-research-agent'])
+  })
+
+  it('rejects a type outside the semantic set', async () => {
+    const exec = makeExec()
+    const executor = new NodeGitExecutor(exec)
+    await expect(executor.checkout({ type: 'banana', scope: '25' })).rejects.toThrow(/banana/)
+    expect(exec).not.toHaveBeenCalled()
+  })
+
+  it('rejects an empty scope', async () => {
+    const exec = makeExec()
+    const executor = new NodeGitExecutor(exec)
+    await expect(executor.checkout({ type: 'feat', scope: '   ' })).rejects.toThrow(/scope/)
+    expect(exec).not.toHaveBeenCalled()
+  })
+})

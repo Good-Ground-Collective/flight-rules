@@ -29770,6 +29770,26 @@ function createRfcCommand(getConfig, getCwd = () => process.cwd()) {
 // src/git/git-executor/git-executor.ts
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+
+// src/git/semantic-types.ts
+var semanticTypes = [
+  "feat",
+  "fix",
+  "perf",
+  "refactor",
+  "docs",
+  "test",
+  "build",
+  "ci",
+  "chore",
+  "style",
+  "revert"
+];
+function isSemanticType(value) {
+  return semanticTypes.some((t) => t === value);
+}
+
+// src/git/git-executor/git-executor.ts
 var NodeGitExecutor = class {
   execFile;
   constructor(execFileFn) {
@@ -29786,6 +29806,22 @@ var NodeGitExecutor = class {
   async getCommitSha() {
     const { stdout } = await this.execFile("git", ["rev-parse", "HEAD"]);
     return stdout.trim();
+  }
+  async checkout(spec, from) {
+    if (!isSemanticType(spec.type)) {
+      throw new Error(
+        `invalid branch type "${spec.type}" \u2014 must be one of: ${semanticTypes.join(", ")}`
+      );
+    }
+    if (spec.scope.trim() === "") {
+      throw new Error("branch scope is required");
+    }
+    const slug = spec.description !== void 0 && spec.description !== "" ? `-${spec.description}` : "";
+    const branch = `${spec.type}/${spec.scope}${slug}`;
+    const args = ["checkout", "-b", branch];
+    if (from !== void 0) args.push(from);
+    await this.execFile("git", args);
+    return branch;
   }
 };
 
@@ -29858,6 +29894,18 @@ function createGitCommand(getExecutor) {
     await executor.commit(message);
     const sha = await executor.getCommitSha();
     process.stdout.write(JSON.stringify({ sha, message }) + "\n");
+  });
+  git.command("checkout").exitOverride().requiredOption("--type <type>", `branch type (${semanticTypes.join(" | ")})`).requiredOption("--scope <scope>", "ticket number / scope").option("--description <description>", "short readable slug").option("--from <base>", "existing branch to base the new branch on (for stacking)").action(async (opts) => {
+    const executor = getExecutor();
+    const branch = await executor.checkout(
+      {
+        type: opts.type,
+        scope: opts.scope,
+        ...opts.description !== void 0 ? { description: opts.description } : {}
+      },
+      opts.from
+    );
+    process.stdout.write(JSON.stringify({ branch, from: opts.from ?? null }) + "\n");
   });
   return git;
 }
