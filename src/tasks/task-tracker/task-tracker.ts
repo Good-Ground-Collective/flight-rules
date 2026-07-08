@@ -5,6 +5,7 @@ export const EntityMetadataSchema = z
     tddId: z.number().optional(),
     epicId: z.number().optional(),
     notes: z.string().optional(),
+    size: z.enum(['ticket', 'epic', 'initiative']).optional(),
   })
   .passthrough()
 
