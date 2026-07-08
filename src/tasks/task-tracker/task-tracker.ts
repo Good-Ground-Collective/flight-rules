@@ -78,6 +78,18 @@ export const CreateTechnicalDesignInputSchema = z.object({
   metadata: EntityMetadataSchema.partial().optional(),
 })
 
+export const InitiativeSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  body: z.string(),
+  epics: z.array(z.object({ id: z.string(), title: z.string() })).default([]),
+})
+
+export const CreateInitiativeInputSchema = z.object({
+  title: z.string(),
+  body: z.string(),
+})
+
 export type Comment = z.infer<typeof CommentSchema>
 export type TechnicalDesign = z.infer<typeof TechnicalDesignSchema>
 export type Ticket = z.infer<typeof TicketSchema>
@@ -85,6 +97,8 @@ export type Epic = z.infer<typeof EpicSchema>
 export type CreateEpicInput = z.infer<typeof CreateEpicInputSchema>
 export type CreateTicketInput = z.infer<typeof CreateTicketInputSchema>
 export type CreateTechnicalDesignInput = z.infer<typeof CreateTechnicalDesignInputSchema>
+export type Initiative = z.infer<typeof InitiativeSchema>
+export type CreateInitiativeInput = z.infer<typeof CreateInitiativeInputSchema>
 
 export interface TaskTracker {
   createEpic(input: CreateEpicInput): Promise<Epic>

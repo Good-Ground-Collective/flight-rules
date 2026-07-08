@@ -7,6 +7,8 @@ import {
   CreateEpicInputSchema,
   CreateTicketInputSchema,
   CreateTechnicalDesignInputSchema,
+  InitiativeSchema,
+  CreateInitiativeInputSchema,
 } from './task-tracker.js'
 
 describe('CommentSchema', () => {
@@ -111,6 +113,29 @@ describe('EntityMetadataSchema', () => {
 
   it('rejects an invalid size', () => {
     expect(() => EntityMetadataSchema.parse({ size: 'banana' })).toThrow()
+  })
+})
+
+describe('InitiativeSchema', () => {
+  it('parses an initiative with linked epics', () => {
+    const result = InitiativeSchema.parse({
+      id: '5',
+      title: 'Q3 Platform',
+      body: 'The big push',
+      epics: [{ id: '19', title: 'Decomposition' }],
+    })
+    expect(result.id).toBe('5')
+    expect(result.epics).toEqual([{ id: '19', title: 'Decomposition' }])
+  })
+
+  it('defaults epics to an empty array when omitted', () => {
+    const result = InitiativeSchema.parse({ id: '5', title: 'T', body: 'B' })
+    expect(result.epics).toEqual([])
+  })
+
+  it('parses create input', () => {
+    const result = CreateInitiativeInputSchema.parse({ title: 'T', body: 'B' })
+    expect(result.title).toBe('T')
   })
 })
 
