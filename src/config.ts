@@ -2,12 +2,31 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { z } from 'zod'
 
+// Seed competency set for Sharpen-the-Saw candidacy — foundational skills worth
+// keeping warm in human hands. Slugs double as the `sharpen-the-saw:<slug>` label
+// suffix. Teams override via `competencies` in flight-rules.local.md.
+export const seedCompetencies = [
+  'define-a-schema',
+  'wire-an-endpoint',
+  'write-a-migration',
+  'pure-transform',
+  'write-a-query',
+  'mapper-adapter',
+  'harden-edge-cases',
+  'business-rule',
+  'external-api-client',
+  'reducer-state',
+  'async-coordination',
+  'auth-check',
+] as const
+
 const ConfigSchema = z.object({
   tracker: z.enum(['github', 'jira']),
   repo: z.string(),
   defaultLabels: z.array(z.string()).default([]),
   rfcStorage: z.enum(['local', 'global']).default('local'),
   rfcStoragePath: z.string().optional(),
+  competencies: z.array(z.string()).default([...seedCompetencies]),
 })
 
 export type Config = z.infer<typeof ConfigSchema>

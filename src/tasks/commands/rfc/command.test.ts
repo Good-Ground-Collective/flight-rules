@@ -12,6 +12,7 @@ const config: Config = {
   repo: 'acme/proj',
   defaultLabels: [],
   rfcStorage: 'local',
+  competencies: [],
 }
 
 const run = (args: string[]) =>

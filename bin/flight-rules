@@ -25384,12 +25384,27 @@ function date4(params) {
 config(en_default());
 
 // src/config.ts
+var seedCompetencies = [
+  "define-a-schema",
+  "wire-an-endpoint",
+  "write-a-migration",
+  "pure-transform",
+  "write-a-query",
+  "mapper-adapter",
+  "harden-edge-cases",
+  "business-rule",
+  "external-api-client",
+  "reducer-state",
+  "async-coordination",
+  "auth-check"
+];
 var ConfigSchema = external_exports.object({
   tracker: external_exports.enum(["github", "jira"]),
   repo: external_exports.string(),
   defaultLabels: external_exports.array(external_exports.string()).default([]),
   rfcStorage: external_exports.enum(["local", "global"]).default("local"),
-  rfcStoragePath: external_exports.string().optional()
+  rfcStoragePath: external_exports.string().optional(),
+  competencies: external_exports.array(external_exports.string()).default([...seedCompetencies])
 });
 function parseFrontmatter(contents) {
   const match = contents.match(/^---\n([\s\S]*?)\n---/);
@@ -29781,6 +29796,15 @@ function createRfcCommand(getConfig, getCwd = () => process.cwd()) {
   return rfc;
 }
 
+// src/tasks/commands/competencies/command.ts
+function createCompetenciesCommand(getConfig) {
+  const competencies = new Command("competencies");
+  competencies.exitOverride().action(() => {
+    process.stdout.write(JSON.stringify(getConfig().competencies) + "\n");
+  });
+  return competencies;
+}
+
 // src/git/git-executor/git-executor.ts
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -29959,6 +29983,7 @@ function buildProgram(getTracker, getConfig) {
   program2.addCommand(createGitCommand(() => new NodeGitExecutor()));
   program2.addCommand(createUsersCommand(getTracker));
   program2.addCommand(createRfcCommand(getConfig));
+  program2.addCommand(createCompetenciesCommand(getConfig));
   return program2;
 }
 async function run(argv) {
