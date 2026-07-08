@@ -11,6 +11,7 @@ const makeMockExecutor = (): GitExecutor => ({
   stage: vi.fn().mockResolvedValue(undefined),
   commit: vi.fn().mockResolvedValue(undefined),
   getCommitSha: vi.fn().mockResolvedValue('abc123'),
+  checkout: vi.fn().mockResolvedValue('feat/25-saw'),
 })
 
 const run = (executor: GitExecutor, args: string[]) =>
@@ -68,6 +69,35 @@ describe('git commit command', () => {
     const executor = makeMockExecutor()
     const errOutput = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
     await expect(createGitCommand(() => executor).exitOverride().parseAsync(['bogus'], { from: 'user' })).rejects.toThrow(CommanderError)
+    errOutput.mockRestore()
+  })
+})
+
+describe('git checkout command', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('creates a semantic branch and outputs the branch name as JSON', async () => {
+    const executor = makeMockExecutor()
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(executor, ['checkout', '--type', 'feat', '--scope', '25', '--description', 'saw'])
+    expect(vi.mocked(executor.checkout)).toHaveBeenCalledWith({ type: 'feat', scope: '25', description: 'saw' }, undefined)
+    expect(output).toHaveBeenCalledWith(expect.stringContaining('"branch":"feat/25-saw"') as string)
+    output.mockRestore()
+  })
+
+  it('passes --from as the base branch for stacking', async () => {
+    const executor = makeMockExecutor()
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(executor, ['checkout', '--type', 'feat', '--scope', '25', '--from', 'feat/22-research-agent'])
+    expect(vi.mocked(executor.checkout)).toHaveBeenCalledWith({ type: 'feat', scope: '25' }, 'feat/22-research-agent')
+    output.mockRestore()
+  })
+
+  it('rejects checkout when --scope is missing', async () => {
+    const executor = makeMockExecutor()
+    const errOutput = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+    await expect(run(executor, ['checkout', '--type', 'feat'])).rejects.toThrow(CommanderError)
+    expect(vi.mocked(executor.checkout)).not.toHaveBeenCalled()
     errOutput.mockRestore()
   })
 })
