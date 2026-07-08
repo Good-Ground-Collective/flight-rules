@@ -29167,6 +29167,16 @@ var CreateTechnicalDesignInputSchema = external_exports.object({
   epicId: external_exports.string(),
   metadata: EntityMetadataSchema.partial().optional()
 });
+var InitiativeSchema = external_exports.object({
+  id: external_exports.string(),
+  title: external_exports.string(),
+  body: external_exports.string(),
+  epics: external_exports.array(external_exports.object({ id: external_exports.string(), title: external_exports.string() })).default([])
+});
+var CreateInitiativeInputSchema = external_exports.object({
+  title: external_exports.string(),
+  body: external_exports.string()
+});
 
 // src/tasks/body-metadata/body-metadata.ts
 var sentinelComment = "<!-- flight-rules:metadata -->";
@@ -29245,6 +29255,55 @@ var GitHubTaskTracker = class {
       metadata: this.bodyMetadata.parse(data.body ?? ""),
       updatedAt: data.updated_at
     };
+  }
+  async createInitiative(input) {
+    const { data } = await this.octokit.rest.issues.createMilestone({
+      owner: this.owner,
+      repo: this.repo,
+      title: input.title,
+      description: input.body
+    });
+    return {
+      id: String(data.number),
+      title: data.title,
+      body: data.description ?? "",
+      epics: []
+    };
+  }
+  async getInitiative(id) {
+    const milestoneNumber = parseInt(id, 10);
+    const [milestoneResponse, epicsResponse] = await Promise.all([
+      this.octokit.rest.issues.getMilestone({
+        owner: this.owner,
+        repo: this.repo,
+        milestone_number: milestoneNumber
+      }),
+      this.octokit.rest.issues.listForRepo({
+        owner: this.owner,
+        repo: this.repo,
+        milestone: String(milestoneNumber),
+        labels: "epic",
+        state: "all"
+      })
+    ]);
+    const milestone = milestoneResponse.data;
+    return {
+      id,
+      title: milestone.title,
+      body: milestone.description ?? "",
+      epics: epicsResponse.data.map((issue2) => ({
+        id: String(issue2.number),
+        title: issue2.title
+      }))
+    };
+  }
+  async linkEpicToInitiative(epicId, initiativeId) {
+    await this.octokit.rest.issues.update({
+      owner: this.owner,
+      repo: this.repo,
+      issue_number: parseInt(epicId, 10),
+      milestone: parseInt(initiativeId, 10)
+    });
   }
   async getEpic(id) {
     const issueNumber = parseInt(id, 10);
@@ -29606,7 +29665,24 @@ function createEpicCommand(getTracker) {
       throw new Error(`dependency cycle detected among tickets: ${plan.cycles.join(", ")}`);
     }
   });
+  epic.command("link-initiative").exitOverride().argument("<epicId>", "epic id").requiredOption("--initiative <id>", "initiative (milestone) id").action(async (epicId, opts) => {
+    await getTracker().linkEpicToInitiative(epicId, opts.initiative);
+  });
   return epic;
+}
+
+// src/tasks/commands/initiative/command.ts
+function createInitiativeCommand(getTracker) {
+  const initiative = new Command("initiative");
+  initiative.command("create").exitOverride().requiredOption("--title <title>", "initiative title").requiredOption("--body <body>", "initiative body").action(async (opts) => {
+    const result = await getTracker().createInitiative({ title: opts.title, body: opts.body });
+    process.stdout.write(JSON.stringify(result) + "\n");
+  });
+  initiative.command("get").exitOverride().argument("<id>", "initiative id").action(async (id) => {
+    const result = await getTracker().getInitiative(id);
+    process.stdout.write(JSON.stringify(result) + "\n");
+  });
+  return initiative;
 }
 
 // src/tasks/commands/ticket/command.ts
@@ -29815,6 +29891,7 @@ function buildProgram(getTracker, getConfig) {
   program2.version(appVersion);
   program2.exitOverride();
   program2.addCommand(createEpicCommand(getTracker));
+  program2.addCommand(createInitiativeCommand(getTracker));
   program2.addCommand(createTicketCommand(getTracker));
   program2.addCommand(createTddCommand(getTracker));
   program2.addCommand(createGitCommand(() => new NodeGitExecutor()));

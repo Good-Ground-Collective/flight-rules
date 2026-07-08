@@ -41,6 +41,9 @@ const makeTracker = (): TaskTracker => ({
   updateTicketMetadata: vi.fn(),
   updateTddMetadata: vi.fn(),
   createTechnicalDesign: vi.fn(),
+  createInitiative: vi.fn(),
+  getInitiative: vi.fn(),
+  linkEpicToInitiative: vi.fn(),
   getTechnicalDesign: vi.fn(),
   addComment: vi.fn(),
   getUsers: vi.fn(),
@@ -117,5 +120,19 @@ describe('epic command', () => {
 
     expect(output).toHaveBeenCalled() // JSON still printed before throwing
     output.mockRestore()
+  })
+
+  it('calls linkEpicToInitiative for "link-initiative"', async () => {
+    const tracker = makeTracker()
+    await run(tracker, ['link-initiative', '19', '--initiative', '7'])
+    expect(tracker.linkEpicToInitiative).toHaveBeenCalledWith('19', '7')
+  })
+
+  it('rejects "link-initiative" when --initiative is missing', async () => {
+    const tracker = makeTracker()
+    const errOutput = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+    await expect(run(tracker, ['link-initiative', '19'])).rejects.toThrow(CommanderError)
+    expect(tracker.linkEpicToInitiative).not.toHaveBeenCalled()
+    errOutput.mockRestore()
   })
 })

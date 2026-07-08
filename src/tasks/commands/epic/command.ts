@@ -51,5 +51,14 @@ export function createEpicCommand(getTracker: () => TaskTracker): Command {
       }
     })
 
+  epic
+    .command('link-initiative')
+    .exitOverride()
+    .argument('<epicId>', 'epic id')
+    .requiredOption('--initiative <id>', 'initiative (milestone) id')
+    .action(async (epicId: string, opts: { initiative: string }) => {
+      await getTracker().linkEpicToInitiative(epicId, opts.initiative)
+    })
+
   return epic
 }
