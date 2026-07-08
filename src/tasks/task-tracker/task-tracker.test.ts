@@ -103,6 +103,15 @@ describe('EntityMetadataSchema', () => {
     const result = EntityMetadataSchema.parse({ tddId: 1, foo: 'bar' })
     expect((result as Record<string, unknown>)['foo']).toBe('bar')
   })
+
+  it('accepts a valid size', () => {
+    const result = EntityMetadataSchema.parse({ size: 'epic' })
+    expect(result.size).toBe('epic')
+  })
+
+  it('rejects an invalid size', () => {
+    expect(() => EntityMetadataSchema.parse({ size: 'banana' })).toThrow()
+  })
 })
 
 describe('EpicSchema metadata', () => {

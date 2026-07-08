@@ -29104,7 +29104,8 @@ var import_yaml = __toESM(require_dist2(), 1);
 var EntityMetadataSchema = external_exports.object({
   tddId: external_exports.number().optional(),
   epicId: external_exports.number().optional(),
-  notes: external_exports.string().optional()
+  notes: external_exports.string().optional(),
+  size: external_exports.enum(["ticket", "epic", "initiative"]).optional()
 }).passthrough();
 var CommentSchema = external_exports.object({
   id: external_exports.string(),

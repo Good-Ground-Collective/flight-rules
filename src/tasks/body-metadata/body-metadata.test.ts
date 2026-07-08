@@ -81,4 +81,22 @@ describe('BodyMetadataService.splice', () => {
     expect(result).toContain('tddId: 9')
     expect((result.match(/<details>/g) ?? []).length).toBe(2)
   })
+
+  it('round-trips a size field through splice and parse', () => {
+    const svc = new BodyMetadataService()
+    const result = svc.splice('Some body', { size: 'epic' })
+    expect(svc.parse(result).size).toBe('epic')
+  })
+
+  it('leaves a Guided Walkthrough details above the sentinel byte-identical', () => {
+    const svc = new BodyMetadataService()
+    const guided =
+      '## High-level technical writeup\n\nStuff.\n\n' +
+      '<details><summary>Guided Walkthrough</summary>\n\n' +
+      '```ts\nconst x = 1\n```\n\n</details>'
+    const body = `${guided}\n\n${makeBlock('tddId: 1')}`
+    const result = svc.splice(body, { size: 'ticket' })
+    expect(result.startsWith(guided)).toBe(true)
+    expect(svc.parse(result).size).toBe('ticket')
+  })
 })
