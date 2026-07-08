@@ -1,10 +1,12 @@
 import { Command, Option } from 'commander'
 import type { CreateTicketInput, EntitySize, TaskTracker } from '../../task-tracker/task-tracker.js'
 import { entitySizes } from '../../task-tracker/task-tracker.js'
+import { resolveBody } from '../resolve-body.js'
 
 type CreateTicketOptions = {
   title: string
-  body: string
+  body?: string
+  bodyFile?: string
   epicId: string
   labels?: string
   assignee?: string
@@ -18,7 +20,8 @@ export function createTicketCommand(getTracker: () => TaskTracker): Command {
     .command('create')
     .exitOverride()
     .requiredOption('--title <title>', 'ticket title')
-    .requiredOption('--body <body>', 'ticket body')
+    .option('--body <body>', 'ticket body (or use --body-file)')
+    .option('--body-file <path>', 'read the ticket body from a file')
     .requiredOption('--epic-id <id>', 'parent epic id')
     .option('--labels <labels>', 'comma-separated labels')
     .option('--assignee <user>', 'assignee login')
@@ -26,7 +29,7 @@ export function createTicketCommand(getTracker: () => TaskTracker): Command {
     .action(async (opts: CreateTicketOptions) => {
       const input: CreateTicketInput = {
         title: opts.title,
-        body: opts.body,
+        body: resolveBody({ body: opts.body, bodyFile: opts.bodyFile }),
         epicId: opts.epicId,
         labels: opts.labels !== undefined ? opts.labels.split(',') : [],
         ...(opts.assignee !== undefined ? { assignee: opts.assignee } : {}),

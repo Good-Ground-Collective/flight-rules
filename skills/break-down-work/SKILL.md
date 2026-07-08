@@ -94,7 +94,7 @@ Follow [`docs/layered-body-format.md`](../../docs/layered-body-format.md) exactl
 - **Tickets only:** a `<details><summary>Guided Walkthrough</summary>` plain-markdown section (never inside the YAML — a nested fence would break it).
 - The `size` of the **child** (one altitude below the input) is stamped via the CLI `--size` flag in the next step; do not hand-write the LLM-Context YAML block.
 
-Write each body to a temp file and pass it with `--body "$(cat <file>)"` to avoid shell-escaping the markdown.
+Write each body to a temp file and pass it with `--body-file <file>` — the deterministic way to hand large layered-body markdown (fenced YAML, nested code) to the CLI without shell-escaping it.
 
 ### 7. Create and link via the CLI
 
@@ -103,16 +103,16 @@ Use only `flight-rules` — never the tracker's native API directly.
 **initiative → epics:**
 ```bash
 # 1. materialize the initiative
-flight-rules initiative create --title "<title>" --body "$(cat initiative-body.md)"   # → { "id": <milestoneId> }
+flight-rules initiative create --title "<title>" --body-file initiative-body.md   # → { "id": <milestoneId> }
 # 2. for each epic
-flight-rules epic create --title "<title>" --body "$(cat epic-N.md)" --size epic       # → { "id": <epicId> }
+flight-rules epic create --title "<title>" --body-file epic-N.md --size epic        # → { "id": <epicId> }
 flight-rules epic link-initiative <epicId> --initiative <milestoneId>
 ```
 
 **epic → tickets:**
 ```bash
 # for each ticket (auto-links to the epic as a sub-issue)
-flight-rules ticket create --title "<title>" --body "$(cat ticket-N.md)" --epic-id <epicId> --size ticket   # → { "id": <ticketId> }
+flight-rules ticket create --title "<title>" --body-file ticket-N.md --epic-id <epicId> --size ticket   # → { "id": <ticketId> }
 # then wire dependencies discovered during synthesis
 flight-rules ticket block <ticketId> --by <blockerTicketId>
 ```
