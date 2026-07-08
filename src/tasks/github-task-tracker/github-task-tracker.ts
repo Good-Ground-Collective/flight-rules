@@ -79,6 +79,34 @@ export class GitHubTaskTracker implements TaskTracker {
     }
   }
 
+  async getInitiative(id: string): Promise<Initiative> {
+    const milestoneNumber = parseInt(id, 10)
+    const [milestoneResponse, epicsResponse] = await Promise.all([
+      this.octokit.rest.issues.getMilestone({
+        owner: this.owner,
+        repo: this.repo,
+        milestone_number: milestoneNumber,
+      }),
+      this.octokit.rest.issues.listForRepo({
+        owner: this.owner,
+        repo: this.repo,
+        milestone: String(milestoneNumber),
+        labels: 'epic',
+        state: 'all',
+      }),
+    ])
+    const milestone = milestoneResponse.data
+    return {
+      id,
+      title: milestone.title,
+      body: milestone.description ?? '',
+      epics: epicsResponse.data.map((issue) => ({
+        id: String(issue.number),
+        title: issue.title,
+      })),
+    }
+  }
+
   async linkEpicToInitiative(epicId: string, initiativeId: string): Promise<void> {
     await this.octokit.rest.issues.update({
       owner: this.owner,

@@ -13,6 +13,8 @@ vi.mock('@octokit/rest', () => ({
           createComment: vi.fn(),
           listComments: vi.fn(),
           createMilestone: vi.fn(),
+          getMilestone: vi.fn(),
+          listForRepo: vi.fn(),
         },
         orgs: {
           listMembers: vi.fn(),
@@ -504,6 +506,51 @@ describe('GitHubTracker.linkEpicToInitiative', () => {
       repo: 'proj',
       issue_number: 19,
       milestone: 7,
+    })
+  })
+})
+
+describe('GitHubTracker.getInitiative', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('returns the milestone with its epic-labelled issues', async () => {
+    const tracker = makeTracker()
+    // @ts-expect-error — accessing private field for test setup
+    const mockGetMilestone = vi.mocked(tracker.octokit.rest.issues.getMilestone)
+    // @ts-expect-error — accessing private field for test setup
+    const mockListForRepo = vi.mocked(tracker.octokit.rest.issues.listForRepo)
+    mockGetMilestone.mockResolvedValueOnce({
+      data: { number: 7, title: 'Q3 Platform', description: 'The big push' },
+    } as never)
+    mockListForRepo.mockResolvedValueOnce({
+      data: [
+        { number: 19, title: 'Decomposition' },
+        { number: 30, title: 'Rollout' },
+      ],
+    } as never)
+
+    const initiative = await tracker.getInitiative('7')
+
+    expect(mockGetMilestone).toHaveBeenCalledWith({
+      owner: 'acme',
+      repo: 'proj',
+      milestone_number: 7,
+    })
+    expect(mockListForRepo).toHaveBeenCalledWith({
+      owner: 'acme',
+      repo: 'proj',
+      milestone: '7',
+      labels: 'epic',
+      state: 'all',
+    })
+    expect(initiative).toEqual({
+      id: '7',
+      title: 'Q3 Platform',
+      body: 'The big push',
+      epics: [
+        { id: '19', title: 'Decomposition' },
+        { id: '30', title: 'Rollout' },
+      ],
     })
   })
 })
