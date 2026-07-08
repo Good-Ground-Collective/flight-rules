@@ -5,6 +5,7 @@ import { readConfig } from './config.js'
 import type { Config } from './config.js'
 import { GitHubTaskTracker } from './tasks/github-task-tracker/github-task-tracker.js'
 import { createEpicCommand } from './tasks/commands/epic/command.js'
+import { createInitiativeCommand } from './tasks/commands/initiative/command.js'
 import { createTicketCommand } from './tasks/commands/ticket/command.js'
 import { createTddCommand } from './tasks/commands/tdd/command.js'
 import { createUsersCommand } from './tasks/commands/users/command.js'
@@ -48,6 +49,7 @@ export function buildProgram(
   program.version(appVersion)
   program.exitOverride()
   program.addCommand(createEpicCommand(getTracker))
+  program.addCommand(createInitiativeCommand(getTracker))
   program.addCommand(createTicketCommand(getTracker))
   program.addCommand(createTddCommand(getTracker))
   program.addCommand(createGitCommand(() => new NodeGitExecutor()))
