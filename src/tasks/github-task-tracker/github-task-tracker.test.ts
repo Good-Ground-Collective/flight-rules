@@ -12,6 +12,7 @@ vi.mock('@octokit/rest', () => ({
           update: vi.fn(),
           createComment: vi.fn(),
           listComments: vi.fn(),
+          createMilestone: vi.fn(),
         },
         orgs: {
           listMembers: vi.fn(),
@@ -461,5 +462,28 @@ describe('GitHubTracker.getUsers', () => {
     mockListMembers.mockResolvedValueOnce({ data: [] } as never)
     const result = await tracker.getUsers()
     expect(result).toEqual([])
+  })
+})
+
+describe('GitHubTracker.createInitiative', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('creates a milestone and maps it to an Initiative', async () => {
+    const tracker = makeTracker()
+    // @ts-expect-error — accessing private field for test setup
+    const mockCreate = vi.mocked(tracker.octokit.rest.issues.createMilestone)
+    mockCreate.mockResolvedValueOnce({
+      data: { number: 7, title: 'Q3 Platform', description: 'The big push' },
+    } as never)
+
+    const initiative = await tracker.createInitiative({ title: 'Q3 Platform', body: 'The big push' })
+
+    expect(mockCreate).toHaveBeenCalledWith({
+      owner: 'acme',
+      repo: 'proj',
+      title: 'Q3 Platform',
+      description: 'The big push',
+    })
+    expect(initiative).toEqual({ id: '7', title: 'Q3 Platform', body: 'The big push', epics: [] })
   })
 })

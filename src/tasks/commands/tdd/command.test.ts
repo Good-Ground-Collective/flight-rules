@@ -25,6 +25,7 @@ const makeTracker = (): TaskTracker => ({
   updateTddMetadata: vi.fn(),
   createTechnicalDesign: vi.fn().mockResolvedValue(mockTdd),
   getTechnicalDesign: vi.fn().mockResolvedValue(mockTdd),
+  createInitiative: vi.fn(),
   addComment: vi.fn(),
   getUsers: vi.fn(),
 })

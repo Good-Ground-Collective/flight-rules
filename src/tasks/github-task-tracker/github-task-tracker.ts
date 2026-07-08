@@ -5,10 +5,12 @@ import { z } from 'zod'
 import type {
   Comment,
   CreateEpicInput,
+  CreateInitiativeInput,
   CreateTicketInput,
   CreateTechnicalDesignInput,
   EntityMetadata,
   Epic,
+  Initiative,
   TaskTracker,
   TechnicalDesign,
   Ticket,
@@ -59,6 +61,21 @@ export class GitHubTaskTracker implements TaskTracker {
       comments: [],
       metadata: this.bodyMetadata.parse(data.body ?? ''),
       updatedAt: data.updated_at,
+    }
+  }
+
+  async createInitiative(input: CreateInitiativeInput): Promise<Initiative> {
+    const { data } = await this.octokit.rest.issues.createMilestone({
+      owner: this.owner,
+      repo: this.repo,
+      title: input.title,
+      description: input.body,
+    })
+    return {
+      id: String(data.number),
+      title: data.title,
+      body: data.description ?? '',
+      epics: [],
     }
   }
 
