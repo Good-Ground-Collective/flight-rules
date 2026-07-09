@@ -29575,6 +29575,9 @@ var GitHubTaskTracker = class {
     });
     return data.map((member) => member.login);
   }
+  async ping() {
+    await this.octokit.rest.repos.get({ owner: this.owner, repo: this.repo });
+  }
   async resolveIssueId(issueNumber) {
     const { data } = await this.octokit.rest.issues.get({
       owner: this.owner,
@@ -29805,6 +29808,52 @@ function createCompetenciesCommand(getConfig) {
   return competencies;
 }
 
+// src/tasks/commands/check/command.ts
+var credentialVar = {
+  github: "GITHUB_TOKEN",
+  jira: void 0
+};
+function createCheckCommand(getConfig, getTracker) {
+  const check2 = new Command("check");
+  check2.exitOverride().action(async () => {
+    const checks = [];
+    let config2;
+    try {
+      config2 = getConfig();
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      checks.push({ name: "config", ok: false, detail });
+      process.stdout.write(JSON.stringify({ tracker: null, repo: null, checks, ok: false }) + "\n");
+      throw new Error("flight-rules check failed \u2014 config could not be resolved", { cause: err });
+    }
+    checks.push({ name: "config", ok: true, detail: `tracker=${config2.tracker} repo=${config2.repo}` });
+    const credVar = credentialVar[config2.tracker];
+    const credOk = credVar === void 0 || process.env[credVar] !== void 0;
+    checks.push({
+      name: "credentials",
+      ok: credOk,
+      detail: credOk ? "present" : `${credVar} is not set`
+    });
+    if (credOk) {
+      try {
+        await getTracker().ping();
+        checks.push({ name: "reachable", ok: true, detail: `${config2.repo} responded` });
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        checks.push({ name: "reachable", ok: false, detail });
+      }
+    } else {
+      checks.push({ name: "reachable", ok: false, detail: "skipped \u2014 credentials missing" });
+    }
+    const ok = checks.every((c) => c.ok);
+    process.stdout.write(
+      JSON.stringify({ tracker: config2.tracker, repo: config2.repo, checks, ok }) + "\n"
+    );
+    if (!ok) throw new Error("flight-rules check failed \u2014 see report above");
+  });
+  return check2;
+}
+
 // src/git/git-executor/git-executor.ts
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -29984,6 +30033,7 @@ function buildProgram(getTracker, getConfig) {
   program2.addCommand(createUsersCommand(getTracker));
   program2.addCommand(createRfcCommand(getConfig));
   program2.addCommand(createCompetenciesCommand(getConfig));
+  program2.addCommand(createCheckCommand(getConfig, getTracker));
   return program2;
 }
 async function run(argv) {

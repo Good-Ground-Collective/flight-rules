@@ -418,6 +418,10 @@ export class GitHubTaskTracker implements TaskTracker {
     return data.map((member) => member.login)
   }
 
+  async ping(): Promise<void> {
+    await this.octokit.rest.repos.get({ owner: this.owner, repo: this.repo })
+  }
+
   private async resolveIssueId(issueNumber: number): Promise<number> {
     const { data } = await this.octokit.rest.issues.get({
       owner: this.owner,
