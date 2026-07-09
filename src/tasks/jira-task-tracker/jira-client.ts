@@ -1,6 +1,14 @@
-const MAX_RETRIES = 4
-const DEFAULT_RETRY_AFTER_SECONDS = 2
-const MAX_BACKOFF_MS = 30_000
+import { z } from 'zod'
+
+const maxRetries = 4
+const defaultRetryAfterSeconds = 2
+const maxBackoffMs = 30_000
+
+const JiraErrorBodySchema = z.object({
+  errorMessages: z.array(z.string()).optional(),
+  errors: z.record(z.string(), z.string()).optional(),
+  message: z.string().optional(),
+})
 
 export interface JiraClientConfig {
   host: string
@@ -47,18 +55,21 @@ export class JiraClient {
     })
 
     if (!res.ok) await this.throwApiError(res)
-    if (res.status === 204) return undefined as T
-    return res.json() as Promise<T>
+    const text = await res.text()
+    // JSON.parse is lib-typed `any` (assignable to T without an assertion, which
+    // the repo's eslint bans); undici's res.json() is `unknown` and would not be.
+    const data: T = text.length > 0 ? JSON.parse(text) : undefined
+    return data
   }
 
   private async fetchWithRetry(url: string, init: RequestInit, attempt = 0): Promise<Response> {
     const res = await fetch(url, init)
-    if (res.status === 429 && attempt < MAX_RETRIES) {
+    if (res.status === 429 && attempt < maxRetries) {
       const retryAfterHeader = res.headers.get('Retry-After')
       const parsedRetryAfter = retryAfterHeader !== null ? Number(retryAfterHeader) : NaN
-      const retryAfterSeconds = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : DEFAULT_RETRY_AFTER_SECONDS
+      const retryAfterSeconds = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : defaultRetryAfterSeconds
       const jitter = 0.7 + Math.random() * 0.6
-      const delayMs = Math.min(retryAfterSeconds * 1000 * jitter, MAX_BACKOFF_MS)
+      const delayMs = Math.min(retryAfterSeconds * 1000 * jitter, maxBackoffMs)
       await new Promise((resolve) => setTimeout(resolve, delayMs))
       return this.fetchWithRetry(url, init, attempt + 1)
     }
@@ -67,7 +78,7 @@ export class JiraClient {
 
   private async throwApiError(res: Response): Promise<never> {
     const parsed: unknown = await res.json().catch(() => undefined)
-    const body = (parsed ?? {}) as { errorMessages?: string[]; errors?: Record<string, string>; message?: string }
+    const body = JiraErrorBodySchema.catch({}).parse(parsed)
     const messages = body.errorMessages ?? (body.message ? [body.message] : [])
     const fieldErrors = body.errors ?? {}
     throw new JiraApiError(res.status, messages, fieldErrors)
