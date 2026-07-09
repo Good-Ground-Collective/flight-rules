@@ -29998,7 +29998,7 @@ function createGitCommand(getExecutor) {
 }
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.14.0";
+var appVersion = false ? "0.0.0-dev" : "1.15.0";
 
 // src/cli.ts
 function buildTracker() {
