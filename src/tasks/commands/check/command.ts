@@ -8,7 +8,7 @@ type Check = { name: string; ok: boolean; detail: string }
 // the tracker specifics live here in the CLI rather than in any skill.
 const credentialVar: Record<Config['tracker'], string | undefined> = {
   github: 'GITHUB_TOKEN',
-  jira: undefined,
+  jira: 'JIRA_TOKEN',
 }
 
 export function createCheckCommand(

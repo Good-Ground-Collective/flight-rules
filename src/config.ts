@@ -20,14 +20,34 @@ export const seedCompetencies = [
   'auth-check',
 ] as const
 
-const ConfigSchema = z.object({
-  tracker: z.enum(['github', 'jira']),
-  repo: z.string(),
-  defaultLabels: z.array(z.string()).default([]),
-  rfcStorage: z.enum(['local', 'global']).default('local'),
-  rfcStoragePath: z.string().optional(),
-  competencies: z.array(z.string()).default([...seedCompetencies]),
-})
+const ConfigSchema = z
+  .object({
+    tracker: z.enum(['github', 'jira']),
+    // repo is GitHub-specific; Jira identifies work by project keys instead. Both
+    // are optional at the field level and required per-tracker by the refine below.
+    repo: z.string().optional(),
+    jiraHost: z.string().optional(),
+    jiraEmail: z.string().optional(),
+    jiraProject: z.string().optional(),
+    jpdProject: z.string().optional(),
+    confluenceSpaceKey: z.string().optional(),
+    defaultLabels: z.array(z.string()).default([]),
+    rfcStorage: z.enum(['local', 'global']).default('local'),
+    rfcStoragePath: z.string().optional(),
+    competencies: z.array(z.string()).default([...seedCompetencies]),
+  })
+  .superRefine((cfg, ctx) => {
+    if (cfg.tracker === 'github' && cfg.repo === undefined) {
+      ctx.addIssue({ code: 'custom', path: ['repo'], message: 'repo is required when tracker is github' })
+    }
+    if (cfg.tracker === 'jira') {
+      ;(['jiraHost', 'jiraEmail', 'jiraProject'] as const).forEach((field) => {
+        if (cfg[field] === undefined) {
+          ctx.addIssue({ code: 'custom', path: [field], message: `${field} is required when tracker is jira` })
+        }
+      })
+    }
+  })
 
 export type Config = z.infer<typeof ConfigSchema>
 

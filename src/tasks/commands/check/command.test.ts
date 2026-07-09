@@ -69,3 +69,43 @@ describe('check command', () => {
     output.mockRestore()
   })
 })
+
+const jiraConfig: Config = {
+  tracker: 'jira',
+  jiraHost: 'acme.atlassian.net',
+  jiraEmail: 'me@acme.com',
+  jiraProject: 'PROJ',
+  defaultLabels: [],
+  rfcStorage: 'local',
+  competencies: [],
+}
+
+describe('check command (jira)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.unstubAllEnvs()
+  })
+
+  it('reports all-ok when JIRA_TOKEN is present and the probe succeeds', async () => {
+    vi.stubEnv('JIRA_TOKEN', 'tok')
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(() => jiraConfig, makeTracker())
+    const parsed = lastJson(output)
+    expect(parsed.ok).toBe(true)
+    expect(parsed.tracker).toBe('jira')
+    output.mockRestore()
+  })
+
+  it('fails and skips the probe when JIRA_TOKEN is missing', async () => {
+    vi.stubEnv('JIRA_TOKEN', undefined)
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    const ping = vi.fn().mockResolvedValue(undefined)
+    await expect(run(() => jiraConfig, makeTracker(ping))).rejects.toThrow('check failed')
+    const parsed = lastJson(output)
+    expect(parsed.ok).toBe(false)
+    expect(parsed.checks.find((c) => c.name === 'credentials')?.ok).toBe(false)
+    expect(parsed.checks.find((c) => c.name === 'credentials')?.detail).toContain('JIRA_TOKEN')
+    expect(ping).not.toHaveBeenCalled()
+    output.mockRestore()
+  })
+})

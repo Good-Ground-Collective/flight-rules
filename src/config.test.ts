@@ -69,6 +69,42 @@ competencies:
     const config = readConfig(filePath)
     expect(config.competencies).toEqual(['custom-thing', 'another-thing'])
   })
+
+  it('parses a valid jira config without a repo', () => {
+    const filePath = setupFixture(`---
+tracker: jira
+jiraHost: acme.atlassian.net
+jiraEmail: me@acme.com
+jiraProject: PROJ
+jpdProject: DISC
+---
+`)
+    const config = readConfig(filePath)
+    expect(config.tracker).toBe('jira')
+    expect(config.jiraHost).toBe('acme.atlassian.net')
+    expect(config.jiraEmail).toBe('me@acme.com')
+    expect(config.jiraProject).toBe('PROJ')
+    expect(config.jpdProject).toBe('DISC')
+    expect(config.repo).toBeUndefined()
+  })
+
+  it('rejects a jira config missing jiraProject', () => {
+    const filePath = setupFixture(`---
+tracker: jira
+jiraHost: acme.atlassian.net
+jiraEmail: me@acme.com
+---
+`)
+    expect(() => readConfig(filePath)).toThrow()
+  })
+
+  it('rejects a github config missing repo', () => {
+    const filePath = setupFixture(`---
+tracker: github
+---
+`)
+    expect(() => readConfig(filePath)).toThrow()
+  })
 })
 
 const base: Config = {
