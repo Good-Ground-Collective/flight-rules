@@ -1,19 +1,21 @@
 ---
-name: draft-spec
-description: "Forces a human to author an RFC before any agent touches a codebase. Either builds one interactively via Socratic dialogue or interrogates an existing spec file. Always the first step in the software factory pipeline."
+name: draft-request-for-comments
+description: "Forces a human to author an RFC before any agent touches a codebase, then sizes the work as a ticket, epic, or initiative. Builds the RFC interactively via Socratic dialogue or interrogates an existing file. Always the first step in the software factory pipeline."
 ---
 
-# Draft Spec
+# Draft Request for Comments
 
-This skill forces a human to author an RFC before any agent starts planning or building. It either accepts an existing spec file and interrogates it, or guides the user through writing one from scratch via Socratic questions — no canned options, free-form answers only.
+This skill forces a human to author an RFC before any agent starts planning or building. It either accepts an existing file and interrogates it, or guides the user through writing one from scratch via Socratic questions — no canned options, free-form answers only. It closes by sizing the work — ticket, epic, or initiative — so the rest of the pipeline knows what to do next.
 
-The RFC this skill produces is the grounding source for all downstream agents: initiative-planner, ticket-planner, system-architect, and senior-engineer. Nothing proceeds without a merged RFC. The RFC is a human artifact that agents read, not an agent artifact that humans rubber-stamp.
+This document is an **RFC** — the upstream "what and why" that collects comments — not a spec. A true spec is a downstream artifact that lives alongside its delivery (the code, the PR). Keep this skill lean; it must never grow into an implementation spec.
+
+The RFC this skill produces is the grounding source for all downstream agents. Nothing proceeds without a merged RFC. The RFC is a human artifact that agents read, not an agent artifact that humans rubber-stamp.
 
 ## Entry Modes
 
 Ask the user:
 
-> "Do you have a spec file you'd like me to review, or would you like to write one from scratch?"
+> "Do you have an existing document you'd like me to review, or would you like to write one from scratch?"
 
 - **File provided** → use the File Review Flow
 - **Start from scratch** → use the Interactive Flow
@@ -67,7 +69,7 @@ This can be as brief as "we already use Octokit, follow that pattern" or as deta
 
 ## File Review Flow
 
-When the user provides a spec file:
+When the user provides an existing document:
 
 1. Read the file
 2. Check every section against these standards:
@@ -75,8 +77,8 @@ When the user provides a spec file:
    - **Solution**: connects directly to the problem, concrete enough to act on
    - **Gaps**: are there obvious edge cases or scope ambiguities the author hasn't surfaced?
 3. Ask follow-up questions on anything thin, vague, or disconnected
-4. Do not declare the spec ready until every required section is solid
-5. Proceed to Frontmatter Collection
+4. Do not declare the RFC ready until every required section is solid
+5. Proceed to Sizing the Work
 
 ---
 
@@ -94,12 +96,71 @@ Err toward verbatim. A human voice in each section is the point — polished age
 
 ---
 
+## Sizing the Work
+
+Once the sections are solid, size the work before collecting frontmatter. Do not ask the user to pick a size cold — **propose** one from what they wrote, then let them confirm or override.
+
+| Size | What it is | Rough scale (guidance, not a gate) |
+|---|---|---|
+| **ticket** | A single unit of work — one PR | ≤ ~1000 lines of reviewable code |
+| **epic** | A bundle of smaller tickets | several tickets, ~100–330 reviewable lines each |
+| **initiative** | A bundle of epics | several epics |
+
+Read the RFC and weigh:
+
+- How many independent deliverables are described?
+- Does the whole thing ship as one unit, or as several?
+- Does it span multiple repos or teams?
+- Rough scale against the table above.
+
+Then propose, with your reasoning. For example:
+
+> "You've described three independent deliverables that span two repos and don't ship as one unit — that reads like an **initiative**, not a ticket. Size it as an initiative, or would you draw the line differently?"
+
+The user confirms or overrides. Their call is final — the line counts are intuition, not rules. Record the agreed size; it becomes the `size` frontmatter field and drives the size-specific section below.
+
+---
+
+## Size-Specific Section
+
+Append exactly one section based on the agreed size. Add nothing for the sizes that don't apply. Keep it rough — enough to justify the size and let a reviewer sanity-check it, never a full breakdown (that is downstream work).
+
+### ticket → Acceptance Criteria
+
+Ask:
+
+> "What are the checkable conditions that tell us this ticket is done? Two to five, each independently verifiable."
+
+Save as a bulleted checklist.
+
+### epic → Ticket Sketch
+
+Ask:
+
+> "Roughly what tickets make this up? One line each — just enough to show the shape. Note ordering only where it matters."
+
+Save as a bulleted list. Do not expand these into full tickets; that is a downstream task.
+
+### initiative → Epic Sketch + Definition of Success
+
+Ask two questions:
+
+> "Roughly what epics make this up? One line each."
+
+> "How will we know this initiative succeeded — in product-outcome terms, not code?"
+
+Save the epic sketch as a bulleted list and the Definition of Success as a short paragraph or bulleted outcomes. Do not expand the epic sketch into full epics; that is a downstream task.
+
+---
+
 ## Frontmatter Collection
 
 Once all sections are solid, collect the following in order:
 
+**Size** is already agreed from the Sizing step above — do not re-ask. Carry it into the `size` frontmatter field below.
+
 **1. Title**
-Ask for a short title if the spec doesn't already have one.
+Ask for a short title if the document doesn't already have one.
 
 **2. Repos**
 > "Which repository or repositories will this work touch? Use org/repo format."
@@ -144,6 +205,7 @@ title: <title>
 date: <today's date in YYYY-MM-DD>
 author: <git user name>
 status: draft
+size: <ticket | epic | initiative>
 reviewers:
   - <reviewer1>
   - <reviewer2>
@@ -172,9 +234,14 @@ repos:
 ## Known Gaps and Edge Cases
 
 <gaps text>
+
+<Size-specific section for the agreed size — see "Size-Specific Section" above.
+ ticket → "## Acceptance Criteria" (checklist);
+ epic → "## Ticket Sketch" (bulleted one-liners);
+ initiative → "## Epic Sketch" (bulleted one-liners) and "## Definition of Success" (outcomes).>
 ```
 
-Omit optional sections entirely (including their heading) if the user skipped them.
+Omit optional sections entirely (including their heading) if the user skipped them. The size-specific section is required — include the one (or two, for an initiative) that matches the `size` field.
 
 ---
 
@@ -195,7 +262,7 @@ Open the PR with reviewer requests:
 ```bash
 gh pr create \
   --title "<id>: <title>" \
-  --body "RFC for review. See the document for full context." \
+  --body "RFC for review — proposed size: **<size>**. Reviewers: please confirm the size or challenge it as part of your review. See the document for full context." \
   --reviewer <reviewer1> \
   --reviewer <reviewer2>
 ```
@@ -213,3 +280,6 @@ A solid RFC before it leaves this skill:
 - At least one human-written sentence exists in every included section
 - All frontmatter fields are populated — no empty `title`, `reviewers`, or `repos`
 - Reviewers are real team members who must approve before agents begin work
+- A size is agreed (`ticket`, `epic`, or `initiative`) and recorded in the `size` frontmatter field
+- The size-specific section for that size is present and non-empty (Acceptance Criteria, Ticket Sketch, or Epic Sketch + Definition of Success)
+- The PR body states the proposed size and asks reviewers to confirm or challenge it

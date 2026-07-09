@@ -25384,12 +25384,27 @@ function date4(params) {
 config(en_default());
 
 // src/config.ts
+var seedCompetencies = [
+  "define-a-schema",
+  "wire-an-endpoint",
+  "write-a-migration",
+  "pure-transform",
+  "write-a-query",
+  "mapper-adapter",
+  "harden-edge-cases",
+  "business-rule",
+  "external-api-client",
+  "reducer-state",
+  "async-coordination",
+  "auth-check"
+];
 var ConfigSchema = external_exports.object({
   tracker: external_exports.enum(["github", "jira"]),
   repo: external_exports.string(),
   defaultLabels: external_exports.array(external_exports.string()).default([]),
   rfcStorage: external_exports.enum(["local", "global"]).default("local"),
-  rfcStoragePath: external_exports.string().optional()
+  rfcStoragePath: external_exports.string().optional(),
+  competencies: external_exports.array(external_exports.string()).default([...seedCompetencies])
 });
 function parseFrontmatter(contents) {
   const match = contents.match(/^---\n([\s\S]*?)\n---/);
@@ -29101,10 +29116,12 @@ var Octokit2 = Octokit.plugin(requestLog, legacyRestEndpointMethods, paginateRes
 var import_yaml = __toESM(require_dist2(), 1);
 
 // src/tasks/task-tracker/task-tracker.ts
+var entitySizes = ["ticket", "epic", "initiative"];
 var EntityMetadataSchema = external_exports.object({
   tddId: external_exports.number().optional(),
   epicId: external_exports.number().optional(),
-  notes: external_exports.string().optional()
+  notes: external_exports.string().optional(),
+  size: external_exports.enum(entitySizes).optional()
 }).passthrough();
 var CommentSchema = external_exports.object({
   id: external_exports.string(),
@@ -29165,6 +29182,16 @@ var CreateTechnicalDesignInputSchema = external_exports.object({
   body: external_exports.string(),
   epicId: external_exports.string(),
   metadata: EntityMetadataSchema.partial().optional()
+});
+var InitiativeSchema = external_exports.object({
+  id: external_exports.string(),
+  title: external_exports.string(),
+  body: external_exports.string(),
+  epics: external_exports.array(external_exports.object({ id: external_exports.string(), title: external_exports.string() })).default([])
+});
+var CreateInitiativeInputSchema = external_exports.object({
+  title: external_exports.string(),
+  body: external_exports.string()
 });
 
 // src/tasks/body-metadata/body-metadata.ts
@@ -29244,6 +29271,55 @@ var GitHubTaskTracker = class {
       metadata: this.bodyMetadata.parse(data.body ?? ""),
       updatedAt: data.updated_at
     };
+  }
+  async createInitiative(input) {
+    const { data } = await this.octokit.rest.issues.createMilestone({
+      owner: this.owner,
+      repo: this.repo,
+      title: input.title,
+      description: input.body
+    });
+    return {
+      id: String(data.number),
+      title: data.title,
+      body: data.description ?? "",
+      epics: []
+    };
+  }
+  async getInitiative(id) {
+    const milestoneNumber = parseInt(id, 10);
+    const [milestoneResponse, epicsResponse] = await Promise.all([
+      this.octokit.rest.issues.getMilestone({
+        owner: this.owner,
+        repo: this.repo,
+        milestone_number: milestoneNumber
+      }),
+      this.octokit.rest.issues.listForRepo({
+        owner: this.owner,
+        repo: this.repo,
+        milestone: String(milestoneNumber),
+        labels: "epic",
+        state: "all"
+      })
+    ]);
+    const milestone = milestoneResponse.data;
+    return {
+      id,
+      title: milestone.title,
+      body: milestone.description ?? "",
+      epics: epicsResponse.data.map((issue2) => ({
+        id: String(issue2.number),
+        title: issue2.title
+      }))
+    };
+  }
+  async linkEpicToInitiative(epicId, initiativeId) {
+    await this.octokit.rest.issues.update({
+      owner: this.owner,
+      repo: this.repo,
+      issue_number: parseInt(epicId, 10),
+      milestone: parseInt(initiativeId, 10)
+    });
   }
   async getEpic(id) {
     const issueNumber = parseInt(id, 10);
@@ -29499,6 +29575,9 @@ var GitHubTaskTracker = class {
     });
     return data.map((member) => member.login);
   }
+  async ping() {
+    await this.octokit.rest.repos.get({ owner: this.owner, repo: this.repo });
+  }
   async resolveIssueId(issueNumber) {
     const { data } = await this.octokit.rest.issues.get({
       owner: this.owner,
@@ -29536,6 +29615,14 @@ var GitHubTaskTracker = class {
     };
   }
 };
+
+// src/tasks/commands/resolve-body.ts
+import { readFileSync as readFileSync2 } from "node:fs";
+function resolveBody(opts) {
+  if (opts.bodyFile !== void 0) return readFileSync2(opts.bodyFile, "utf8");
+  if (opts.body !== void 0) return opts.body;
+  throw new Error("one of --body or --body-file is required");
+}
 
 // src/tasks/dependency-planner/dependency-planner.ts
 var DependencyPlannerService = class {
@@ -29578,11 +29665,12 @@ var DependencyPlannerService = class {
 // src/tasks/commands/epic/command.ts
 function createEpicCommand(getTracker) {
   const epic = new Command("epic");
-  epic.command("create").exitOverride().requiredOption("--title <title>", "epic title").requiredOption("--body <body>", "epic body").option("--labels <labels>", "comma-separated labels").action(async (opts) => {
+  epic.command("create").exitOverride().requiredOption("--title <title>", "epic title").option("--body <body>", "epic body (or use --body-file)").option("--body-file <path>", "read the epic body from a file").option("--labels <labels>", "comma-separated labels").addOption(new Option("--size <size>", "work size for the LLM-Context metadata").choices([...entitySizes])).action(async (opts) => {
     const result = await getTracker().createEpic({
       title: opts.title,
-      body: opts.body,
-      labels: opts.labels !== void 0 ? opts.labels.split(",") : []
+      body: resolveBody({ body: opts.body, bodyFile: opts.bodyFile }),
+      labels: opts.labels !== void 0 ? opts.labels.split(",") : [],
+      ...opts.size !== void 0 ? { metadata: { size: opts.size } } : {}
     });
     process.stdout.write(JSON.stringify(result) + "\n");
   });
@@ -29605,19 +29693,40 @@ function createEpicCommand(getTracker) {
       throw new Error(`dependency cycle detected among tickets: ${plan.cycles.join(", ")}`);
     }
   });
+  epic.command("link-initiative").exitOverride().argument("<epicId>", "epic id").requiredOption("--initiative <id>", "initiative (milestone) id").action(async (epicId, opts) => {
+    await getTracker().linkEpicToInitiative(epicId, opts.initiative);
+  });
   return epic;
+}
+
+// src/tasks/commands/initiative/command.ts
+function createInitiativeCommand(getTracker) {
+  const initiative = new Command("initiative");
+  initiative.command("create").exitOverride().requiredOption("--title <title>", "initiative title").option("--body <body>", "initiative body (or use --body-file)").option("--body-file <path>", "read the initiative body from a file").action(async (opts) => {
+    const result = await getTracker().createInitiative({
+      title: opts.title,
+      body: resolveBody({ body: opts.body, bodyFile: opts.bodyFile })
+    });
+    process.stdout.write(JSON.stringify(result) + "\n");
+  });
+  initiative.command("get").exitOverride().argument("<id>", "initiative id").action(async (id) => {
+    const result = await getTracker().getInitiative(id);
+    process.stdout.write(JSON.stringify(result) + "\n");
+  });
+  return initiative;
 }
 
 // src/tasks/commands/ticket/command.ts
 function createTicketCommand(getTracker) {
   const ticket = new Command("ticket");
-  ticket.command("create").exitOverride().requiredOption("--title <title>", "ticket title").requiredOption("--body <body>", "ticket body").requiredOption("--epic-id <id>", "parent epic id").option("--labels <labels>", "comma-separated labels").option("--assignee <user>", "assignee login").action(async (opts) => {
+  ticket.command("create").exitOverride().requiredOption("--title <title>", "ticket title").option("--body <body>", "ticket body (or use --body-file)").option("--body-file <path>", "read the ticket body from a file").requiredOption("--epic-id <id>", "parent epic id").option("--labels <labels>", "comma-separated labels").option("--assignee <user>", "assignee login").addOption(new Option("--size <size>", "work size for the LLM-Context metadata").choices([...entitySizes])).action(async (opts) => {
     const input = {
       title: opts.title,
-      body: opts.body,
+      body: resolveBody({ body: opts.body, bodyFile: opts.bodyFile }),
       epicId: opts.epicId,
       labels: opts.labels !== void 0 ? opts.labels.split(",") : [],
-      ...opts.assignee !== void 0 ? { assignee: opts.assignee } : {}
+      ...opts.assignee !== void 0 ? { assignee: opts.assignee } : {},
+      ...opts.size !== void 0 ? { metadata: { size: opts.size } } : {}
     };
     const result = await getTracker().createTicket(input);
     process.stdout.write(JSON.stringify(result) + "\n");
@@ -29690,9 +29799,84 @@ function createRfcCommand(getConfig, getCwd = () => process.cwd()) {
   return rfc;
 }
 
+// src/tasks/commands/competencies/command.ts
+function createCompetenciesCommand(getConfig) {
+  const competencies = new Command("competencies");
+  competencies.exitOverride().action(() => {
+    process.stdout.write(JSON.stringify(getConfig().competencies) + "\n");
+  });
+  return competencies;
+}
+
+// src/tasks/commands/check/command.ts
+var credentialVar = {
+  github: "GITHUB_TOKEN",
+  jira: void 0
+};
+function createCheckCommand(getConfig, getTracker) {
+  const check2 = new Command("check");
+  check2.exitOverride().action(async () => {
+    const checks = [];
+    let config2;
+    try {
+      config2 = getConfig();
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      checks.push({ name: "config", ok: false, detail });
+      process.stdout.write(JSON.stringify({ tracker: null, repo: null, checks, ok: false }) + "\n");
+      throw new Error("flight-rules check failed \u2014 config could not be resolved", { cause: err });
+    }
+    checks.push({ name: "config", ok: true, detail: `tracker=${config2.tracker} repo=${config2.repo}` });
+    const credVar = credentialVar[config2.tracker];
+    const credOk = credVar === void 0 || process.env[credVar] !== void 0;
+    checks.push({
+      name: "credentials",
+      ok: credOk,
+      detail: credOk ? "present" : `${credVar} is not set`
+    });
+    if (credOk) {
+      try {
+        await getTracker().ping();
+        checks.push({ name: "reachable", ok: true, detail: `${config2.repo} responded` });
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        checks.push({ name: "reachable", ok: false, detail });
+      }
+    } else {
+      checks.push({ name: "reachable", ok: false, detail: "skipped \u2014 credentials missing" });
+    }
+    const ok = checks.every((c) => c.ok);
+    process.stdout.write(
+      JSON.stringify({ tracker: config2.tracker, repo: config2.repo, checks, ok }) + "\n"
+    );
+    if (!ok) throw new Error("flight-rules check failed \u2014 see report above");
+  });
+  return check2;
+}
+
 // src/git/git-executor/git-executor.ts
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+
+// src/git/semantic-types.ts
+var semanticTypes = [
+  "feat",
+  "fix",
+  "perf",
+  "refactor",
+  "docs",
+  "test",
+  "build",
+  "ci",
+  "chore",
+  "style",
+  "revert"
+];
+function isSemanticType(value) {
+  return semanticTypes.some((t) => t === value);
+}
+
+// src/git/git-executor/git-executor.ts
 var NodeGitExecutor = class {
   execFile;
   constructor(execFileFn) {
@@ -29710,10 +29894,26 @@ var NodeGitExecutor = class {
     const { stdout } = await this.execFile("git", ["rev-parse", "HEAD"]);
     return stdout.trim();
   }
+  async checkout(spec, from) {
+    if (!isSemanticType(spec.type)) {
+      throw new Error(
+        `invalid branch type "${spec.type}" \u2014 must be one of: ${semanticTypes.join(", ")}`
+      );
+    }
+    if (spec.scope.trim() === "") {
+      throw new Error("branch scope is required");
+    }
+    const slug = spec.description !== void 0 && spec.description !== "" ? `-${spec.description}` : "";
+    const branch = `${spec.type}/${spec.scope}${slug}`;
+    const args = ["checkout", "-b", branch];
+    if (from !== void 0) args.push(from);
+    await this.execFile("git", args);
+    return branch;
+  }
 };
 
 // src/git/commit-message-builder/commit-message-builder.ts
-import { readFileSync as readFileSync2 } from "node:fs";
+import { readFileSync as readFileSync3 } from "node:fs";
 import { dirname, join as join2 } from "node:path";
 var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
   pluginVersion;
@@ -29740,7 +29940,7 @@ var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
   static readPluginVersion(binPath) {
     try {
       const pkgPath = join2(dirname(binPath), "..", "package.json");
-      const parsed = JSON.parse(readFileSync2(pkgPath, "utf-8"));
+      const parsed = JSON.parse(readFileSync3(pkgPath, "utf-8"));
       if (typeof parsed === "object" && parsed !== null && "version" in parsed && typeof parsed.version === "string") {
         return parsed.version;
       }
@@ -29782,11 +29982,23 @@ function createGitCommand(getExecutor) {
     const sha = await executor.getCommitSha();
     process.stdout.write(JSON.stringify({ sha, message }) + "\n");
   });
+  git.command("checkout").exitOverride().requiredOption("--type <type>", `branch type (${semanticTypes.join(" | ")})`).requiredOption("--scope <scope>", "ticket number / scope").option("--description <description>", "short readable slug").option("--from <base>", "existing branch to base the new branch on (for stacking)").action(async (opts) => {
+    const executor = getExecutor();
+    const branch = await executor.checkout(
+      {
+        type: opts.type,
+        scope: opts.scope,
+        ...opts.description !== void 0 ? { description: opts.description } : {}
+      },
+      opts.from
+    );
+    process.stdout.write(JSON.stringify({ branch, from: opts.from ?? null }) + "\n");
+  });
   return git;
 }
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.6.1";
+var appVersion = false ? "0.0.0-dev" : "1.15.1";
 
 // src/cli.ts
 function buildTracker() {
@@ -29814,11 +30026,14 @@ function buildProgram(getTracker, getConfig) {
   program2.version(appVersion);
   program2.exitOverride();
   program2.addCommand(createEpicCommand(getTracker));
+  program2.addCommand(createInitiativeCommand(getTracker));
   program2.addCommand(createTicketCommand(getTracker));
   program2.addCommand(createTddCommand(getTracker));
   program2.addCommand(createGitCommand(() => new NodeGitExecutor()));
   program2.addCommand(createUsersCommand(getTracker));
   program2.addCommand(createRfcCommand(getConfig));
+  program2.addCommand(createCompetenciesCommand(getConfig));
+  program2.addCommand(createCheckCommand(getConfig, getTracker));
   return program2;
 }
 async function run(argv) {

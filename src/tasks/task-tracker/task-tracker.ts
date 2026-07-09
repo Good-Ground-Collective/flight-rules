@@ -1,10 +1,14 @@
 import { z } from 'zod'
 
+export const entitySizes = ['ticket', 'epic', 'initiative'] as const
+export type EntitySize = (typeof entitySizes)[number]
+
 export const EntityMetadataSchema = z
   .object({
     tddId: z.number().optional(),
     epicId: z.number().optional(),
     notes: z.string().optional(),
+    size: z.enum(entitySizes).optional(),
   })
   .passthrough()
 
@@ -77,6 +81,18 @@ export const CreateTechnicalDesignInputSchema = z.object({
   metadata: EntityMetadataSchema.partial().optional(),
 })
 
+export const InitiativeSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  body: z.string(),
+  epics: z.array(z.object({ id: z.string(), title: z.string() })).default([]),
+})
+
+export const CreateInitiativeInputSchema = z.object({
+  title: z.string(),
+  body: z.string(),
+})
+
 export type Comment = z.infer<typeof CommentSchema>
 export type TechnicalDesign = z.infer<typeof TechnicalDesignSchema>
 export type Ticket = z.infer<typeof TicketSchema>
@@ -84,6 +100,8 @@ export type Epic = z.infer<typeof EpicSchema>
 export type CreateEpicInput = z.infer<typeof CreateEpicInputSchema>
 export type CreateTicketInput = z.infer<typeof CreateTicketInputSchema>
 export type CreateTechnicalDesignInput = z.infer<typeof CreateTechnicalDesignInputSchema>
+export type Initiative = z.infer<typeof InitiativeSchema>
+export type CreateInitiativeInput = z.infer<typeof CreateInitiativeInputSchema>
 
 export interface TaskTracker {
   createEpic(input: CreateEpicInput): Promise<Epic>
@@ -96,8 +114,12 @@ export interface TaskTracker {
   updateEpicMetadata(epicId: string, patch: Partial<EntityMetadata>): Promise<void>
   updateTicketMetadata(ticketId: string, patch: Partial<EntityMetadata>): Promise<void>
   updateTddMetadata(tddId: string, patch: Partial<EntityMetadata>): Promise<void>
+  createInitiative(input: CreateInitiativeInput): Promise<Initiative>
+  getInitiative(id: string): Promise<Initiative>
+  linkEpicToInitiative(epicId: string, initiativeId: string): Promise<void>
   createTechnicalDesign(input: CreateTechnicalDesignInput): Promise<TechnicalDesign>
   getTechnicalDesign(id: string): Promise<TechnicalDesign>
   addComment(entityId: string, body: string): Promise<Comment>
   getUsers(): Promise<string[]>
+  ping(): Promise<void>
 }

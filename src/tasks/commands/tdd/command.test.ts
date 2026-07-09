@@ -25,8 +25,12 @@ const makeTracker = (): TaskTracker => ({
   updateTddMetadata: vi.fn(),
   createTechnicalDesign: vi.fn().mockResolvedValue(mockTdd),
   getTechnicalDesign: vi.fn().mockResolvedValue(mockTdd),
+  createInitiative: vi.fn(),
+  getInitiative: vi.fn(),
+  linkEpicToInitiative: vi.fn(),
   addComment: vi.fn(),
   getUsers: vi.fn(),
+  ping: vi.fn(),
 })
 
 const run = (tracker: TaskTracker, args: string[]) =>

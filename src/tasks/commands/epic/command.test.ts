@@ -41,9 +41,13 @@ const makeTracker = (): TaskTracker => ({
   updateTicketMetadata: vi.fn(),
   updateTddMetadata: vi.fn(),
   createTechnicalDesign: vi.fn(),
+  createInitiative: vi.fn(),
+  getInitiative: vi.fn(),
+  linkEpicToInitiative: vi.fn(),
   getTechnicalDesign: vi.fn(),
   addComment: vi.fn(),
   getUsers: vi.fn(),
+  ping: vi.fn(),
 })
 
 const run = (tracker: TaskTracker, args: string[]) =>
@@ -67,6 +71,28 @@ describe('epic command', () => {
     await run(tracker, ['create', '--title', 'T', '--body', 'B', '--labels', 'bug,feature'])
     expect(tracker.createEpic).toHaveBeenCalledWith({ title: 'T', body: 'B', labels: ['bug', 'feature'] })
     output.mockRestore()
+  })
+
+  it('rejects "create" when neither --body nor --body-file is given', async () => {
+    const tracker = makeTracker()
+    await expect(run(tracker, ['create', '--title', 'T'])).rejects.toThrow('one of --body or --body-file')
+    expect(tracker.createEpic).not.toHaveBeenCalled()
+  })
+
+  it('passes size as metadata for "create"', async () => {
+    const tracker = makeTracker()
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(tracker, ['create', '--title', 'T', '--body', 'B', '--size', 'epic'])
+    expect(tracker.createEpic).toHaveBeenCalledWith({ title: 'T', body: 'B', labels: [], metadata: { size: 'epic' } })
+    output.mockRestore()
+  })
+
+  it('rejects an invalid --size for "create"', async () => {
+    const tracker = makeTracker()
+    const errOutput = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+    await expect(run(tracker, ['create', '--title', 'T', '--body', 'B', '--size', 'huge'])).rejects.toThrow(CommanderError)
+    expect(tracker.createEpic).not.toHaveBeenCalled()
+    errOutput.mockRestore()
   })
 
   it('calls getEpic and prints JSON for "get"', async () => {
@@ -117,5 +143,19 @@ describe('epic command', () => {
 
     expect(output).toHaveBeenCalled() // JSON still printed before throwing
     output.mockRestore()
+  })
+
+  it('calls linkEpicToInitiative for "link-initiative"', async () => {
+    const tracker = makeTracker()
+    await run(tracker, ['link-initiative', '19', '--initiative', '7'])
+    expect(tracker.linkEpicToInitiative).toHaveBeenCalledWith('19', '7')
+  })
+
+  it('rejects "link-initiative" when --initiative is missing', async () => {
+    const tracker = makeTracker()
+    const errOutput = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+    await expect(run(tracker, ['link-initiative', '19'])).rejects.toThrow(CommanderError)
+    expect(tracker.linkEpicToInitiative).not.toHaveBeenCalled()
+    errOutput.mockRestore()
   })
 })

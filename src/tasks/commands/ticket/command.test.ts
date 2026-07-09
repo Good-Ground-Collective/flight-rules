@@ -29,9 +29,13 @@ const makeTracker = (): TaskTracker => ({
   updateTicketMetadata: vi.fn(),
   updateTddMetadata: vi.fn(),
   createTechnicalDesign: vi.fn(),
+  createInitiative: vi.fn(),
+  getInitiative: vi.fn(),
+  linkEpicToInitiative: vi.fn(),
   getTechnicalDesign: vi.fn(),
   addComment: vi.fn(),
   getUsers: vi.fn(),
+  ping: vi.fn(),
 })
 
 const run = (tracker: TaskTracker, args: string[]) =>
@@ -65,6 +69,20 @@ describe('ticket command', () => {
       labels: [],
       assignee: 'alice',
     })
+    output.mockRestore()
+  })
+
+  it('rejects "create" when neither --body nor --body-file is given', async () => {
+    const tracker = makeTracker()
+    await expect(run(tracker, ['create', '--title', 'T', '--epic-id', '5'])).rejects.toThrow('one of --body or --body-file')
+    expect(tracker.createTicket).not.toHaveBeenCalled()
+  })
+
+  it('passes size as metadata for "create"', async () => {
+    const tracker = makeTracker()
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(tracker, ['create', '--title', 'T', '--body', 'B', '--epic-id', '5', '--size', 'ticket'])
+    expect(tracker.createTicket).toHaveBeenCalledWith({ title: 'T', body: 'B', epicId: '5', labels: [], metadata: { size: 'ticket' } })
     output.mockRestore()
   })
 

@@ -12,9 +12,15 @@ vi.mock('@octokit/rest', () => ({
           update: vi.fn(),
           createComment: vi.fn(),
           listComments: vi.fn(),
+          createMilestone: vi.fn(),
+          getMilestone: vi.fn(),
+          listForRepo: vi.fn(),
         },
         orgs: {
           listMembers: vi.fn(),
+        },
+        repos: {
+          get: vi.fn(),
         },
       },
     }
@@ -461,5 +467,114 @@ describe('GitHubTracker.getUsers', () => {
     mockListMembers.mockResolvedValueOnce({ data: [] } as never)
     const result = await tracker.getUsers()
     expect(result).toEqual([])
+  })
+})
+
+describe('GitHubTracker.createInitiative', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('creates a milestone and maps it to an Initiative', async () => {
+    const tracker = makeTracker()
+    // @ts-expect-error — accessing private field for test setup
+    const mockCreate = vi.mocked(tracker.octokit.rest.issues.createMilestone)
+    mockCreate.mockResolvedValueOnce({
+      data: { number: 7, title: 'Q3 Platform', description: 'The big push' },
+    } as never)
+
+    const initiative = await tracker.createInitiative({ title: 'Q3 Platform', body: 'The big push' })
+
+    expect(mockCreate).toHaveBeenCalledWith({
+      owner: 'acme',
+      repo: 'proj',
+      title: 'Q3 Platform',
+      description: 'The big push',
+    })
+    expect(initiative).toEqual({ id: '7', title: 'Q3 Platform', body: 'The big push', epics: [] })
+  })
+})
+
+describe('GitHubTracker.linkEpicToInitiative', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('sets the epic issue milestone to the initiative number', async () => {
+    const tracker = makeTracker()
+    // @ts-expect-error — accessing private field for test setup
+    const mockUpdate = vi.mocked(tracker.octokit.rest.issues.update)
+    mockUpdate.mockResolvedValueOnce({ data: {} } as never)
+
+    await tracker.linkEpicToInitiative('19', '7')
+
+    expect(mockUpdate).toHaveBeenCalledWith({
+      owner: 'acme',
+      repo: 'proj',
+      issue_number: 19,
+      milestone: 7,
+    })
+  })
+})
+
+describe('GitHubTracker.getInitiative', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('returns the milestone with its epic-labelled issues', async () => {
+    const tracker = makeTracker()
+    // @ts-expect-error — accessing private field for test setup
+    const mockGetMilestone = vi.mocked(tracker.octokit.rest.issues.getMilestone)
+    // @ts-expect-error — accessing private field for test setup
+    const mockListForRepo = vi.mocked(tracker.octokit.rest.issues.listForRepo)
+    mockGetMilestone.mockResolvedValueOnce({
+      data: { number: 7, title: 'Q3 Platform', description: 'The big push' },
+    } as never)
+    mockListForRepo.mockResolvedValueOnce({
+      data: [
+        { number: 19, title: 'Decomposition' },
+        { number: 30, title: 'Rollout' },
+      ],
+    } as never)
+
+    const initiative = await tracker.getInitiative('7')
+
+    expect(mockGetMilestone).toHaveBeenCalledWith({
+      owner: 'acme',
+      repo: 'proj',
+      milestone_number: 7,
+    })
+    expect(mockListForRepo).toHaveBeenCalledWith({
+      owner: 'acme',
+      repo: 'proj',
+      milestone: '7',
+      labels: 'epic',
+      state: 'all',
+    })
+    expect(initiative).toEqual({
+      id: '7',
+      title: 'Q3 Platform',
+      body: 'The big push',
+      epics: [
+        { id: '19', title: 'Decomposition' },
+        { id: '30', title: 'Rollout' },
+      ],
+    })
+  })
+})
+
+describe('GitHubTracker.ping', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('reads the configured repo to verify reachability', async () => {
+    const tracker = makeTracker()
+    // @ts-expect-error — accessing private field for test setup
+    const mockGet = vi.mocked(tracker.octokit.rest.repos.get)
+    mockGet.mockResolvedValueOnce({ data: { full_name: 'acme/proj' } } as never)
+    await tracker.ping()
+    expect(mockGet).toHaveBeenCalledWith({ owner: 'acme', repo: 'proj' })
+  })
+
+  it('propagates the error when the repo is unreachable', async () => {
+    const tracker = makeTracker()
+    // @ts-expect-error — accessing private field for test setup
+    const mockGet = vi.mocked(tracker.octokit.rest.repos.get)
+    mockGet.mockRejectedValueOnce(new Error('Not Found'))
+    await expect(tracker.ping()).rejects.toThrow('Not Found')
   })
 })
