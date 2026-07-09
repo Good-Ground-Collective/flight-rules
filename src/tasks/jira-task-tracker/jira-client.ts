@@ -1,12 +1,17 @@
 import { z } from 'zod'
 
+import { JiraApiError } from './jira-api-error.js'
+
 const maxRetries = 4
 const defaultRetryAfterSeconds = 2
 const maxBackoffMs = 30_000
 
 const JiraErrorBodySchema = z.object({
   errorMessages: z.array(z.string()).optional(),
-  errors: z.record(z.string(), z.string()).optional(),
+  // Per-field catch: a malformed `errors` map (Jira usually returns
+  // field -> string, but off-contract/gateway bodies vary) must not discard a
+  // valid sibling `errorMessages`, which a top-level catch would.
+  errors: z.record(z.string(), z.string()).optional().catch(undefined),
   message: z.string().optional(),
 })
 
@@ -14,20 +19,6 @@ export interface JiraClientConfig {
   host: string
   email: string
   token: string
-}
-
-export class JiraApiError extends Error {
-  readonly status: number
-  readonly messages: string[]
-  readonly fieldErrors: Record<string, string>
-
-  constructor(status: number, messages: string[], fieldErrors: Record<string, string>) {
-    super(messages[0] ?? `Jira API error (status ${status})`)
-    this.name = 'JiraApiError'
-    this.status = status
-    this.messages = messages
-    this.fieldErrors = fieldErrors
-  }
 }
 
 export class JiraClient {
@@ -46,7 +37,7 @@ export class JiraClient {
     params?: Record<string, string | number>,
   ): Promise<T> {
     const url = new URL(`${this.baseUrl}${path}`)
-    if (params) for (const [k, v] of Object.entries(params)) url.searchParams.set(k, String(v))
+    if (params) Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, String(v)))
 
     const res = await this.fetchWithRetry(url.toString(), {
       method,
@@ -84,50 +75,3 @@ export class JiraClient {
     throw new JiraApiError(res.status, messages, fieldErrors)
   }
 }
-
-export interface AdfTextNode {
-  type: 'text'
-  text: string
-}
-
-export interface AdfParagraphNode {
-  type: 'paragraph'
-  content: AdfTextNode[]
-}
-
-export interface AdfDocNode {
-  version: 1
-  type: 'doc'
-  content: AdfParagraphNode[]
-}
-
-export interface AdfExpandNode {
-  type: 'expand'
-  attrs: { title: string }
-  content: unknown[]
-}
-
-export interface AdfBuilder {
-  doc(text: string): AdfDocNode
-  expand(title: string, child: unknown): AdfExpandNode
-}
-
-export class DefaultAdfBuilder implements AdfBuilder {
-  doc(text: string): AdfDocNode {
-    return {
-      version: 1,
-      type: 'doc',
-      content: [{ type: 'paragraph', content: [{ type: 'text', text }] }],
-    }
-  }
-
-  expand(title: string, child: unknown): AdfExpandNode {
-    return {
-      type: 'expand',
-      attrs: { title },
-      content: [child],
-    }
-  }
-}
-
-export const adfBuilder: AdfBuilder = new DefaultAdfBuilder()

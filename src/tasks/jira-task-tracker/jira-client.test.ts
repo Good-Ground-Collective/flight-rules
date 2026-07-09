@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { JiraClient, JiraApiError, adfBuilder } from './jira-client.js'
+import { adfBuilder } from './adf.js'
+import { JiraApiError } from './jira-api-error.js'
+import { JiraClient } from './jira-client.js'
 
 const makeClient = () => new JiraClient({ host: 'acme.atlassian.net', email: 'me@acme.com', token: 'tok' })
 
