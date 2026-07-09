@@ -4,5 +4,5 @@
   "description": "PM-to-engineering pipeline for Good Ground Collective",
   "repository": "https://github.com/good-ground-collective/flight-rules",
   "skills": "./skills/",
-  "agents": "./agents/"
+  "agents": ["./agents/research-agent.md"]
 }
