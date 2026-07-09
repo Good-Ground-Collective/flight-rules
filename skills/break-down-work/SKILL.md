@@ -100,17 +100,40 @@ You hold the RFC context and every findings report. Now decide the children:
 
 Every child ties back to the parent's Problem Statement. If the findings **contradict the RFC** — a seam that isn't real, a missing one, or a risk that reshapes the work — do **not** silently restructure: this is a *stop-and-ask* trigger (see "Working with the human"). Surface what you found via `AskUserQuestion`, propose the adjusted breakdown, and get the human's call before continuing.
 
-### 6. Preview the breakdown and get the go-ahead
+### 6. (epic → tickets only) Sharpen-the-Saw: label at most one leaf
+
+Keep a trickle of foundational work in human hands. You have the whole epic's ticket graph in context, so this is the one place the cap can be enforced without cross-epic state.
+
+Pull the configurable competency list:
+
+```bash
+flight-rules competencies   # → JSON array of competency slugs (12-item seed default)
+```
+
+Then, over the tickets you just planned:
+
+1. **Find the leaves** — tickets with an **empty `blocking` set** (nothing else in the epic depends on them). Only leaves are eligible; an un-worked leaf is a harmless backlog item, never a stall.
+2. **Apply the rubric** — a candidate must sit in the intersection of *interview-signal* (exercises a load-bearing fundamental) ∩ *real-work* (a ticket that needed doing anyway) ∩ *TDD-fenceable* (a clean input→output contract a failing suite can pin), and must match one of the competency slugs. A ~30–90-minute task for a senior engineer.
+3. **Pick at most ONE** per epic. Hard cap of 1, regardless of epic size. If no leaf fits the rubric, label nothing — that is fine and common.
+4. For the chosen ticket:
+   - Add the label `sharpen-the-saw:<slug>` (the matched competency) via `ticket create --labels` at creation (step 9).
+   - **Write the justification into the body** — which competency, why it's cleanly TDD-fenceable, why it's ~30–90 min. Never label silently; the pipeline-runner reads this to decide keep-or-strip in seconds.
+   - **Reduce its Guided Walkthrough to hints only** — the tests will carry the spec (via the `sharpen-the-saw` companion skill) and the human does the implementation thinking. Don't hand them the solution.
+
+Stripping the label makes the ticket flow through the pipeline like any other — the label degrades gracefully.
+
+### 7. Preview the breakdown and get the go-ahead
 
 **Before authoring or creating anything**, present the proposed breakdown to the human and wait for an explicit go-ahead. Creating tracker nodes is irreversible — never skip this. Show the **shape**, not full bodies (those come next), so a wrong call is caught before the authoring effort:
 
 - The parent (milestone/epic) and each child's **title + one-line summary**.
 - The **dependency ordering** between children (what blocks what).
+- The **Sharpen-the-Saw pick**, if any — which ticket, which competency, and why (or "none").
 - Any **assumptions or open judgment calls** you made during synthesis.
 
 Ask plainly (via `AskUserQuestion`): *"Here's the proposed breakdown — good to create these, or adjust?"* Revise on feedback and re-preview. Only proceed once the human says go.
 
-### 7. Author each child as a layered-body artifact
+### 8. Author each child as a layered-body artifact
 
 Follow [`docs/layered-body-format.md`](../../docs/layered-body-format.md) exactly. Write the prose **directly** (there is no serializer):
 
@@ -120,7 +143,7 @@ Follow [`docs/layered-body-format.md`](../../docs/layered-body-format.md) exactl
 
 Write each body to a temp file and pass it with `--body-file <file>` — the deterministic way to hand large layered-body markdown (fenced YAML, nested code) to the CLI without shell-escaping it.
 
-### 8. Create and link via the CLI
+### 9. Create and link via the CLI
 
 Use only `flight-rules` — never the tracker's native API directly.
 
@@ -137,13 +160,15 @@ flight-rules epic link-initiative <epicId> --initiative <milestoneId>
 ```bash
 # for each ticket (auto-links to the epic as a sub-issue)
 flight-rules ticket create --title "<title>" --body-file ticket-N.md --epic-id <epicId> --size ticket   # → { "id": <ticketId> }
+# the one Sharpen-the-Saw leaf (if any) additionally carries the label:
+flight-rules ticket create --title "<title>" --body-file ticket-saw.md --epic-id <epicId> --size ticket --labels sharpen-the-saw:<slug>
 # then wire dependencies discovered during synthesis
 flight-rules ticket block <ticketId> --by <blockerTicketId>
 ```
 
 **ticket:** create the single ticket (`--size ticket`) under its epic.
 
-### 9. Verify and stop
+### 10. Verify and stop
 
 For an epic hop, sanity-check the dependency graph:
 ```bash
@@ -160,7 +185,7 @@ Report the created node ids and their links. **Stop — one altitude only.** Do 
 - **Never create nodes without the go-ahead.** Preview first (step 6); creating is irreversible.
 - **Check in when unsure, don't guess.** Ambiguity, RFC/code contradiction, real forks, and size mismatches are all `AskUserQuestion` triggers (see "Working with the human").
 - **Everything through `flight-rules`.** The skill stays tracker-agnostic; the CLI resolves GitHub/Jira.
-- **Sharpen-the-Saw labeling** is folded into the epic→ticket pass by a later ticket — until that lands, do not saw-label here.
+- **At most one Sharpen-the-Saw leaf per epic** (step 6), only on a non-blocking leaf, always with a written justification. Never label silently; never exceed one.
 
 ## What Good Looks Like
 
@@ -169,4 +194,5 @@ Report the created node ids and their links. **Stop — one altitude only.** Do 
 - Every child is a layered-body artifact grounded in real code (its writeup cites what the research actually found, not guesses).
 - Tickets carry a Guided Walkthrough concrete enough for a Sonnet/Haiku agent to execute; epics don't.
 - Children are natively linked (epics→milestone, tickets→epic sub-issues) with a clean, cycle-free dependency graph.
+- An epic→ticket pass labels **at most one** leaf `sharpen-the-saw:<slug>`, with a justification and reduced walkthrough — or none, if nothing fits the rubric.
 - Each emitted node could itself be handed straight back into this skill for the next hop down.
