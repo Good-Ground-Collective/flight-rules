@@ -38,14 +38,28 @@ If the input is ambiguous, resolve a real file path as an RFC file; otherwise tr
 
 Each invocation moves the work **exactly one altitude down**. Tickets come out of the epic hop already executable — depth comes from the **fan-out going deep**, not a second per-ticket pass. Starting from an initiative RFC that yields 5 epics × 5 tickets: `1` (initiative→epics) + `5` (each epic→tickets) = **6 calls**, not 31. If per-ticket quality falls short, turn up **fan-out depth/breadth** — never add a fourth altitude.
 
+## Working with the human
+
+You are a staff engineer working **with** a PM — not a batch job. Decompose confidently when the picture is clear, but **check in rather than guess** when it isn't.
+
+**Stop and ask the human — using the `AskUserQuestion` tool — whenever you hit any of these.** Do not paper over it, and do not pick for them:
+- **Ambiguous input** — the Problem / Solution / Acceptance Criteria are too vague to decompose with confidence.
+- **Research contradicts the RFC** — a sketched seam doesn't exist in the code, a major seam is missing, or the fan-out surfaces a significant risk/unknown that changes the shape.
+- **A real decomposition fork** — there are materially different, reasonable ways to slice or order the work. Present the options and your recommendation; let the human choose.
+- **Size mismatch** — the declared `size` looks wrong (e.g. an "epic" that is really an initiative). Flag it before proceeding.
+
+When you ask, be specific: state what's unclear, show what you found, and offer your recommendation. `AskUserQuestion` is for getting direction — never guess your way past a genuine unknown.
+
+**Always preview before creating anything** (step 6). Creating tracker nodes is irreversible, so never create until the human has seen the proposed breakdown and given the go-ahead.
+
 ## Preconditions
 
-- Run everything from the **repo root** (the `flight-rules` CLI resolves config relative to CWD).
-- `GITHUB_TOKEN` is set (for the GitHub tracker).
+- Run everything from the **repo root** so `flight-rules` resolves the project's configured tracker.
+- The backing tracker must be reachable from this shell. This skill is **tracker-agnostic** — it never talks to GitHub/Jira directly, only through `flight-rules`, which resolves the configured system.
 
 ## Process
 
-You MUST create a todo per step and complete them in order.
+Track your progress with your own to-do mechanism (e.g. the `TodoWrite` tool) — one to-do per step, completed in order. This is *internal* progress-tracking, separate from the tracker nodes you **emit** in step 8.
 
 ### 1. Read the work item and settle the input altitude
 
@@ -84,9 +98,19 @@ You hold the RFC context and every findings report. Now decide the children:
 - **epic → tickets:** break the work into executable tickets, each roughly one PR. Use the *deep* findings to write each ticket's **Guided Walkthrough** so a Sonnet/Haiku-tier agent can build it — name the exact files, patterns to follow, integration points, and the test approach, drawn straight from the findings (`files`, `patterns`, `integrationPoints`, `risks`). Decide the dependency ordering between tickets.
 - **ticket:** the single deep node.
 
-Every child ties back to the parent's Problem Statement. If the findings reveal the sketch was wrong (a seam that isn't real, or a missing one), trust the code — adjust the breakdown and note why.
+Every child ties back to the parent's Problem Statement. If the findings **contradict the RFC** — a seam that isn't real, a missing one, or a risk that reshapes the work — do **not** silently restructure: this is a *stop-and-ask* trigger (see "Working with the human"). Surface what you found via `AskUserQuestion`, propose the adjusted breakdown, and get the human's call before continuing.
 
-### 6. Author each child as a layered-body artifact
+### 6. Preview the breakdown and get the go-ahead
+
+**Before authoring or creating anything**, present the proposed breakdown to the human and wait for an explicit go-ahead. Creating tracker nodes is irreversible — never skip this. Show the **shape**, not full bodies (those come next), so a wrong call is caught before the authoring effort:
+
+- The parent (milestone/epic) and each child's **title + one-line summary**.
+- The **dependency ordering** between children (what blocks what).
+- Any **assumptions or open judgment calls** you made during synthesis.
+
+Ask plainly (via `AskUserQuestion`): *"Here's the proposed breakdown — good to create these, or adjust?"* Revise on feedback and re-preview. Only proceed once the human says go.
+
+### 7. Author each child as a layered-body artifact
 
 Follow [`docs/layered-body-format.md`](../../docs/layered-body-format.md) exactly. Write the prose **directly** (there is no serializer):
 
@@ -96,7 +120,7 @@ Follow [`docs/layered-body-format.md`](../../docs/layered-body-format.md) exactl
 
 Write each body to a temp file and pass it with `--body-file <file>` — the deterministic way to hand large layered-body markdown (fenced YAML, nested code) to the CLI without shell-escaping it.
 
-### 7. Create and link via the CLI
+### 8. Create and link via the CLI
 
 Use only `flight-rules` — never the tracker's native API directly.
 
@@ -119,7 +143,7 @@ flight-rules ticket block <ticketId> --by <blockerTicketId>
 
 **ticket:** create the single ticket (`--size ticket`) under its epic.
 
-### 8. Verify and stop
+### 9. Verify and stop
 
 For an epic hop, sanity-check the dependency graph:
 ```bash
@@ -133,11 +157,14 @@ Report the created node ids and their links. **Stop — one altitude only.** Do 
 
 - **One altitude-hop per invocation.** Never recurse within a single run.
 - **Never implement.** This skill produces deliverables, not code.
+- **Never create nodes without the go-ahead.** Preview first (step 6); creating is irreversible.
+- **Check in when unsure, don't guess.** Ambiguity, RFC/code contradiction, real forks, and size mismatches are all `AskUserQuestion` triggers (see "Working with the human").
 - **Everything through `flight-rules`.** The skill stays tracker-agnostic; the CLI resolves GitHub/Jira.
-- **Sharpen-the-Saw labeling** is folded into the epic→ticket pass by #24 — until that lands, do not saw-label here.
+- **Sharpen-the-Saw labeling** is folded into the epic→ticket pass by a later ticket — until that lands, do not saw-label here.
 
 ## What Good Looks Like
 
+- The human saw and approved the breakdown before any node was created; genuine uncertainty was raised via `AskUserQuestion`, not guessed through.
 - Exactly one altitude was created; the invocation stopped there.
 - Every child is a layered-body artifact grounded in real code (its writeup cites what the research actually found, not guesses).
 - Tickets carry a Guided Walkthrough concrete enough for a Sonnet/Haiku agent to execute; epics don't.
