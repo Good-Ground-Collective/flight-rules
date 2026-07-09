@@ -10,6 +10,7 @@ import { createTicketCommand } from './tasks/commands/ticket/command.js'
 import { createTddCommand } from './tasks/commands/tdd/command.js'
 import { createUsersCommand } from './tasks/commands/users/command.js'
 import { createRfcCommand } from './tasks/commands/rfc/command.js'
+import { createCompetenciesCommand } from './tasks/commands/competencies/command.js'
 import type { TaskTracker } from './tasks/task-tracker/task-tracker.js'
 import { NodeGitExecutor } from './git/git-executor/git-executor.js'
 import { createGitCommand } from './git/commands/commit/command.js'
@@ -55,6 +56,7 @@ export function buildProgram(
   program.addCommand(createGitCommand(() => new NodeGitExecutor()))
   program.addCommand(createUsersCommand(getTracker))
   program.addCommand(createRfcCommand(getConfig))
+  program.addCommand(createCompetenciesCommand(getConfig))
   return program
 }
 
