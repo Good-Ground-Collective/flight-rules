@@ -19,6 +19,9 @@ vi.mock('@octokit/rest', () => ({
         orgs: {
           listMembers: vi.fn(),
         },
+        repos: {
+          get: vi.fn(),
+        },
       },
     }
   }),
@@ -552,5 +555,26 @@ describe('GitHubTracker.getInitiative', () => {
         { id: '30', title: 'Rollout' },
       ],
     })
+  })
+})
+
+describe('GitHubTracker.ping', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('reads the configured repo to verify reachability', async () => {
+    const tracker = makeTracker()
+    // @ts-expect-error — accessing private field for test setup
+    const mockGet = vi.mocked(tracker.octokit.rest.repos.get)
+    mockGet.mockResolvedValueOnce({ data: { full_name: 'acme/proj' } } as never)
+    await tracker.ping()
+    expect(mockGet).toHaveBeenCalledWith({ owner: 'acme', repo: 'proj' })
+  })
+
+  it('propagates the error when the repo is unreachable', async () => {
+    const tracker = makeTracker()
+    // @ts-expect-error — accessing private field for test setup
+    const mockGet = vi.mocked(tracker.octokit.rest.repos.get)
+    mockGet.mockRejectedValueOnce(new Error('Not Found'))
+    await expect(tracker.ping()).rejects.toThrow('Not Found')
   })
 })

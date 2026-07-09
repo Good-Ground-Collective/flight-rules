@@ -121,4 +121,5 @@ export interface TaskTracker {
   getTechnicalDesign(id: string): Promise<TechnicalDesign>
   addComment(entityId: string, body: string): Promise<Comment>
   getUsers(): Promise<string[]>
+  ping(): Promise<void>
 }

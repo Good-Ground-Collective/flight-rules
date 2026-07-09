@@ -47,6 +47,7 @@ const makeTracker = (): TaskTracker => ({
   getTechnicalDesign: vi.fn(),
   addComment: vi.fn(),
   getUsers: vi.fn(),
+  ping: vi.fn(),
 })
 
 const run = (tracker: TaskTracker, args: string[]) =>
