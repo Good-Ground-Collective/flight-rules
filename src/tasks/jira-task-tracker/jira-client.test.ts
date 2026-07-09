@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { JiraClient, JiraApiError, adfDoc, adfExpand } from './jira-client.js'
+import { JiraClient, JiraApiError, adfBuilder } from './jira-client.js'
 
 const makeClient = () => new JiraClient({ host: 'acme.atlassian.net', email: 'me@acme.com', token: 'tok' })
 
@@ -121,18 +121,18 @@ describe('JiraClient.request', () => {
   }, 10000)
 })
 
-describe('ADF helpers', () => {
-  it('adfDoc builds a doc/paragraph node from plain text', () => {
-    expect(adfDoc('hello world')).toEqual({
+describe('AdfBuilder', () => {
+  it('doc builds a doc/paragraph node from plain text', () => {
+    expect(adfBuilder.doc('hello world')).toEqual({
       version: 1,
       type: 'doc',
       content: [{ type: 'paragraph', content: [{ type: 'text', text: 'hello world' }] }],
     })
   })
 
-  it('adfExpand wraps a child node in a collapsible expand node with a title', () => {
+  it('expand wraps a child node in a collapsible expand node with a title', () => {
     const child = { type: 'paragraph', content: [{ type: 'text', text: 'details' }] }
-    expect(adfExpand('Metadata', child)).toEqual({
+    expect(adfBuilder.expand('Metadata', child)).toEqual({
       type: 'expand',
       attrs: { title: 'Metadata' },
       content: [child],
