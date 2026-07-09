@@ -55,7 +55,7 @@ When you ask, be specific: state what's unclear, show what you found, and offer 
 ## Preconditions
 
 - Run everything from the **repo root** so `flight-rules` resolves the project's configured tracker.
-- The backing tracker must be reachable from this shell. This skill is **tracker-agnostic** — it never talks to GitHub/Jira directly, only through `flight-rules`, which resolves the configured system.
+- Confirm the tracker is wired up before starting: `flight-rules check` (verifies config, credentials, and reachability; exits non-zero with an actionable report if not). This skill is **tracker-agnostic** — it never talks to GitHub/Jira directly, only through `flight-rules`, which resolves the configured system.
 
 ## Process
 
