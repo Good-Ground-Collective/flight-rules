@@ -48,4 +48,10 @@ describe('initiative command', () => {
     expect(tracker.createInitiative).not.toHaveBeenCalled()
     errOutput.mockRestore()
   })
+
+  it('rejects "create" when neither --body nor --body-file is given', async () => {
+    const tracker = makeTracker()
+    await expect(run(tracker, ['create', '--title', 'T'])).rejects.toThrow('one of --body or --body-file')
+    expect(tracker.createInitiative).not.toHaveBeenCalled()
+  })
 })

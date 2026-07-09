@@ -1,8 +1,16 @@
-import { Command } from 'commander'
-import type { TaskTracker } from '../../task-tracker/task-tracker.js'
+import { Command, Option } from 'commander'
+import type { EntitySize, TaskTracker } from '../../task-tracker/task-tracker.js'
+import { entitySizes } from '../../task-tracker/task-tracker.js'
+import { resolveBody } from '../resolve-body.js'
 import { DependencyPlannerService } from '../../dependency-planner/dependency-planner.js'
 
-type CreateEpicOptions = { title: string; body: string; labels?: string }
+type CreateEpicOptions = {
+  title: string
+  body?: string
+  bodyFile?: string
+  labels?: string
+  size?: EntitySize
+}
 
 export function createEpicCommand(getTracker: () => TaskTracker): Command {
   const epic = new Command('epic')
@@ -11,13 +19,16 @@ export function createEpicCommand(getTracker: () => TaskTracker): Command {
     .command('create')
     .exitOverride()
     .requiredOption('--title <title>', 'epic title')
-    .requiredOption('--body <body>', 'epic body')
+    .option('--body <body>', 'epic body (or use --body-file)')
+    .option('--body-file <path>', 'read the epic body from a file')
     .option('--labels <labels>', 'comma-separated labels')
+    .addOption(new Option('--size <size>', 'work size for the LLM-Context metadata').choices([...entitySizes]))
     .action(async (opts: CreateEpicOptions) => {
       const result = await getTracker().createEpic({
         title: opts.title,
-        body: opts.body,
+        body: resolveBody({ body: opts.body, bodyFile: opts.bodyFile }),
         labels: opts.labels !== undefined ? opts.labels.split(',') : [],
+        ...(opts.size !== undefined ? { metadata: { size: opts.size } } : {}),
       })
       process.stdout.write(JSON.stringify(result) + '\n')
     })

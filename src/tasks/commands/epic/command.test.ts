@@ -72,6 +72,28 @@ describe('epic command', () => {
     output.mockRestore()
   })
 
+  it('rejects "create" when neither --body nor --body-file is given', async () => {
+    const tracker = makeTracker()
+    await expect(run(tracker, ['create', '--title', 'T'])).rejects.toThrow('one of --body or --body-file')
+    expect(tracker.createEpic).not.toHaveBeenCalled()
+  })
+
+  it('passes size as metadata for "create"', async () => {
+    const tracker = makeTracker()
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(tracker, ['create', '--title', 'T', '--body', 'B', '--size', 'epic'])
+    expect(tracker.createEpic).toHaveBeenCalledWith({ title: 'T', body: 'B', labels: [], metadata: { size: 'epic' } })
+    output.mockRestore()
+  })
+
+  it('rejects an invalid --size for "create"', async () => {
+    const tracker = makeTracker()
+    const errOutput = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+    await expect(run(tracker, ['create', '--title', 'T', '--body', 'B', '--size', 'huge'])).rejects.toThrow(CommanderError)
+    expect(tracker.createEpic).not.toHaveBeenCalled()
+    errOutput.mockRestore()
+  })
+
   it('calls getEpic and prints JSON for "get"', async () => {
     const tracker = makeTracker()
     const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)

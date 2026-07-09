@@ -71,6 +71,20 @@ describe('ticket command', () => {
     output.mockRestore()
   })
 
+  it('rejects "create" when neither --body nor --body-file is given', async () => {
+    const tracker = makeTracker()
+    await expect(run(tracker, ['create', '--title', 'T', '--epic-id', '5'])).rejects.toThrow('one of --body or --body-file')
+    expect(tracker.createTicket).not.toHaveBeenCalled()
+  })
+
+  it('passes size as metadata for "create"', async () => {
+    const tracker = makeTracker()
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(tracker, ['create', '--title', 'T', '--body', 'B', '--epic-id', '5', '--size', 'ticket'])
+    expect(tracker.createTicket).toHaveBeenCalledWith({ title: 'T', body: 'B', epicId: '5', labels: [], metadata: { size: 'ticket' } })
+    output.mockRestore()
+  })
+
   it('calls getTicket and prints JSON for "get"', async () => {
     const tracker = makeTracker()
     const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)

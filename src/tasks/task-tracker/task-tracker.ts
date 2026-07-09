@@ -1,11 +1,14 @@
 import { z } from 'zod'
 
+export const entitySizes = ['ticket', 'epic', 'initiative'] as const
+export type EntitySize = (typeof entitySizes)[number]
+
 export const EntityMetadataSchema = z
   .object({
     tddId: z.number().optional(),
     epicId: z.number().optional(),
     notes: z.string().optional(),
-    size: z.enum(['ticket', 'epic', 'initiative']).optional(),
+    size: z.enum(entitySizes).optional(),
   })
   .passthrough()
 

@@ -29101,11 +29101,12 @@ var Octokit2 = Octokit.plugin(requestLog, legacyRestEndpointMethods, paginateRes
 var import_yaml = __toESM(require_dist2(), 1);
 
 // src/tasks/task-tracker/task-tracker.ts
+var entitySizes = ["ticket", "epic", "initiative"];
 var EntityMetadataSchema = external_exports.object({
   tddId: external_exports.number().optional(),
   epicId: external_exports.number().optional(),
   notes: external_exports.string().optional(),
-  size: external_exports.enum(["ticket", "epic", "initiative"]).optional()
+  size: external_exports.enum(entitySizes).optional()
 }).passthrough();
 var CommentSchema = external_exports.object({
   id: external_exports.string(),
@@ -29597,6 +29598,14 @@ var GitHubTaskTracker = class {
   }
 };
 
+// src/tasks/commands/resolve-body.ts
+import { readFileSync as readFileSync2 } from "node:fs";
+function resolveBody(opts) {
+  if (opts.bodyFile !== void 0) return readFileSync2(opts.bodyFile, "utf8");
+  if (opts.body !== void 0) return opts.body;
+  throw new Error("one of --body or --body-file is required");
+}
+
 // src/tasks/dependency-planner/dependency-planner.ts
 var DependencyPlannerService = class {
   plan(tickets) {
@@ -29638,11 +29647,12 @@ var DependencyPlannerService = class {
 // src/tasks/commands/epic/command.ts
 function createEpicCommand(getTracker) {
   const epic = new Command("epic");
-  epic.command("create").exitOverride().requiredOption("--title <title>", "epic title").requiredOption("--body <body>", "epic body").option("--labels <labels>", "comma-separated labels").action(async (opts) => {
+  epic.command("create").exitOverride().requiredOption("--title <title>", "epic title").option("--body <body>", "epic body (or use --body-file)").option("--body-file <path>", "read the epic body from a file").option("--labels <labels>", "comma-separated labels").addOption(new Option("--size <size>", "work size for the LLM-Context metadata").choices([...entitySizes])).action(async (opts) => {
     const result = await getTracker().createEpic({
       title: opts.title,
-      body: opts.body,
-      labels: opts.labels !== void 0 ? opts.labels.split(",") : []
+      body: resolveBody({ body: opts.body, bodyFile: opts.bodyFile }),
+      labels: opts.labels !== void 0 ? opts.labels.split(",") : [],
+      ...opts.size !== void 0 ? { metadata: { size: opts.size } } : {}
     });
     process.stdout.write(JSON.stringify(result) + "\n");
   });
@@ -29674,8 +29684,11 @@ function createEpicCommand(getTracker) {
 // src/tasks/commands/initiative/command.ts
 function createInitiativeCommand(getTracker) {
   const initiative = new Command("initiative");
-  initiative.command("create").exitOverride().requiredOption("--title <title>", "initiative title").requiredOption("--body <body>", "initiative body").action(async (opts) => {
-    const result = await getTracker().createInitiative({ title: opts.title, body: opts.body });
+  initiative.command("create").exitOverride().requiredOption("--title <title>", "initiative title").option("--body <body>", "initiative body (or use --body-file)").option("--body-file <path>", "read the initiative body from a file").action(async (opts) => {
+    const result = await getTracker().createInitiative({
+      title: opts.title,
+      body: resolveBody({ body: opts.body, bodyFile: opts.bodyFile })
+    });
     process.stdout.write(JSON.stringify(result) + "\n");
   });
   initiative.command("get").exitOverride().argument("<id>", "initiative id").action(async (id) => {
@@ -29688,13 +29701,14 @@ function createInitiativeCommand(getTracker) {
 // src/tasks/commands/ticket/command.ts
 function createTicketCommand(getTracker) {
   const ticket = new Command("ticket");
-  ticket.command("create").exitOverride().requiredOption("--title <title>", "ticket title").requiredOption("--body <body>", "ticket body").requiredOption("--epic-id <id>", "parent epic id").option("--labels <labels>", "comma-separated labels").option("--assignee <user>", "assignee login").action(async (opts) => {
+  ticket.command("create").exitOverride().requiredOption("--title <title>", "ticket title").option("--body <body>", "ticket body (or use --body-file)").option("--body-file <path>", "read the ticket body from a file").requiredOption("--epic-id <id>", "parent epic id").option("--labels <labels>", "comma-separated labels").option("--assignee <user>", "assignee login").addOption(new Option("--size <size>", "work size for the LLM-Context metadata").choices([...entitySizes])).action(async (opts) => {
     const input = {
       title: opts.title,
-      body: opts.body,
+      body: resolveBody({ body: opts.body, bodyFile: opts.bodyFile }),
       epicId: opts.epicId,
       labels: opts.labels !== void 0 ? opts.labels.split(",") : [],
-      ...opts.assignee !== void 0 ? { assignee: opts.assignee } : {}
+      ...opts.assignee !== void 0 ? { assignee: opts.assignee } : {},
+      ...opts.size !== void 0 ? { metadata: { size: opts.size } } : {}
     };
     const result = await getTracker().createTicket(input);
     process.stdout.write(JSON.stringify(result) + "\n");
@@ -29826,7 +29840,7 @@ var NodeGitExecutor = class {
 };
 
 // src/git/commit-message-builder/commit-message-builder.ts
-import { readFileSync as readFileSync2 } from "node:fs";
+import { readFileSync as readFileSync3 } from "node:fs";
 import { dirname, join as join2 } from "node:path";
 var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
   pluginVersion;
@@ -29853,7 +29867,7 @@ var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
   static readPluginVersion(binPath) {
     try {
       const pkgPath = join2(dirname(binPath), "..", "package.json");
-      const parsed = JSON.parse(readFileSync2(pkgPath, "utf-8"));
+      const parsed = JSON.parse(readFileSync3(pkgPath, "utf-8"));
       if (typeof parsed === "object" && parsed !== null && "version" in parsed && typeof parsed.version === "string") {
         return parsed.version;
       }

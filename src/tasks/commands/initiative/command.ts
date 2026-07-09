@@ -1,7 +1,8 @@
 import { Command } from 'commander'
 import type { TaskTracker } from '../../task-tracker/task-tracker.js'
+import { resolveBody } from '../resolve-body.js'
 
-type CreateInitiativeOptions = { title: string; body: string }
+type CreateInitiativeOptions = { title: string; body?: string; bodyFile?: string }
 
 export function createInitiativeCommand(getTracker: () => TaskTracker): Command {
   const initiative = new Command('initiative')
@@ -10,9 +11,13 @@ export function createInitiativeCommand(getTracker: () => TaskTracker): Command 
     .command('create')
     .exitOverride()
     .requiredOption('--title <title>', 'initiative title')
-    .requiredOption('--body <body>', 'initiative body')
+    .option('--body <body>', 'initiative body (or use --body-file)')
+    .option('--body-file <path>', 'read the initiative body from a file')
     .action(async (opts: CreateInitiativeOptions) => {
-      const result = await getTracker().createInitiative({ title: opts.title, body: opts.body })
+      const result = await getTracker().createInitiative({
+        title: opts.title,
+        body: resolveBody({ body: opts.body, bodyFile: opts.bodyFile }),
+      })
       process.stdout.write(JSON.stringify(result) + '\n')
     })
 
