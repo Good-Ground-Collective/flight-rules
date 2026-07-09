@@ -29824,7 +29824,7 @@ function createCheckCommand(getConfig, getTracker) {
       const detail = err instanceof Error ? err.message : String(err);
       checks.push({ name: "config", ok: false, detail });
       process.stdout.write(JSON.stringify({ tracker: null, repo: null, checks, ok: false }) + "\n");
-      throw new Error("flight-rules check failed \u2014 config could not be resolved");
+      throw new Error("flight-rules check failed \u2014 config could not be resolved", { cause: err });
     }
     checks.push({ name: "config", ok: true, detail: `tracker=${config2.tracker} repo=${config2.repo}` });
     const credVar = credentialVar[config2.tracker];

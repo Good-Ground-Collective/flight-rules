@@ -27,7 +27,7 @@ export function createCheckCommand(
       const detail = err instanceof Error ? err.message : String(err)
       checks.push({ name: 'config', ok: false, detail })
       process.stdout.write(JSON.stringify({ tracker: null, repo: null, checks, ok: false }) + '\n')
-      throw new Error('flight-rules check failed — config could not be resolved')
+      throw new Error('flight-rules check failed — config could not be resolved', { cause: err })
     }
     checks.push({ name: 'config', ok: true, detail: `tracker=${config.tracker} repo=${config.repo}` })
 
