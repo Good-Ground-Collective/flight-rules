@@ -45,6 +45,7 @@ const issue = (
 })
 
 const createMeta = { values: [{ id: '10000', name: 'Epic' }, { id: '10001', name: 'Story' }] }
+const blocksLinkTypes = { issueLinkTypes: [{ id: '1', name: 'Blocks', inward: 'is blocked by', outward: 'blocks' }] }
 
 const postCallBody = (): { fields: Record<string, unknown> } => {
   const call = request.mock.calls.find(([method, path]) => method === 'POST' && path === '/issue')
@@ -59,6 +60,7 @@ describe('JiraTaskTracker.createEpic', () => {
   it('creates an Epic-typed issue with metadata spliced into the description', async () => {
     request.mockImplementation((method: string, path: string) => {
       if (path.startsWith('/issue/createmeta')) return Promise.resolve(createMeta)
+      if (method === 'GET' && path === '/issueLinkType') return Promise.resolve(blocksLinkTypes)
       if (method === 'POST' && path === '/issue') return Promise.resolve({ id: 'id-PROJ-1', key: 'PROJ-1' })
       if (method === 'GET' && path === '/issue/PROJ-1')
         return Promise.resolve(issue('PROJ-1', { summary: 'My Epic', description: descriptionWith('Epic body', { size: 'epic' }) }))
@@ -99,6 +101,7 @@ describe('JiraTaskTracker.createTicket', () => {
   it('creates a Story with parent, labels, and assignee set', async () => {
     request.mockImplementation((method: string, path: string) => {
       if (path.startsWith('/issue/createmeta')) return Promise.resolve(createMeta)
+      if (method === 'GET' && path === '/issueLinkType') return Promise.resolve(blocksLinkTypes)
       if (method === 'POST' && path === '/issue') return Promise.resolve({ id: 'id-PROJ-2', key: 'PROJ-2' })
       if (method === 'GET' && path === '/issue/PROJ-2')
         return Promise.resolve(issue('PROJ-2', { summary: 'A ticket', parent: 'PROJ-1', assignee: 'acct-1', labels: ['backend'] }))
@@ -136,6 +139,7 @@ describe('JiraTaskTracker.getEpic', () => {
       issuelinks: [{ type: { name: 'Blocks' }, inwardIssue: { key: 'PROJ-9' } }],
     })
     request.mockImplementation((method: string, path: string, _body?: unknown, params?: Record<string, unknown>) => {
+      if (method === 'GET' && path === '/issueLinkType') return Promise.resolve(blocksLinkTypes)
       if (method === 'GET' && path === '/issue/PROJ-1')
         return Promise.resolve(issue('PROJ-1', { summary: 'Epic', description: descriptionWith('body', { size: 'epic' }) }))
       if (method === 'GET' && path === '/search') {
@@ -162,6 +166,7 @@ describe('JiraTaskTracker.getTicket', () => {
 
   it('round-trips metadata from the description and derives blockedBy/blocking from Blocks links', async () => {
     request.mockImplementation((method: string, path: string) => {
+      if (method === 'GET' && path === '/issueLinkType') return Promise.resolve(blocksLinkTypes)
       if (method === 'GET' && path === '/issue/PROJ-2')
         return Promise.resolve(
           issue('PROJ-2', {
