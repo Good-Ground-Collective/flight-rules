@@ -24,6 +24,7 @@ export const CommentSchema = z.object({
 export const TechnicalDesignSchema = z.object({
   id: z.string(),
   epicId: z.string(),
+  url: z.string().optional(),
   body: z.string(),
   comments: z.array(CommentSchema),
   metadata: EntityMetadataSchema.default({}),
