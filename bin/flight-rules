@@ -29869,11 +29869,11 @@ var JiraTaskTracker = class {
     if (link?.id === void 0) return;
     await this.client.request("DELETE", `/issueLink/${link.id}`);
   }
-  updateEpicMetadata() {
-    return this.notImplemented("updateEpicMetadata");
+  async updateEpicMetadata(epicId, patch) {
+    await this.spliceDescriptionMetadata(epicId, patch);
   }
-  updateTicketMetadata() {
-    return this.notImplemented("updateTicketMetadata");
+  async updateTicketMetadata(ticketId, patch) {
+    await this.spliceDescriptionMetadata(ticketId, patch);
   }
   updateTddMetadata() {
     return this.notImplemented("updateTddMetadata");
@@ -29893,8 +29893,17 @@ var JiraTaskTracker = class {
   getTechnicalDesign() {
     return this.notImplemented("getTechnicalDesign");
   }
-  addComment() {
-    return this.notImplemented("addComment");
+  async addComment(entityId, body) {
+    const comment = await this.client.request("POST", `/issue/${entityId}/comment`, {
+      body: adfBuilder.doc(body)
+    });
+    return {
+      id: comment.id,
+      body,
+      author: comment.author?.displayName ?? "",
+      createdAt: comment.created,
+      updatedAt: comment.updated
+    };
   }
   async getUsers() {
     const users = await this.client.request("GET", "/user/assignable/search", void 0, {
@@ -29942,6 +29951,12 @@ var JiraTaskTracker = class {
       if (link.outwardIssue !== void 0) blocking.push(link.outwardIssue.key);
     });
     return { blockedBy, blocking };
+  }
+  async spliceDescriptionMetadata(key, patch) {
+    const issue2 = await this.client.request("GET", `/issue/${key}`, void 0, { fields: "description" });
+    const current = issue2.fields.description ?? adfBuilder.doc("");
+    const next = this.metadata.splice(current, patch);
+    await this.client.request("PUT", `/issue/${key}`, { fields: { description: next } });
   }
   async issueLinks(ticketId) {
     const issue2 = await this.client.request("GET", `/issue/${ticketId}`, void 0, {
@@ -30383,7 +30398,7 @@ function createGitCommand(getExecutor) {
 }
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.20.0";
+var appVersion = false ? "0.0.0-dev" : "1.21.0";
 
 // src/cli.ts
 function buildTracker(overrideTracker) {
