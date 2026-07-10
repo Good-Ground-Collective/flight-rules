@@ -25400,11 +25400,28 @@ var seedCompetencies = [
 ];
 var ConfigSchema = external_exports.object({
   tracker: external_exports.enum(["github", "jira"]),
-  repo: external_exports.string(),
+  repo: external_exports.string().optional().describe("GitHub owner/repo; required when tracker is github"),
+  jiraHost: external_exports.string().optional().describe("Atlassian Cloud host, e.g. acme.atlassian.net"),
+  jiraEmail: external_exports.string().optional().describe("Atlassian account email for Basic auth"),
+  jiraProject: external_exports.string().optional().describe("Jira project key holding epics and tickets"),
+  jpdProject: external_exports.string().optional().describe("Jira Product Discovery project key holding initiatives"),
+  confluenceSpaceKey: external_exports.string().optional().describe("Confluence space key holding technical design docs"),
   defaultLabels: external_exports.array(external_exports.string()).default([]),
   rfcStorage: external_exports.enum(["local", "global"]).default("local"),
   rfcStoragePath: external_exports.string().optional(),
   competencies: external_exports.array(external_exports.string()).default([...seedCompetencies])
+}).superRefine((cfg, ctx) => {
+  if (cfg.tracker === "github" && cfg.repo === void 0) {
+    ctx.addIssue({ code: "custom", path: ["repo"], message: "repo is required when tracker is github" });
+  }
+  if (cfg.tracker === "jira") {
+    ;
+    ["jiraHost", "jiraEmail", "jiraProject"].forEach((field) => {
+      if (cfg[field] === void 0) {
+        ctx.addIssue({ code: "custom", path: [field], message: `${field} is required when tracker is jira` });
+      }
+    });
+  }
 });
 function parseFrontmatter(contents) {
   const match = contents.match(/^---\n([\s\S]*?)\n---/);
@@ -25480,6 +25497,22 @@ function getRfcDir(config2, cwd) {
     return config2.rfcStoragePath;
   }
   return join(cwd, "rfcs");
+}
+
+// src/env.ts
+var EnvSchema = external_exports.object({
+  githubToken: external_exports.string().optional(),
+  jiraToken: external_exports.string().optional(),
+  jiraEmail: external_exports.string().optional(),
+  jiraHost: external_exports.string().optional()
+});
+function readEnv(source = process.env) {
+  return EnvSchema.parse({
+    githubToken: source["GITHUB_TOKEN"],
+    jiraToken: source["JIRA_TOKEN"] ?? source["JIRA_API_TOKEN"] ?? source["JIRA_API_KEY"],
+    jiraEmail: source["JIRA_EMAIL"],
+    jiraHost: source["JIRA_HOST"]
+  });
 }
 
 // node_modules/universal-user-agent/index.js
@@ -26074,8 +26107,8 @@ function isPlainObject3(value) {
 }
 var noop = () => "";
 async function fetchWrapper(requestOptions) {
-  const fetch = requestOptions.request?.fetch || globalThis.fetch;
-  if (!fetch) {
+  const fetch2 = requestOptions.request?.fetch || globalThis.fetch;
+  if (!fetch2) {
     throw new Error(
       "fetch is not set. Please pass a fetch implementation as new Octokit({ request: { fetch }}). Learn more at https://github.com/octokit/octokit.js/#fetch-missing"
     );
@@ -26091,7 +26124,7 @@ async function fetchWrapper(requestOptions) {
   );
   let fetchResponse;
   try {
-    fetchResponse = await fetch(requestOptions.url, {
+    fetchResponse = await fetch2(requestOptions.url, {
       method: requestOptions.method,
       body,
       redirect: requestOptions.request?.redirect,
@@ -29616,6 +29649,145 @@ var GitHubTaskTracker = class {
   }
 };
 
+// src/tasks/jira-task-tracker/jira-api-error.ts
+var JiraApiError = class extends Error {
+  status;
+  messages;
+  fieldErrors;
+  constructor(status, messages, fieldErrors) {
+    super(messages[0] ?? `Jira API error (status ${status})`);
+    this.name = "JiraApiError";
+    this.status = status;
+    this.messages = messages;
+    this.fieldErrors = fieldErrors;
+  }
+};
+
+// src/tasks/jira-task-tracker/jira-client.ts
+var maxRetries = 4;
+var defaultRetryAfterSeconds = 2;
+var maxBackoffMs = 3e4;
+var JiraErrorBodySchema = external_exports.object({
+  errorMessages: external_exports.array(external_exports.string()).optional(),
+  // Per-field catch: a malformed `errors` map (Jira usually returns
+  // field -> string, but off-contract/gateway bodies vary) must not discard a
+  // valid sibling `errorMessages`, which a top-level catch would.
+  errors: external_exports.record(external_exports.string(), external_exports.string()).optional().catch(void 0),
+  message: external_exports.string().optional()
+});
+var JiraClient = class {
+  baseUrl;
+  authHeader;
+  constructor(config2) {
+    this.baseUrl = `https://${config2.host}/rest/api/3`;
+    this.authHeader = `Basic ${Buffer.from(`${config2.email}:${config2.token}`).toString("base64")}`;
+  }
+  async request(method, path2, body, params) {
+    const url2 = new URL(`${this.baseUrl}${path2}`);
+    if (params) Object.entries(params).forEach(([k, v]) => url2.searchParams.set(k, String(v)));
+    const res = await this.fetchWithRetry(url2.toString(), {
+      method,
+      headers: { Authorization: this.authHeader, "Content-Type": "application/json", Accept: "application/json" },
+      ...body !== void 0 ? { body: JSON.stringify(body) } : {}
+    });
+    if (!res.ok) await this.throwApiError(res);
+    const text = await res.text();
+    const data = text.length > 0 ? JSON.parse(text) : void 0;
+    return data;
+  }
+  async fetchWithRetry(url2, init, attempt = 0) {
+    const res = await fetch(url2, init);
+    if (res.status === 429 && attempt < maxRetries) {
+      const retryAfterHeader = res.headers.get("Retry-After");
+      const parsedRetryAfter = retryAfterHeader !== null ? Number(retryAfterHeader) : NaN;
+      const retryAfterSeconds = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : defaultRetryAfterSeconds;
+      const jitter = 0.7 + Math.random() * 0.6;
+      const delayMs = Math.min(retryAfterSeconds * 1e3 * jitter, maxBackoffMs);
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      return this.fetchWithRetry(url2, init, attempt + 1);
+    }
+    return res;
+  }
+  async throwApiError(res) {
+    const parsed = await res.json().catch(() => void 0);
+    const body = JiraErrorBodySchema.catch({}).parse(parsed);
+    const messages = body.errorMessages ?? (body.message ? [body.message] : []);
+    const fieldErrors = body.errors ?? {};
+    throw new JiraApiError(res.status, messages, fieldErrors);
+  }
+};
+
+// src/tasks/jira-task-tracker/jira-task-tracker.ts
+var JiraTaskTracker = class {
+  client;
+  project;
+  constructor(config2) {
+    this.client = new JiraClient({ host: config2.host, email: config2.email, token: config2.token });
+    this.project = config2.project;
+  }
+  createEpic() {
+    return this.notImplemented("createEpic");
+  }
+  getEpic() {
+    return this.notImplemented("getEpic");
+  }
+  createTicket() {
+    return this.notImplemented("createTicket");
+  }
+  getTicket() {
+    return this.notImplemented("getTicket");
+  }
+  linkTicketToEpic() {
+    return this.notImplemented("linkTicketToEpic");
+  }
+  blockTicket() {
+    return this.notImplemented("blockTicket");
+  }
+  unblockTicket() {
+    return this.notImplemented("unblockTicket");
+  }
+  updateEpicMetadata() {
+    return this.notImplemented("updateEpicMetadata");
+  }
+  updateTicketMetadata() {
+    return this.notImplemented("updateTicketMetadata");
+  }
+  updateTddMetadata() {
+    return this.notImplemented("updateTddMetadata");
+  }
+  createInitiative() {
+    return this.notImplemented("createInitiative");
+  }
+  getInitiative() {
+    return this.notImplemented("getInitiative");
+  }
+  linkEpicToInitiative() {
+    return this.notImplemented("linkEpicToInitiative");
+  }
+  createTechnicalDesign() {
+    return this.notImplemented("createTechnicalDesign");
+  }
+  getTechnicalDesign() {
+    return this.notImplemented("getTechnicalDesign");
+  }
+  addComment() {
+    return this.notImplemented("addComment");
+  }
+  async getUsers() {
+    const users = await this.client.request("GET", "/user/assignable/search", void 0, {
+      project: this.project,
+      maxResults: 100
+    });
+    return users.map((user) => user.displayName);
+  }
+  async ping() {
+    await this.client.request("GET", "/myself");
+  }
+  notImplemented(method) {
+    return Promise.reject(new Error(`JiraTaskTracker.${method} not implemented`));
+  }
+};
+
 // src/tasks/commands/resolve-body.ts
 import { readFileSync as readFileSync2 } from "node:fs";
 function resolveBody(opts) {
@@ -29809,10 +29981,10 @@ function createCompetenciesCommand(getConfig) {
 }
 
 // src/tasks/commands/check/command.ts
-var credentialVar = {
-  github: "GITHUB_TOKEN",
-  jira: void 0
-};
+function credentialFor(tracker, env) {
+  if (tracker === "github") return { name: "GITHUB_TOKEN", value: env.githubToken };
+  return { name: "JIRA_TOKEN (or JIRA_API_TOKEN / JIRA_API_KEY)", value: env.jiraToken };
+}
 function createCheckCommand(getConfig, getTracker) {
   const check2 = new Command("check");
   check2.exitOverride().action(async () => {
@@ -29827,12 +29999,12 @@ function createCheckCommand(getConfig, getTracker) {
       throw new Error("flight-rules check failed \u2014 config could not be resolved", { cause: err });
     }
     checks.push({ name: "config", ok: true, detail: `tracker=${config2.tracker} repo=${config2.repo}` });
-    const credVar = credentialVar[config2.tracker];
-    const credOk = credVar === void 0 || process.env[credVar] !== void 0;
+    const credential = credentialFor(config2.tracker, readEnv());
+    const credOk = credential.value !== void 0;
     checks.push({
       name: "credentials",
       ok: credOk,
-      detail: credOk ? "present" : `${credVar} is not set`
+      detail: credOk ? "present" : `${credential.name} is not set`
     });
     if (credOk) {
       try {
@@ -29998,42 +30170,66 @@ function createGitCommand(getExecutor) {
 }
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.17.0";
+var appVersion = false ? "0.0.0-dev" : "1.18.0";
 
 // src/cli.ts
-function buildTracker() {
-  const configPath = process.env["FLIGHT_RULES_CONFIG"] ?? join3(process.cwd(), ".claude", "flight-rules.local.md");
-  const config2 = readConfig(configPath);
+function buildTracker(overrideTracker) {
+  const config2 = getConfigFromEnv(overrideTracker);
+  const env = readEnv();
   if (config2.tracker === "github") {
-    const token = process.env["GITHUB_TOKEN"];
-    if (token === void 0) throw new Error("GITHUB_TOKEN environment variable is required");
-    const parts = config2.repo.split("/");
-    const owner = parts[0];
-    const repo = parts[1];
+    if (env.githubToken === void 0) throw new Error("GITHUB_TOKEN environment variable is required");
+    if (config2.repo === void 0) throw new Error("repo is required when tracker is github");
+    const [owner, repo] = config2.repo.split("/");
     if (owner === void 0 || repo === void 0) {
       throw new Error(`Invalid repo format "${config2.repo}" \u2014 expected "owner/repo"`);
     }
-    return new GitHubTaskTracker({ token, owner, repo });
+    return new GitHubTaskTracker({ token: env.githubToken, owner, repo });
   }
-  throw new Error(`Unsupported tracker: ${config2.tracker}`);
+  if (env.jiraToken === void 0) {
+    throw new Error("JIRA_TOKEN (or JIRA_API_TOKEN / JIRA_API_KEY) environment variable is required");
+  }
+  if (env.jiraEmail === void 0) throw new Error("JIRA_EMAIL environment variable is required");
+  const host = env.jiraHost ?? config2.jiraHost;
+  if (host === void 0) throw new Error("JIRA_HOST environment variable or jiraHost config is required");
+  if (config2.jiraProject === void 0) throw new Error("jiraProject is required when tracker is jira");
+  return new JiraTaskTracker({
+    token: env.jiraToken,
+    host,
+    email: env.jiraEmail,
+    project: config2.jiraProject,
+    ...config2.jpdProject !== void 0 ? { jpdProject: config2.jpdProject } : {}
+  });
 }
-function getConfigFromEnv() {
+function getConfigFromEnv(overrideTracker) {
   const configPath = process.env["FLIGHT_RULES_CONFIG"] ?? join3(process.cwd(), ".claude", "flight-rules.local.md");
-  return readConfig(configPath);
+  const config2 = readConfig(configPath);
+  if (overrideTracker === void 0) return config2;
+  if (overrideTracker !== "github" && overrideTracker !== "jira") {
+    throw new Error(`Invalid --tracker "${overrideTracker}" \u2014 expected "github" or "jira"`);
+  }
+  return { ...config2, tracker: overrideTracker };
 }
 function buildProgram(getTracker, getConfig) {
   const program2 = new Command("flight-rules");
   program2.version(appVersion);
   program2.exitOverride();
-  program2.addCommand(createEpicCommand(getTracker));
-  program2.addCommand(createInitiativeCommand(getTracker));
-  program2.addCommand(createTicketCommand(getTracker));
-  program2.addCommand(createTddCommand(getTracker));
+  program2.option("--tracker <tracker>", "override the configured tracker for this run");
+  let overrideTracker;
+  program2.hook("preAction", () => {
+    const value = program2.opts()["tracker"];
+    overrideTracker = typeof value === "string" ? value : void 0;
+  });
+  const tracker = () => getTracker(overrideTracker);
+  const config2 = () => getConfig(overrideTracker);
+  program2.addCommand(createEpicCommand(tracker));
+  program2.addCommand(createInitiativeCommand(tracker));
+  program2.addCommand(createTicketCommand(tracker));
+  program2.addCommand(createTddCommand(tracker));
   program2.addCommand(createGitCommand(() => new NodeGitExecutor()));
-  program2.addCommand(createUsersCommand(getTracker));
-  program2.addCommand(createRfcCommand(getConfig));
-  program2.addCommand(createCompetenciesCommand(getConfig));
-  program2.addCommand(createCheckCommand(getConfig, getTracker));
+  program2.addCommand(createUsersCommand(tracker));
+  program2.addCommand(createRfcCommand(config2));
+  program2.addCommand(createCompetenciesCommand(config2));
+  program2.addCommand(createCheckCommand(config2, tracker));
   return program2;
 }
 async function run(argv) {
