@@ -50,6 +50,7 @@ function buildTracker(overrideTracker?: string): TaskTracker {
     email: env.jiraEmail,
     project: config.jiraProject,
     ...(config.jpdProject !== undefined ? { jpdProject: config.jpdProject } : {}),
+    ...(config.confluenceSpaceKey !== undefined ? { confluenceSpaceKey: config.confluenceSpaceKey } : {}),
   })
 }
 

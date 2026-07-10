@@ -1,4 +1,5 @@
 import { JiraClient } from './jira-client.js'
+import { ConfluenceClient } from './confluence-client.js'
 import { adfBuilder, type AdfDocNode, type AdfNode } from './adf.js'
 import { JiraAdfMetadataService, type AdfMetadataService } from './adf-metadata.js'
 import type {
@@ -14,9 +15,17 @@ import type {
   JiraTrackerConfig,
 } from './jira-interfaces.js'
 import type {
+  ConfluencePage,
+  ConfluencePropertiesResponse,
+  ConfluenceProperty,
+  ConfluenceSpacesResponse,
+} from './confluence-interfaces.js'
+import { EntityMetadataSchema } from '../task-tracker/task-tracker.js'
+import type {
   Comment,
   CreateEpicInput,
   CreateInitiativeInput,
+  CreateTechnicalDesignInput,
   CreateTicketInput,
   EntityMetadata,
   Epic,
@@ -31,6 +40,7 @@ const issueFields = 'summary,status,labels,assignee,description,issuelinks,updat
 const ideaIssueType = 'Idea'
 const jpdProjectType = 'product_discovery'
 const deliveryLinkOutward = 'implements'
+const tddMetadataPropertyKey = 'flight-rules-metadata'
 
 /**
  * The Jira / Jira Product Discovery backend. Epics map to the Epic issue type
@@ -39,23 +49,29 @@ const deliveryLinkOutward = 'implements'
  * Blocking dependencies ride "Blocks" issue links, resolved by name from the
  * instance, and entity metadata updates splice back through the description.
  * Initiatives map to JPD Ideas in the configured discovery project, linked to
- * delivery epics via the "Polaris issue link" type. TDDs arrive in a later
- * ticket and reject until then.
+ * delivery epics via the "Polaris issue link" type. Technical designs are
+ * Confluence pages in the configured space, their metadata held in a native
+ * content property and their URL stamped onto the parent epic.
  */
 export class JiraTaskTracker implements TaskTracker {
   private readonly client: JiraClient
+  private readonly confluence: ConfluenceClient
   private readonly project: string
   private readonly jpdProject: string | undefined
+  private readonly confluenceSpaceKey: string | undefined
   private readonly metadata: AdfMetadataService = new JiraAdfMetadataService()
   private issueTypeNames: string[] | undefined
   private blocksLinkType: string | undefined
   private deliveryLinkType: string | undefined
+  private confluenceSpaceId: string | undefined
   private jpdProjectVerified = false
 
   constructor(config: JiraTrackerConfig) {
     this.client = new JiraClient({ host: config.host, email: config.email, token: config.token })
+    this.confluence = new ConfluenceClient({ host: config.host, email: config.email, token: config.token })
     this.project = config.project
     this.jpdProject = config.jpdProject
+    this.confluenceSpaceKey = config.confluenceSpaceKey
   }
 
   async createEpic(input: CreateEpicInput): Promise<Epic> {
@@ -163,8 +179,26 @@ export class JiraTaskTracker implements TaskTracker {
     await this.spliceDescriptionMetadata(ticketId, patch)
   }
 
-  updateTddMetadata(): Promise<void> {
-    return this.notImplemented('updateTddMetadata')
+  async updateTddMetadata(tddId: string, patch: Partial<EntityMetadata>): Promise<void> {
+    const existing = await this.tddMetadataProperty(tddId)
+    const merged: Record<string, unknown> = { ...(existing?.value ?? {}) }
+    Object.entries(patch).forEach(([key, value]) => {
+      if (value !== undefined) merged[key] = value
+    })
+
+    if (existing === undefined) {
+      await this.confluence.request('POST', `/pages/${tddId}/properties`, {
+        key: tddMetadataPropertyKey,
+        value: merged,
+      })
+      return
+    }
+
+    await this.confluence.request('PUT', `/pages/${tddId}/properties/${existing.id}`, {
+      key: tddMetadataPropertyKey,
+      value: merged,
+      version: { number: (existing.version?.number ?? 1) + 1 },
+    })
   }
 
   async createInitiative(input: CreateInitiativeInput): Promise<Initiative> {
@@ -224,12 +258,35 @@ export class JiraTaskTracker implements TaskTracker {
     })
   }
 
-  createTechnicalDesign(): Promise<TechnicalDesign> {
-    return this.notImplemented('createTechnicalDesign')
+  async createTechnicalDesign(input: CreateTechnicalDesignInput): Promise<TechnicalDesign> {
+    const spaceId = await this.resolveConfluenceSpaceId()
+    // Jira epic ids are keys (e.g. "PROJ-1"), not numbers, so the epic key is
+    // stored as a string alongside the entity metadata rather than in the
+    // numeric `epicId` metadata field.
+    const propertyValue: Record<string, unknown> = { ...input.metadata, epicId: input.epicId }
+
+    const page = await this.confluence.request<ConfluencePage>('POST', '/pages', {
+      spaceId,
+      status: 'current',
+      title: input.title,
+      body: { representation: 'storage', value: input.body },
+    })
+
+    await this.confluence.request('POST', `/pages/${page.id}/properties`, {
+      key: tddMetadataPropertyKey,
+      value: propertyValue,
+    })
+    await this.updateEpicMetadata(input.epicId, { tddId: Number(page.id) })
+
+    return this.mapTechnicalDesign(page, input.body, propertyValue)
   }
 
-  getTechnicalDesign(): Promise<TechnicalDesign> {
-    return this.notImplemented('getTechnicalDesign')
+  async getTechnicalDesign(id: string): Promise<TechnicalDesign> {
+    const [page, property] = await Promise.all([
+      this.confluence.request<ConfluencePage>('GET', `/pages/${id}`, undefined, { 'body-format': 'storage' }),
+      this.tddMetadataProperty(id),
+    ])
+    return this.mapTechnicalDesign(page, page.body?.storage?.value ?? '', property?.value ?? {})
   }
 
   async addComment(entityId: string, body: string): Promise<Comment> {
@@ -417,7 +474,46 @@ export class JiraTaskTracker implements TaskTracker {
     return this.issueTypeNames
   }
 
-  private notImplemented(method: string): Promise<never> {
-    return Promise.reject(new Error(`JiraTaskTracker.${method} not implemented`))
+  private async resolveConfluenceSpaceId(): Promise<string> {
+    if (this.confluenceSpaceKey === undefined) {
+      throw new Error('No Confluence space is configured; set confluenceSpaceKey to create or fetch technical designs')
+    }
+    if (this.confluenceSpaceId === undefined) {
+      const response = await this.confluence.request<ConfluenceSpacesResponse>('GET', '/spaces', undefined, {
+        keys: this.confluenceSpaceKey,
+      })
+      const space = response.results[0]
+      if (space === undefined) throw new Error(`Confluence space "${this.confluenceSpaceKey}" was not found`)
+      this.confluenceSpaceId = space.id
+    }
+    return this.confluenceSpaceId
+  }
+
+  private async tddMetadataProperty(pageId: string): Promise<ConfluenceProperty | undefined> {
+    const response = await this.confluence.request<ConfluencePropertiesResponse>(
+      'GET',
+      `/pages/${pageId}/properties`,
+    )
+    return response.results.find((property) => property.key === tddMetadataPropertyKey)
+  }
+
+  private mapTechnicalDesign(
+    page: ConfluencePage,
+    body: string,
+    propertyValue: Record<string, unknown>,
+  ): TechnicalDesign {
+    const { epicId: rawEpicId, ...rest } = propertyValue
+    const metadata = EntityMetadataSchema.parse(rest)
+    const epicId = typeof rawEpicId === 'string' ? rawEpicId : rawEpicId !== undefined ? String(rawEpicId) : ''
+    const webui = page._links?.webui
+    return {
+      id: String(page.id),
+      epicId,
+      ...(webui !== undefined ? { url: `${this.confluence.siteBaseUrl}${webui}` } : {}),
+      body,
+      comments: [],
+      metadata,
+      updatedAt: page.version?.createdAt ?? '',
+    }
   }
 }

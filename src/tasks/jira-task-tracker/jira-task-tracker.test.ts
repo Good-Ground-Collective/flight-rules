@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import type { TaskTracker } from '../task-tracker/task-tracker.js'
 
 const request = vi.hoisted(() => vi.fn())
 vi.mock('./jira-client.js', () => ({
@@ -52,15 +51,5 @@ describe('JiraTaskTracker.getUsers', () => {
       project: 'PROJ',
       maxResults: 100,
     })
-  })
-})
-
-describe('JiraTaskTracker unimplemented methods', () => {
-  it('reject with a not-implemented error naming the method', async () => {
-    const tracker: TaskTracker = makeTracker()
-    await expect(tracker.getTechnicalDesign('1')).rejects.toThrow('JiraTaskTracker.getTechnicalDesign not implemented')
-    await expect(tracker.createTechnicalDesign({ title: 't', epicId: '1', body: 'b' })).rejects.toThrow(
-      'JiraTaskTracker.createTechnicalDesign not implemented',
-    )
   })
 })

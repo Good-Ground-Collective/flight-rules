@@ -7,6 +7,7 @@ export interface JiraTrackerConfig {
   email: string
   project: string
   jpdProject?: string
+  confluenceSpaceKey?: string
 }
 
 export interface JiraAssignableUser {
