@@ -61,7 +61,7 @@ describe('JiraTaskTracker.blockTicket', () => {
     request.mockImplementation((method: string, path: string) => {
       if (method === 'GET' && path === '/issueLinkType') return Promise.resolve(linkTypes())
       if (method === 'GET' && path === '/issue/PROJ-2')
-        return Promise.resolve(issueLinks('PROJ-2', [{ type: { name: 'Blocks' }, inwardIssue: { key: 'PROJ-9' } }]))
+        return Promise.resolve(issueLinks('PROJ-2', [{ type: { name: 'Blocks' }, outwardIssue: { key: 'PROJ-9' } }]))
       throw new Error(`unexpected ${method} ${path}`)
     })
 
@@ -92,7 +92,7 @@ describe('JiraTaskTracker.unblockTicket', () => {
       if (method === 'GET' && path === '/issue/PROJ-2')
         return Promise.resolve(
           issueLinks('PROJ-2', [
-            { id: '55', type: { name: 'Blocks' }, inwardIssue: { key: 'PROJ-9' } },
+            { id: '55', type: { name: 'Blocks' }, outwardIssue: { key: 'PROJ-9' } },
             { id: '56', type: { name: 'Relates' }, outwardIssue: { key: 'PROJ-8' } },
           ]),
         )

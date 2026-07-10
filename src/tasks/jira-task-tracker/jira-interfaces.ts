@@ -19,6 +19,10 @@ export interface JiraCreatedIssue {
   key: string
 }
 
+export interface JiraProject {
+  projectTypeKey: string
+}
+
 export interface JiraIssueLink {
   id?: string
   type: { name: string }
@@ -57,7 +61,7 @@ export interface JiraSearchResponse {
 }
 
 export interface JiraIssueTypesResponse {
-  values: { id: string; name: string }[]
+  issueTypes: { id: string; name: string }[]
 }
 
 export interface JiraComment {

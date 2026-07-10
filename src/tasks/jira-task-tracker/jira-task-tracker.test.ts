@@ -58,9 +58,9 @@ describe('JiraTaskTracker.getUsers', () => {
 describe('JiraTaskTracker unimplemented methods', () => {
   it('reject with a not-implemented error naming the method', async () => {
     const tracker: TaskTracker = makeTracker()
-    await expect(tracker.getInitiative('1')).rejects.toThrow('JiraTaskTracker.getInitiative not implemented')
-    await expect(tracker.createInitiative({ title: 't', body: 'b' })).rejects.toThrow(
-      'JiraTaskTracker.createInitiative not implemented',
+    await expect(tracker.getTechnicalDesign('1')).rejects.toThrow('JiraTaskTracker.getTechnicalDesign not implemented')
+    await expect(tracker.createTechnicalDesign({ title: 't', epicId: '1', body: 'b' })).rejects.toThrow(
+      'JiraTaskTracker.createTechnicalDesign not implemented',
     )
   })
 })
