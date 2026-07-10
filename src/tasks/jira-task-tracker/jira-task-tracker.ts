@@ -2,6 +2,17 @@ import { JiraClient } from './jira-client.js'
 import { adfBuilder, type AdfDocNode, type AdfNode } from './adf.js'
 import { JiraAdfMetadataService, type AdfMetadataService } from './adf-metadata.js'
 import type {
+  JiraAssignableUser,
+  JiraComment,
+  JiraCreatedIssue,
+  JiraIssue,
+  JiraIssueLink,
+  JiraIssueLinkTypesResponse,
+  JiraIssueTypesResponse,
+  JiraSearchResponse,
+  JiraTrackerConfig,
+} from './jira-interfaces.js'
+import type {
   Comment,
   CreateEpicInput,
   CreateTicketInput,
@@ -12,72 +23,6 @@ import type {
   TechnicalDesign,
   Ticket,
 } from '../task-tracker/task-tracker.js'
-
-interface JiraTrackerConfig {
-  token: string
-  host: string
-  email: string
-  project: string
-  jpdProject?: string
-}
-
-interface JiraAssignableUser {
-  accountId: string
-  displayName: string
-}
-
-interface JiraCreatedIssue {
-  id: string
-  key: string
-}
-
-interface JiraIssueLink {
-  id?: string
-  type: { name: string }
-  inwardIssue?: { key: string }
-  outwardIssue?: { key: string }
-}
-
-interface JiraLinkType {
-  id: string
-  name: string
-  inward: string
-  outward: string
-}
-
-interface JiraIssueLinkTypesResponse {
-  issueLinkTypes: JiraLinkType[]
-}
-
-interface JiraIssue {
-  id: string
-  key: string
-  fields: {
-    summary: string
-    status?: { name: string }
-    labels?: string[]
-    assignee?: { accountId: string } | null
-    description?: AdfDocNode | null
-    updated?: string
-    parent?: { key: string }
-    issuelinks?: JiraIssueLink[]
-  }
-}
-
-interface JiraSearchResponse {
-  issues: JiraIssue[]
-}
-
-interface JiraIssueTypesResponse {
-  values: { id: string; name: string }[]
-}
-
-interface JiraComment {
-  id: string
-  author?: { displayName?: string }
-  created: string
-  updated: string
-}
 
 const metadataExpandTitle = 'LLM Context'
 const issueFields = 'summary,status,labels,assignee,description,issuelinks,updated'
@@ -302,9 +247,6 @@ export class JiraTaskTracker implements TaskTracker {
     const issue = await this.client.request<JiraIssue>('GET', `/issue/${key}`, undefined, { fields: 'description' })
     const current = issue.fields.description ?? adfBuilder.doc('')
     const next = this.metadata.splice(current, patch)
-
-    // No optimistic lock exists, so a concurrent description edit can be lost —
-    // the same read-then-write race the GitHub tracker accepts.
     await this.client.request('PUT', `/issue/${key}`, { fields: { description: next } })
   }
 
