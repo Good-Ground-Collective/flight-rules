@@ -212,10 +212,13 @@ export class JiraTaskTracker implements TaskTracker {
     )
     if (alreadyLinked) return
 
+    // JPD's Delivery tab reads the delivery link with the idea as the
+    // outward issue and the delivery epic as the inward issue; the reverse
+    // creates the link but the rollup does not surface it.
     await this.client.request('POST', '/issueLink', {
       type: { name: deliveryLinkType },
-      inwardIssue: { key: initiativeId },
-      outwardIssue: { key: epicId },
+      outwardIssue: { key: initiativeId },
+      inwardIssue: { key: epicId },
     })
   }
 
