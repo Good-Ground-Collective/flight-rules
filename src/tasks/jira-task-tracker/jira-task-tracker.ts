@@ -9,12 +9,14 @@ import type {
   JiraIssueLink,
   JiraIssueLinkTypesResponse,
   JiraIssueTypesResponse,
+  JiraProject,
   JiraSearchResponse,
   JiraTrackerConfig,
 } from './jira-interfaces.js'
 import type {
   Comment,
   CreateEpicInput,
+  CreateInitiativeInput,
   CreateTicketInput,
   EntityMetadata,
   Epic,
@@ -26,6 +28,9 @@ import type {
 
 const metadataExpandTitle = 'LLM Context'
 const issueFields = 'summary,status,labels,assignee,description,issuelinks,updated'
+const ideaIssueType = 'Idea'
+const jpdProjectType = 'product_discovery'
+const deliveryLinkType = 'Polaris issue link'
 
 /**
  * The Jira / Jira Product Discovery backend. Epics map to the Epic issue type
@@ -33,18 +38,23 @@ const issueFields = 'summary,status,labels,assignee,description,issuelinks,updat
  * metadata round-trips through the ADF description via {@link AdfMetadataService}.
  * Blocking dependencies ride "Blocks" issue links, resolved by name from the
  * instance, and entity metadata updates splice back through the description.
- * Initiatives and TDDs arrive in later tickets and reject until then.
+ * Initiatives map to JPD Ideas in the configured discovery project, linked to
+ * delivery epics via the "Polaris issue link" type. TDDs arrive in a later
+ * ticket and reject until then.
  */
 export class JiraTaskTracker implements TaskTracker {
   private readonly client: JiraClient
   private readonly project: string
+  private readonly jpdProject: string | undefined
   private readonly metadata: AdfMetadataService = new JiraAdfMetadataService()
   private issueTypeNames: string[] | undefined
   private blocksLinkType: string | undefined
+  private jpdProjectVerified = false
 
   constructor(config: JiraTrackerConfig) {
     this.client = new JiraClient({ host: config.host, email: config.email, token: config.token })
     this.project = config.project
+    this.jpdProject = config.jpdProject
   }
 
   async createEpic(input: CreateEpicInput): Promise<Epic> {
@@ -155,16 +165,55 @@ export class JiraTaskTracker implements TaskTracker {
     return this.notImplemented('updateTddMetadata')
   }
 
-  createInitiative(): Promise<Initiative> {
-    return this.notImplemented('createInitiative')
+  async createInitiative(input: CreateInitiativeInput): Promise<Initiative> {
+    const projectKey = await this.ensureJpdProject()
+
+    const created = await this.client.request<JiraCreatedIssue>('POST', '/issue', {
+      fields: {
+        project: { key: projectKey },
+        issuetype: { name: ideaIssueType },
+        summary: input.title,
+        description: adfBuilder.doc(input.body),
+      },
+    })
+
+    return this.getInitiative(created.key)
   }
 
-  getInitiative(): Promise<Initiative> {
-    return this.notImplemented('getInitiative')
+  async getInitiative(id: string): Promise<Initiative> {
+    const idea = await this.client.request<JiraIssue>('GET', `/issue/${id}`, undefined, {
+      fields: 'summary,description,issuelinks',
+    })
+    const epicKeys = this.deliveryLinkedKeys(idea.fields.issuelinks ?? [])
+    const epics = await Promise.all(
+      epicKeys.map(async (key) => {
+        const epic = await this.client.request<JiraIssue>('GET', `/issue/${key}`, undefined, { fields: 'summary' })
+        return { id: epic.key, title: epic.fields.summary }
+      }),
+    )
+
+    return {
+      id: idea.key,
+      title: idea.fields.summary,
+      body: this.extractBody(idea.fields.description),
+      epics,
+    }
   }
 
-  linkEpicToInitiative(): Promise<void> {
-    return this.notImplemented('linkEpicToInitiative')
+  async linkEpicToInitiative(epicId: string, initiativeId: string): Promise<void> {
+    const links = await this.issueLinks(initiativeId)
+    const alreadyLinked = links.some(
+      (link) =>
+        link.type.name === deliveryLinkType &&
+        (link.outwardIssue?.key === epicId || link.inwardIssue?.key === epicId),
+    )
+    if (alreadyLinked) return
+
+    await this.client.request('POST', '/issueLink', {
+      type: { name: deliveryLinkType },
+      inwardIssue: { key: initiativeId },
+      outwardIssue: { key: epicId },
+    })
   }
 
   createTechnicalDesign(): Promise<TechnicalDesign> {
@@ -248,6 +297,32 @@ export class JiraTaskTracker implements TaskTracker {
     const current = issue.fields.description ?? adfBuilder.doc('')
     const next = this.metadata.splice(current, patch)
     await this.client.request('PUT', `/issue/${key}`, { fields: { description: next } })
+  }
+
+  private deliveryLinkedKeys(links: JiraIssueLink[]): string[] {
+    const keys: string[] = []
+    links.forEach((link) => {
+      if (link.type.name !== deliveryLinkType) return
+      const key = link.outwardIssue?.key ?? link.inwardIssue?.key
+      if (key !== undefined) keys.push(key)
+    })
+    return keys
+  }
+
+  private async ensureJpdProject(): Promise<string> {
+    if (this.jpdProject === undefined) {
+      throw new Error('No JPD project is configured; set jpdProject to create or link initiatives')
+    }
+    if (!this.jpdProjectVerified) {
+      const project = await this.client.request<JiraProject>('GET', `/project/${this.jpdProject}`)
+      if (project.projectTypeKey !== jpdProjectType) {
+        throw new Error(
+          `Project ${this.jpdProject} is a "${project.projectTypeKey}" project, not a ${jpdProjectType} (JPD) project`,
+        )
+      }
+      this.jpdProjectVerified = true
+    }
+    return this.jpdProject
   }
 
   private async issueLinks(ticketId: string): Promise<JiraIssueLink[]> {

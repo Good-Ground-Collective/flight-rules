@@ -19,6 +19,10 @@ export interface JiraCreatedIssue {
   key: string
 }
 
+export interface JiraProject {
+  projectTypeKey: string
+}
+
 export interface JiraIssueLink {
   id?: string
   type: { name: string }
