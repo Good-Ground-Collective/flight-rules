@@ -87,9 +87,9 @@ describe('JiraTaskTracker.updateTicketMetadata', () => {
       throw new Error(`unexpected ${method} ${path}`)
     })
 
-    await makeTracker().updateTicketMetadata('PROJ-2', { size: 'ticket' })
+    await makeTracker().updateTicketMetadata('PROJ-2', { tddId: 3 })
 
-    expect(jiraAdfMetadataService.parse(putDescription('PROJ-2'))).toEqual({ size: 'ticket' })
+    expect(jiraAdfMetadataService.parse(putDescription('PROJ-2'))).toEqual({ tddId: 3 })
   })
 })
 
@@ -99,7 +99,7 @@ describe('JiraTaskTracker.updateEpicMetadata', () => {
   })
 
   it('merges the patch, ignores undefined fields, and preserves existing/unknown keys', async () => {
-    const existing = descriptionWith('epic body', { size: 'epic', notes: 'keep me', custom: 'x' } as Partial<EntityMetadata>)
+    const existing = descriptionWith('epic body', { epicId: 4, notes: 'keep me', custom: 'x' } as Partial<EntityMetadata>)
     request.mockImplementation((method: string, path: string) => {
       if (method === 'GET' && path === '/issue/PROJ-1') return Promise.resolve(issueDescription('PROJ-1', existing))
       if (method === 'PUT' && path === '/issue/PROJ-1') return Promise.resolve(undefined)
@@ -109,7 +109,7 @@ describe('JiraTaskTracker.updateEpicMetadata', () => {
     await makeTracker().updateEpicMetadata('PROJ-1', { tddId: 9, notes: undefined })
 
     expect(jiraAdfMetadataService.parse(putDescription('PROJ-1'))).toEqual({
-      size: 'epic',
+      epicId: 4,
       notes: 'keep me',
       custom: 'x',
       tddId: 9,

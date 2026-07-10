@@ -53,6 +53,7 @@ export class GitHubTaskTracker implements TaskTracker {
     })
     return {
       id: String(data.number),
+      size: 'epic',
       status: data.state,
       labels: data.labels.map((l) => this.labelName(l)).filter(Boolean),
       title: data.title,
@@ -73,6 +74,7 @@ export class GitHubTaskTracker implements TaskTracker {
     })
     return {
       id: String(data.number),
+      size: 'initiative',
       title: data.title,
       body: data.description ?? '',
       epics: [],
@@ -98,6 +100,7 @@ export class GitHubTaskTracker implements TaskTracker {
     const milestone = milestoneResponse.data
     return {
       id,
+      size: 'initiative',
       title: milestone.title,
       body: milestone.description ?? '',
       epics: epicsResponse.data.map((issue) => ({
@@ -141,6 +144,7 @@ export class GitHubTaskTracker implements TaskTracker {
 
     return {
       id,
+      size: 'epic',
       status: issue.state,
       labels: issue.labels.map((l) => this.labelName(l)).filter(Boolean),
       title: issue.title,
@@ -455,6 +459,7 @@ export class GitHubTaskTracker implements TaskTracker {
   ): Ticket {
     return {
       id: String(issue.number),
+      size: 'ticket',
       status: issue.state,
       labels: issue.labels.map((l) => this.labelName(l)).filter(Boolean),
       title: issue.title,

@@ -8,7 +8,6 @@ export const EntityMetadataSchema = z
     tddId: z.number().optional(),
     epicId: z.number().optional(),
     notes: z.string().optional(),
-    size: z.enum(entitySizes).optional(),
   })
   .passthrough()
 
@@ -33,6 +32,7 @@ export const TechnicalDesignSchema = z.object({
 
 export const TicketSchema = z.object({
   id: z.string(),
+  size: z.literal('ticket'),
   status: z.string(),
   labels: z.array(z.string()),
   title: z.string(),
@@ -47,6 +47,7 @@ export const TicketSchema = z.object({
 
 export const EpicSchema = z.object({
   id: z.string(),
+  size: z.literal('epic'),
   status: z.string(),
   labels: z.array(z.string()),
   title: z.string(),
@@ -83,6 +84,7 @@ export const CreateTechnicalDesignInputSchema = z.object({
 
 export const InitiativeSchema = z.object({
   id: z.string(),
+  size: z.literal('initiative'),
   title: z.string(),
   body: z.string(),
   epics: z.array(z.object({ id: z.string(), title: z.string() })).default([]),
