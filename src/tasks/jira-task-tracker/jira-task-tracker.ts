@@ -53,7 +53,6 @@ interface JiraIssue {
 
 interface JiraSearchResponse {
   issues: JiraIssue[]
-  total: number
 }
 
 interface JiraIssueTypesResponse {
@@ -203,24 +202,12 @@ export class JiraTaskTracker implements TaskTracker {
   }
 
   private async searchChildren(epicKey: string): Promise<Ticket[]> {
-    const tickets: Ticket[] = []
-    let startAt = 0
-    let total = Infinity
-
-    while (startAt < total) {
-      const page = await this.client.request<JiraSearchResponse>('GET', '/search', undefined, {
-        jql: `parent = ${epicKey}`,
-        fields: issueFields,
-        startAt,
-        maxResults: 100,
-      })
-      total = page.total
-      if (page.issues.length === 0) break
-      page.issues.forEach((issue) => tickets.push(this.mapTicket(issue)))
-      startAt += page.issues.length
-    }
-
-    return tickets
+    const page = await this.client.request<JiraSearchResponse>('GET', '/search', undefined, {
+      jql: `parent = ${epicKey}`,
+      fields: issueFields,
+      maxResults: 100,
+    })
+    return page.issues.map((issue) => this.mapTicket(issue))
   }
 
   private mapTicket(issue: JiraIssue): Ticket {
