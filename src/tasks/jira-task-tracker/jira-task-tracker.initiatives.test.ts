@@ -120,7 +120,7 @@ describe('JiraTaskTracker.linkEpicToInitiative', () => {
     request.mockReset()
   })
 
-  it('creates a Polaris delivery link with the idea inward and the epic outward', async () => {
+  it('creates a Polaris delivery link with the idea outward and the epic inward', async () => {
     request.mockImplementation((method: string, path: string) => {
       if (method === 'GET' && path === '/issueLinkType') return Promise.resolve(deliveryLinkTypes)
       if (method === 'GET' && path === '/issue/DISC-1')
@@ -133,8 +133,8 @@ describe('JiraTaskTracker.linkEpicToInitiative', () => {
 
     expect(postLinkBody()).toEqual({
       type: { name: deliveryType },
-      inwardIssue: { key: 'DISC-1' },
-      outwardIssue: { key: 'PROJ-10' },
+      outwardIssue: { key: 'DISC-1' },
+      inwardIssue: { key: 'PROJ-10' },
     })
   })
 
