@@ -29779,15 +29779,22 @@ var jiraAdfMetadataService = new JiraAdfMetadataService();
 // src/tasks/jira-task-tracker/jira-task-tracker.ts
 var metadataExpandTitle = "LLM Context";
 var issueFields = "summary,status,labels,assignee,description,issuelinks,updated";
+var ideaIssueType = "Idea";
+var jpdProjectType = "product_discovery";
+var deliveryLinkOutward = "implements";
 var JiraTaskTracker = class {
   client;
   project;
+  jpdProject;
   metadata = new JiraAdfMetadataService();
   issueTypeNames;
   blocksLinkType;
+  deliveryLinkType;
+  jpdProjectVerified = false;
   constructor(config2) {
     this.client = new JiraClient({ host: config2.host, email: config2.email, token: config2.token });
     this.project = config2.project;
+    this.jpdProject = config2.jpdProject;
   }
   async createEpic(input) {
     const issuetype = await this.resolveIssueType("Epic");
@@ -29851,7 +29858,7 @@ var JiraTaskTracker = class {
     const blocksLinkType = await this.resolveBlocksLinkType();
     const links = await this.issueLinks(ticketId);
     const alreadyBlocked = links.some(
-      (link) => link.type.name === blocksLinkType && link.inwardIssue?.key === blockedById
+      (link) => link.type.name === blocksLinkType && link.outwardIssue?.key === blockedById
     );
     if (alreadyBlocked) return;
     await this.client.request("POST", "/issueLink", {
@@ -29864,7 +29871,7 @@ var JiraTaskTracker = class {
     const blocksLinkType = await this.resolveBlocksLinkType();
     const links = await this.issueLinks(ticketId);
     const link = links.find(
-      (candidate) => candidate.type.name === blocksLinkType && candidate.inwardIssue?.key === blockedById
+      (candidate) => candidate.type.name === blocksLinkType && candidate.outwardIssue?.key === blockedById
     );
     if (link?.id === void 0) return;
     await this.client.request("DELETE", `/issueLink/${link.id}`);
@@ -29878,14 +29885,49 @@ var JiraTaskTracker = class {
   updateTddMetadata() {
     return this.notImplemented("updateTddMetadata");
   }
-  createInitiative() {
-    return this.notImplemented("createInitiative");
+  async createInitiative(input) {
+    const projectKey = await this.ensureJpdProject();
+    const created = await this.client.request("POST", "/issue", {
+      fields: {
+        project: { key: projectKey },
+        issuetype: { name: ideaIssueType },
+        summary: input.title,
+        description: adfBuilder.doc(input.body)
+      }
+    });
+    return this.getInitiative(created.key);
   }
-  getInitiative() {
-    return this.notImplemented("getInitiative");
+  async getInitiative(id) {
+    const idea = await this.client.request("GET", `/issue/${id}`, void 0, {
+      fields: "summary,description,issuelinks"
+    });
+    const deliveryLinkType = await this.resolveDeliveryLinkType();
+    const epicKeys = this.deliveryLinkedKeys(idea.fields.issuelinks ?? [], deliveryLinkType);
+    const epics = await Promise.all(
+      epicKeys.map(async (key) => {
+        const epic = await this.client.request("GET", `/issue/${key}`, void 0, { fields: "summary" });
+        return { id: epic.key, title: epic.fields.summary };
+      })
+    );
+    return {
+      id: idea.key,
+      title: idea.fields.summary,
+      body: this.extractBody(idea.fields.description),
+      epics
+    };
   }
-  linkEpicToInitiative() {
-    return this.notImplemented("linkEpicToInitiative");
+  async linkEpicToInitiative(epicId, initiativeId) {
+    const deliveryLinkType = await this.resolveDeliveryLinkType();
+    const links = await this.issueLinks(initiativeId);
+    const alreadyLinked = links.some(
+      (link) => link.type.name === deliveryLinkType && (link.outwardIssue?.key === epicId || link.inwardIssue?.key === epicId)
+    );
+    if (alreadyLinked) return;
+    await this.client.request("POST", "/issueLink", {
+      type: { name: deliveryLinkType },
+      inwardIssue: { key: initiativeId },
+      outwardIssue: { key: epicId }
+    });
   }
   createTechnicalDesign() {
     return this.notImplemented("createTechnicalDesign");
@@ -29917,7 +29959,7 @@ var JiraTaskTracker = class {
   }
   async searchChildren(epicKey) {
     const [page, blocksLinkType] = await Promise.all([
-      this.client.request("GET", "/search", void 0, {
+      this.client.request("GET", "/search/jql", void 0, {
         jql: `parent = ${epicKey}`,
         fields: issueFields,
         maxResults: 100
@@ -29947,8 +29989,8 @@ var JiraTaskTracker = class {
     const blocking = [];
     links.forEach((link) => {
       if (link.type.name !== blocksLinkType) return;
-      if (link.inwardIssue !== void 0) blockedBy.push(link.inwardIssue.key);
-      if (link.outwardIssue !== void 0) blocking.push(link.outwardIssue.key);
+      if (link.outwardIssue !== void 0) blockedBy.push(link.outwardIssue.key);
+      if (link.inwardIssue !== void 0) blocking.push(link.inwardIssue.key);
     });
     return { blockedBy, blocking };
   }
@@ -29957,6 +29999,30 @@ var JiraTaskTracker = class {
     const current = issue2.fields.description ?? adfBuilder.doc("");
     const next = this.metadata.splice(current, patch);
     await this.client.request("PUT", `/issue/${key}`, { fields: { description: next } });
+  }
+  deliveryLinkedKeys(links, deliveryLinkType) {
+    const keys = [];
+    links.forEach((link) => {
+      if (link.type.name !== deliveryLinkType) return;
+      const key = link.outwardIssue?.key ?? link.inwardIssue?.key;
+      if (key !== void 0) keys.push(key);
+    });
+    return keys;
+  }
+  async ensureJpdProject() {
+    if (this.jpdProject === void 0) {
+      throw new Error("No JPD project is configured; set jpdProject to create or link initiatives");
+    }
+    if (!this.jpdProjectVerified) {
+      const project = await this.client.request("GET", `/project/${this.jpdProject}`);
+      if (project.projectTypeKey !== jpdProjectType) {
+        throw new Error(
+          `Project ${this.jpdProject} is a "${project.projectTypeKey}" project, not a ${jpdProjectType} (JPD) project`
+        );
+      }
+      this.jpdProjectVerified = true;
+    }
+    return this.jpdProject;
   }
   async issueLinks(ticketId) {
     const issue2 = await this.client.request("GET", `/issue/${ticketId}`, void 0, {
@@ -29975,6 +30041,20 @@ var JiraTaskTracker = class {
       this.blocksLinkType = match.name;
     }
     return this.blocksLinkType;
+  }
+  async resolveDeliveryLinkType() {
+    if (this.deliveryLinkType === void 0) {
+      const response = await this.client.request("GET", "/issueLinkType");
+      const match = response.issueLinkTypes.find((type) => type.outward.toLowerCase() === deliveryLinkOutward);
+      if (match === void 0) {
+        const names = response.issueLinkTypes.map((type) => type.name).join(", ");
+        throw new Error(
+          `No JPD delivery link type (outward "${deliveryLinkOutward}") is available in this Jira instance (found: ${names})`
+        );
+      }
+      this.deliveryLinkType = match.name;
+    }
+    return this.deliveryLinkType;
   }
   parseMetadata(issue2) {
     const description = issue2.fields.description;
@@ -30007,7 +30087,7 @@ var JiraTaskTracker = class {
         "GET",
         `/issue/createmeta/${this.project}/issuetypes`
       );
-      this.issueTypeNames = meta3.values.map((type) => type.name);
+      this.issueTypeNames = meta3.issueTypes.map((type) => type.name);
     }
     return this.issueTypeNames;
   }
@@ -30398,7 +30478,7 @@ function createGitCommand(getExecutor) {
 }
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.21.0";
+var appVersion = false ? "0.0.0-dev" : "1.22.0";
 
 // src/cli.ts
 function buildTracker(overrideTracker) {
