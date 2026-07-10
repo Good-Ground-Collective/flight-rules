@@ -29784,6 +29784,7 @@ var JiraTaskTracker = class {
   project;
   metadata = new JiraAdfMetadataService();
   issueTypeNames;
+  blocksLinkType;
   constructor(config2) {
     this.client = new JiraClient({ host: config2.host, email: config2.email, token: config2.token });
     this.project = config2.project;
@@ -29834,19 +29835,39 @@ var JiraTaskTracker = class {
     return this.getTicket(created.key);
   }
   async getTicket(id) {
-    const issue2 = await this.client.request("GET", `/issue/${id}`, void 0, { fields: issueFields });
-    return this.mapTicket(issue2);
+    const [issue2, blocksLinkType] = await Promise.all([
+      this.client.request("GET", `/issue/${id}`, void 0, { fields: issueFields }),
+      this.resolveBlocksLinkType()
+    ]);
+    return this.mapTicket(issue2, blocksLinkType);
   }
   async linkTicketToEpic(ticketId, epicId) {
     const issue2 = await this.client.request("GET", `/issue/${ticketId}`, void 0, { fields: "parent" });
     if (issue2.fields.parent?.key === epicId) return;
     await this.client.request("PUT", `/issue/${ticketId}`, { fields: { parent: { key: epicId } } });
   }
-  blockTicket() {
-    return this.notImplemented("blockTicket");
+  async blockTicket(ticketId, blockedById) {
+    if (ticketId === blockedById) throw new Error("a ticket cannot block itself");
+    const blocksLinkType = await this.resolveBlocksLinkType();
+    const links = await this.issueLinks(ticketId);
+    const alreadyBlocked = links.some(
+      (link) => link.type.name === blocksLinkType && link.inwardIssue?.key === blockedById
+    );
+    if (alreadyBlocked) return;
+    await this.client.request("POST", "/issueLink", {
+      type: { name: blocksLinkType },
+      inwardIssue: { key: ticketId },
+      outwardIssue: { key: blockedById }
+    });
   }
-  unblockTicket() {
-    return this.notImplemented("unblockTicket");
+  async unblockTicket(ticketId, blockedById) {
+    const blocksLinkType = await this.resolveBlocksLinkType();
+    const links = await this.issueLinks(ticketId);
+    const link = links.find(
+      (candidate) => candidate.type.name === blocksLinkType && candidate.inwardIssue?.key === blockedById
+    );
+    if (link?.id === void 0) return;
+    await this.client.request("DELETE", `/issueLink/${link.id}`);
   }
   updateEpicMetadata() {
     return this.notImplemented("updateEpicMetadata");
@@ -29886,15 +29907,18 @@ var JiraTaskTracker = class {
     await this.client.request("GET", "/myself");
   }
   async searchChildren(epicKey) {
-    const page = await this.client.request("GET", "/search", void 0, {
-      jql: `parent = ${epicKey}`,
-      fields: issueFields,
-      maxResults: 100
-    });
-    return page.issues.map((issue2) => this.mapTicket(issue2));
+    const [page, blocksLinkType] = await Promise.all([
+      this.client.request("GET", "/search", void 0, {
+        jql: `parent = ${epicKey}`,
+        fields: issueFields,
+        maxResults: 100
+      }),
+      this.resolveBlocksLinkType()
+    ]);
+    return page.issues.map((issue2) => this.mapTicket(issue2, blocksLinkType));
   }
-  mapTicket(issue2) {
-    const { blockedBy, blocking } = this.blockingLinks(issue2.fields.issuelinks ?? []);
+  mapTicket(issue2, blocksLinkType) {
+    const { blockedBy, blocking } = this.blockingLinks(issue2.fields.issuelinks ?? [], blocksLinkType);
     return {
       id: issue2.key,
       status: issue2.fields.status?.name ?? "unknown",
@@ -29909,15 +29933,33 @@ var JiraTaskTracker = class {
       updatedAt: issue2.fields.updated ?? ""
     };
   }
-  blockingLinks(links) {
+  blockingLinks(links, blocksLinkType) {
     const blockedBy = [];
     const blocking = [];
     links.forEach((link) => {
-      if (link.type.name !== "Blocks") return;
+      if (link.type.name !== blocksLinkType) return;
       if (link.inwardIssue !== void 0) blockedBy.push(link.inwardIssue.key);
       if (link.outwardIssue !== void 0) blocking.push(link.outwardIssue.key);
     });
     return { blockedBy, blocking };
+  }
+  async issueLinks(ticketId) {
+    const issue2 = await this.client.request("GET", `/issue/${ticketId}`, void 0, {
+      fields: "issuelinks"
+    });
+    return issue2.fields.issuelinks ?? [];
+  }
+  async resolveBlocksLinkType() {
+    if (this.blocksLinkType === void 0) {
+      const response = await this.client.request("GET", "/issueLinkType");
+      const match = response.issueLinkTypes.find((type) => type.name.toLowerCase() === "blocks");
+      if (match === void 0) {
+        const names = response.issueLinkTypes.map((type) => type.name).join(", ");
+        throw new Error(`No "Blocks" issue link type is configured in this Jira instance (found: ${names})`);
+      }
+      this.blocksLinkType = match.name;
+    }
+    return this.blocksLinkType;
   }
   parseMetadata(issue2) {
     const description = issue2.fields.description;
@@ -30341,7 +30383,7 @@ function createGitCommand(getExecutor) {
 }
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.19.0";
+var appVersion = false ? "0.0.0-dev" : "1.20.0";
 
 // src/cli.ts
 function buildTracker(overrideTracker) {
