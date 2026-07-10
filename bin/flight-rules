@@ -29717,28 +29717,130 @@ var JiraClient = class {
   }
 };
 
+// src/tasks/jira-task-tracker/adf.ts
+var DefaultAdfBuilder = class {
+  doc(text) {
+    return {
+      version: 1,
+      type: "doc",
+      content: [{ type: "paragraph", content: [{ type: "text", text }] }]
+    };
+  }
+  codeBlock(text, language = "yaml") {
+    return {
+      type: "codeBlock",
+      attrs: { language },
+      content: [{ type: "text", text }]
+    };
+  }
+  expand(title, child) {
+    return {
+      type: "expand",
+      attrs: { title },
+      content: [child]
+    };
+  }
+};
+var adfBuilder = new DefaultAdfBuilder();
+
+// src/tasks/jira-task-tracker/adf-metadata.ts
+var import_yaml2 = __toESM(require_dist2(), 1);
+var metadataTitle = "LLM Context";
+var JiraAdfMetadataService = class {
+  parse(doc) {
+    const yaml = this.readMetadataYaml(doc);
+    if (yaml === void 0) return {};
+    const raw = (0, import_yaml2.parse)(yaml);
+    if (raw === null || raw === void 0 || typeof raw !== "object" || Array.isArray(raw)) return {};
+    return EntityMetadataSchema.parse(raw);
+  }
+  splice(doc, patch) {
+    const merged = { ...this.parse(doc) };
+    Object.entries(patch).forEach(([key, value]) => {
+      if (value !== void 0) merged[key] = value;
+    });
+    const node = adfBuilder.expand(metadataTitle, adfBuilder.codeBlock((0, import_yaml2.stringify)(merged).trimEnd()));
+    const contentWithoutMetadata = doc.content.filter((n) => !this.isMetadataExpand(n));
+    return { ...doc, content: [...contentWithoutMetadata, node] };
+  }
+  readMetadataYaml(doc) {
+    const expand2 = doc.content.find((n) => this.isMetadataExpand(n));
+    const codeBlock = expand2?.content?.find((n) => n.type === "codeBlock");
+    const text = codeBlock?.content?.find((n) => n.type === "text")?.text;
+    if (text === void 0 || text.trim() === "") return void 0;
+    return text;
+  }
+  isMetadataExpand(node) {
+    return node.type === "expand" && node.attrs?.["title"] === metadataTitle;
+  }
+};
+var jiraAdfMetadataService = new JiraAdfMetadataService();
+
 // src/tasks/jira-task-tracker/jira-task-tracker.ts
+var metadataExpandTitle = "LLM Context";
+var issueFields = "summary,status,labels,assignee,description,issuelinks,updated";
 var JiraTaskTracker = class {
   client;
   project;
+  metadata = new JiraAdfMetadataService();
+  issueTypeNames;
   constructor(config2) {
     this.client = new JiraClient({ host: config2.host, email: config2.email, token: config2.token });
     this.project = config2.project;
   }
-  createEpic() {
-    return this.notImplemented("createEpic");
+  async createEpic(input) {
+    const issuetype = await this.resolveIssueType("Epic");
+    const description = this.metadata.splice(adfBuilder.doc(input.body), input.metadata ?? {});
+    const created = await this.client.request("POST", "/issue", {
+      fields: {
+        project: { key: this.project },
+        issuetype: { name: issuetype },
+        summary: input.title,
+        description,
+        labels: input.labels
+      }
+    });
+    return this.getEpic(created.key);
   }
-  getEpic() {
-    return this.notImplemented("getEpic");
+  async getEpic(id) {
+    const issue2 = await this.client.request("GET", `/issue/${id}`, void 0, { fields: issueFields });
+    const childIssues = await this.searchChildren(issue2.key);
+    return {
+      id: issue2.key,
+      status: issue2.fields.status?.name ?? "unknown",
+      labels: issue2.fields.labels ?? [],
+      title: issue2.fields.summary,
+      body: this.extractBody(issue2.fields.description),
+      childIssues,
+      comments: [],
+      metadata: this.parseMetadata(issue2),
+      updatedAt: issue2.fields.updated ?? ""
+    };
   }
-  createTicket() {
-    return this.notImplemented("createTicket");
+  async createTicket(input) {
+    const issuetype = await this.resolveIssueType("Story");
+    const description = this.metadata.splice(adfBuilder.doc(input.body), input.metadata ?? {});
+    const created = await this.client.request("POST", "/issue", {
+      fields: {
+        project: { key: this.project },
+        issuetype: { name: issuetype },
+        summary: input.title,
+        description,
+        parent: { key: input.epicId },
+        labels: input.labels,
+        ...input.assignee !== void 0 ? { assignee: { accountId: input.assignee } } : {}
+      }
+    });
+    return this.getTicket(created.key);
   }
-  getTicket() {
-    return this.notImplemented("getTicket");
+  async getTicket(id) {
+    const issue2 = await this.client.request("GET", `/issue/${id}`, void 0, { fields: issueFields });
+    return this.mapTicket(issue2);
   }
-  linkTicketToEpic() {
-    return this.notImplemented("linkTicketToEpic");
+  async linkTicketToEpic(ticketId, epicId) {
+    const issue2 = await this.client.request("GET", `/issue/${ticketId}`, void 0, { fields: "parent" });
+    if (issue2.fields.parent?.key === epicId) return;
+    await this.client.request("PUT", `/issue/${ticketId}`, { fields: { parent: { key: epicId } } });
   }
   blockTicket() {
     return this.notImplemented("blockTicket");
@@ -29782,6 +29884,75 @@ var JiraTaskTracker = class {
   }
   async ping() {
     await this.client.request("GET", "/myself");
+  }
+  async searchChildren(epicKey) {
+    const page = await this.client.request("GET", "/search", void 0, {
+      jql: `parent = ${epicKey}`,
+      fields: issueFields,
+      maxResults: 100
+    });
+    return page.issues.map((issue2) => this.mapTicket(issue2));
+  }
+  mapTicket(issue2) {
+    const { blockedBy, blocking } = this.blockingLinks(issue2.fields.issuelinks ?? []);
+    return {
+      id: issue2.key,
+      status: issue2.fields.status?.name ?? "unknown",
+      labels: issue2.fields.labels ?? [],
+      title: issue2.fields.summary,
+      body: this.extractBody(issue2.fields.description),
+      comments: [],
+      assignee: issue2.fields.assignee?.accountId ?? null,
+      blockedBy,
+      blocking,
+      metadata: this.parseMetadata(issue2),
+      updatedAt: issue2.fields.updated ?? ""
+    };
+  }
+  blockingLinks(links) {
+    const blockedBy = [];
+    const blocking = [];
+    links.forEach((link) => {
+      if (link.type.name !== "Blocks") return;
+      if (link.inwardIssue !== void 0) blockedBy.push(link.inwardIssue.key);
+      if (link.outwardIssue !== void 0) blocking.push(link.outwardIssue.key);
+    });
+    return { blockedBy, blocking };
+  }
+  parseMetadata(issue2) {
+    const description = issue2.fields.description;
+    return description === null || description === void 0 ? {} : this.metadata.parse(description);
+  }
+  extractBody(description) {
+    if (description === null || description === void 0) return "";
+    return description.content.filter((node) => !this.isMetadataNode(node)).map((node) => this.nodeText(node)).filter((text) => text.length > 0).join("\n");
+  }
+  isMetadataNode(node) {
+    return node.type === "expand" && node.attrs?.["title"] === metadataExpandTitle;
+  }
+  nodeText(node) {
+    if (node.text !== void 0) return node.text;
+    return (node.content ?? []).map((child) => this.nodeText(child)).join("");
+  }
+  async resolveIssueType(name) {
+    const available = await this.availableIssueTypes();
+    const match = available.find((type) => type.toLowerCase() === name.toLowerCase());
+    if (match === void 0) {
+      throw new Error(
+        `Issue type "${name}" is not available in project ${this.project} (found: ${available.join(", ")})`
+      );
+    }
+    return match;
+  }
+  async availableIssueTypes() {
+    if (this.issueTypeNames === void 0) {
+      const meta3 = await this.client.request(
+        "GET",
+        `/issue/createmeta/${this.project}/issuetypes`
+      );
+      this.issueTypeNames = meta3.values.map((type) => type.name);
+    }
+    return this.issueTypeNames;
   }
   notImplemented(method) {
     return Promise.reject(new Error(`JiraTaskTracker.${method} not implemented`));
@@ -30170,7 +30341,7 @@ function createGitCommand(getExecutor) {
 }
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.18.0";
+var appVersion = false ? "0.0.0-dev" : "1.19.0";
 
 // src/cli.ts
 function buildTracker(overrideTracker) {
