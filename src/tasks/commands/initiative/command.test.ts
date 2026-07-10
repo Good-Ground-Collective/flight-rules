@@ -5,6 +5,7 @@ import { createInitiativeCommand } from './command.js'
 
 const mockInitiative: Initiative = {
   id: '7',
+  size: 'initiative',
   title: 'Q3 Platform',
   body: 'The big push',
   epics: [{ id: '19', title: 'Decomposition' }],

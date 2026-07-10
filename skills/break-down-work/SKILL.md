@@ -30,7 +30,7 @@ Two entry modes:
   flight-rules epic get <id>
   ```
 
-  The CLI's tracker abstraction handles which system it is. Read `size` from the returned `metadata.size` and the sections from the body. **An emitted node's layered body is the RFC for the next hop** — that is what makes the recursion clean.
+  The CLI's tracker abstraction handles which system it is. Read `size` from the returned top-level `size` field (derived from the entity's kind) and the sections from the body. **An emitted node's layered body is the RFC for the next hop** — that is what makes the recursion clean.
 
 If the input is ambiguous, resolve a real file path as an RFC file; otherwise treat it as a node id.
 
@@ -64,7 +64,7 @@ Track your progress with your own to-do mechanism (e.g. the `TodoWrite` tool) �
 ### 1. Read the work item and settle the input altitude
 
 Read the RFC file or `flight-rules <type> get <id>`. Extract:
-- **`size`** (frontmatter or `metadata.size`) — the input altitude.
+- **`size`** (RFC frontmatter, or the tracker node's top-level `size`) — the input altitude.
 - **Problem / Solution / Acceptance Criteria**, and the size-specific **sketch**: an `Epic Sketch` (on an initiative) or `Ticket Sketch` (on an epic). The sketch is the human's outline of the seams — you will ground each seam in real code.
 
 ### 2. Settle the target altitude and analysis depth
@@ -139,7 +139,7 @@ Follow [`docs/layered-body-format.md`](../../docs/layered-body-format.md) exactl
 
 - `## Problem Statement`, `## Solution`, `## Acceptance Criteria` (as a `- [ ]` checklist), `## High-level technical writeup`.
 - **Tickets only:** a `<details><summary>Guided Walkthrough</summary>` plain-markdown section (never inside the YAML — a nested fence would break it).
-- The `size` of the **child** (one altitude below the input) is stamped via the CLI `--size` flag in the next step; do not hand-write the LLM-Context YAML block.
+- The `size` of the **child** is implied by the create command you run (`epic create` → epic, `ticket create` → ticket); it is derived from the entity's kind on read, never stored in the LLM-Context block.
 
 Write each body to a temp file and pass it with `--body-file <file>` — the deterministic way to hand large layered-body markdown (fenced YAML, nested code) to the CLI without shell-escaping it.
 
@@ -152,21 +152,21 @@ Use only `flight-rules` — never the tracker's native API directly.
 # 1. materialize the initiative
 flight-rules initiative create --title "<title>" --body-file initiative-body.md   # → { "id": <milestoneId> }
 # 2. for each epic
-flight-rules epic create --title "<title>" --body-file epic-N.md --size epic        # → { "id": <epicId> }
+flight-rules epic create --title "<title>" --body-file epic-N.md        # → { "id": <epicId> }
 flight-rules epic link-initiative <epicId> --initiative <milestoneId>
 ```
 
 **epic → tickets:**
 ```bash
 # for each ticket (auto-links to the epic as a sub-issue)
-flight-rules ticket create --title "<title>" --body-file ticket-N.md --epic-id <epicId> --size ticket   # → { "id": <ticketId> }
+flight-rules ticket create --title "<title>" --body-file ticket-N.md --epic-id <epicId>   # → { "id": <ticketId> }
 # the one Sharpen-the-Saw leaf (if any) additionally carries the label:
-flight-rules ticket create --title "<title>" --body-file ticket-saw.md --epic-id <epicId> --size ticket --labels sharpen-the-saw:<slug>
+flight-rules ticket create --title "<title>" --body-file ticket-saw.md --epic-id <epicId> --labels sharpen-the-saw:<slug>
 # then wire dependencies discovered during synthesis
 flight-rules ticket block <ticketId> --by <blockerTicketId>
 ```
 
-**ticket:** create the single ticket (`--size ticket`) under its epic.
+**ticket:** create the single ticket under its epic.
 
 ### 10. Verify and stop
 

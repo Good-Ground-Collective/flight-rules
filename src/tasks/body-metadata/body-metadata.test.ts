@@ -82,10 +82,11 @@ describe('BodyMetadataService.splice', () => {
     expect((result.match(/<details>/g) ?? []).length).toBe(2)
   })
 
-  it('round-trips a size field through splice and parse', () => {
+  it('strips a legacy size key on parse', () => {
     const svc = new BodyMetadataService()
-    const result = svc.splice('Some body', { size: 'epic' })
-    expect(svc.parse(result).size).toBe('epic')
+    const parsed = svc.parse(`Body\n\n${makeBlock('size: epic\ntddId: 5')}`)
+    expect((parsed as Record<string, unknown>)['size']).toBeUndefined()
+    expect(parsed.tddId).toBe(5)
   })
 
   it('leaves a Guided Walkthrough details above the sentinel byte-identical', () => {
@@ -95,8 +96,8 @@ describe('BodyMetadataService.splice', () => {
       '<details><summary>Guided Walkthrough</summary>\n\n' +
       '```ts\nconst x = 1\n```\n\n</details>'
     const body = `${guided}\n\n${makeBlock('tddId: 1')}`
-    const result = svc.splice(body, { size: 'ticket' })
+    const result = svc.splice(body, { tddId: 2 })
     expect(result.startsWith(guided)).toBe(true)
-    expect(svc.parse(result).size).toBe('ticket')
+    expect(svc.parse(result).tddId).toBe(2)
   })
 })

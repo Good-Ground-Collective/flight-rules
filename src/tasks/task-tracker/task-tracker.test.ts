@@ -28,6 +28,7 @@ describe('TicketSchema', () => {
   it('parses a valid ticket', () => {
     const result = TicketSchema.parse({
       id: '1',
+      size: 'ticket',
       status: 'open',
       labels: ['bug'],
       title: 'Fix login',
@@ -43,6 +44,7 @@ describe('TicketSchema', () => {
   it('defaults blockedBy and blocking to empty arrays', () => {
     const result = TicketSchema.parse({
       id: '1',
+      size: 'ticket',
       status: 'open',
       labels: [],
       title: 'T',
@@ -60,6 +62,7 @@ describe('EpicSchema', () => {
   it('parses a valid epic with no TDD', () => {
     const result = EpicSchema.parse({
       id: '10',
+      size: 'epic',
       status: 'open',
       labels: [],
       title: 'Auth system',
@@ -105,21 +108,13 @@ describe('EntityMetadataSchema', () => {
     const result = EntityMetadataSchema.parse({ tddId: 1, foo: 'bar' })
     expect((result as Record<string, unknown>)['foo']).toBe('bar')
   })
-
-  it('accepts a valid size', () => {
-    const result = EntityMetadataSchema.parse({ size: 'epic' })
-    expect(result.size).toBe('epic')
-  })
-
-  it('rejects an invalid size', () => {
-    expect(() => EntityMetadataSchema.parse({ size: 'banana' })).toThrow()
-  })
 })
 
 describe('InitiativeSchema', () => {
   it('parses an initiative with linked epics', () => {
     const result = InitiativeSchema.parse({
       id: '5',
+      size: 'initiative',
       title: 'Q3 Platform',
       body: 'The big push',
       epics: [{ id: '19', title: 'Decomposition' }],
@@ -129,7 +124,7 @@ describe('InitiativeSchema', () => {
   })
 
   it('defaults epics to an empty array when omitted', () => {
-    const result = InitiativeSchema.parse({ id: '5', title: 'T', body: 'B' })
+    const result = InitiativeSchema.parse({ id: '5', size: 'initiative', title: 'T', body: 'B' })
     expect(result.epics).toEqual([])
   })
 
@@ -143,6 +138,7 @@ describe('EpicSchema metadata', () => {
   it('defaults metadata to empty object', () => {
     const result = EpicSchema.parse({
       id: '10',
+      size: 'epic',
       status: 'open',
       labels: [],
       title: 'T',
@@ -159,6 +155,7 @@ describe('TicketSchema metadata', () => {
   it('defaults metadata to empty object', () => {
     const result = TicketSchema.parse({
       id: '1',
+      size: 'ticket',
       status: 'open',
       labels: [],
       title: 'T',

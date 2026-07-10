@@ -81,6 +81,7 @@ export class JiraTaskTracker implements TaskTracker {
 
     return {
       id: issue.key,
+      size: 'epic',
       status: issue.fields.status?.name ?? 'unknown',
       labels: issue.fields.labels ?? [],
       title: issue.fields.summary,
@@ -196,6 +197,7 @@ export class JiraTaskTracker implements TaskTracker {
 
     return {
       id: idea.key,
+      size: 'initiative',
       title: idea.fields.summary,
       body: this.extractBody(idea.fields.description),
       epics,
@@ -271,6 +273,7 @@ export class JiraTaskTracker implements TaskTracker {
     const { blockedBy, blocking } = this.blockingLinks(issue.fields.issuelinks ?? [], blocksLinkType)
     return {
       id: issue.key,
+      size: 'ticket',
       status: issue.fields.status?.name ?? 'unknown',
       labels: issue.fields.labels ?? [],
       title: issue.fields.summary,

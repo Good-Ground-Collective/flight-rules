@@ -489,7 +489,7 @@ describe('GitHubTracker.createInitiative', () => {
       title: 'Q3 Platform',
       description: 'The big push',
     })
-    expect(initiative).toEqual({ id: '7', title: 'Q3 Platform', body: 'The big push', epics: [] })
+    expect(initiative).toEqual({ id: '7', size: 'initiative', title: 'Q3 Platform', body: 'The big push', epics: [] })
   })
 })
 
@@ -548,6 +548,7 @@ describe('GitHubTracker.getInitiative', () => {
     })
     expect(initiative).toEqual({
       id: '7',
+      size: 'initiative',
       title: 'Q3 Platform',
       body: 'The big push',
       epics: [

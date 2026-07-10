@@ -63,22 +63,23 @@ describe('JiraTaskTracker.createEpic', () => {
       if (method === 'GET' && path === '/issueLinkType') return Promise.resolve(blocksLinkTypes)
       if (method === 'POST' && path === '/issue') return Promise.resolve({ id: 'id-PROJ-1', key: 'PROJ-1' })
       if (method === 'GET' && path === '/issue/PROJ-1')
-        return Promise.resolve(issue('PROJ-1', { summary: 'My Epic', description: descriptionWith('Epic body', { size: 'epic' }) }))
+        return Promise.resolve(issue('PROJ-1', { summary: 'My Epic', description: descriptionWith('Epic body', { notes: 'ctx' }) }))
       if (method === 'GET' && path === '/search/jql') return Promise.resolve({ issues: [] })
       throw new Error(`unexpected ${method} ${path}`)
     })
 
-    const epic = await makeTracker().createEpic({ title: 'My Epic', body: 'Epic body', labels: [], metadata: { size: 'epic' } })
+    const epic = await makeTracker().createEpic({ title: 'My Epic', body: 'Epic body', labels: [], metadata: { notes: 'ctx' } })
 
     expect(epic.id).toBe('PROJ-1')
     expect(epic.title).toBe('My Epic')
-    expect(epic.metadata).toEqual({ size: 'epic' })
+    expect(epic.size).toBe('epic')
+    expect(epic.metadata).toEqual({ notes: 'ctx' })
     expect(epic.childIssues).toEqual([])
 
     const body = postCallBody()
     expect(body.fields['issuetype']).toEqual({ name: 'Epic' })
     expect(body.fields['project']).toEqual({ key: 'PROJ' })
-    expect(jiraAdfMetadataService.parse(body.fields['description'] as AdfDocNode)).toEqual({ size: 'epic' })
+    expect(jiraAdfMetadataService.parse(body.fields['description'] as AdfDocNode)).toEqual({ notes: 'ctx' })
   })
 
   it('throws a clear error when the Epic issue type is unavailable', async () => {
@@ -141,7 +142,7 @@ describe('JiraTaskTracker.getEpic', () => {
     request.mockImplementation((method: string, path: string, _body?: unknown, params?: Record<string, unknown>) => {
       if (method === 'GET' && path === '/issueLinkType') return Promise.resolve(blocksLinkTypes)
       if (method === 'GET' && path === '/issue/PROJ-1')
-        return Promise.resolve(issue('PROJ-1', { summary: 'Epic', description: descriptionWith('body', { size: 'epic' }) }))
+        return Promise.resolve(issue('PROJ-1', { summary: 'Epic', description: descriptionWith('body', {}) }))
       if (method === 'GET' && path === '/search/jql') {
         expect(params?.['jql']).toBe('parent = PROJ-1')
         return Promise.resolve({ issues: [child], total: 1, startAt: 0, maxResults: 100 })
@@ -172,7 +173,7 @@ describe('JiraTaskTracker.getTicket', () => {
           issue('PROJ-2', {
             summary: 'Ticket',
             assignee: 'acct-7',
-            description: descriptionWith('the body', { size: 'ticket', tddId: 5 }),
+            description: descriptionWith('the body', { tddId: 5 }),
             issuelinks: [
               { type: { name: 'Blocks' }, outwardIssue: { key: 'PROJ-8' } },
               { type: { name: 'Blocks' }, inwardIssue: { key: 'PROJ-9' } },
@@ -185,7 +186,8 @@ describe('JiraTaskTracker.getTicket', () => {
 
     const ticket = await makeTracker().getTicket('PROJ-2')
 
-    expect(ticket.metadata).toEqual({ size: 'ticket', tddId: 5 })
+    expect(ticket.size).toBe('ticket')
+    expect(ticket.metadata).toEqual({ tddId: 5 })
     expect(ticket.body).toBe('the body')
     expect(ticket.assignee).toBe('acct-7')
     expect(ticket.blockedBy).toEqual(['PROJ-8'])
