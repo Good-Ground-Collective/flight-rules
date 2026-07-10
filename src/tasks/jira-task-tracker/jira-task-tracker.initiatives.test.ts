@@ -13,7 +13,10 @@ import { JiraTaskTracker } from './jira-task-tracker.js'
 const makeTracker = (jpdProject: string | null = 'DISC') =>
   new JiraTaskTracker({ token: 'tok', host: 'acme.atlassian.net', email: 'me@acme.com', project: 'PROJ', ...(jpdProject !== null ? { jpdProject } : {}) })
 
-const deliveryType = 'Polaris issue link'
+const deliveryType = 'Polaris work item link'
+const deliveryLinkTypes = {
+  issueLinkTypes: [{ id: '900', name: deliveryType, inward: 'is implemented by', outward: 'implements' }],
+}
 const discoveryProject = { projectTypeKey: 'product_discovery' }
 
 const postIssueBody = (): { fields: Record<string, unknown> } => {
@@ -34,6 +37,7 @@ describe('JiraTaskTracker.createInitiative', () => {
   it('creates an Idea-typed issue in the configured JPD project', async () => {
     request.mockImplementation((method: string, path: string) => {
       if (method === 'GET' && path === '/project/DISC') return Promise.resolve(discoveryProject)
+      if (method === 'GET' && path === '/issueLinkType') return Promise.resolve(deliveryLinkTypes)
       if (method === 'POST' && path === '/issue') return Promise.resolve({ id: 'id-DISC-1', key: 'DISC-1' })
       if (method === 'GET' && path === '/issue/DISC-1')
         return Promise.resolve({ id: 'id-DISC-1', key: 'DISC-1', fields: { summary: 'My Idea', description: adfBuilder.doc('idea body'), issuelinks: [] } })
@@ -78,6 +82,7 @@ describe('JiraTaskTracker.getInitiative', () => {
 
   it('reconstructs linked epics from Polaris issue links, ignoring other link types', async () => {
     request.mockImplementation((method: string, path: string) => {
+      if (method === 'GET' && path === '/issueLinkType') return Promise.resolve(deliveryLinkTypes)
       if (method === 'GET' && path === '/issue/DISC-1')
         return Promise.resolve({
           id: 'id-DISC-1',
@@ -117,6 +122,7 @@ describe('JiraTaskTracker.linkEpicToInitiative', () => {
 
   it('creates a Polaris delivery link with the idea inward and the epic outward', async () => {
     request.mockImplementation((method: string, path: string) => {
+      if (method === 'GET' && path === '/issueLinkType') return Promise.resolve(deliveryLinkTypes)
       if (method === 'GET' && path === '/issue/DISC-1')
         return Promise.resolve({ id: 'id-DISC-1', key: 'DISC-1', fields: { issuelinks: [] } })
       if (method === 'POST' && path === '/issueLink') return Promise.resolve(undefined)
@@ -134,6 +140,7 @@ describe('JiraTaskTracker.linkEpicToInitiative', () => {
 
   it('no-ops when the epic is already delivery-linked to the idea', async () => {
     request.mockImplementation((method: string, path: string) => {
+      if (method === 'GET' && path === '/issueLinkType') return Promise.resolve(deliveryLinkTypes)
       if (method === 'GET' && path === '/issue/DISC-1')
         return Promise.resolve({
           id: 'id-DISC-1',

@@ -61,7 +61,7 @@ export interface JiraSearchResponse {
 }
 
 export interface JiraIssueTypesResponse {
-  values: { id: string; name: string }[]
+  issueTypes: { id: string; name: string }[]
 }
 
 export interface JiraComment {

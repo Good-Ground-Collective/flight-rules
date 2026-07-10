@@ -44,7 +44,7 @@ const issue = (
   },
 })
 
-const createMeta = { values: [{ id: '10000', name: 'Epic' }, { id: '10001', name: 'Story' }] }
+const createMeta = { issueTypes: [{ id: '10000', name: 'Epic' }, { id: '10001', name: 'Story' }] }
 const blocksLinkTypes = { issueLinkTypes: [{ id: '1', name: 'Blocks', inward: 'is blocked by', outward: 'blocks' }] }
 
 const postCallBody = (): { fields: Record<string, unknown> } => {
@@ -64,7 +64,7 @@ describe('JiraTaskTracker.createEpic', () => {
       if (method === 'POST' && path === '/issue') return Promise.resolve({ id: 'id-PROJ-1', key: 'PROJ-1' })
       if (method === 'GET' && path === '/issue/PROJ-1')
         return Promise.resolve(issue('PROJ-1', { summary: 'My Epic', description: descriptionWith('Epic body', { size: 'epic' }) }))
-      if (method === 'GET' && path === '/search') return Promise.resolve({ issues: [], total: 0, startAt: 0, maxResults: 100 })
+      if (method === 'GET' && path === '/search/jql') return Promise.resolve({ issues: [] })
       throw new Error(`unexpected ${method} ${path}`)
     })
 
@@ -83,7 +83,7 @@ describe('JiraTaskTracker.createEpic', () => {
 
   it('throws a clear error when the Epic issue type is unavailable', async () => {
     request.mockImplementation((method: string, path: string) => {
-      if (path.startsWith('/issue/createmeta')) return Promise.resolve({ values: [{ id: '10001', name: 'Story' }] })
+      if (path.startsWith('/issue/createmeta')) return Promise.resolve({ issueTypes: [{ id: '10001', name: 'Story' }] })
       throw new Error(`unexpected ${method} ${path}`)
     })
 
@@ -136,13 +136,13 @@ describe('JiraTaskTracker.getEpic', () => {
   it('populates childIssues with the planner trio {id, status, blockedBy} via a parent JQL search', async () => {
     const child = issue('PROJ-3', {
       status: 'In Progress',
-      issuelinks: [{ type: { name: 'Blocks' }, inwardIssue: { key: 'PROJ-9' } }],
+      issuelinks: [{ type: { name: 'Blocks' }, outwardIssue: { key: 'PROJ-9' } }],
     })
     request.mockImplementation((method: string, path: string, _body?: unknown, params?: Record<string, unknown>) => {
       if (method === 'GET' && path === '/issueLinkType') return Promise.resolve(blocksLinkTypes)
       if (method === 'GET' && path === '/issue/PROJ-1')
         return Promise.resolve(issue('PROJ-1', { summary: 'Epic', description: descriptionWith('body', { size: 'epic' }) }))
-      if (method === 'GET' && path === '/search') {
+      if (method === 'GET' && path === '/search/jql') {
         expect(params?.['jql']).toBe('parent = PROJ-1')
         return Promise.resolve({ issues: [child], total: 1, startAt: 0, maxResults: 100 })
       }
@@ -174,8 +174,8 @@ describe('JiraTaskTracker.getTicket', () => {
             assignee: 'acct-7',
             description: descriptionWith('the body', { size: 'ticket', tddId: 5 }),
             issuelinks: [
-              { type: { name: 'Blocks' }, inwardIssue: { key: 'PROJ-8' } },
-              { type: { name: 'Blocks' }, outwardIssue: { key: 'PROJ-9' } },
+              { type: { name: 'Blocks' }, outwardIssue: { key: 'PROJ-8' } },
+              { type: { name: 'Blocks' }, inwardIssue: { key: 'PROJ-9' } },
               { type: { name: 'Relates' }, outwardIssue: { key: 'PROJ-10' } },
             ],
           }),

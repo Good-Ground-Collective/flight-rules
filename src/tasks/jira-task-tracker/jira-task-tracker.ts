@@ -30,7 +30,7 @@ const metadataExpandTitle = 'LLM Context'
 const issueFields = 'summary,status,labels,assignee,description,issuelinks,updated'
 const ideaIssueType = 'Idea'
 const jpdProjectType = 'product_discovery'
-const deliveryLinkType = 'Polaris issue link'
+const deliveryLinkOutward = 'implements'
 
 /**
  * The Jira / Jira Product Discovery backend. Epics map to the Epic issue type
@@ -49,6 +49,7 @@ export class JiraTaskTracker implements TaskTracker {
   private readonly metadata: AdfMetadataService = new JiraAdfMetadataService()
   private issueTypeNames: string[] | undefined
   private blocksLinkType: string | undefined
+  private deliveryLinkType: string | undefined
   private jpdProjectVerified = false
 
   constructor(config: JiraTrackerConfig) {
@@ -131,7 +132,7 @@ export class JiraTaskTracker implements TaskTracker {
     const blocksLinkType = await this.resolveBlocksLinkType()
     const links = await this.issueLinks(ticketId)
     const alreadyBlocked = links.some(
-      (link) => link.type.name === blocksLinkType && link.inwardIssue?.key === blockedById,
+      (link) => link.type.name === blocksLinkType && link.outwardIssue?.key === blockedById,
     )
     if (alreadyBlocked) return
 
@@ -146,7 +147,7 @@ export class JiraTaskTracker implements TaskTracker {
     const blocksLinkType = await this.resolveBlocksLinkType()
     const links = await this.issueLinks(ticketId)
     const link = links.find(
-      (candidate) => candidate.type.name === blocksLinkType && candidate.inwardIssue?.key === blockedById,
+      (candidate) => candidate.type.name === blocksLinkType && candidate.outwardIssue?.key === blockedById,
     )
     if (link?.id === undefined) return
 
@@ -184,7 +185,8 @@ export class JiraTaskTracker implements TaskTracker {
     const idea = await this.client.request<JiraIssue>('GET', `/issue/${id}`, undefined, {
       fields: 'summary,description,issuelinks',
     })
-    const epicKeys = this.deliveryLinkedKeys(idea.fields.issuelinks ?? [])
+    const deliveryLinkType = await this.resolveDeliveryLinkType()
+    const epicKeys = this.deliveryLinkedKeys(idea.fields.issuelinks ?? [], deliveryLinkType)
     const epics = await Promise.all(
       epicKeys.map(async (key) => {
         const epic = await this.client.request<JiraIssue>('GET', `/issue/${key}`, undefined, { fields: 'summary' })
@@ -201,6 +203,7 @@ export class JiraTaskTracker implements TaskTracker {
   }
 
   async linkEpicToInitiative(epicId: string, initiativeId: string): Promise<void> {
+    const deliveryLinkType = await this.resolveDeliveryLinkType()
     const links = await this.issueLinks(initiativeId)
     const alreadyLinked = links.some(
       (link) =>
@@ -251,7 +254,7 @@ export class JiraTaskTracker implements TaskTracker {
 
   private async searchChildren(epicKey: string): Promise<Ticket[]> {
     const [page, blocksLinkType] = await Promise.all([
-      this.client.request<JiraSearchResponse>('GET', '/search', undefined, {
+      this.client.request<JiraSearchResponse>('GET', '/search/jql', undefined, {
         jql: `parent = ${epicKey}`,
         fields: issueFields,
         maxResults: 100,
@@ -286,8 +289,11 @@ export class JiraTaskTracker implements TaskTracker {
     const blocking: string[] = []
     links.forEach((link) => {
       if (link.type.name !== blocksLinkType) return
-      if (link.inwardIssue !== undefined) blockedBy.push(link.inwardIssue.key)
-      if (link.outwardIssue !== undefined) blocking.push(link.outwardIssue.key)
+      // On the fetched issue, Jira surfaces the partner in the partner's slot:
+      // the blocker sits in outwardIssue (this issue is blocked by it), the
+      // blocked sits in inwardIssue (this issue blocks it).
+      if (link.outwardIssue !== undefined) blockedBy.push(link.outwardIssue.key)
+      if (link.inwardIssue !== undefined) blocking.push(link.inwardIssue.key)
     })
     return { blockedBy, blocking }
   }
@@ -299,7 +305,7 @@ export class JiraTaskTracker implements TaskTracker {
     await this.client.request('PUT', `/issue/${key}`, { fields: { description: next } })
   }
 
-  private deliveryLinkedKeys(links: JiraIssueLink[]): string[] {
+  private deliveryLinkedKeys(links: JiraIssueLink[], deliveryLinkType: string): string[] {
     const keys: string[] = []
     links.forEach((link) => {
       if (link.type.name !== deliveryLinkType) return
@@ -345,6 +351,21 @@ export class JiraTaskTracker implements TaskTracker {
     return this.blocksLinkType
   }
 
+  private async resolveDeliveryLinkType(): Promise<string> {
+    if (this.deliveryLinkType === undefined) {
+      const response = await this.client.request<JiraIssueLinkTypesResponse>('GET', '/issueLinkType')
+      const match = response.issueLinkTypes.find((type) => type.outward.toLowerCase() === deliveryLinkOutward)
+      if (match === undefined) {
+        const names = response.issueLinkTypes.map((type) => type.name).join(', ')
+        throw new Error(
+          `No JPD delivery link type (outward "${deliveryLinkOutward}") is available in this Jira instance (found: ${names})`,
+        )
+      }
+      this.deliveryLinkType = match.name
+    }
+    return this.deliveryLinkType
+  }
+
   private parseMetadata(issue: JiraIssue) {
     const description = issue.fields.description
     return description === null || description === undefined ? {} : this.metadata.parse(description)
@@ -385,7 +406,7 @@ export class JiraTaskTracker implements TaskTracker {
         'GET',
         `/issue/createmeta/${this.project}/issuetypes`,
       )
-      this.issueTypeNames = meta.values.map((type) => type.name)
+      this.issueTypeNames = meta.issueTypes.map((type) => type.name)
     }
     return this.issueTypeNames
   }
