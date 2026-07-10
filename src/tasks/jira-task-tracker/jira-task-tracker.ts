@@ -2,74 +2,27 @@ import { JiraClient } from './jira-client.js'
 import { adfBuilder, type AdfDocNode, type AdfNode } from './adf.js'
 import { JiraAdfMetadataService, type AdfMetadataService } from './adf-metadata.js'
 import type {
+  JiraAssignableUser,
+  JiraComment,
+  JiraCreatedIssue,
+  JiraIssue,
+  JiraIssueLink,
+  JiraIssueLinkTypesResponse,
+  JiraIssueTypesResponse,
+  JiraSearchResponse,
+  JiraTrackerConfig,
+} from './jira-interfaces.js'
+import type {
   Comment,
   CreateEpicInput,
   CreateTicketInput,
+  EntityMetadata,
   Epic,
   Initiative,
   TaskTracker,
   TechnicalDesign,
   Ticket,
 } from '../task-tracker/task-tracker.js'
-
-interface JiraTrackerConfig {
-  token: string
-  host: string
-  email: string
-  project: string
-  jpdProject?: string
-}
-
-interface JiraAssignableUser {
-  accountId: string
-  displayName: string
-}
-
-interface JiraCreatedIssue {
-  id: string
-  key: string
-}
-
-interface JiraIssueLink {
-  id?: string
-  type: { name: string }
-  inwardIssue?: { key: string }
-  outwardIssue?: { key: string }
-}
-
-interface JiraLinkType {
-  id: string
-  name: string
-  inward: string
-  outward: string
-}
-
-interface JiraIssueLinkTypesResponse {
-  issueLinkTypes: JiraLinkType[]
-}
-
-interface JiraIssue {
-  id: string
-  key: string
-  fields: {
-    summary: string
-    status?: { name: string }
-    labels?: string[]
-    assignee?: { accountId: string } | null
-    description?: AdfDocNode | null
-    updated?: string
-    parent?: { key: string }
-    issuelinks?: JiraIssueLink[]
-  }
-}
-
-interface JiraSearchResponse {
-  issues: JiraIssue[]
-}
-
-interface JiraIssueTypesResponse {
-  values: { id: string; name: string }[]
-}
 
 const metadataExpandTitle = 'LLM Context'
 const issueFields = 'summary,status,labels,assignee,description,issuelinks,updated'
@@ -79,8 +32,8 @@ const issueFields = 'summary,status,labels,assignee,description,issuelinks,updat
  * and tickets to Story; parentage rides the native `parent` field, and entity
  * metadata round-trips through the ADF description via {@link AdfMetadataService}.
  * Blocking dependencies ride "Blocks" issue links, resolved by name from the
- * instance. Initiatives, TDDs, and comments arrive in later tickets and reject
- * until then.
+ * instance, and entity metadata updates splice back through the description.
+ * Initiatives and TDDs arrive in later tickets and reject until then.
  */
 export class JiraTaskTracker implements TaskTracker {
   private readonly client: JiraClient
@@ -190,12 +143,12 @@ export class JiraTaskTracker implements TaskTracker {
     await this.client.request('DELETE', `/issueLink/${link.id}`)
   }
 
-  updateEpicMetadata(): Promise<void> {
-    return this.notImplemented('updateEpicMetadata')
+  async updateEpicMetadata(epicId: string, patch: Partial<EntityMetadata>): Promise<void> {
+    await this.spliceDescriptionMetadata(epicId, patch)
   }
 
-  updateTicketMetadata(): Promise<void> {
-    return this.notImplemented('updateTicketMetadata')
+  async updateTicketMetadata(ticketId: string, patch: Partial<EntityMetadata>): Promise<void> {
+    await this.spliceDescriptionMetadata(ticketId, patch)
   }
 
   updateTddMetadata(): Promise<void> {
@@ -222,8 +175,17 @@ export class JiraTaskTracker implements TaskTracker {
     return this.notImplemented('getTechnicalDesign')
   }
 
-  addComment(): Promise<Comment> {
-    return this.notImplemented('addComment')
+  async addComment(entityId: string, body: string): Promise<Comment> {
+    const comment = await this.client.request<JiraComment>('POST', `/issue/${entityId}/comment`, {
+      body: adfBuilder.doc(body),
+    })
+    return {
+      id: comment.id,
+      body,
+      author: comment.author?.displayName ?? '',
+      createdAt: comment.created,
+      updatedAt: comment.updated,
+    }
   }
 
   async getUsers(): Promise<string[]> {
@@ -279,6 +241,13 @@ export class JiraTaskTracker implements TaskTracker {
       if (link.outwardIssue !== undefined) blocking.push(link.outwardIssue.key)
     })
     return { blockedBy, blocking }
+  }
+
+  private async spliceDescriptionMetadata(key: string, patch: Partial<EntityMetadata>): Promise<void> {
+    const issue = await this.client.request<JiraIssue>('GET', `/issue/${key}`, undefined, { fields: 'description' })
+    const current = issue.fields.description ?? adfBuilder.doc('')
+    const next = this.metadata.splice(current, patch)
+    await this.client.request('PUT', `/issue/${key}`, { fields: { description: next } })
   }
 
   private async issueLinks(ticketId: string): Promise<JiraIssueLink[]> {
