@@ -29149,12 +29149,10 @@ var Octokit2 = Octokit.plugin(requestLog, legacyRestEndpointMethods, paginateRes
 var import_yaml = __toESM(require_dist2(), 1);
 
 // src/tasks/task-tracker/task-tracker.ts
-var entitySizes = ["ticket", "epic", "initiative"];
 var EntityMetadataSchema = external_exports.object({
   tddId: external_exports.number().optional(),
   epicId: external_exports.number().optional(),
-  notes: external_exports.string().optional(),
-  size: external_exports.enum(entitySizes).optional()
+  notes: external_exports.string().optional()
 }).passthrough();
 var CommentSchema = external_exports.object({
   id: external_exports.string(),
@@ -29173,6 +29171,7 @@ var TechnicalDesignSchema = external_exports.object({
 });
 var TicketSchema = external_exports.object({
   id: external_exports.string(),
+  size: external_exports.literal("ticket"),
   status: external_exports.string(),
   labels: external_exports.array(external_exports.string()),
   title: external_exports.string(),
@@ -29186,6 +29185,7 @@ var TicketSchema = external_exports.object({
 });
 var EpicSchema = external_exports.object({
   id: external_exports.string(),
+  size: external_exports.literal("epic"),
   status: external_exports.string(),
   labels: external_exports.array(external_exports.string()),
   title: external_exports.string(),
@@ -29218,6 +29218,7 @@ var CreateTechnicalDesignInputSchema = external_exports.object({
 });
 var InitiativeSchema = external_exports.object({
   id: external_exports.string(),
+  size: external_exports.literal("initiative"),
   title: external_exports.string(),
   body: external_exports.string(),
   epics: external_exports.array(external_exports.object({ id: external_exports.string(), title: external_exports.string() })).default([])
@@ -29241,6 +29242,7 @@ var BodyMetadataService = class {
     if (typeof raw !== "object" || Array.isArray(raw)) {
       throw new Error("malformed flight-rules metadata block");
     }
+    Reflect.deleteProperty(raw, "size");
     return EntityMetadataSchema.parse(raw);
   }
   splice(body, patch) {
@@ -29295,6 +29297,7 @@ var GitHubTaskTracker = class {
     });
     return {
       id: String(data.number),
+      size: "epic",
       status: data.state,
       labels: data.labels.map((l) => this.labelName(l)).filter(Boolean),
       title: data.title,
@@ -29314,6 +29317,7 @@ var GitHubTaskTracker = class {
     });
     return {
       id: String(data.number),
+      size: "initiative",
       title: data.title,
       body: data.description ?? "",
       epics: []
@@ -29338,6 +29342,7 @@ var GitHubTaskTracker = class {
     const milestone = milestoneResponse.data;
     return {
       id,
+      size: "initiative",
       title: milestone.title,
       body: milestone.description ?? "",
       epics: epicsResponse.data.map((issue2) => ({
@@ -29376,6 +29381,7 @@ var GitHubTaskTracker = class {
     }
     return {
       id,
+      size: "epic",
       status: issue2.state,
       labels: issue2.labels.map((l) => this.labelName(l)).filter(Boolean),
       title: issue2.title,
@@ -29635,6 +29641,7 @@ var GitHubTaskTracker = class {
   mapTicket(issue2, comments, blockedBy = [], blocking = [], metadata = {}) {
     return {
       id: String(issue2.number),
+      size: "ticket",
       status: issue2.state,
       labels: issue2.labels.map((l) => this.labelName(l)).filter(Boolean),
       title: issue2.title,
@@ -29752,6 +29759,7 @@ var JiraAdfMetadataService = class {
     if (yaml === void 0) return {};
     const raw = (0, import_yaml2.parse)(yaml);
     if (raw === null || raw === void 0 || typeof raw !== "object" || Array.isArray(raw)) return {};
+    Reflect.deleteProperty(raw, "size");
     return EntityMetadataSchema.parse(raw);
   }
   splice(doc, patch) {
@@ -29815,6 +29823,7 @@ var JiraTaskTracker = class {
     const childIssues = await this.searchChildren(issue2.key);
     return {
       id: issue2.key,
+      size: "epic",
       status: issue2.fields.status?.name ?? "unknown",
       labels: issue2.fields.labels ?? [],
       title: issue2.fields.summary,
@@ -29911,6 +29920,7 @@ var JiraTaskTracker = class {
     );
     return {
       id: idea.key,
+      size: "initiative",
       title: idea.fields.summary,
       body: this.extractBody(idea.fields.description),
       epics
@@ -29925,8 +29935,8 @@ var JiraTaskTracker = class {
     if (alreadyLinked) return;
     await this.client.request("POST", "/issueLink", {
       type: { name: deliveryLinkType },
-      inwardIssue: { key: initiativeId },
-      outwardIssue: { key: epicId }
+      outwardIssue: { key: initiativeId },
+      inwardIssue: { key: epicId }
     });
   }
   createTechnicalDesign() {
@@ -29972,6 +29982,7 @@ var JiraTaskTracker = class {
     const { blockedBy, blocking } = this.blockingLinks(issue2.fields.issuelinks ?? [], blocksLinkType);
     return {
       id: issue2.key,
+      size: "ticket",
       status: issue2.fields.status?.name ?? "unknown",
       labels: issue2.fields.labels ?? [],
       title: issue2.fields.summary,
@@ -30145,12 +30156,11 @@ var DependencyPlannerService = class {
 // src/tasks/commands/epic/command.ts
 function createEpicCommand(getTracker) {
   const epic = new Command("epic");
-  epic.command("create").exitOverride().requiredOption("--title <title>", "epic title").option("--body <body>", "epic body (or use --body-file)").option("--body-file <path>", "read the epic body from a file").option("--labels <labels>", "comma-separated labels").addOption(new Option("--size <size>", "work size for the LLM-Context metadata").choices([...entitySizes])).action(async (opts) => {
+  epic.command("create").exitOverride().requiredOption("--title <title>", "epic title").option("--body <body>", "epic body (or use --body-file)").option("--body-file <path>", "read the epic body from a file").option("--labels <labels>", "comma-separated labels").action(async (opts) => {
     const result = await getTracker().createEpic({
       title: opts.title,
       body: resolveBody({ body: opts.body, bodyFile: opts.bodyFile }),
-      labels: opts.labels !== void 0 ? opts.labels.split(",") : [],
-      ...opts.size !== void 0 ? { metadata: { size: opts.size } } : {}
+      labels: opts.labels !== void 0 ? opts.labels.split(",") : []
     });
     process.stdout.write(JSON.stringify(result) + "\n");
   });
@@ -30199,14 +30209,13 @@ function createInitiativeCommand(getTracker) {
 // src/tasks/commands/ticket/command.ts
 function createTicketCommand(getTracker) {
   const ticket = new Command("ticket");
-  ticket.command("create").exitOverride().requiredOption("--title <title>", "ticket title").option("--body <body>", "ticket body (or use --body-file)").option("--body-file <path>", "read the ticket body from a file").requiredOption("--epic-id <id>", "parent epic id").option("--labels <labels>", "comma-separated labels").option("--assignee <user>", "assignee login").addOption(new Option("--size <size>", "work size for the LLM-Context metadata").choices([...entitySizes])).action(async (opts) => {
+  ticket.command("create").exitOverride().requiredOption("--title <title>", "ticket title").option("--body <body>", "ticket body (or use --body-file)").option("--body-file <path>", "read the ticket body from a file").requiredOption("--epic-id <id>", "parent epic id").option("--labels <labels>", "comma-separated labels").option("--assignee <user>", "assignee login").action(async (opts) => {
     const input = {
       title: opts.title,
       body: resolveBody({ body: opts.body, bodyFile: opts.bodyFile }),
       epicId: opts.epicId,
       labels: opts.labels !== void 0 ? opts.labels.split(",") : [],
-      ...opts.assignee !== void 0 ? { assignee: opts.assignee } : {},
-      ...opts.size !== void 0 ? { metadata: { size: opts.size } } : {}
+      ...opts.assignee !== void 0 ? { assignee: opts.assignee } : {}
     };
     const result = await getTracker().createTicket(input);
     process.stdout.write(JSON.stringify(result) + "\n");
@@ -30478,7 +30487,7 @@ function createGitCommand(getExecutor) {
 }
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.22.0";
+var appVersion = false ? "0.0.0-dev" : "1.22.1";
 
 // src/cli.ts
 function buildTracker(overrideTracker) {
