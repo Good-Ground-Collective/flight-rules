@@ -1,14 +1,13 @@
 import { Command } from 'commander'
 import type { Config } from '../../../config.js'
+import { readEnv, type Env } from '../../../env.js'
 import type { TaskTracker } from '../../task-tracker/task-tracker.js'
 
 type Check = { name: string; ok: boolean; detail: string }
 
-// Required credential env var per tracker, so the check stays deterministic and
-// the tracker specifics live here in the CLI rather than in any skill.
-const credentialVar: Record<Config['tracker'], string | undefined> = {
-  github: 'GITHUB_TOKEN',
-  jira: undefined,
+function credentialFor(tracker: Config['tracker'], env: Env): { name: string; value: string | undefined } {
+  if (tracker === 'github') return { name: 'GITHUB_TOKEN', value: env.githubToken }
+  return { name: 'JIRA_TOKEN (or JIRA_API_TOKEN / JIRA_API_KEY)', value: env.jiraToken }
 }
 
 export function createCheckCommand(
@@ -31,12 +30,12 @@ export function createCheckCommand(
     }
     checks.push({ name: 'config', ok: true, detail: `tracker=${config.tracker} repo=${config.repo}` })
 
-    const credVar = credentialVar[config.tracker]
-    const credOk = credVar === undefined || process.env[credVar] !== undefined
+    const credential = credentialFor(config.tracker, readEnv())
+    const credOk = credential.value !== undefined
     checks.push({
       name: 'credentials',
       ok: credOk,
-      detail: credOk ? 'present' : `${credVar} is not set`,
+      detail: credOk ? 'present' : `${credential.name} is not set`,
     })
 
     if (credOk) {

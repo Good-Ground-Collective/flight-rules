@@ -20,6 +20,9 @@ vi.mock('@octokit/rest', () => ({
             },
           }),
         },
+        repos: {
+          get: vi.fn().mockResolvedValue({ data: { full_name: 'acme/proj' } }),
+        },
       },
     }
   }),
@@ -27,6 +30,12 @@ vi.mock('@octokit/rest', () => ({
 
 vi.mock('@octokit/graphql', () => ({
   graphql: Object.assign(vi.fn(), { defaults: vi.fn().mockReturnValue(vi.fn()) }),
+}))
+
+vi.mock('./tasks/jira-task-tracker/jira-client.js', () => ({
+  JiraClient: class {
+    request = vi.fn().mockResolvedValue({ accountId: 'acct-1' })
+  },
 }))
 
 const writeConfig = (dir: string, content: string): string => {
@@ -62,5 +71,41 @@ describe('run', () => {
     const { run } = await import('./cli.js')
     // program-level exitOverride makes --help reject rather than process.exit
     await expect(run(['--help'])).rejects.toThrow()
+  })
+
+  it('builds a JiraTaskTracker for a jira config so check passes', async () => {
+    const dir = join(tmpdir(), `fr-cli-jira-${Date.now()}`)
+    const configPath = writeConfig(
+      dir,
+      `---\ntracker: jira\njiraHost: acme.atlassian.net\njiraEmail: me@acme.com\njiraProject: PROJ\n---\n`,
+    )
+    vi.stubEnv('JIRA_TOKEN', 'jira-token')
+    vi.stubEnv('JIRA_EMAIL', 'me@acme.com')
+    vi.stubEnv('FLIGHT_RULES_CONFIG', configPath)
+
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    const { run } = await import('./cli.js')
+    await run(['check'])
+
+    expect(output).toHaveBeenCalledWith(expect.stringContaining('"tracker":"jira"') as string)
+    expect(output).toHaveBeenCalledWith(expect.stringContaining('"ok":true') as string)
+    output.mockRestore()
+  })
+
+  it('honors --tracker to override the configured tracker for one run', async () => {
+    const dir = join(tmpdir(), `fr-cli-override-${Date.now()}`)
+    const configPath = writeConfig(
+      dir,
+      `---\ntracker: jira\njiraHost: acme.atlassian.net\njiraEmail: me@acme.com\njiraProject: PROJ\nrepo: acme/proj\n---\n`,
+    )
+    vi.stubEnv('GITHUB_TOKEN', 'gh-token')
+    vi.stubEnv('FLIGHT_RULES_CONFIG', configPath)
+
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    const { run } = await import('./cli.js')
+    await run(['--tracker', 'github', 'check'])
+
+    expect(output).toHaveBeenCalledWith(expect.stringContaining('"tracker":"github"') as string)
+    output.mockRestore()
   })
 })

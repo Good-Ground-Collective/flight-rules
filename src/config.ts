@@ -20,14 +20,32 @@ export const seedCompetencies = [
   'auth-check',
 ] as const
 
-const ConfigSchema = z.object({
-  tracker: z.enum(['github', 'jira']),
-  repo: z.string(),
-  defaultLabels: z.array(z.string()).default([]),
-  rfcStorage: z.enum(['local', 'global']).default('local'),
-  rfcStoragePath: z.string().optional(),
-  competencies: z.array(z.string()).default([...seedCompetencies]),
-})
+const ConfigSchema = z
+  .object({
+    tracker: z.enum(['github', 'jira']),
+    repo: z.string().optional().describe('GitHub owner/repo; required when tracker is github'),
+    jiraHost: z.string().optional().describe('Atlassian Cloud host, e.g. acme.atlassian.net'),
+    jiraEmail: z.string().optional().describe('Atlassian account email for Basic auth'),
+    jiraProject: z.string().optional().describe('Jira project key holding epics and tickets'),
+    jpdProject: z.string().optional().describe('Jira Product Discovery project key holding initiatives'),
+    confluenceSpaceKey: z.string().optional().describe('Confluence space key holding technical design docs'),
+    defaultLabels: z.array(z.string()).default([]),
+    rfcStorage: z.enum(['local', 'global']).default('local'),
+    rfcStoragePath: z.string().optional(),
+    competencies: z.array(z.string()).default([...seedCompetencies]),
+  })
+  .superRefine((cfg, ctx) => {
+    if (cfg.tracker === 'github' && cfg.repo === undefined) {
+      ctx.addIssue({ code: 'custom', path: ['repo'], message: 'repo is required when tracker is github' })
+    }
+    if (cfg.tracker === 'jira') {
+      ;(['jiraHost', 'jiraEmail', 'jiraProject'] as const).forEach((field) => {
+        if (cfg[field] === undefined) {
+          ctx.addIssue({ code: 'custom', path: [field], message: `${field} is required when tracker is jira` })
+        }
+      })
+    }
+  })
 
 export type Config = z.infer<typeof ConfigSchema>
 

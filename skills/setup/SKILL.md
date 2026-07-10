@@ -27,7 +27,17 @@ Stop if the binary is not working.
 
 ---
 
-## Step 2: Check GITHUB_TOKEN
+## Step 2: Choose the task tracker
+
+Ask:
+
+> "Which task tracker will this project use — **GitHub** (Issues) or **Jira** (Jira + Jira Product Discovery + Confluence)?"
+
+The rest of setup branches on this answer. Follow **Step 3–6 (GitHub)** or **Step 3–6 (Jira)** accordingly.
+
+---
+
+## Step 3 (GitHub): Check GITHUB_TOKEN
 
 Run:
 
@@ -45,9 +55,7 @@ If the output is empty, tell the user:
 
 Stop if the token is not present.
 
----
-
-## Step 3: Collect configuration
+## Step 4 (GitHub): Collect configuration
 
 Ask each question in order. Keep it conversational — one question at a time.
 
@@ -68,9 +76,7 @@ Validate that the input contains exactly one `/`.
 
 If they provide labels, split on commas and strip whitespace. If they skip, use an empty list.
 
----
-
-## Step 4: Write the config file
+## Step 5 (GitHub): Write the config file
 
 Create `.claude/` if it doesn't exist. Write `.claude/flight-rules.local.md`:
 
@@ -103,9 +109,7 @@ rfcStoragePath: <path>
 
 Omit the `defaultLabels` block entirely if the user skipped that step.
 
----
-
-## Step 5: Smoke test
+## Step 6 (GitHub): Smoke test
 
 Run:
 
@@ -119,3 +123,82 @@ flight-rules users get
   - 401/403 — token lacks `read:org` scope or doesn't have access to the org
   - 404 — the org in the repo field doesn't exist or the token can't see it
   - Parse error — the config file was written incorrectly; show the file and offer to fix it
+
+---
+
+## Step 3 (Jira): Check credentials
+
+Jira, Jira Product Discovery, and Confluence all authenticate with one Atlassian API token plus the account email (HTTP Basic auth). Run:
+
+```bash
+echo "${JIRA_TOKEN:+token-set} ${JIRA_EMAIL:+email-set}"
+```
+
+If either is missing, tell the user:
+
+> "Jira needs an API token and the account email. Export both before continuing:
+> ```bash
+> export JIRA_TOKEN=your_atlassian_api_token   # id.atlassian.com → Security → API tokens
+> export JIRA_EMAIL=you@example.com            # the Atlassian account the token belongs to
+> ```
+> The same token works for Jira, Jira Product Discovery, and Confluence."
+
+Stop if either is not present.
+
+## Step 4 (Jira): Collect configuration
+
+Ask each question in order, one at a time.
+
+**Host**
+> "What's your Atlassian Cloud host? Just the domain, e.g. `acme.atlassian.net`."
+
+**Jira project key**
+> "Which Jira project key will hold epics and tickets? (e.g. `PROJ`)"
+
+**JPD project key**
+> "Which Jira Product Discovery project holds initiatives (Ideas)? (e.g. `DISC`) — hit enter to skip if you're not using JPD yet."
+
+**RFC storage**
+> "Where should RFCs be saved — locally in this project's `rfcs/` folder, or in a shared global RFC repository?"
+
+- If local: no follow-up needed.
+- If global: ask for the absolute path to the RFC repository.
+
+**Default labels** (optional)
+> "Any default labels to apply to every issue created from this project? Hit enter to skip."
+
+## Step 5 (Jira): Write the config file
+
+Create `.claude/` if it doesn't exist. Write `.claude/flight-rules.local.md`. Note there is **no `repo`** field for Jira; work is identified by project keys.
+
+```markdown
+---
+tracker: jira
+jiraHost: <host>
+jiraEmail: <email>
+jiraProject: <project key>
+jpdProject: <jpd project key>
+rfcStorage: local
+---
+```
+
+- Omit `jpdProject` if the user skipped it.
+- For global RFC storage, use `rfcStorage: global` and add `rfcStoragePath: <path>` instead of `rfcStorage: local`.
+- Add a `defaultLabels` block only if the user provided labels.
+
+`JIRA_TOKEN` and `JIRA_EMAIL` stay in the environment — never write them into the config file.
+
+## Step 6 (Jira): Smoke test
+
+Run:
+
+```bash
+flight-rules check
+```
+
+- If the JSON report shows `"ok": true`: setup is complete. Tell the user:
+  > "Setup complete. `flight-rules` is configured for Jira project `<project key>`. Try `/draft-request-for-comments` to author your first RFC."
+- If a check fails, show the report and explain by failed check:
+  - `credentials` — `JIRA_TOKEN` (or `JIRA_EMAIL`) is not exported in this shell.
+  - `reachable` — 401 means the token/email pair is wrong; 404 means the host or project key is wrong; a network error means the host domain is unreachable.
+  - `config` — the config file was written incorrectly; show the file and offer to fix it.
