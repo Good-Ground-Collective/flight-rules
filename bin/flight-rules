@@ -29164,6 +29164,7 @@ var CommentSchema = external_exports.object({
 var TechnicalDesignSchema = external_exports.object({
   id: external_exports.string(),
   epicId: external_exports.string(),
+  url: external_exports.string().optional(),
   body: external_exports.string(),
   comments: external_exports.array(CommentSchema),
   metadata: EntityMetadataSchema.default({}),
@@ -29724,6 +29725,57 @@ var JiraClient = class {
   }
 };
 
+// src/tasks/jira-task-tracker/confluence-client.ts
+var maxRetries2 = 4;
+var defaultRetryAfterSeconds2 = 2;
+var maxBackoffMs2 = 3e4;
+var ConfluenceErrorBodySchema = external_exports.object({
+  errors: external_exports.array(external_exports.object({ title: external_exports.string().optional(), detail: external_exports.string().optional() })).optional().catch(void 0),
+  message: external_exports.string().optional()
+});
+var ConfluenceClient = class {
+  siteBaseUrl;
+  baseUrl;
+  authHeader;
+  constructor(config2) {
+    this.siteBaseUrl = `https://${config2.host}/wiki`;
+    this.baseUrl = `${this.siteBaseUrl}/api/v2`;
+    this.authHeader = `Basic ${Buffer.from(`${config2.email}:${config2.token}`).toString("base64")}`;
+  }
+  async request(method, path2, body, params) {
+    const url2 = new URL(`${this.baseUrl}${path2}`);
+    if (params) Object.entries(params).forEach(([k, v]) => url2.searchParams.set(k, String(v)));
+    const res = await this.fetchWithRetry(url2.toString(), {
+      method,
+      headers: { Authorization: this.authHeader, "Content-Type": "application/json", Accept: "application/json" },
+      ...body !== void 0 ? { body: JSON.stringify(body) } : {}
+    });
+    if (!res.ok) await this.throwApiError(res);
+    const text = await res.text();
+    const data = text.length > 0 ? JSON.parse(text) : void 0;
+    return data;
+  }
+  async fetchWithRetry(url2, init, attempt = 0) {
+    const res = await fetch(url2, init);
+    if (res.status === 429 && attempt < maxRetries2) {
+      const retryAfterHeader = res.headers.get("Retry-After");
+      const parsedRetryAfter = retryAfterHeader !== null ? Number(retryAfterHeader) : NaN;
+      const retryAfterSeconds = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : defaultRetryAfterSeconds2;
+      const jitter = 0.7 + Math.random() * 0.6;
+      const delayMs = Math.min(retryAfterSeconds * 1e3 * jitter, maxBackoffMs2);
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      return this.fetchWithRetry(url2, init, attempt + 1);
+    }
+    return res;
+  }
+  async throwApiError(res) {
+    const parsed = await res.json().catch(() => void 0);
+    const body = ConfluenceErrorBodySchema.catch({}).parse(parsed);
+    const detail = body.errors?.map((e) => e.detail ?? e.title).filter(Boolean).join("; ") ?? body.message ?? "";
+    throw new Error(`Confluence API ${res.status}${detail ? `: ${detail}` : ""}`);
+  }
+};
+
 // src/tasks/jira-task-tracker/adf.ts
 var DefaultAdfBuilder = class {
   doc(text) {
@@ -29790,19 +29842,25 @@ var issueFields = "summary,status,labels,assignee,description,issuelinks,updated
 var ideaIssueType = "Idea";
 var jpdProjectType = "product_discovery";
 var deliveryLinkOutward = "implements";
+var tddMetadataPropertyKey = "flight-rules-metadata";
 var JiraTaskTracker = class {
   client;
+  confluence;
   project;
   jpdProject;
+  confluenceSpaceKey;
   metadata = new JiraAdfMetadataService();
   issueTypeNames;
   blocksLinkType;
   deliveryLinkType;
+  confluenceSpaceId;
   jpdProjectVerified = false;
   constructor(config2) {
     this.client = new JiraClient({ host: config2.host, email: config2.email, token: config2.token });
+    this.confluence = new ConfluenceClient({ host: config2.host, email: config2.email, token: config2.token });
     this.project = config2.project;
     this.jpdProject = config2.jpdProject;
+    this.confluenceSpaceKey = config2.confluenceSpaceKey;
   }
   async createEpic(input) {
     const issuetype = await this.resolveIssueType("Epic");
@@ -29891,8 +29949,24 @@ var JiraTaskTracker = class {
   async updateTicketMetadata(ticketId, patch) {
     await this.spliceDescriptionMetadata(ticketId, patch);
   }
-  updateTddMetadata() {
-    return this.notImplemented("updateTddMetadata");
+  async updateTddMetadata(tddId, patch) {
+    const existing = await this.tddMetadataProperty(tddId);
+    const merged = { ...existing?.value ?? {} };
+    Object.entries(patch).forEach(([key, value]) => {
+      if (value !== void 0) merged[key] = value;
+    });
+    if (existing === void 0) {
+      await this.confluence.request("POST", `/pages/${tddId}/properties`, {
+        key: tddMetadataPropertyKey,
+        value: merged
+      });
+      return;
+    }
+    await this.confluence.request("PUT", `/pages/${tddId}/properties/${existing.id}`, {
+      key: tddMetadataPropertyKey,
+      value: merged,
+      version: { number: (existing.version?.number ?? 1) + 1 }
+    });
   }
   async createInitiative(input) {
     const projectKey = await this.ensureJpdProject();
@@ -29939,11 +30013,28 @@ var JiraTaskTracker = class {
       inwardIssue: { key: epicId }
     });
   }
-  createTechnicalDesign() {
-    return this.notImplemented("createTechnicalDesign");
+  async createTechnicalDesign(input) {
+    const spaceId = await this.resolveConfluenceSpaceId();
+    const propertyValue = { ...input.metadata, epicId: input.epicId };
+    const page = await this.confluence.request("POST", "/pages", {
+      spaceId,
+      status: "current",
+      title: input.title,
+      body: { representation: "storage", value: input.body }
+    });
+    await this.confluence.request("POST", `/pages/${page.id}/properties`, {
+      key: tddMetadataPropertyKey,
+      value: propertyValue
+    });
+    await this.updateEpicMetadata(input.epicId, { tddId: Number(page.id) });
+    return this.mapTechnicalDesign(page, input.body, propertyValue);
   }
-  getTechnicalDesign() {
-    return this.notImplemented("getTechnicalDesign");
+  async getTechnicalDesign(id) {
+    const [page, property] = await Promise.all([
+      this.confluence.request("GET", `/pages/${id}`, void 0, { "body-format": "storage" }),
+      this.tddMetadataProperty(id)
+    ]);
+    return this.mapTechnicalDesign(page, page.body?.storage?.value ?? "", property?.value ?? {});
   }
   async addComment(entityId, body) {
     const comment = await this.client.request("POST", `/issue/${entityId}/comment`, {
@@ -30102,8 +30193,41 @@ var JiraTaskTracker = class {
     }
     return this.issueTypeNames;
   }
-  notImplemented(method) {
-    return Promise.reject(new Error(`JiraTaskTracker.${method} not implemented`));
+  async resolveConfluenceSpaceId() {
+    if (this.confluenceSpaceKey === void 0) {
+      throw new Error("No Confluence space is configured; set confluenceSpaceKey to create or fetch technical designs");
+    }
+    if (this.confluenceSpaceId === void 0) {
+      const response = await this.confluence.request("GET", "/spaces", void 0, {
+        keys: this.confluenceSpaceKey
+      });
+      const space = response.results[0];
+      if (space === void 0) throw new Error(`Confluence space "${this.confluenceSpaceKey}" was not found`);
+      this.confluenceSpaceId = space.id;
+    }
+    return this.confluenceSpaceId;
+  }
+  async tddMetadataProperty(pageId) {
+    const response = await this.confluence.request(
+      "GET",
+      `/pages/${pageId}/properties`
+    );
+    return response.results.find((property) => property.key === tddMetadataPropertyKey);
+  }
+  mapTechnicalDesign(page, body, propertyValue) {
+    const { epicId: rawEpicId, ...rest } = propertyValue;
+    const metadata = EntityMetadataSchema.parse(rest);
+    const epicId = typeof rawEpicId === "string" ? rawEpicId : rawEpicId !== void 0 ? String(rawEpicId) : "";
+    const webui = page._links?.webui;
+    return {
+      id: String(page.id),
+      epicId,
+      ...webui !== void 0 ? { url: `${this.confluence.siteBaseUrl}${webui}` } : {},
+      body,
+      comments: [],
+      metadata,
+      updatedAt: page.version?.createdAt ?? ""
+    };
   }
 };
 
@@ -30487,7 +30611,7 @@ function createGitCommand(getExecutor) {
 }
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.22.1";
+var appVersion = false ? "0.0.0-dev" : "1.23.0";
 
 // src/cli.ts
 function buildTracker(overrideTracker) {
@@ -30514,7 +30638,8 @@ function buildTracker(overrideTracker) {
     host,
     email: env.jiraEmail,
     project: config2.jiraProject,
-    ...config2.jpdProject !== void 0 ? { jpdProject: config2.jpdProject } : {}
+    ...config2.jpdProject !== void 0 ? { jpdProject: config2.jpdProject } : {},
+    ...config2.confluenceSpaceKey !== void 0 ? { confluenceSpaceKey: config2.confluenceSpaceKey } : {}
   });
 }
 function getConfigFromEnv(overrideTracker) {
