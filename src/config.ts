@@ -23,14 +23,12 @@ export const seedCompetencies = [
 const ConfigSchema = z
   .object({
     tracker: z.enum(['github', 'jira']),
-    // repo is GitHub-specific; Jira identifies work by project keys instead. Both
-    // are optional at the field level and required per-tracker by the refine below.
-    repo: z.string().optional(),
-    jiraHost: z.string().optional(),
-    jiraEmail: z.string().optional(),
-    jiraProject: z.string().optional(),
-    jpdProject: z.string().optional(),
-    confluenceSpaceKey: z.string().optional(),
+    repo: z.string().optional().describe('GitHub owner/repo; required when tracker is github'),
+    jiraHost: z.string().optional().describe('Atlassian Cloud host, e.g. acme.atlassian.net'),
+    jiraEmail: z.string().optional().describe('Atlassian account email for Basic auth'),
+    jiraProject: z.string().optional().describe('Jira project key holding epics and tickets'),
+    jpdProject: z.string().optional().describe('Jira Product Discovery project key holding initiatives'),
+    confluenceSpaceKey: z.string().optional().describe('Confluence space key holding technical design docs'),
     defaultLabels: z.array(z.string()).default([]),
     rfcStorage: z.enum(['local', 'global']).default('local'),
     rfcStoragePath: z.string().optional(),

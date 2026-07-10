@@ -96,8 +96,10 @@ describe('check command (jira)', () => {
     output.mockRestore()
   })
 
-  it('fails and skips the probe when JIRA_TOKEN is missing', async () => {
+  it('fails and skips the probe when JIRA_TOKEN and its aliases are missing', async () => {
     vi.stubEnv('JIRA_TOKEN', undefined)
+    vi.stubEnv('JIRA_API_TOKEN', undefined)
+    vi.stubEnv('JIRA_API_KEY', undefined)
     const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
     const ping = vi.fn().mockResolvedValue(undefined)
     await expect(run(() => jiraConfig, makeTracker(ping))).rejects.toThrow('check failed')

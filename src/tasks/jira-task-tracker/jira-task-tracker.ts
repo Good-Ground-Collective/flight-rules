@@ -21,17 +21,16 @@ interface JiraAssignableUser {
   displayName: string
 }
 
-// The Jira/JPD backend. This ticket delivers the selectable, health-checkable
-// shell: ping() and getUsers() are live; the remaining TaskTracker methods are
-// filled in by later tickets (T4–T8) and reject until then. Stubs omit their
-// parameters (a lower-arity method still satisfies the interface) so the
-// scaffold stays lint-clean; each ticket reintroduces the real signature.
+/**
+ * The Jira / Jira Product Discovery backend. Backend selection and reachability
+ * work today through ping() and getUsers(); the remaining TaskTracker
+ * operations reject until their support ships. A stub omits its parameters
+ * because a lower-arity method still satisfies the interface.
+ */
 export class JiraTaskTracker implements TaskTracker {
   private readonly client: JiraClient
   private readonly project: string
 
-  // jpdProject / confluenceSpaceKey are accepted (the config seam T7/T8 need)
-  // but not stored until those tickets consume them.
   constructor(config: JiraTrackerConfig) {
     this.client = new JiraClient({ host: config.host, email: config.email, token: config.token })
     this.project = config.project

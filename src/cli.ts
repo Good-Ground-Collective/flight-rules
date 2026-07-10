@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { Command, CommanderError } from 'commander'
 import { readConfig } from './config.js'
 import type { Config } from './config.js'
+import { readEnv } from './env.js'
 import { GitHubTaskTracker } from './tasks/github-task-tracker/github-task-tracker.js'
 import { JiraTaskTracker } from './tasks/jira-task-tracker/jira-task-tracker.js'
 import { createEpicCommand } from './tasks/commands/epic/command.js'
@@ -20,31 +21,33 @@ import { appVersion } from './version.js'
 
 function buildTracker(overrideTracker?: string): TaskTracker {
   const config = getConfigFromEnv(overrideTracker)
+  const env = readEnv()
 
   if (config.tracker === 'github') {
-    const token = process.env['GITHUB_TOKEN']
-    if (token === undefined) throw new Error('GITHUB_TOKEN environment variable is required')
+    if (env.githubToken === undefined) throw new Error('GITHUB_TOKEN environment variable is required')
     if (config.repo === undefined) throw new Error('repo is required when tracker is github')
-    const parts = config.repo.split('/')
-    const owner = parts[0]
-    const repo = parts[1]
+
+    const [owner, repo] = config.repo.split('/')
     if (owner === undefined || repo === undefined) {
       throw new Error(`Invalid repo format "${config.repo}" — expected "owner/repo"`)
     }
-    return new GitHubTaskTracker({ token, owner, repo })
+
+    return new GitHubTaskTracker({ token: env.githubToken, owner, repo })
   }
 
-  const token = process.env['JIRA_TOKEN']
-  if (token === undefined) throw new Error('JIRA_TOKEN environment variable is required')
-  const email = process.env['JIRA_EMAIL']
-  if (email === undefined) throw new Error('JIRA_EMAIL environment variable is required')
-  const host = process.env['JIRA_HOST'] ?? config.jiraHost
+  if (env.jiraToken === undefined) {
+    throw new Error('JIRA_TOKEN (or JIRA_API_TOKEN / JIRA_API_KEY) environment variable is required')
+  }
+  if (env.jiraEmail === undefined) throw new Error('JIRA_EMAIL environment variable is required')
+
+  const host = env.jiraHost ?? config.jiraHost
   if (host === undefined) throw new Error('JIRA_HOST environment variable or jiraHost config is required')
   if (config.jiraProject === undefined) throw new Error('jiraProject is required when tracker is jira')
+
   return new JiraTaskTracker({
-    token,
+    token: env.jiraToken,
     host,
-    email,
+    email: env.jiraEmail,
     project: config.jiraProject,
     ...(config.jpdProject !== undefined ? { jpdProject: config.jpdProject } : {}),
   })
@@ -70,9 +73,6 @@ export function buildProgram(
   program.exitOverride()
   program.option('--tracker <tracker>', 'override the configured tracker for this run')
 
-  // A root --tracker flag overrides config.tracker for one invocation. The hook
-  // runs after option parsing but before any subcommand action, so the closures
-  // below (invoked lazily inside actions) observe the resolved override.
   let overrideTracker: string | undefined
   program.hook('preAction', () => {
     const value = program.opts()['tracker']
