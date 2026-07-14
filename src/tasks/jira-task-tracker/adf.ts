@@ -7,6 +7,12 @@ export interface AdfNode {
   attrs?: Record<string, unknown>
   content?: AdfNode[]
   text?: string
+  marks?: AdfMark[]
+}
+
+export interface AdfMark {
+  type: string
+  attrs?: Record<string, unknown>
 }
 
 export interface AdfTextNode {

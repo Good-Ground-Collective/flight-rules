@@ -129,6 +129,95 @@ describe('JiraTaskTracker.createTicket', () => {
   })
 })
 
+describe('JiraTaskTracker markdown ⇄ ADF descriptions', () => {
+  beforeEach(() => {
+    request.mockReset()
+  })
+
+  const layeredBody = [
+    '## Problem Statement',
+    '',
+    'Markdown renders raw in Jira.',
+    '',
+    '- [ ] renders formatted',
+    '',
+    '<details><summary>Guided Walkthrough</summary>',
+    '',
+    '```sh',
+    'npm test',
+    '```',
+    '',
+    '</details>',
+  ].join('\n')
+
+  it('stores structured ADF on create and returns the original markdown on get', async () => {
+    let storedDescription: AdfDocNode | undefined
+    request.mockImplementation((method: string, path: string, body?: unknown) => {
+      if (path.startsWith('/issue/createmeta')) return Promise.resolve(createMeta)
+      if (method === 'GET' && path === '/issueLinkType') return Promise.resolve(blocksLinkTypes)
+      if (method === 'POST' && path === '/issue') {
+        storedDescription = (body as { fields: { description: AdfDocNode } }).fields.description
+        return Promise.resolve({ id: 'id-PROJ-4', key: 'PROJ-4' })
+      }
+      if (method === 'GET' && path === '/issue/PROJ-4')
+        return Promise.resolve(
+          issue('PROJ-4', {
+            summary: 'Structured',
+            ...(storedDescription !== undefined ? { description: storedDescription } : {}),
+          }),
+        )
+      throw new Error(`unexpected ${method} ${path}`)
+    })
+
+    const ticket = await makeTracker().createTicket({
+      title: 'Structured',
+      body: layeredBody,
+      epicId: 'PROJ-1',
+      labels: [],
+      metadata: { notes: 'ctx' },
+    })
+
+    const types = (storedDescription?.content ?? []).map((node) => node.type)
+    expect(types).toContain('heading')
+    expect(types).toContain('taskList')
+    expect(types).toContain('expand')
+    expect(types.filter((t) => t === 'paragraph').length).toBeGreaterThan(0)
+
+    expect(ticket.body).toBe(layeredBody)
+    expect(ticket.metadata).toEqual({ notes: 'ctx' })
+  })
+
+  it('folds a body-borne LLM Context details block into the single metadata expand', async () => {
+    const bodyWithMetadataBlock = `intro\n\n<details>\n<summary>LLM Context</summary>\n\n\`\`\`yaml\nnotes: from-body\n\`\`\`\n\n</details>`
+    let storedDescription: AdfDocNode | undefined
+    request.mockImplementation((method: string, path: string, body?: unknown) => {
+      if (path.startsWith('/issue/createmeta')) return Promise.resolve(createMeta)
+      if (method === 'GET' && path === '/issueLinkType') return Promise.resolve(blocksLinkTypes)
+      if (method === 'POST' && path === '/issue') {
+        storedDescription = (body as { fields: { description: AdfDocNode } }).fields.description
+        return Promise.resolve({ id: 'id-PROJ-5', key: 'PROJ-5' })
+      }
+      if (method === 'GET' && path === '/issue/PROJ-5')
+        return Promise.resolve(
+          issue('PROJ-5', { ...(storedDescription !== undefined ? { description: storedDescription } : {}) }),
+        )
+      throw new Error(`unexpected ${method} ${path}`)
+    })
+
+    const ticket = await makeTracker().createTicket({
+      title: 'T',
+      body: bodyWithMetadataBlock,
+      epicId: 'PROJ-1',
+      labels: [],
+    })
+
+    const expands = (storedDescription?.content ?? []).filter((node) => node.type === 'expand')
+    expect(expands).toHaveLength(1)
+    expect(ticket.metadata).toEqual({ notes: 'from-body' })
+    expect(ticket.body).toBe('intro')
+  })
+})
+
 describe('JiraTaskTracker.getEpic', () => {
   beforeEach(() => {
     request.mockReset()
