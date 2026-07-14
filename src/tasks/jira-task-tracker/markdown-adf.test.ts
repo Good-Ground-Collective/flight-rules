@@ -1,19 +1,19 @@
 import { describe, it, expect } from 'vitest'
-import { adfToMarkdown, markdownToAdf } from './markdown-adf.js'
+import { markdownAdfConverter } from './markdown-adf.js'
 import type { AdfNode } from './adf.js'
 
-const roundTrip = (markdown: string): string => adfToMarkdown(markdownToAdf(markdown).content)
+const roundTrip = (markdown: string): string => markdownAdfConverter.toMarkdown(markdownAdfConverter.toAdf(markdown).content)
 
-describe('markdownToAdf', () => {
+describe('markdownAdfConverter.toAdf', () => {
   it('converts a heading to a heading node with its level', () => {
-    const doc = markdownToAdf('## Problem Statement')
+    const doc = markdownAdfConverter.toAdf('## Problem Statement')
     expect(doc.content).toEqual([
       { type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: 'Problem Statement' }] },
     ])
   })
 
   it('converts bold and inline code to marked text nodes', () => {
-    const doc = markdownToAdf('Run **all** the `flight-rules check` command')
+    const doc = markdownAdfConverter.toAdf('Run **all** the `flight-rules check` command')
     expect(doc.content).toEqual([
       {
         type: 'paragraph',
@@ -29,14 +29,14 @@ describe('markdownToAdf', () => {
   })
 
   it('converts a fenced code block to a codeBlock with its language', () => {
-    const doc = markdownToAdf('```ts\nconst x = 1\n```')
+    const doc = markdownAdfConverter.toAdf('```ts\nconst x = 1\n```')
     expect(doc.content).toEqual([
       { type: 'codeBlock', attrs: { language: 'ts' }, content: [{ type: 'text', text: 'const x = 1' }] },
     ])
   })
 
   it('converts checkboxes to a taskList with TODO/DONE states', () => {
-    const doc = markdownToAdf('- [ ] first\n- [x] second')
+    const doc = markdownAdfConverter.toAdf('- [ ] first\n- [x] second')
     const [taskList] = doc.content
     expect(taskList?.type).toBe('taskList')
     expect(taskList?.content?.map((item) => item.attrs?.['state'])).toEqual(['TODO', 'DONE'])
@@ -44,7 +44,7 @@ describe('markdownToAdf', () => {
   })
 
   it('converts bullets to a bulletList of listItem paragraphs', () => {
-    const doc = markdownToAdf('- one\n- two')
+    const doc = markdownAdfConverter.toAdf('- one\n- two')
     expect(doc.content).toEqual([
       {
         type: 'bulletList',
@@ -57,7 +57,7 @@ describe('markdownToAdf', () => {
   })
 
   it('converts a <details> block to an expand with converted children', () => {
-    const doc = markdownToAdf('<details><summary>Guided Walkthrough</summary>\n\nStep one.\n\n</details>')
+    const doc = markdownAdfConverter.toAdf('<details><summary>Guided Walkthrough</summary>\n\nStep one.\n\n</details>')
     expect(doc.content).toEqual([
       {
         type: 'expand',
@@ -68,14 +68,14 @@ describe('markdownToAdf', () => {
   })
 
   it('handles a <summary> on its own line (LLM Context form)', () => {
-    const doc = markdownToAdf('<details>\n<summary>LLM Context</summary>\n\n```yaml\nnotes: hi\n```\n\n</details>')
+    const doc = markdownAdfConverter.toAdf('<details>\n<summary>LLM Context</summary>\n\n```yaml\nnotes: hi\n```\n\n</details>')
     const [expand] = doc.content
     expect(expand?.attrs).toEqual({ title: 'LLM Context' })
     expect(expand?.content?.some((n) => n.type === 'codeBlock')).toBe(true)
   })
 
   it('produces an empty doc for an empty body', () => {
-    expect(markdownToAdf('').content).toEqual([])
+    expect(markdownAdfConverter.toAdf('').content).toEqual([])
   })
 })
 
@@ -123,7 +123,7 @@ describe('markdown ⇄ ADF round-trip', () => {
       'Start with the converter:',
       '',
       '```ts',
-      'markdownToAdf(body)',
+      'markdownAdfConverter.toAdf(body)',
       '```',
       '',
       '- keep the subset small',
@@ -136,7 +136,7 @@ describe('markdown ⇄ ADF round-trip', () => {
   })
 })
 
-describe('adfToMarkdown graceful degradation', () => {
+describe('markdownAdfConverter.toMarkdown graceful degradation', () => {
   it('flattens unknown block nodes to their text content', () => {
     const nodes: AdfNode[] = [
       {
@@ -145,7 +145,7 @@ describe('adfToMarkdown graceful degradation', () => {
         content: [{ type: 'paragraph', content: [{ type: 'text', text: 'from the UI' }] }],
       },
     ]
-    expect(adfToMarkdown(nodes)).toBe('from the UI')
+    expect(markdownAdfConverter.toMarkdown(nodes)).toBe('from the UI')
   })
 
   it('renders link marks as markdown links', () => {
@@ -155,7 +155,7 @@ describe('adfToMarkdown graceful degradation', () => {
         content: [{ type: 'text', text: 'docs', marks: [{ type: 'link', attrs: { href: 'https://x.dev' } }] }],
       },
     ]
-    expect(adfToMarkdown(nodes)).toBe('[docs](https://x.dev)')
+    expect(markdownAdfConverter.toMarkdown(nodes)).toBe('[docs](https://x.dev)')
   })
 
   it('renders ordered lists with numeric markers', () => {
@@ -168,6 +168,6 @@ describe('adfToMarkdown graceful degradation', () => {
         ],
       },
     ]
-    expect(adfToMarkdown(nodes)).toBe('1. one\n2. two')
+    expect(markdownAdfConverter.toMarkdown(nodes)).toBe('1. one\n2. two')
   })
 })

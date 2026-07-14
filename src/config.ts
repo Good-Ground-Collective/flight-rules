@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { z } from 'zod'
-import { normalizeJiraHost } from './jira-host.js'
+import { JiraHostSchema } from './tasks/jira-task-tracker/jira-host.js'
 
 // Seed competency set for Sharpen-the-Saw candidacy — foundational skills worth
 // keeping warm in human hands. Slugs double as the `sharpen-the-saw:<slug>` label
@@ -25,7 +25,7 @@ const ConfigSchema = z
   .object({
     tracker: z.enum(['github', 'jira']),
     repo: z.string().optional().describe('GitHub owner/repo; required when tracker is github'),
-    jiraHost: z.string().optional().describe('Atlassian Cloud host, e.g. acme.atlassian.net'),
+    jiraHost: JiraHostSchema.optional().describe('Atlassian Cloud host, e.g. acme.atlassian.net'),
     jiraEmail: z.string().optional().describe('Atlassian account email for Basic auth'),
     jiraProject: z.string().optional().describe('Jira project key holding epics and tickets'),
     jpdProject: z.string().optional().describe('Jira Product Discovery project key holding initiatives'),
@@ -134,8 +134,7 @@ function parseFrontmatter(contents: string): Record<string, unknown> {
 export function readConfig(configPath: string): Config {
   const contents = readFileSync(configPath, 'utf-8')
   const data = parseFrontmatter(contents)
-  const config = ConfigSchema.parse(data)
-  return config.jiraHost === undefined ? config : { ...config, jiraHost: normalizeJiraHost(config.jiraHost) }
+  return ConfigSchema.parse(data)
 }
 
 export function getRfcDir(config: Config, cwd: string): string {

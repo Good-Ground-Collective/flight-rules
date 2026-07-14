@@ -10,9 +10,7 @@ import * as esbuild from 'esbuild'
 const pkg = JSON.parse(
   readFileSync(fileURLToPath(new URL('../package.json', import.meta.url)), 'utf8'),
 )
-// The bundle needs a real .mjs extension: under "type": "module" Node refuses
-// to load an extensionless entry as ESM (ERR_UNKNOWN_FILE_EXTENSION). The
-// committed bin/flight-rules is a static sh shim that execs this file.
+// .mjs, not extensionless: Node refuses extensionless ESM entries under "type": "module"
 const outfile = fileURLToPath(new URL('../bin/flight-rules.mjs', import.meta.url))
 
 await esbuild.build({

@@ -1,7 +1,7 @@
 import { JiraClient } from './jira-client.js'
 import { ConfluenceClient } from './confluence-client.js'
 import type { AdfDocNode, AdfNode } from './adf.js'
-import { adfToMarkdown, markdownToAdf } from './markdown-adf.js'
+import { markdownAdfConverter, type MarkdownAdfConverter } from './markdown-adf.js'
 import { JiraAdfMetadataService, type AdfMetadataService } from './adf-metadata.js'
 import type {
   JiraAssignableUser,
@@ -61,6 +61,7 @@ export class JiraTaskTracker implements TaskTracker {
   private readonly jpdProject: string | undefined
   private readonly confluenceSpaceKey: string | undefined
   private readonly metadata: AdfMetadataService = new JiraAdfMetadataService()
+  private readonly bodyFormat: MarkdownAdfConverter = markdownAdfConverter
   private issueTypeNames: string[] | undefined
   private blocksLinkType: string | undefined
   private deliveryLinkType: string | undefined
@@ -77,7 +78,7 @@ export class JiraTaskTracker implements TaskTracker {
 
   async createEpic(input: CreateEpicInput): Promise<Epic> {
     const issuetype = await this.resolveIssueType('Epic')
-    const description = this.metadata.splice(markdownToAdf(input.body), input.metadata ?? {})
+    const description = this.metadata.splice(this.bodyFormat.toAdf(input.body), input.metadata ?? {})
 
     const created = await this.client.request<JiraCreatedIssue>('POST', '/issue', {
       fields: {
@@ -112,7 +113,7 @@ export class JiraTaskTracker implements TaskTracker {
 
   async createTicket(input: CreateTicketInput): Promise<Ticket> {
     const issuetype = await this.resolveIssueType('Story')
-    const description = this.metadata.splice(markdownToAdf(input.body), input.metadata ?? {})
+    const description = this.metadata.splice(this.bodyFormat.toAdf(input.body), input.metadata ?? {})
 
     const created = await this.client.request<JiraCreatedIssue>('POST', '/issue', {
       fields: {
@@ -210,7 +211,7 @@ export class JiraTaskTracker implements TaskTracker {
         project: { key: projectKey },
         issuetype: { name: ideaIssueType },
         summary: input.title,
-        description: markdownToAdf(input.body),
+        description: this.bodyFormat.toAdf(input.body),
       },
     })
 
@@ -292,7 +293,7 @@ export class JiraTaskTracker implements TaskTracker {
 
   async addComment(entityId: string, body: string): Promise<Comment> {
     const comment = await this.client.request<JiraComment>('POST', `/issue/${entityId}/comment`, {
-      body: markdownToAdf(body),
+      body: this.bodyFormat.toAdf(body),
     })
     return {
       id: comment.id,
@@ -364,7 +365,7 @@ export class JiraTaskTracker implements TaskTracker {
 
   private async spliceDescriptionMetadata(key: string, patch: Partial<EntityMetadata>): Promise<void> {
     const issue = await this.client.request<JiraIssue>('GET', `/issue/${key}`, undefined, { fields: 'description' })
-    const current = issue.fields.description ?? markdownToAdf('')
+    const current = issue.fields.description ?? this.bodyFormat.toAdf('')
     const next = this.metadata.splice(current, patch)
     await this.client.request('PUT', `/issue/${key}`, { fields: { description: next } })
   }
@@ -437,7 +438,7 @@ export class JiraTaskTracker implements TaskTracker {
 
   private extractBody(description: AdfDocNode | null | undefined): string {
     if (description === null || description === undefined) return ''
-    return adfToMarkdown(description.content.filter((node) => !this.isMetadataNode(node)))
+    return this.bodyFormat.toMarkdown(description.content.filter((node) => !this.isMetadataNode(node)))
   }
 
   private isMetadataNode(node: AdfNode): boolean {

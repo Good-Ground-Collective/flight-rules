@@ -25383,10 +25383,8 @@ function date4(params) {
 // node_modules/zod/v4/classic/external.js
 config(en_default());
 
-// src/jira-host.ts
-function normalizeJiraHost(host) {
-  return host.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, "");
-}
+// src/tasks/jira-task-tracker/jira-host.ts
+var JiraHostSchema = external_exports.string().transform((host) => host.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, ""));
 
 // src/config.ts
 var seedCompetencies = [
@@ -25406,7 +25404,7 @@ var seedCompetencies = [
 var ConfigSchema = external_exports.object({
   tracker: external_exports.enum(["github", "jira"]),
   repo: external_exports.string().optional().describe("GitHub owner/repo; required when tracker is github"),
-  jiraHost: external_exports.string().optional().describe("Atlassian Cloud host, e.g. acme.atlassian.net"),
+  jiraHost: JiraHostSchema.optional().describe("Atlassian Cloud host, e.g. acme.atlassian.net"),
   jiraEmail: external_exports.string().optional().describe("Atlassian account email for Basic auth"),
   jiraProject: external_exports.string().optional().describe("Jira project key holding epics and tickets"),
   jpdProject: external_exports.string().optional().describe("Jira Product Discovery project key holding initiatives"),
@@ -25492,8 +25490,7 @@ function parseFrontmatter(contents) {
 function readConfig(configPath) {
   const contents = readFileSync(configPath, "utf-8");
   const data = parseFrontmatter(contents);
-  const config2 = ConfigSchema.parse(data);
-  return config2.jiraHost === void 0 ? config2 : { ...config2, jiraHost: normalizeJiraHost(config2.jiraHost) };
+  return ConfigSchema.parse(data);
 }
 function getRfcDir(config2, cwd) {
   if (config2.rfcStorage === "global") {
@@ -25510,14 +25507,14 @@ var EnvSchema = external_exports.object({
   githubToken: external_exports.string().optional(),
   jiraToken: external_exports.string().optional(),
   jiraEmail: external_exports.string().optional(),
-  jiraHost: external_exports.string().optional()
+  jiraHost: JiraHostSchema.optional()
 });
 function readEnv(source = process.env) {
   return EnvSchema.parse({
     githubToken: source["GITHUB_TOKEN"],
     jiraToken: source["JIRA_TOKEN"] ?? source["JIRA_API_TOKEN"] ?? source["JIRA_API_KEY"],
     jiraEmail: source["JIRA_EMAIL"],
-    jiraHost: source["JIRA_HOST"] === void 0 ? void 0 : normalizeJiraHost(source["JIRA_HOST"])
+    jiraHost: source["JIRA_HOST"]
   });
 }
 
@@ -29789,176 +29786,188 @@ var headingLine = /^(#{1,6})\s+(.*)$/;
 var taskLine = /^-\s+\[( |x|X)\]\s+(.*)$/;
 var bulletLine = /^-\s+(.*)$/;
 var detailsOpen = /^<details>/;
-function markdownToAdf(markdown) {
-  return { version: 1, type: "doc", content: parseBlocks(markdown.replace(/\r\n/g, "\n").split("\n")) };
-}
-function adfToMarkdown(nodes) {
-  return nodes.map((node) => blockToMarkdown(node)).filter((block) => block.length > 0).join("\n\n");
-}
-function parseBlocks(lines) {
-  const nodes = [];
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i];
-    if (line === void 0 || line.trim() === "") {
-      i++;
-      continue;
-    }
-    const fence = line.match(fenceOpen);
-    if (fence) {
-      const body = [];
-      let j = i + 1;
-      while (j < lines.length && !fenceClose.test(lines[j] ?? "")) {
-        body.push(lines[j] ?? "");
-        j++;
-      }
-      nodes.push({
-        type: "codeBlock",
-        attrs: fence[1] !== void 0 && fence[1] !== "" ? { language: fence[1] } : {},
-        content: body.length > 0 ? [{ type: "text", text: body.join("\n") }] : []
-      });
-      i = j + 1;
-      continue;
-    }
-    const heading = line.match(headingLine);
-    if (heading !== null && heading[1] !== void 0 && heading[2] !== void 0) {
-      nodes.push({ type: "heading", attrs: { level: heading[1].length }, content: parseInline(heading[2]) });
-      i++;
-      continue;
-    }
-    if (detailsOpen.test(line.trim())) {
-      const details = parseDetails(lines, i);
-      if (details !== void 0) {
-        nodes.push(details.node);
-        i = details.next;
+var LayeredBodyAdfConverter = class {
+  toAdf(markdown) {
+    return { version: 1, type: "doc", content: this.parseBlocks(markdown.replace(/\r\n/g, "\n").split("\n")) };
+  }
+  toMarkdown(nodes) {
+    return nodes.map((node) => this.blockToMarkdown(node)).filter((block) => block.length > 0).join("\n\n");
+  }
+  parseBlocks(lines) {
+    const nodes = [];
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i];
+      if (line === void 0 || line.trim() === "") {
+        i++;
         continue;
       }
-    }
-    if (taskLine.test(line)) {
-      const items = [];
-      while (i < lines.length) {
-        const task = lines[i]?.match(taskLine);
-        if (task === null || task === void 0 || task[2] === void 0) break;
-        items.push({
-          type: "taskItem",
-          attrs: { localId: `task-${items.length + 1}`, state: task[1]?.toLowerCase() === "x" ? "DONE" : "TODO" },
-          content: parseInline(task[2])
+      const fence = line.match(fenceOpen);
+      if (fence) {
+        const body = [];
+        let j = i + 1;
+        while (j < lines.length && !fenceClose.test(lines[j] ?? "")) {
+          body.push(lines[j] ?? "");
+          j++;
+        }
+        nodes.push({
+          type: "codeBlock",
+          attrs: fence[1] !== void 0 && fence[1] !== "" ? { language: fence[1] } : {},
+          content: body.length > 0 ? [{ type: "text", text: body.join("\n") }] : []
         });
-        i++;
+        i = j + 1;
+        continue;
       }
-      nodes.push({ type: "taskList", attrs: { localId: "task-list" }, content: items });
-      continue;
-    }
-    if (bulletLine.test(line)) {
-      const items = [];
+      const heading = line.match(headingLine);
+      if (heading !== null && heading[1] !== void 0 && heading[2] !== void 0) {
+        nodes.push({ type: "heading", attrs: { level: heading[1].length }, content: this.parseInline(heading[2]) });
+        i++;
+        continue;
+      }
+      if (detailsOpen.test(line.trim())) {
+        const details = this.parseDetails(lines, i);
+        if (details !== void 0) {
+          nodes.push(details.node);
+          i = details.next;
+          continue;
+        }
+      }
+      if (taskLine.test(line)) {
+        const items = [];
+        while (i < lines.length) {
+          const task = lines[i]?.match(taskLine);
+          if (task === null || task === void 0 || task[2] === void 0) break;
+          items.push({
+            type: "taskItem",
+            attrs: { localId: `task-${items.length + 1}`, state: task[1]?.toLowerCase() === "x" ? "DONE" : "TODO" },
+            content: this.parseInline(task[2])
+          });
+          i++;
+        }
+        nodes.push({ type: "taskList", attrs: { localId: "task-list" }, content: items });
+        continue;
+      }
+      if (bulletLine.test(line)) {
+        const items = [];
+        while (i < lines.length) {
+          const bullet = lines[i]?.match(bulletLine);
+          if (bullet === null || bullet === void 0 || bullet[1] === void 0) break;
+          items.push({ type: "listItem", content: [{ type: "paragraph", content: this.parseInline(bullet[1]) }] });
+          i++;
+        }
+        nodes.push({ type: "bulletList", content: items });
+        continue;
+      }
+      const paragraph = [];
       while (i < lines.length) {
-        const bullet = lines[i]?.match(bulletLine);
-        if (bullet === null || bullet === void 0 || bullet[1] === void 0) break;
-        items.push({ type: "listItem", content: [{ type: "paragraph", content: parseInline(bullet[1]) }] });
+        const current = lines[i];
+        if (current === void 0 || current.trim() === "" || this.startsBlock(current)) break;
+        if (paragraph.length > 0) paragraph.push({ type: "hardBreak" });
+        paragraph.push(...this.parseInline(current));
         i++;
       }
-      nodes.push({ type: "bulletList", content: items });
-      continue;
+      if (paragraph.length > 0) nodes.push({ type: "paragraph", content: paragraph });
     }
-    const paragraph = [];
-    while (i < lines.length) {
-      const current = lines[i];
-      if (current === void 0 || current.trim() === "" || startsBlock(current)) break;
-      if (paragraph.length > 0) paragraph.push({ type: "hardBreak" });
-      paragraph.push(...parseInline(current));
-      i++;
-    }
-    if (paragraph.length > 0) nodes.push({ type: "paragraph", content: paragraph });
+    return nodes;
   }
-  return nodes;
-}
-function startsBlock(line) {
-  return fenceOpen.test(line) || headingLine.test(line) || taskLine.test(line) || bulletLine.test(line) || detailsOpen.test(line.trim());
-}
-function parseDetails(lines, start) {
-  let depth = 0;
-  let end = -1;
-  for (let j = start; j < lines.length; j++) {
-    const line = lines[j] ?? "";
-    depth += (line.match(/<details(?:\s|>)/g) ?? []).length;
-    depth -= (line.match(/<\/details>/g) ?? []).length;
-    if (depth === 0) {
-      end = j;
-      break;
-    }
+  startsBlock(line) {
+    return fenceOpen.test(line) || headingLine.test(line) || taskLine.test(line) || bulletLine.test(line) || detailsOpen.test(line.trim());
   }
-  if (end === -1) return void 0;
-  const block = lines.slice(start, end + 1).join("\n");
-  const inner = block.replace(/^\s*<details>\s*/, "").replace(/\s*<\/details>\s*$/, "");
-  const summary = inner.match(/^\s*<summary>([\s\S]*?)<\/summary>\s*/);
-  const title = summary?.[1]?.trim() ?? "";
-  const body = summary !== null ? inner.slice(summary[0].length) : inner;
-  return {
-    node: { type: "expand", attrs: { title }, content: parseBlocks(body.split("\n")) },
-    next: end + 1
-  };
-}
-function parseInline(text) {
-  const nodes = [];
-  const pattern = /\*\*([^*]+)\*\*|`([^`]+)`/g;
-  let last = 0;
-  for (let match = pattern.exec(text); match !== null; match = pattern.exec(text)) {
-    if (match.index > last) nodes.push({ type: "text", text: text.slice(last, match.index) });
-    if (match[1] !== void 0) nodes.push({ type: "text", text: match[1], marks: [{ type: "strong" }] });
-    else if (match[2] !== void 0) nodes.push({ type: "text", text: match[2], marks: [{ type: "code" }] });
-    last = match.index + match[0].length;
-  }
-  if (last < text.length) nodes.push({ type: "text", text: text.slice(last) });
-  return nodes;
-}
-function blockToMarkdown(node) {
-  switch (node.type) {
-    case "heading": {
-      const level = typeof node.attrs?.["level"] === "number" ? node.attrs["level"] : 1;
-      return `${"#".repeat(level)} ${inlineToMarkdown(node.content ?? [])}`;
+  /**
+   * Converts the `<details>` block spanning `lines[start..]` into an expand:
+   * finds the matching `</details>` (nesting-aware), lifts the `<summary>`
+   * into the expand title, and parses what remains as blocks. Returns
+   * undefined for an unclosed block, which then falls through to plain
+   * paragraph text.
+   */
+  parseDetails(lines, start) {
+    let depth = 0;
+    let end = -1;
+    for (let j = start; j < lines.length; j++) {
+      const line = lines[j] ?? "";
+      depth += (line.match(/<details(?:\s|>)/g) ?? []).length;
+      depth -= (line.match(/<\/details>/g) ?? []).length;
+      if (depth === 0) {
+        end = j;
+        break;
+      }
     }
-    case "paragraph":
-      return inlineToMarkdown(node.content ?? []);
-    case "codeBlock": {
-      const language = typeof node.attrs?.["language"] === "string" ? node.attrs["language"] : "";
-      const text = (node.content ?? []).map((child) => child.text ?? "").join("");
-      return `\`\`\`${language}
+    if (end === -1) return void 0;
+    const block = lines.slice(start, end + 1).join("\n");
+    const inner = block.replace(/^\s*<details>\s*/, "").replace(/\s*<\/details>\s*$/, "");
+    const summary = inner.match(/^\s*<summary>([\s\S]*?)<\/summary>\s*/);
+    const title = summary?.[1]?.trim() ?? "";
+    const body = summary !== null ? inner.slice(summary[0].length) : inner;
+    return {
+      node: { type: "expand", attrs: { title }, content: this.parseBlocks(body.split("\n")) },
+      next: end + 1
+    };
+  }
+  parseInline(text) {
+    const nodes = [];
+    const pattern = /\*\*([^*]+)\*\*|`([^`]+)`/g;
+    let last = 0;
+    for (let match = pattern.exec(text); match !== null; match = pattern.exec(text)) {
+      if (match.index > last) nodes.push({ type: "text", text: text.slice(last, match.index) });
+      if (match[1] !== void 0) nodes.push({ type: "text", text: match[1], marks: [{ type: "strong" }] });
+      else if (match[2] !== void 0) nodes.push({ type: "text", text: match[2], marks: [{ type: "code" }] });
+      last = match.index + match[0].length;
+    }
+    if (last < text.length) nodes.push({ type: "text", text: text.slice(last) });
+    return nodes;
+  }
+  blockToMarkdown(node) {
+    switch (node.type) {
+      case "heading": {
+        const level = typeof node.attrs?.["level"] === "number" ? node.attrs["level"] : 1;
+        return `${"#".repeat(level)} ${this.inlineToMarkdown(node.content ?? [])}`;
+      }
+      case "paragraph":
+        return this.inlineToMarkdown(node.content ?? []);
+      case "codeBlock": {
+        const language = typeof node.attrs?.["language"] === "string" ? node.attrs["language"] : "";
+        const text = (node.content ?? []).map((child) => child.text ?? "").join("");
+        return `\`\`\`${language}
 ${text}
 \`\`\``;
-    }
-    case "taskList":
-      return (node.content ?? []).map((item) => `- [${item.attrs?.["state"] === "DONE" ? "x" : " "}] ${inlineToMarkdown(item.content ?? [])}`).join("\n");
-    case "bulletList":
-      return (node.content ?? []).map((item) => `- ${adfToMarkdown(item.content ?? []).replace(/\n/g, "\n  ")}`).join("\n");
-    case "orderedList":
-      return (node.content ?? []).map((item, index) => `${index + 1}. ${adfToMarkdown(item.content ?? []).replace(/\n/g, "\n   ")}`).join("\n");
-    case "expand": {
-      const title = typeof node.attrs?.["title"] === "string" ? node.attrs["title"] : "";
-      return `<details><summary>${title}</summary>
+      }
+      case "taskList":
+        return (node.content ?? []).map(
+          (item) => `- [${item.attrs?.["state"] === "DONE" ? "x" : " "}] ${this.inlineToMarkdown(item.content ?? [])}`
+        ).join("\n");
+      case "bulletList":
+        return (node.content ?? []).map((item) => `- ${this.toMarkdown(item.content ?? []).replace(/\n/g, "\n  ")}`).join("\n");
+      case "orderedList":
+        return (node.content ?? []).map((item, index) => `${index + 1}. ${this.toMarkdown(item.content ?? []).replace(/\n/g, "\n   ")}`).join("\n");
+      case "expand": {
+        const title = typeof node.attrs?.["title"] === "string" ? node.attrs["title"] : "";
+        return `<details><summary>${title}</summary>
 
-${adfToMarkdown(node.content ?? [])}
+${this.toMarkdown(node.content ?? [])}
 
 </details>`;
+      }
+      case "rule":
+        return "---";
+      default:
+        return node.text ?? this.toMarkdown(node.content ?? []);
     }
-    case "rule":
-      return "---";
-    default:
-      return node.text ?? adfToMarkdown(node.content ?? []);
   }
-}
-function inlineToMarkdown(nodes) {
-  return nodes.map((node) => {
-    if (node.type === "hardBreak") return "\n";
-    let text = node.text ?? (node.content !== void 0 ? inlineToMarkdown(node.content) : "");
-    const marks = node.marks ?? [];
-    if (marks.some((mark) => mark.type === "code")) text = `\`${text}\``;
-    if (marks.some((mark) => mark.type === "strong")) text = `**${text}**`;
-    const link = marks.find((mark) => mark.type === "link");
-    const href = link?.attrs?.["href"];
-    if (typeof href === "string") text = `[${text}](${href})`;
-    return text;
-  }).join("");
-}
+  inlineToMarkdown(nodes) {
+    return nodes.map((node) => {
+      if (node.type === "hardBreak") return "\n";
+      let text = node.text ?? (node.content !== void 0 ? this.inlineToMarkdown(node.content) : "");
+      const marks = node.marks ?? [];
+      if (marks.some((mark) => mark.type === "code")) text = `\`${text}\``;
+      if (marks.some((mark) => mark.type === "strong")) text = `**${text}**`;
+      const link = marks.find((mark) => mark.type === "link");
+      const href = link?.attrs?.["href"];
+      if (typeof href === "string") text = `[${text}](${href})`;
+      return text;
+    }).join("");
+  }
+};
+var markdownAdfConverter = new LayeredBodyAdfConverter();
 
 // src/tasks/jira-task-tracker/adf-metadata.ts
 var import_yaml2 = __toESM(require_dist2(), 1);
@@ -30036,6 +30045,7 @@ var JiraTaskTracker = class {
   jpdProject;
   confluenceSpaceKey;
   metadata = new JiraAdfMetadataService();
+  bodyFormat = markdownAdfConverter;
   issueTypeNames;
   blocksLinkType;
   deliveryLinkType;
@@ -30050,7 +30060,7 @@ var JiraTaskTracker = class {
   }
   async createEpic(input) {
     const issuetype = await this.resolveIssueType("Epic");
-    const description = this.metadata.splice(markdownToAdf(input.body), input.metadata ?? {});
+    const description = this.metadata.splice(this.bodyFormat.toAdf(input.body), input.metadata ?? {});
     const created = await this.client.request("POST", "/issue", {
       fields: {
         project: { key: this.project },
@@ -30080,7 +30090,7 @@ var JiraTaskTracker = class {
   }
   async createTicket(input) {
     const issuetype = await this.resolveIssueType("Story");
-    const description = this.metadata.splice(markdownToAdf(input.body), input.metadata ?? {});
+    const description = this.metadata.splice(this.bodyFormat.toAdf(input.body), input.metadata ?? {});
     const created = await this.client.request("POST", "/issue", {
       fields: {
         project: { key: this.project },
@@ -30161,7 +30171,7 @@ var JiraTaskTracker = class {
         project: { key: projectKey },
         issuetype: { name: ideaIssueType },
         summary: input.title,
-        description: markdownToAdf(input.body)
+        description: this.bodyFormat.toAdf(input.body)
       }
     });
     return this.getInitiative(created.key);
@@ -30224,7 +30234,7 @@ var JiraTaskTracker = class {
   }
   async addComment(entityId, body) {
     const comment = await this.client.request("POST", `/issue/${entityId}/comment`, {
-      body: markdownToAdf(body)
+      body: this.bodyFormat.toAdf(body)
     });
     return {
       id: comment.id,
@@ -30284,7 +30294,7 @@ var JiraTaskTracker = class {
   }
   async spliceDescriptionMetadata(key, patch) {
     const issue2 = await this.client.request("GET", `/issue/${key}`, void 0, { fields: "description" });
-    const current = issue2.fields.description ?? markdownToAdf("");
+    const current = issue2.fields.description ?? this.bodyFormat.toAdf("");
     const next = this.metadata.splice(current, patch);
     await this.client.request("PUT", `/issue/${key}`, { fields: { description: next } });
   }
@@ -30350,7 +30360,7 @@ var JiraTaskTracker = class {
   }
   extractBody(description) {
     if (description === null || description === void 0) return "";
-    return adfToMarkdown(description.content.filter((node) => !this.isMetadataNode(node)));
+    return this.bodyFormat.toMarkdown(description.content.filter((node) => !this.isMetadataNode(node)));
   }
   isMetadataNode(node) {
     return node.type === "expand" && node.attrs?.["title"] === metadataExpandTitle;
