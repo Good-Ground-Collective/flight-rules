@@ -30803,7 +30803,7 @@ function createGitCommand(getExecutor) {
 }
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.23.0";
+var appVersion = false ? "0.0.0-dev" : "1.23.1";
 
 // src/cli.ts
 function buildTracker(overrideTracker) {
