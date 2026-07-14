@@ -6,10 +6,13 @@
   "author": "",
   "type": "module",
   "main": "index.js",
+  "bin": {
+    "flight-rules": "bin/flight-rules.mjs"
+  },
   "scripts": {
     "build": "node scripts/build.mjs",
-    "fmt": "sort-package-json && oxfmt",
-    "fmt:check": "sort-package-json --check && oxfmt --check",
+    "fmt": "sort-package-json && oxfmt -c .config/.oxfmtrc.json",
+    "fmt:check": "sort-package-json --check && oxfmt -c .config/.oxfmtrc.json --check",
     "release": "semantic-release",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
@@ -33,7 +36,8 @@
           "assets": [
             "package.json",
             ".claude-plugin/plugin.json",
-            "bin/flight-rules"
+            "bin/flight-rules",
+            "bin/flight-rules.mjs"
           ],
           "message": "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}"
         }
