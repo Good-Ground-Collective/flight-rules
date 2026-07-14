@@ -1,10 +1,11 @@
 import { z } from 'zod'
+import { JiraHostSchema } from './tasks/jira-task-tracker/jira-host.js'
 
 const EnvSchema = z.object({
   githubToken: z.string().optional(),
   jiraToken: z.string().optional(),
   jiraEmail: z.string().optional(),
-  jiraHost: z.string().optional(),
+  jiraHost: JiraHostSchema.optional(),
 })
 
 export type Env = z.infer<typeof EnvSchema>

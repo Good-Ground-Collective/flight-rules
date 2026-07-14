@@ -1,6 +1,5 @@
-#!/usr/bin/env node
 import { join } from 'node:path'
-import { Command, CommanderError } from 'commander'
+import { Command } from 'commander'
 import { readConfig } from './config.js'
 import type { Config } from './config.js'
 import { readEnv } from './env.js'
@@ -97,18 +96,4 @@ export function buildProgram(
 
 export async function run(argv: string[]): Promise<void> {
   await buildProgram(buildTracker, getConfigFromEnv).parseAsync(argv, { from: 'user' })
-}
-
-const isMain =
-  process.argv[1]?.endsWith('flight-rules') === true || process.argv[1]?.endsWith('cli.js') === true
-
-if (isMain) {
-  run(process.argv.slice(2)).catch((err: unknown) => {
-    if (err instanceof CommanderError) {
-      // Commander already wrote help/usage/error output; just honor its exit code.
-      process.exit(err.exitCode)
-    }
-    process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`)
-    process.exit(1)
-  })
 }
