@@ -88,6 +88,17 @@ jpdProject: DISC
     expect(config.repo).toBeUndefined()
   })
 
+  it('normalizes a full-URL jiraHost to a bare domain', () => {
+    const filePath = setupFixture(`---
+tracker: jira
+jiraHost: https://acme.atlassian.net/
+jiraEmail: me@acme.com
+jiraProject: PROJ
+---
+`)
+    expect(readConfig(filePath).jiraHost).toBe('acme.atlassian.net')
+  })
+
   it('rejects a jira config missing jiraProject', () => {
     const filePath = setupFixture(`---
 tracker: jira

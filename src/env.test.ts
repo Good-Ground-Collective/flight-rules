@@ -29,4 +29,10 @@ describe('readEnv', () => {
   it('leaves credentials undefined when nothing is set', () => {
     expect(readEnv({})).toEqual({})
   })
+
+  it('normalizes a full-URL JIRA_HOST to a bare domain', () => {
+    expect(readEnv({ JIRA_HOST: 'https://acme.atlassian.net/' }).jiraHost).toBe('acme.atlassian.net')
+    expect(readEnv({ JIRA_HOST: 'http://acme.atlassian.net' }).jiraHost).toBe('acme.atlassian.net')
+    expect(readEnv({ JIRA_HOST: 'acme.atlassian.net' }).jiraHost).toBe('acme.atlassian.net')
+  })
 })

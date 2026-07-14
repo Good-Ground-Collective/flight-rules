@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { z } from 'zod'
+import { normalizeJiraHost } from './jira-host.js'
 
 // Seed competency set for Sharpen-the-Saw candidacy — foundational skills worth
 // keeping warm in human hands. Slugs double as the `sharpen-the-saw:<slug>` label
@@ -133,7 +134,8 @@ function parseFrontmatter(contents: string): Record<string, unknown> {
 export function readConfig(configPath: string): Config {
   const contents = readFileSync(configPath, 'utf-8')
   const data = parseFrontmatter(contents)
-  return ConfigSchema.parse(data)
+  const config = ConfigSchema.parse(data)
+  return config.jiraHost === undefined ? config : { ...config, jiraHost: normalizeJiraHost(config.jiraHost) }
 }
 
 export function getRfcDir(config: Config, cwd: string): string {
