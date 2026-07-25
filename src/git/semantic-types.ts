@@ -1,6 +1,5 @@
-// The canonical set of semantic (conventional-commit) types. Shared so branch
-// names and commit messages draw from one vocabulary, keeping the history
-// legible to semantic-release.
+import { z } from "zod"
+
 export const semanticTypes = [
   'feat',
   'fix',
@@ -15,8 +14,8 @@ export const semanticTypes = [
   'revert',
 ] as const
 
-export type SemanticType = (typeof semanticTypes)[number]
+export const SemanticTypeSchema = z.enum(semanticTypes)
 
-export function isSemanticType(value: string): value is SemanticType {
-  return semanticTypes.some((t) => t === value)
-}
+export type SemanticType = z.infer<typeof SemanticTypeSchema>
+
+

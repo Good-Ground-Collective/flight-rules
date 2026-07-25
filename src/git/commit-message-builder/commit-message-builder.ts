@@ -1,14 +1,13 @@
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-
-export interface CommitMessageInput {
-  type: string
-  scope: string
-  description: string
-  body?: string
-  footers: string[]
-  model?: string
-}
+import {
+  CommitMessageBuilderPropsSchema,
+  CommitMessageHeaderSchema,
+  CommitMessageInputSchema,
+  type CommitMessageBuilderProps,
+  type CommitMessageInput,
+} from './commit-message.schema.js'
+export { CommitMessageInputSchema }
 
 export interface CommitMessageBuilder {
   build(input: CommitMessageInput): string
@@ -18,32 +17,40 @@ export class DefaultCommitMessageBuilder implements CommitMessageBuilder {
   private readonly pluginVersion: string
   private readonly harnessVersion: string | undefined
 
-  constructor(binPath: string, agentEnv: string | undefined) {
-    this.pluginVersion = DefaultCommitMessageBuilder.readPluginVersion(binPath)
-    this.harnessVersion = DefaultCommitMessageBuilder.parseHarnessVersion(agentEnv)
+  constructor(props: CommitMessageBuilderProps) {
+    const parsed = CommitMessageBuilderPropsSchema.parse(props)
+    this.pluginVersion = DefaultCommitMessageBuilder.readPluginVersion(parsed.binPath)
+    this.harnessVersion = DefaultCommitMessageBuilder.parseHarnessVersion(parsed.agentEnv)
   }
 
   build(input: CommitMessageInput): string {
     const sections: string[] = []
 
-    sections.push(`${input.type}(${input.scope}): ${input.description}`)
+    const headerValidation = CommitMessageHeaderSchema.safeParse(
+      `${input.type}(${input.scope}): ${input.description}`
+    )
+
+    if (!headerValidation.success) throw headerValidation.error;
+    sections.push(`${headerValidation.data}\n`)
+
 
     if (input.body !== undefined) {
-      sections.push(input.body)
+      sections.push(`${input.body}\n`)
     }
 
-    const trailers: string[] = [
-      ...input.footers,
+    const trailers: string[] = [];
+    if (input.footers) trailers.push(...input.footers)
+    trailers.push(
       `Flight-Rules-Version: ${this.pluginVersion}`,
       ...(this.harnessVersion !== undefined ? [`Harness-Version: ${this.harnessVersion}`] : []),
-      ...(input.model !== undefined ? [`Model-Used: ${input.model}`] : []),
-    ]
-
+      ...(input.model !== undefined ? [`Model-Used: ${input.model}`] : [])
+    )
+    
     sections.push(trailers.join('\n'))
 
-    return sections.join('\n\n')
+    return sections.join('\n')
   }
-
+ 
   private static readPluginVersion(binPath: string): string {
     try {
       const pkgPath = join(dirname(binPath), '..', 'package.json')
