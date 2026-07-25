@@ -136,6 +136,39 @@ describe('markdown ⇄ ADF round-trip', () => {
   })
 })
 
+describe('markdownAdfConverter.toAdf <details> resilience (KAN-38)', () => {
+  it('parses a details block that mentions <details> tags in inline code as one expand', () => {
+    const body = [
+      '<details><summary>Guided Walkthrough</summary>',
+      '',
+      'Match the `<details>` block whose `<summary>` reads Guided Walkthrough.',
+      '',
+      '</details>',
+    ].join('\n')
+    const doc = markdownAdfConverter.toAdf(body)
+    expect(doc.content).toHaveLength(1)
+    expect(doc.content[0]?.type).toBe('expand')
+    expect(doc.content[0]?.attrs).toEqual({ title: 'Guided Walkthrough' })
+  })
+
+  it('round-trips a details block that mentions tags in prose', () => {
+    const body = [
+      '<details><summary>Guided Walkthrough</summary>',
+      '',
+      'Ignore any `<details>` mentioned mid-sentence.',
+      '',
+      '</details>',
+    ].join('\n')
+    expect(markdownAdfConverter.toMarkdown(markdownAdfConverter.toAdf(body).content)).toBe(body)
+  })
+
+  it('degrades an unclosed <details> to paragraph text instead of looping', () => {
+    const doc = markdownAdfConverter.toAdf('<details><summary>Oops</summary>\n\nno closing tag here')
+    expect(doc.content.length).toBeGreaterThan(0)
+    expect(doc.content.every((node) => node.type !== 'expand')).toBe(true)
+  })
+})
+
 describe('markdownAdfConverter.toMarkdown graceful degradation', () => {
   it('flattens unknown block nodes to their text content', () => {
     const nodes: AdfNode[] = [
