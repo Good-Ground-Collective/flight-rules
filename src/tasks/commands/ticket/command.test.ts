@@ -87,6 +87,33 @@ describe('ticket command', () => {
     output.mockRestore()
   })
 
+  it('extracts a single section as JSON for "get --section"', async () => {
+    const tracker = makeTracker()
+    vi.mocked(tracker.getTicket).mockResolvedValue({
+      ...mockTicket,
+      body: '## Acceptance Criteria\n\n- [ ] ship it\n- [x] done\n',
+    })
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(tracker, ['get', '7', '--section', 'acceptance-criteria'])
+    expect(output).toHaveBeenCalledWith(
+      JSON.stringify({
+        id: '7',
+        section: 'acceptance-criteria',
+        markdown: '- [ ] ship it\n- [x] done',
+        items: [
+          { text: 'ship it', done: false },
+          { text: 'done', done: true },
+        ],
+      }) + '\n',
+    )
+    output.mockRestore()
+  })
+
+  it('rejects "get --section" with an unknown section name', async () => {
+    const tracker = makeTracker()
+    await expect(run(tracker, ['get', '7', '--section', 'bogus'])).rejects.toThrow(/unknown section/)
+  })
+
   it('rejects "create" when --epic-id is missing', async () => {
     const tracker = makeTracker()
     const errOutput = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
