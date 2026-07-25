@@ -10,6 +10,7 @@ import type {
   JiraIssue,
   JiraIssueLink,
   JiraIssueLinkTypesResponse,
+  JiraTransitionsResponse,
   JiraIssueTypesResponse,
   JiraProject,
   JiraSearchResponse,
@@ -171,6 +172,24 @@ export class JiraTaskTracker implements TaskTracker {
     if (link?.id === undefined) return
 
     await this.client.request('DELETE', `/issueLink/${link.id}`)
+  }
+
+  async transitionTicket(ticketId: string, status: string): Promise<void> {
+    // Transitions are workflow- and current-status-specific, so this must be
+    // resolved per call (not cached like the instance-wide link types): only
+    // transitions reachable from the issue's current status are returned.
+    const response = await this.client.request<JiraTransitionsResponse>(
+      'GET',
+      `/issue/${ticketId}/transitions`,
+    )
+    const match = response.transitions.find((transition) => transition.to.name.toLowerCase() === status.toLowerCase())
+    if (match === undefined) {
+      const available = response.transitions.map((transition) => transition.to.name).join(', ')
+      throw new Error(
+        `No transition to status "${status}" is available for ${ticketId} from its current status (available: ${available})`,
+      )
+    }
+    await this.client.request('POST', `/issue/${ticketId}/transitions`, { transition: { id: match.id } })
   }
 
   async updateEpicMetadata(epicId: string, patch: Partial<EntityMetadata>): Promise<void> {

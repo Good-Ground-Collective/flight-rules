@@ -313,3 +313,40 @@ describe('JiraTaskTracker.linkTicketToEpic', () => {
     expect(put?.[2]).toEqual({ fields: { parent: { key: 'PROJ-1' } } })
   })
 })
+
+describe('JiraTaskTracker.transitionTicket', () => {
+  beforeEach(() => {
+    request.mockReset()
+  })
+
+  it('resolves the transition whose target status matches (case-insensitively) and POSTs its id', async () => {
+    request.mockImplementation((method: string, path: string) => {
+      if (method === 'GET' && path === '/issue/PROJ-1/transitions') {
+        return Promise.resolve({
+          transitions: [
+            { id: '21', name: 'In Progress', to: { name: 'In Progress' } },
+            { id: '31', name: 'In Review', to: { name: 'In Review' } },
+          ],
+        })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    await makeTracker().transitionTicket('PROJ-1', 'in review')
+
+    const post = request.mock.calls.find(([method, path]) => method === 'POST' && path === '/issue/PROJ-1/transitions')
+    expect(post?.[2]).toEqual({ transition: { id: '31' } })
+  })
+
+  it('throws with the available targets when no transition reaches the requested status', async () => {
+    request.mockImplementation((method: string, path: string) => {
+      if (method === 'GET' && path === '/issue/PROJ-1/transitions') {
+        return Promise.resolve({ transitions: [{ id: '21', name: 'In Progress', to: { name: 'In Progress' } }] })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    await expect(makeTracker().transitionTicket('PROJ-1', 'Done')).rejects.toThrow(/available: In Progress/)
+    expect(request.mock.calls.some(([method]) => method === 'POST')).toBe(false)
+  })
+})

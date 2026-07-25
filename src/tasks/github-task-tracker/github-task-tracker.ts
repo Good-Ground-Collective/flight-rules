@@ -238,6 +238,30 @@ export class GitHubTaskTracker implements TaskTracker {
     )
   }
 
+  async transitionTicket(ticketId: string, status: string): Promise<void> {
+    // GitHub has no native in-progress/in-review concept, so status is encoded
+    // as a `status:<slug>` label (matching the epic/ticket label convention).
+    const issueNumber = parseInt(ticketId, 10)
+    const label = `status:${status.trim().toLowerCase().replace(/\s+/g, '-')}`
+    const { data: issue } = await this.octokit.rest.issues.get({
+      owner: this.owner,
+      repo: this.repo,
+      issue_number: issueNumber,
+    })
+    const stale = issue.labels
+      .map((l) => this.labelName(l))
+      .filter((name) => name.startsWith('status:') && name !== label)
+    for (const name of stale) {
+      await this.octokit.rest.issues.removeLabel({ owner: this.owner, repo: this.repo, issue_number: issueNumber, name })
+    }
+    await this.octokit.rest.issues.addLabels({
+      owner: this.owner,
+      repo: this.repo,
+      issue_number: issueNumber,
+      labels: [label],
+    })
+  }
+
   async updateEpicMetadata(epicId: string, patch: Partial<EntityMetadata>): Promise<void> {
     const issueNumber = parseInt(epicId, 10)
     const { data } = await this.octokit.rest.issues.get({
@@ -457,11 +481,13 @@ export class GitHubTaskTracker implements TaskTracker {
     blocking: string[] = [],
     metadata: EntityMetadata = {},
   ): Ticket {
+    const labels = issue.labels.map((l) => this.labelName(l)).filter(Boolean)
+    const statusLabel = labels.find((name) => name.startsWith('status:'))
     return {
       id: String(issue.number),
       size: 'ticket',
-      status: issue.state,
-      labels: issue.labels.map((l) => this.labelName(l)).filter(Boolean),
+      status: statusLabel !== undefined ? statusLabel.slice('status:'.length) : issue.state,
+      labels,
       title: issue.title,
       body: issue.body ?? '',
       comments: comments.map((c) => this.mapComment(c)),

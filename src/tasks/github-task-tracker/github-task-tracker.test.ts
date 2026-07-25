@@ -15,6 +15,8 @@ vi.mock('@octokit/rest', () => ({
           createMilestone: vi.fn(),
           getMilestone: vi.fn(),
           listForRepo: vi.fn(),
+          addLabels: vi.fn(),
+          removeLabel: vi.fn(),
         },
         orgs: {
           listMembers: vi.fn(),
@@ -577,5 +579,52 @@ describe('GitHubTracker.ping', () => {
     const mockGet = vi.mocked(tracker.octokit.rest.repos.get)
     mockGet.mockRejectedValueOnce(new Error('Not Found'))
     await expect(tracker.ping()).rejects.toThrow('Not Found')
+  })
+})
+
+describe('GitHubTracker.transitionTicket', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('swaps any existing status label for the new status:<slug> label', async () => {
+    const tracker = makeTracker()
+    // @ts-expect-error — accessing private field for test setup
+    const issues = tracker.octokit.rest.issues
+    vi.mocked(issues.get).mockResolvedValueOnce({
+      data: { number: 7, labels: [{ name: 'ticket' }, { name: 'status:to-do' }] },
+    } as never)
+    vi.mocked(issues.removeLabel).mockResolvedValue({} as never)
+    vi.mocked(issues.addLabels).mockResolvedValue({} as never)
+
+    await tracker.transitionTicket('7', 'In Review')
+
+    expect(vi.mocked(issues.removeLabel)).toHaveBeenCalledWith(
+      expect.objectContaining({ issue_number: 7, name: 'status:to-do' }),
+    )
+    expect(vi.mocked(issues.addLabels)).toHaveBeenCalledWith(
+      expect.objectContaining({ issue_number: 7, labels: ['status:in-review'] }),
+    )
+  })
+
+  it('derives Ticket.status from a status:* label over the raw issue state', async () => {
+    const tracker = makeTracker()
+    // @ts-expect-error — accessing private field for test setup
+    const issues = tracker.octokit.rest.issues
+    vi.mocked(issues.get).mockResolvedValueOnce({
+      data: {
+        number: 7,
+        state: 'open',
+        labels: [{ name: 'ticket' }, { name: 'status:in-progress' }],
+        title: 'T',
+        body: '',
+        assignee: null,
+        updated_at: '2026-01-01T00:00:00Z',
+      },
+    } as never)
+    vi.mocked(issues.listComments).mockResolvedValueOnce({ data: [] } as never)
+    // @ts-expect-error — accessing private field for test setup
+    vi.mocked(tracker.octokit.request).mockResolvedValue({ data: [] } as never)
+
+    const ticket = await tracker.getTicket('7')
+    expect(ticket.status).toBe('in-progress')
   })
 })

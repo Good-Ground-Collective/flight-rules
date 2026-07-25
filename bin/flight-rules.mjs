@@ -29473,6 +29473,25 @@ var GitHubTaskTracker = class {
       { owner: this.owner, repo: this.repo, issue_number: ticketNumber, issue_id: issueId }
     );
   }
+  async transitionTicket(ticketId, status) {
+    const issueNumber = parseInt(ticketId, 10);
+    const label = `status:${status.trim().toLowerCase().replace(/\s+/g, "-")}`;
+    const { data: issue2 } = await this.octokit.rest.issues.get({
+      owner: this.owner,
+      repo: this.repo,
+      issue_number: issueNumber
+    });
+    const stale = issue2.labels.map((l) => this.labelName(l)).filter((name) => name.startsWith("status:") && name !== label);
+    for (const name of stale) {
+      await this.octokit.rest.issues.removeLabel({ owner: this.owner, repo: this.repo, issue_number: issueNumber, name });
+    }
+    await this.octokit.rest.issues.addLabels({
+      owner: this.owner,
+      repo: this.repo,
+      issue_number: issueNumber,
+      labels: [label]
+    });
+  }
   async updateEpicMetadata(epicId, patch) {
     const issueNumber = parseInt(epicId, 10);
     const { data } = await this.octokit.rest.issues.get({
@@ -29643,11 +29662,13 @@ var GitHubTaskTracker = class {
     };
   }
   mapTicket(issue2, comments, blockedBy = [], blocking = [], metadata = {}) {
+    const labels = issue2.labels.map((l) => this.labelName(l)).filter(Boolean);
+    const statusLabel = labels.find((name) => name.startsWith("status:"));
     return {
       id: String(issue2.number),
       size: "ticket",
-      status: issue2.state,
-      labels: issue2.labels.map((l) => this.labelName(l)).filter(Boolean),
+      status: statusLabel !== void 0 ? statusLabel.slice("status:".length) : issue2.state,
+      labels,
       title: issue2.title,
       body: issue2.body ?? "",
       comments: comments.map((c) => this.mapComment(c)),
@@ -30139,6 +30160,20 @@ var JiraTaskTracker = class {
     if (link?.id === void 0) return;
     await this.client.request("DELETE", `/issueLink/${link.id}`);
   }
+  async transitionTicket(ticketId, status) {
+    const response = await this.client.request(
+      "GET",
+      `/issue/${ticketId}/transitions`
+    );
+    const match = response.transitions.find((transition) => transition.to.name.toLowerCase() === status.toLowerCase());
+    if (match === void 0) {
+      const available = response.transitions.map((transition) => transition.to.name).join(", ");
+      throw new Error(
+        `No transition to status "${status}" is available for ${ticketId} from its current status (available: ${available})`
+      );
+    }
+    await this.client.request("POST", `/issue/${ticketId}/transitions`, { transition: { id: match.id } });
+  }
   async updateEpicMetadata(epicId, patch) {
     await this.spliceDescriptionMetadata(epicId, patch);
   }
@@ -30545,6 +30580,10 @@ function createTicketCommand(getTracker) {
   });
   ticket.command("unblock").exitOverride().argument("<id>", "ticket id to unblock").requiredOption("--by <blockerId>", "id of the blocking ticket to remove").action(async (id, opts) => {
     await getTracker().unblockTicket(id, opts.by);
+  });
+  ticket.command("status").exitOverride().argument("<id>", "ticket id to transition").requiredOption("--to <status>", 'target status, e.g. "In Progress" or "In Review"').action(async (id, opts) => {
+    await getTracker().transitionTicket(id, opts.to);
+    process.stdout.write(JSON.stringify({ id, status: opts.to }) + "\n");
   });
   return ticket;
 }
