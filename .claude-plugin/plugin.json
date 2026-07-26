@@ -6,6 +6,7 @@
   "skills": "./skills/",
   "agents": [
     "./agents/research-agent.md",
-    "./agents/code-implementation.md"
+    "./agents/code-implementation.md",
+    "./agents/code-verifier.md"
   ]
 }
