@@ -16,6 +16,8 @@ import { createCheckCommand } from './tasks/commands/check/command.js'
 import type { TaskTracker } from './tasks/task-tracker/task-tracker.js'
 import { NodeGitExecutor } from './git/git-executor/git-executor.js'
 import { createGitCommand } from './git/commands/commit/command.js'
+import { GitHubPullRequestHost, type PullRequestHost } from './pr/pull-request-host/pull-request-host.js'
+import { createPrCommand } from './pr/commands/pr/command.js'
 import { appVersion } from './version.js'
 
 function buildTracker(overrideTracker?: string): TaskTracker {
@@ -53,6 +55,25 @@ function buildTracker(overrideTracker?: string): TaskTracker {
   })
 }
 
+function buildPrHost(overrideTracker?: string): PullRequestHost {
+  const config = getConfigFromEnv(overrideTracker)
+  const env = readEnv()
+
+  if (env.githubToken === undefined) {
+    throw new Error('GITHUB_TOKEN environment variable is required to create pull requests')
+  }
+  if (config.repo === undefined) {
+    throw new Error('repo (owner/repo) is required in config to create pull requests')
+  }
+
+  const [owner, repo] = config.repo.split('/')
+  if (owner === undefined || repo === undefined) {
+    throw new Error(`Invalid repo format "${config.repo}" — expected "owner/repo"`)
+  }
+
+  return new GitHubPullRequestHost({ token: env.githubToken, owner, repo })
+}
+
 function getConfigFromEnv(overrideTracker?: string): Config {
   const configPath =
     process.env['FLIGHT_RULES_CONFIG'] ?? join(process.cwd(), '.claude', 'flight-rules.local.md')
@@ -67,6 +88,7 @@ function getConfigFromEnv(overrideTracker?: string): Config {
 export function buildProgram(
   getTracker: (overrideTracker?: string) => TaskTracker,
   getConfig: (overrideTracker?: string) => Config,
+  getPrHost: (overrideTracker?: string) => PullRequestHost,
 ): Command {
   const program = new Command('flight-rules')
   program.version(appVersion)
@@ -81,12 +103,14 @@ export function buildProgram(
 
   const tracker = (): TaskTracker => getTracker(overrideTracker)
   const config = (): Config => getConfig(overrideTracker)
+  const prHost = (): PullRequestHost => getPrHost(overrideTracker)
 
   program.addCommand(createEpicCommand(tracker))
   program.addCommand(createInitiativeCommand(tracker))
   program.addCommand(createTicketCommand(tracker))
   program.addCommand(createTddCommand(tracker))
   program.addCommand(createGitCommand(() => new NodeGitExecutor()))
+  program.addCommand(createPrCommand(prHost))
   program.addCommand(createUsersCommand(tracker))
   program.addCommand(createRfcCommand(config))
   program.addCommand(createCompetenciesCommand(config))
@@ -95,5 +119,5 @@ export function buildProgram(
 }
 
 export async function run(argv: string[]): Promise<void> {
-  await buildProgram(buildTracker, getConfigFromEnv).parseAsync(argv, { from: 'user' })
+  await buildProgram(buildTracker, getConfigFromEnv, buildPrHost).parseAsync(argv, { from: 'user' })
 }

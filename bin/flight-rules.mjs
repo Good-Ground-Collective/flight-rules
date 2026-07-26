@@ -30837,6 +30837,121 @@ function createGitCommand(getExecutor) {
   return git;
 }
 
+// src/git/pr-template/pr-template.ts
+var PullRequestTemplateSchema = external_exports.object({
+  type: external_exports.enum(semanticTypes),
+  scope: external_exports.string().min(1),
+  description: external_exports.string().min(1),
+  summary: external_exports.string().min(1),
+  changes: external_exports.array(external_exports.string()).default([]),
+  ticketId: external_exports.string().optional(),
+  testNotes: external_exports.string().optional(),
+  baseBranch: external_exports.string().min(1),
+  headBranch: external_exports.string().min(1),
+  reviewers: external_exports.array(external_exports.string()).default([]),
+  labels: external_exports.array(external_exports.string()).default([])
+});
+var DefaultPullRequestBuilder = class {
+  build(input) {
+    const parsed = PullRequestTemplateSchema.parse(input);
+    const title = `${parsed.type}(${parsed.scope}): ${parsed.description}`;
+    const sections = ["## Summary", "", parsed.summary];
+    if (parsed.changes.length > 0) {
+      sections.push("", "## Changes", "", ...parsed.changes.map((change) => `- ${change}`));
+    }
+    if (parsed.ticketId !== void 0) {
+      sections.push("", "## Ticket", "", parsed.ticketId);
+    }
+    if (parsed.testNotes !== void 0) {
+      sections.push("", "## Testing", "", parsed.testNotes);
+    }
+    return { title, body: sections.join("\n") };
+  }
+};
+var pullRequestBuilder = new DefaultPullRequestBuilder();
+
+// src/pr/pull-request-host/pull-request-host.ts
+var GitHubPullRequestHostPropsSchema = external_exports.object({
+  token: external_exports.string().min(1),
+  owner: external_exports.string().min(1),
+  repo: external_exports.string().min(1)
+});
+var GitHubPullRequestHost = class {
+  octokit;
+  owner;
+  repo;
+  builder;
+  constructor(props, builder = new DefaultPullRequestBuilder()) {
+    const parsed = GitHubPullRequestHostPropsSchema.parse(props);
+    this.octokit = new Octokit2({ auth: parsed.token });
+    this.owner = parsed.owner;
+    this.repo = parsed.repo;
+    this.builder = builder;
+  }
+  async createPullRequest(input) {
+    const template = PullRequestTemplateSchema.parse(input);
+    const { title, body } = this.builder.build(template);
+    const response = await this.octokit.rest.pulls.create({
+      owner: this.owner,
+      repo: this.repo,
+      title,
+      body,
+      base: template.baseBranch,
+      head: template.headBranch
+    });
+    const created = { number: response.data.number, url: response.data.html_url };
+    if (template.reviewers.length > 0) {
+      await this.requestReviewers(created.number, template.reviewers);
+    }
+    if (template.labels.length > 0) {
+      await this.octokit.rest.issues.addLabels({
+        owner: this.owner,
+        repo: this.repo,
+        issue_number: created.number,
+        labels: template.labels
+      });
+    }
+    return created;
+  }
+  async requestReviewers(pullNumber, reviewers) {
+    try {
+      await this.octokit.rest.pulls.requestReviewers({
+        owner: this.owner,
+        repo: this.repo,
+        pull_number: pullNumber,
+        reviewers
+      });
+    } catch {
+    }
+  }
+};
+
+// src/pr/commands/pr/command.ts
+function collect2(value, previous) {
+  return [...previous, value];
+}
+function createPrCommand(getHost) {
+  const pr = new Command("pr");
+  pr.command("create").exitOverride().requiredOption("--type <type>", "conventional commit type").requiredOption("--scope <scope>", "conventional commit scope").requiredOption("--description <description>", "PR title description").requiredOption("--summary <summary>", "PR summary section").requiredOption("--base <base>", "base branch to merge into").requiredOption("--head <head>", "head branch to merge from").option("--change <change>", "a change line (repeatable)", collect2, []).option("--ticket-id <id>", "tracker ticket id").option("--test-notes <notes>", "testing section").option("--reviewer <reviewer>", "reviewer to request (repeatable)", collect2, []).option("--label <label>", "label to apply (repeatable)", collect2, []).action(async (opts) => {
+    const template = PullRequestTemplateSchema.parse({
+      type: opts.type,
+      scope: opts.scope,
+      description: opts.description,
+      summary: opts.summary,
+      changes: opts.change,
+      baseBranch: opts.base,
+      headBranch: opts.head,
+      ...opts.ticketId !== void 0 ? { ticketId: opts.ticketId } : {},
+      ...opts.testNotes !== void 0 ? { testNotes: opts.testNotes } : {},
+      reviewers: opts.reviewer,
+      labels: opts.label
+    });
+    const created = await getHost().createPullRequest(template);
+    process.stdout.write(JSON.stringify(created) + "\n");
+  });
+  return pr;
+}
+
 // src/version.ts
 var appVersion = false ? "0.0.0-dev" : "1.23.1";
 
@@ -30869,6 +30984,21 @@ function buildTracker(overrideTracker) {
     ...config2.confluenceSpaceKey !== void 0 ? { confluenceSpaceKey: config2.confluenceSpaceKey } : {}
   });
 }
+function buildPrHost(overrideTracker) {
+  const config2 = getConfigFromEnv(overrideTracker);
+  const env = readEnv();
+  if (env.githubToken === void 0) {
+    throw new Error("GITHUB_TOKEN environment variable is required to create pull requests");
+  }
+  if (config2.repo === void 0) {
+    throw new Error("repo (owner/repo) is required in config to create pull requests");
+  }
+  const [owner, repo] = config2.repo.split("/");
+  if (owner === void 0 || repo === void 0) {
+    throw new Error(`Invalid repo format "${config2.repo}" \u2014 expected "owner/repo"`);
+  }
+  return new GitHubPullRequestHost({ token: env.githubToken, owner, repo });
+}
 function getConfigFromEnv(overrideTracker) {
   const configPath = process.env["FLIGHT_RULES_CONFIG"] ?? join3(process.cwd(), ".claude", "flight-rules.local.md");
   const config2 = readConfig(configPath);
@@ -30878,7 +31008,7 @@ function getConfigFromEnv(overrideTracker) {
   }
   return { ...config2, tracker: overrideTracker };
 }
-function buildProgram(getTracker, getConfig) {
+function buildProgram(getTracker, getConfig, getPrHost) {
   const program2 = new Command("flight-rules");
   program2.version(appVersion);
   program2.exitOverride();
@@ -30890,11 +31020,13 @@ function buildProgram(getTracker, getConfig) {
   });
   const tracker = () => getTracker(overrideTracker);
   const config2 = () => getConfig(overrideTracker);
+  const prHost = () => getPrHost(overrideTracker);
   program2.addCommand(createEpicCommand(tracker));
   program2.addCommand(createInitiativeCommand(tracker));
   program2.addCommand(createTicketCommand(tracker));
   program2.addCommand(createTddCommand(tracker));
   program2.addCommand(createGitCommand(() => new NodeGitExecutor()));
+  program2.addCommand(createPrCommand(prHost));
   program2.addCommand(createUsersCommand(tracker));
   program2.addCommand(createRfcCommand(config2));
   program2.addCommand(createCompetenciesCommand(config2));
@@ -30902,7 +31034,7 @@ function buildProgram(getTracker, getConfig) {
   return program2;
 }
 async function run(argv) {
-  await buildProgram(buildTracker, getConfigFromEnv).parseAsync(argv, { from: "user" });
+  await buildProgram(buildTracker, getConfigFromEnv, buildPrHost).parseAsync(argv, { from: "user" });
 }
 
 // src/main.ts
