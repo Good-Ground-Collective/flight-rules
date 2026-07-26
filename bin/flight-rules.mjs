@@ -30526,7 +30526,106 @@ function createInitiativeCommand(getTracker) {
   return initiative;
 }
 
+// src/tasks/body-sections/body-sections.ts
+var headingLine2 = /^##\s+(.+?)\s*$/;
+var detailsOpen2 = /^<details/;
+var detailsClose = /^<\/details>/;
+var checklistItem = /^-\s+\[( |x|X)\]\s+(.*)$/;
+var HEADING_KEYS = {
+  "Problem Statement": "problemStatement",
+  Solution: "solution",
+  "Acceptance Criteria": "acceptanceCriteria",
+  "High-level technical writeup": "technicalWriteup"
+};
+var LayeredBodySectionsParser = class {
+  parse(body) {
+    const lines = body.replace(/\r\n/g, "\n").split("\n");
+    const raw = {};
+    let current;
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i] ?? "";
+      const heading = line.match(headingLine2);
+      if (heading?.[1] !== void 0) {
+        current = HEADING_KEYS[heading[1]];
+        if (current !== void 0) raw[current] = [];
+        i++;
+        continue;
+      }
+      if (detailsOpen2.test(line.trim())) {
+        const block = this.consumeDetails(lines, i);
+        if (/guided walkthrough/i.test(block.title)) {
+          raw.guidedWalkthrough = block.inner.split("\n");
+        }
+        current = void 0;
+        i = block.next;
+        continue;
+      }
+      if (current !== void 0) raw[current]?.push(line);
+      i++;
+    }
+    const items = (raw.acceptanceCriteria ?? []).map((item) => item.match(checklistItem)).filter((match) => match !== null).map((match) => ({ text: (match[2] ?? "").trim(), done: match[1]?.toLowerCase() === "x" }));
+    const text = (key) => {
+      const joined = (raw[key] ?? []).join("\n").trim();
+      return joined.length > 0 ? joined : void 0;
+    };
+    const problemStatement = text("problemStatement");
+    const solution = text("solution");
+    const acceptanceCriteria = text("acceptanceCriteria");
+    const technicalWriteup = text("technicalWriteup");
+    const guidedWalkthrough = text("guidedWalkthrough");
+    return {
+      ...problemStatement !== void 0 ? { problemStatement } : {},
+      ...solution !== void 0 ? { solution } : {},
+      ...acceptanceCriteria !== void 0 ? { acceptanceCriteria } : {},
+      ...technicalWriteup !== void 0 ? { technicalWriteup } : {},
+      ...guidedWalkthrough !== void 0 ? { guidedWalkthrough } : {},
+      acceptanceCriteriaItems: items
+    };
+  }
+  consumeDetails(lines, start) {
+    let depth = 0;
+    let end = lines.length - 1;
+    for (let j = start; j < lines.length; j++) {
+      const trimmed = (lines[j] ?? "").trim();
+      if (detailsOpen2.test(trimmed)) depth++;
+      if (detailsClose.test(trimmed)) depth--;
+      if (depth === 0) {
+        end = j;
+        break;
+      }
+    }
+    const block = lines.slice(start, end + 1).join("\n");
+    const summary = block.match(/<summary>([\s\S]*?)<\/summary>/);
+    const title = summary?.[1]?.trim() ?? "";
+    const afterSummary = block.indexOf("</summary>");
+    const withoutHead = afterSummary !== -1 ? block.slice(afterSummary + "</summary>".length) : block.replace(detailsOpen2, "");
+    const inner = withoutHead.replace(/<\/details>\s*$/, "").trim();
+    return { title, inner, next: end + 1 };
+  }
+};
+var bodySectionsParser = new LayeredBodySectionsParser();
+
 // src/tasks/commands/ticket/command.ts
+var SECTION_FIELDS = {
+  "problem-statement": "problemStatement",
+  solution: "solution",
+  "acceptance-criteria": "acceptanceCriteria",
+  "technical-writeup": "technicalWriteup",
+  "guided-walkthrough": "guidedWalkthrough"
+};
+function selectSection(id, sections, name) {
+  const field = SECTION_FIELDS[name];
+  if (field === void 0) {
+    throw new Error(`unknown section "${name}" \u2014 expected one of: ${Object.keys(SECTION_FIELDS).join(", ")}`);
+  }
+  return {
+    id,
+    section: name,
+    markdown: sections[field] ?? null,
+    ...field === "acceptanceCriteria" ? { items: sections.acceptanceCriteriaItems } : {}
+  };
+}
 function createTicketCommand(getTracker) {
   const ticket = new Command("ticket");
   ticket.command("create").exitOverride().requiredOption("--title <title>", "ticket title").option("--body <body>", "ticket body (or use --body-file)").option("--body-file <path>", "read the ticket body from a file").requiredOption("--epic-id <id>", "parent epic id").option("--labels <labels>", "comma-separated labels").option("--assignee <user>", "assignee login").action(async (opts) => {
@@ -30540,9 +30639,14 @@ function createTicketCommand(getTracker) {
     const result = await getTracker().createTicket(input);
     process.stdout.write(JSON.stringify(result) + "\n");
   });
-  ticket.command("get").exitOverride().argument("<id>", "ticket id").action(async (id) => {
+  ticket.command("get").exitOverride().argument("<id>", "ticket id").option("--section <name>", "extract a single body section (e.g. acceptance-criteria)").action(async (id, opts) => {
     const result = await getTracker().getTicket(id);
-    process.stdout.write(JSON.stringify(result) + "\n");
+    if (opts.section === void 0) {
+      process.stdout.write(JSON.stringify(result) + "\n");
+      return;
+    }
+    const sections = bodySectionsParser.parse(result.body);
+    process.stdout.write(JSON.stringify(selectSection(id, sections, opts.section)) + "\n");
   });
   ticket.command("block").exitOverride().argument("<id>", "ticket id to block").requiredOption("--by <blockerId>", "id of the ticket that must close first").action(async (id, opts) => {
     await getTracker().blockTicket(id, opts.by);

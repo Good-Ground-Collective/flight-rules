@@ -1,6 +1,28 @@
 import { Command } from 'commander'
 import type { CreateTicketInput, TaskTracker } from '../../task-tracker/task-tracker.js'
 import { resolveBody } from '../resolve-body.js'
+import { bodySectionsParser, type BodySections, type SectionKey } from '../../body-sections/body-sections.js'
+
+const SECTION_FIELDS: Record<string, SectionKey> = {
+  'problem-statement': 'problemStatement',
+  solution: 'solution',
+  'acceptance-criteria': 'acceptanceCriteria',
+  'technical-writeup': 'technicalWriteup',
+  'guided-walkthrough': 'guidedWalkthrough',
+}
+
+function selectSection(id: string, sections: BodySections, name: string): Record<string, unknown> {
+  const field = SECTION_FIELDS[name]
+  if (field === undefined) {
+    throw new Error(`unknown section "${name}" — expected one of: ${Object.keys(SECTION_FIELDS).join(', ')}`)
+  }
+  return {
+    id,
+    section: name,
+    markdown: sections[field] ?? null,
+    ...(field === 'acceptanceCriteria' ? { items: sections.acceptanceCriteriaItems } : {}),
+  }
+}
 
 type CreateTicketOptions = {
   title: string
@@ -39,9 +61,15 @@ export function createTicketCommand(getTracker: () => TaskTracker): Command {
     .command('get')
     .exitOverride()
     .argument('<id>', 'ticket id')
-    .action(async (id: string) => {
+    .option('--section <name>', 'extract a single body section (e.g. acceptance-criteria)')
+    .action(async (id: string, opts: { section?: string }) => {
       const result = await getTracker().getTicket(id)
-      process.stdout.write(JSON.stringify(result) + '\n')
+      if (opts.section === undefined) {
+        process.stdout.write(JSON.stringify(result) + '\n')
+        return
+      }
+      const sections = bodySectionsParser.parse(result.body)
+      process.stdout.write(JSON.stringify(selectSection(id, sections, opts.section)) + '\n')
     })
 
   ticket
