@@ -90,5 +90,15 @@ export function createTicketCommand(getTracker: () => TaskTracker): Command {
       await getTracker().unblockTicket(id, opts.by)
     })
 
+  ticket
+    .command('status')
+    .exitOverride()
+    .argument('<id>', 'ticket id to transition')
+    .requiredOption('--to <status>', 'target status, e.g. "In Progress" or "In Review"')
+    .action(async (id: string, opts: { to: string }) => {
+      await getTracker().transitionTicket(id, opts.to)
+      process.stdout.write(JSON.stringify({ id, status: opts.to }) + '\n')
+    })
+
   return ticket
 }

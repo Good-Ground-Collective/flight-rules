@@ -42,6 +42,16 @@ export interface JiraIssueLinkTypesResponse {
   issueLinkTypes: JiraLinkType[]
 }
 
+export interface JiraTransition {
+  id: string
+  name: string
+  to: { name: string }
+}
+
+export interface JiraTransitionsResponse {
+  transitions: JiraTransition[]
+}
+
 export interface JiraIssue {
   id: string
   key: string

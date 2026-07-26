@@ -26,6 +26,7 @@ const makeTracker = (): TaskTracker => ({
   linkTicketToEpic: vi.fn(),
   blockTicket: vi.fn(),
   unblockTicket: vi.fn(),
+  transitionTicket: vi.fn(),
   updateEpicMetadata: vi.fn(),
   updateTicketMetadata: vi.fn(),
   updateTddMetadata: vi.fn(),
@@ -132,6 +133,23 @@ describe('ticket command', () => {
     const tracker = makeTracker()
     await run(tracker, ['unblock', '7', '--by', '3'])
     expect(tracker.unblockTicket).toHaveBeenCalledWith('7', '3')
+  })
+
+  it('calls transitionTicket and prints JSON for "status"', async () => {
+    const tracker = makeTracker()
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(tracker, ['status', '7', '--to', 'In Review'])
+    expect(tracker.transitionTicket).toHaveBeenCalledWith('7', 'In Review')
+    expect(output).toHaveBeenCalledWith(JSON.stringify({ id: '7', status: 'In Review' }) + '\n')
+    output.mockRestore()
+  })
+
+  it('rejects "status" when --to is missing', async () => {
+    const tracker = makeTracker()
+    const errOutput = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+    await expect(run(tracker, ['status', '7'])).rejects.toThrow(CommanderError)
+    expect(tracker.transitionTicket).not.toHaveBeenCalled()
+    errOutput.mockRestore()
   })
 
   it('rejects "block" when --by is missing', async () => {

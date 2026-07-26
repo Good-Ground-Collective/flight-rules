@@ -10,6 +10,7 @@ const makeTracker = (): TaskTracker => ({
   linkTicketToEpic: vi.fn(),
   blockTicket: vi.fn(),
   unblockTicket: vi.fn(),
+  transitionTicket: vi.fn(),
   updateEpicMetadata: vi.fn(),
   updateTicketMetadata: vi.fn(),
   updateTddMetadata: vi.fn(),
