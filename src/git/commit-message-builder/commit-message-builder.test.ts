@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import type { CommitMessageInput } from './commit-message-builder.js'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { type CommitMessageInput } from './commit-message.schema.js'
 
 vi.mock('node:fs', () => ({
   readFileSync: vi.fn().mockReturnValue(JSON.stringify({ version: '1.2.3' })),
@@ -14,7 +14,7 @@ beforeEach(async () => {
 })
 
 const build = (input: CommitMessageInput, agentEnv: string | undefined = ''): string =>
-  new commitMessageBuilderClass('/x/bin/flight-rules', agentEnv).build(input)
+  new commitMessageBuilderClass({ binPath: '/x/bin/flight-rules', agentEnv }).build(input)
 
 describe('DefaultCommitMessageBuilder.build', () => {
   it('builds subject + footers with no body, reading plugin version from package.json', () => {

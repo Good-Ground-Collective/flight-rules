@@ -30681,9 +30681,7 @@ var semanticTypes = [
   "style",
   "revert"
 ];
-function isSemanticType(value) {
-  return semanticTypes.some((t) => t === value);
-}
+var SemanticTypeSchema = external_exports.enum(semanticTypes);
 
 // src/git/git-executor/git-executor.ts
 var NodeGitExecutor = class {
@@ -30704,7 +30702,8 @@ var NodeGitExecutor = class {
     return stdout.trim();
   }
   async checkout(spec, from) {
-    if (!isSemanticType(spec.type)) {
+    const semanticTypeValidation = SemanticTypeSchema.safeParse(spec.type);
+    if (!semanticTypeValidation.success) {
       throw new Error(
         `invalid branch type "${spec.type}" \u2014 must be one of: ${semanticTypes.join(", ")}`
       );
@@ -30724,27 +30723,57 @@ var NodeGitExecutor = class {
 // src/git/commit-message-builder/commit-message-builder.ts
 import { readFileSync as readFileSync3 } from "node:fs";
 import { dirname, join as join2 } from "node:path";
+
+// src/git/commit-message-builder/commit-message.schema.ts
+var CommitMessageInputSchema = external_exports.object({
+  type: SemanticTypeSchema,
+  scope: external_exports.string().min(2).max(12),
+  description: external_exports.string().min(2).max(50),
+  body: external_exports.string().optional(),
+  model: external_exports.string().max(72).optional(),
+  footers: external_exports.array(external_exports.string().regex(/^[a-zA-Z0-9-]+(: |=).*$/)).default([])
+});
+var CommitMessageHeaderSchema = external_exports.preprocess(
+  (arg) => {
+    return external_exports.string({ error: "Git Commit headers should be 72 characters or less" }).max(72).parse(arg);
+  },
+  external_exports.templateLiteral([SemanticTypeSchema, "(", external_exports.string(), "): ", external_exports.string()])
+);
+var CommitMessageBuilderPropsSchema = external_exports.object({
+  binPath: external_exports.string().min(1),
+  agentEnv: external_exports.string().optional()
+});
+
+// src/git/commit-message-builder/commit-message-builder.ts
 var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
   pluginVersion;
   harnessVersion;
-  constructor(binPath, agentEnv) {
-    this.pluginVersion = _DefaultCommitMessageBuilder.readPluginVersion(binPath);
-    this.harnessVersion = _DefaultCommitMessageBuilder.parseHarnessVersion(agentEnv);
+  constructor(props) {
+    const parsed = CommitMessageBuilderPropsSchema.parse(props);
+    this.pluginVersion = _DefaultCommitMessageBuilder.readPluginVersion(parsed.binPath);
+    this.harnessVersion = _DefaultCommitMessageBuilder.parseHarnessVersion(parsed.agentEnv);
   }
   build(input) {
     const sections = [];
-    sections.push(`${input.type}(${input.scope}): ${input.description}`);
+    const headerValidation = CommitMessageHeaderSchema.safeParse(
+      `${input.type}(${input.scope}): ${input.description}`
+    );
+    if (!headerValidation.success) throw headerValidation.error;
+    sections.push(`${headerValidation.data}
+`);
     if (input.body !== void 0) {
-      sections.push(input.body);
+      sections.push(`${input.body}
+`);
     }
-    const trailers = [
-      ...input.footers,
+    const trailers = [];
+    if (input.footers) trailers.push(...input.footers);
+    trailers.push(
       `Flight-Rules-Version: ${this.pluginVersion}`,
       ...this.harnessVersion !== void 0 ? [`Harness-Version: ${this.harnessVersion}`] : [],
       ...input.model !== void 0 ? [`Model-Used: ${input.model}`] : []
-    ];
+    );
     sections.push(trailers.join("\n"));
-    return sections.join("\n\n");
+    return sections.join("\n");
   }
   static readPluginVersion(binPath) {
     try {
@@ -30773,18 +30802,20 @@ function collect(value, previous) {
 function createGitCommand(getExecutor) {
   const git = new Command("git");
   git.command("commit").exitOverride().requiredOption("--type <type>", "conventional commit type").requiredOption("--scope <scope>", "conventional commit scope").requiredOption("--description <description>", "commit description").option("--file <file>", "file to stage (repeatable)", collect, []).option("--body <body>", "commit body").option("--footer <footer>", "commit footer (repeatable)", collect, []).option("--model <model>", "model identifier").action(async (opts) => {
-    const builder = new DefaultCommitMessageBuilder(
-      process.argv[1] ?? "",
-      process.env["AI_AGENT"]
-    );
-    const message = builder.build({
+    const builder = new DefaultCommitMessageBuilder({
+      binPath: process.argv[1] ?? "",
+      agentEnv: process.env["AI_AGENT"]
+    });
+    const commitMessagePartsValidation = CommitMessageInputSchema.safeParse({
       type: opts.type,
       scope: opts.scope,
       description: opts.description,
-      ...opts.body !== void 0 ? { body: opts.body } : {},
+      body: opts.body ?? void 0,
       footers: opts.footer,
-      ...opts.model !== void 0 ? { model: opts.model } : {}
+      model: opts.model ?? void 0
     });
+    if (!commitMessagePartsValidation.success) throw commitMessagePartsValidation.error;
+    const message = builder.build(commitMessagePartsValidation.data);
     const executor = getExecutor();
     await executor.stage(opts.file);
     await executor.commit(message);

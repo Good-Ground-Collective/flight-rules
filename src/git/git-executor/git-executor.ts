@@ -1,6 +1,6 @@
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
-import { isSemanticType, semanticTypes } from '../semantic-types.js'
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { SemanticTypeSchema, semanticTypes } from '../semantic-types.js';
 
 type ExecFileFn = (
   file: string,
@@ -43,7 +43,8 @@ export class NodeGitExecutor implements GitExecutor {
   }
 
   async checkout(spec: BranchSpec, from?: string): Promise<string> {
-    if (!isSemanticType(spec.type)) {
+    const semanticTypeValidation = SemanticTypeSchema.safeParse(spec.type)
+    if (!semanticTypeValidation.success) {
       throw new Error(
         `invalid branch type "${spec.type}" — must be one of: ${semanticTypes.join(', ')}`,
       )

@@ -1,10 +1,11 @@
 import { Command } from 'commander'
-import type { GitExecutor } from '../../git-executor/git-executor.js'
-import { semanticTypes } from '../../semantic-types.js'
 import {
   DefaultCommitMessageBuilder,
   type CommitMessageBuilder,
 } from '../../commit-message-builder/commit-message-builder.js'
+import { CommitMessageInputSchema } from '../../commit-message-builder/commit-message.schema.js'
+import type { GitExecutor } from '../../git-executor/git-executor.js'
+import { semanticTypes } from '../../semantic-types.js'
 
 function collect(value: string, previous: string[]): string[] {
   return [...previous, value]
@@ -41,18 +42,22 @@ export function createGitCommand(getExecutor: () => GitExecutor): Command {
     .option('--footer <footer>', 'commit footer (repeatable)', collect, [])
     .option('--model <model>', 'model identifier')
     .action(async (opts: GitCommitOptions) => {
-      const builder: CommitMessageBuilder = new DefaultCommitMessageBuilder(
-        process.argv[1] ?? '',
-        process.env['AI_AGENT'],
-      )
-      const message = builder.build({
+      const builder: CommitMessageBuilder = new DefaultCommitMessageBuilder({
+        binPath: process.argv[1] ?? '',
+        agentEnv: process.env['AI_AGENT'],
+      })
+
+      const commitMessagePartsValidation = CommitMessageInputSchema.safeParse({
         type: opts.type,
         scope: opts.scope,
         description: opts.description,
-        ...(opts.body !== undefined ? { body: opts.body } : {}),
+        body: opts.body ?? undefined,
         footers: opts.footer,
-        ...(opts.model !== undefined ? { model: opts.model } : {}),
+        model: opts.model ?? undefined
       })
+      if (!commitMessagePartsValidation.success) throw commitMessagePartsValidation.error;
+
+      const message = builder.build(commitMessagePartsValidation.data)
       const executor = getExecutor()
       await executor.stage(opts.file)
       await executor.commit(message)
