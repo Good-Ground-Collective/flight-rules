@@ -29786,6 +29786,7 @@ var headingLine = /^(#{1,6})\s+(.*)$/;
 var taskLine = /^-\s+\[( |x|X)\]\s+(.*)$/;
 var bulletLine = /^-\s+(.*)$/;
 var detailsOpen = /^<details>/;
+var detailsClose = /^<\/details>/;
 var LayeredBodyAdfConverter = class {
   toAdf(markdown) {
     return { version: 1, type: "doc", content: this.parseBlocks(markdown.replace(/\r\n/g, "\n").split("\n")) };
@@ -29831,6 +29832,9 @@ var LayeredBodyAdfConverter = class {
           i = details.next;
           continue;
         }
+        nodes.push({ type: "paragraph", content: this.parseInline(line) });
+        i++;
+        continue;
       }
       if (taskLine.test(line)) {
         const items = [];
@@ -29884,9 +29888,9 @@ var LayeredBodyAdfConverter = class {
     let depth = 0;
     let end = -1;
     for (let j = start; j < lines.length; j++) {
-      const line = lines[j] ?? "";
-      depth += (line.match(/<details(?:\s|>)/g) ?? []).length;
-      depth -= (line.match(/<\/details>/g) ?? []).length;
+      const trimmed = (lines[j] ?? "").trim();
+      if (detailsOpen.test(trimmed)) depth++;
+      if (detailsClose.test(trimmed)) depth--;
       if (depth === 0) {
         end = j;
         break;

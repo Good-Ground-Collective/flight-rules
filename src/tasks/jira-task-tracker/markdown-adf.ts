@@ -6,6 +6,7 @@ const headingLine = /^(#{1,6})\s+(.*)$/
 const taskLine = /^-\s+\[( |x|X)\]\s+(.*)$/
 const bulletLine = /^-\s+(.*)$/
 const detailsOpen = /^<details>/
+const detailsClose = /^<\/details>/
 
 export interface MarkdownAdfConverter {
   toAdf(markdown: string): AdfDocNode
@@ -76,6 +77,10 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
           i = details.next
           continue
         }
+        // unclosed <details>: emit the opening line as literal text so parsing always advances
+        nodes.push({ type: 'paragraph', content: this.parseInline(line) })
+        i++
+        continue
       }
 
       if (taskLine.test(line)) {
@@ -141,9 +146,11 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
     let depth = 0
     let end = -1
     for (let j = start; j < lines.length; j++) {
-      const line = lines[j] ?? ''
-      depth += (line.match(/<details(?:\s|>)/g) ?? []).length
-      depth -= (line.match(/<\/details>/g) ?? []).length
+      // Count only line-anchored tags. A `<details>` mentioned mid-sentence or
+      // inside inline code is prose, not structure, and must not affect nesting.
+      const trimmed = (lines[j] ?? '').trim()
+      if (detailsOpen.test(trimmed)) depth++
+      if (detailsClose.test(trimmed)) depth--
       if (depth === 0) {
         end = j
         break
