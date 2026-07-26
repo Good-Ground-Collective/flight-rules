@@ -30564,7 +30564,7 @@ function createInitiativeCommand(getTracker) {
 // src/tasks/body-sections/body-sections.ts
 var headingLine2 = /^##\s+(.+?)\s*$/;
 var detailsOpen2 = /^<details/;
-var detailsClose = /^<\/details>/;
+var detailsClose2 = /^<\/details>/;
 var checklistItem = /^-\s+\[( |x|X)\]\s+(.*)$/;
 var HEADING_KEYS = {
   "Problem Statement": "problemStatement",
@@ -30624,7 +30624,7 @@ var LayeredBodySectionsParser = class {
     for (let j = start; j < lines.length; j++) {
       const trimmed = (lines[j] ?? "").trim();
       if (detailsOpen2.test(trimmed)) depth++;
-      if (detailsClose.test(trimmed)) depth--;
+      if (detailsClose2.test(trimmed)) depth--;
       if (depth === 0) {
         end = j;
         break;
