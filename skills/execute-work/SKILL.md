@@ -16,7 +16,8 @@ This is the skill that builds the thing. You are handed a **ticket id**; you han
 - You are handed a **ticket id**.
 - Run everything from the **repo root** (the `flight-rules` CLI resolves config relative to CWD).
 - `flight-rules check` reports `"ok": true`. If it doesn't, fix the environment first — the run mutates tracker state, and a half-configured CLI fails partway through.
-- The **working tree is clean**. A dirty tree stops the run *before any mutation*: the commit step stages by explicit path, so pre-existing edits to a file the implementer also touched would be swept into the commit silently.
+- Config carries a **`repo`** field (`owner/repo`). `flight-rules pr create` needs it regardless of tracker — the PR always lands on GitHub — and it throws before parsing a single option when it is missing. On a Jira-tracked repo `repo` is often absent, because the tracker doesn't need it and `skills/setup/SKILL.md` doesn't ask for it. **Step 2 discovers and stores it**, and it must be settled *before* the loop runs: reaching step 7 without it means a pushed branch and no PR.
+- The **working tree is clean**. A dirty tree stops the run *before any mutation*: the commit step commits by explicit path, so pre-existing edits to a file the implementer also touched would be swept into the commit silently.
 
 ## Process
 
@@ -49,37 +50,51 @@ git status --porcelain
 
 Any output means stop, per Preconditions. (Read-only git inspection like this is fine; it is *mutations* that must go through `flight-rules`.)
 
-### 2. Resolve the tracker's status names
+### 2. Resolve the config the run depends on
 
-The skill has to move the ticket twice — into "work started" and into "PR open" — but only the board knows what those statuses are called. `Config.inProgressStatus` and `Config.inReviewStatus` are **optional with no defaults**; their absence is precisely the signal to discover and store. Never assume a value.
+Three config values decide whether step 7 can finish, and none of them is guaranteed to be there. The skill has to move the ticket twice — into "work started" and into "PR open" — but only the board knows what those statuses are called; and it has to open a PR on GitHub, which needs `owner/repo` even when the tracker is Jira. `Config.inProgressStatus`, `Config.inReviewStatus` and `Config.repo` are all **optional with no defaults**; their absence is precisely the signal to discover and store. Never assume a value.
 
 This step is **discover → ask → store**, and it is interactive **once per repo**. After the first run it is a silent config read.
 
-**Read** `.claude/flight-rules.local.md`. If both `inProgressStatus` and `inReviewStatus` are present, use them and move on.
+**Read** `.claude/flight-rules.local.md`. If `inProgressStatus`, `inReviewStatus` and `repo` are all present, use them and move on.
 
-**Discover** the reachable statuses when either is missing:
+**Discover** the reachable statuses when either status is missing:
 
 ```bash
 flight-rules ticket transitions <id>
 ```
 
-It prints `{"id":"…","transitions":["To Do","In Progress","In Review","Done"]}` and mutates nothing.
+It prints something like `{"id":"…","transitions":["In Progress","Done"]}` and mutates nothing.
+
+**That list is not the board.** On **Jira** it is scoped to the ticket's **current** status — only transitions reachable from where the issue sits right now. You are taking this snapshot while the ticket is still in to-do, so on any gated company-managed workflow the in-review status is simply **not in it**; you won't reach that status until step 7. The illustrative four-name list above is the permissive team-managed case, not the norm. On **GitHub** the list is the repo's existing `status:` labels, which is likewise whatever happens to have been used before.
+
+**Discover** `repo` when it is missing — read it from the git remote, read-only:
+
+```bash
+gh repo view --json nameWithOwner --jq .nameWithOwner
+```
 
 **Ask** with `AskUserQuestion`, once per missing field:
 
-- When the list is non-empty, offer the discovered names as the options — "Which status means work has started?" and "Which status means a PR is open and awaiting review?"
-- When the list is **empty**, that is a valid state, not an error (a fresh GitHub repo has no `status:` labels yet). Ask for free text instead and explain that the tracker will create the status on first use.
+- **Always offer a free-text answer**, whatever the discovered list contains. The correct status name may not be in it — see above — and a discovered name that merely *looks* plausible is how a wrong `inReviewStatus` gets stored and a run dies at the final transition. Offer the discovered names as convenience options, never as the closed set.
+- When the list is **empty**, that is a valid state, not an error (a fresh GitHub repo has no `status:` labels yet). Free text is then the only answer; explain that the tracker will create the status on first use.
+- For `repo`, present what `gh` returned and ask the user to confirm or correct it. It must be exactly `owner/repo` — the CLI splits on `/` and rejects anything else.
 
-**Store** both answers by rewriting `.claude/flight-rules.local.md` with `Write`, exactly as `skills/setup/SKILL.md` does. The two new keys go **inside the `---` frontmatter fences**, alongside the existing fields, which you preserve verbatim. Write the whole file:
+Questions to ask: "Which status means work has started?", "Which status means a PR is open and awaiting review? (it may not appear in the list — the tracker only reports statuses reachable from where the ticket sits now)", and "PRs will be opened against `<owner/repo>` — is that right?"
+
+**Store** all the answers in **one** `Write` of `.claude/flight-rules.local.md`, exactly as `skills/setup/SKILL.md` does — one write, not one per field. The new keys go **inside the `---` frontmatter fences**, alongside the existing fields, which you preserve verbatim. Write the whole file:
 
 ```markdown
 ---
 tracker: <existing value>
 <every other existing field, unchanged>
+repo: <owner/repo>
 inProgressStatus: <the chosen in-progress status>
 inReviewStatus: <the chosen in-review status>
 ---
 ```
+
+Omit any key that was already present and correct; never write a key twice.
 
 The delimiters matter. The config loader reads only the block between the **first** `---` pair at the very start of the file, and the schema is non-strict — so anything written after the closing `---` is silently dropped with no error, and this step would then re-prompt on every single run instead of once.
 
@@ -105,7 +120,7 @@ flight-rules git checkout --type <type> --scope <id> --description <slug> [--fro
 
 - `--type` — the semantic type matching the work (`feat`, `fix`, `chore`, …). Reuse it for the commits and the PR so the trail is consistent.
 - `--scope` — the ticket id.
-- `--description` — a short kebab slug from the ticket title.
+- `--description` — a short kebab slug from the ticket title. It is kebab **because it becomes a branch name**; the commit and the PR in step 7 take prose instead, so don't reuse this token there.
 - `--from <base>` — **only** when this work stacks on another in-flight branch; otherwise omit and it branches off current HEAD.
 
 The command prints `{"branch":"…","from":null}`. Keep that branch name — the PR's `--head` needs it.
@@ -153,7 +168,7 @@ openQuestions:
   - …
 ```
 
-Keep `filesChanged[].path` — the commit step stages from it. If `openQuestions` is present, see Error handling: it goes to the user, unanswered.
+Keep `filesChanged[].path` — the commit step stages and commits exactly that set, and the implementer leaves its edits unstaged, so a path it forgot to report is a path that does not ship. If `openQuestions` is present, see Error handling: it goes to the user, unanswered.
 
 **b. Dispatch `code-verifier`** with the acceptance criteria, fetched fresh and structured:
 
@@ -193,20 +208,22 @@ Only once `verified: true`.
 **Commit.** Stage by explicit path — the command has no all-files flag, and that is deliberate, so an unrelated stray edit can never ride along. Repeat `--file` once per path:
 
 ```bash
-flight-rules git commit --type <type> --scope <id> --description <slug> --file <path> --file <path>
+flight-rules git commit --type <type> --scope <id> --description "<description>" --file <path> --file <path>
 ```
+
+`<description>` is **prose, not the kebab slug from step 4** — an imperative phrase like `add ticket transitions command`, matching the commit history. `feat(KAN-35): add-execute-work-orchestrator` is the shape to avoid; the branch is the only place kebab belongs.
 
 The `--file` set is the **union of `filesChanged[].path` across every iteration**, not just the last one. Each dispatch reports only what *that* dispatch touched, so a retry's list is a subset. Iteration 1 might create a module and its test; iteration 2 fixes only the module and reports only the module — staging that alone would ship the fix without the test, so the PR diff would no longer be the tree the verifier passed. Accumulate the paths as you go, and de-duplicate.
 
 Never use a Claude Code auto-generated commit. The CLI owns the message format.
 
-Then confirm you staged everything:
+Then confirm you committed everything:
 
 ```bash
 git status --porcelain
 ```
 
-It must be **empty**. Any remaining output means the verified tree is wider than what you committed — stop and reconcile before pushing rather than opening a PR that doesn't match what was verified.
+It must be **empty**. Any remaining output — unstaged *or* staged — means the verified tree is wider than what you committed, so stop and reconcile before pushing rather than opening a PR that doesn't match what was verified. This check has teeth because the CLI commits with `git commit --only -- <paths>`: a path the implementer left behind, or staged without reporting, is excluded from the commit and therefore still visible here. It cannot be swept in silently.
 
 **Push.** The command resolves the branch from HEAD and sets upstream by default:
 
@@ -225,9 +242,10 @@ gh repo view --json defaultBranchRef --jq .defaultBranchRef.name
 The head is the branch `git checkout` printed in step 4:
 
 ```bash
-flight-rules pr create --type <type> --scope <id> --description <slug> --summary "<from the ticket's Solution>" --ticket-id <id> --test-notes "<the verifier's per-criterion evidence>" --base <default-branch> --head <branch>
+flight-rules pr create --type <type> --scope <id> --description "<description>" --summary "<from the ticket's Solution>" --ticket-id <id> --test-notes "<the verifier's per-criterion evidence>" --base <default-branch> --head <branch>
 ```
 
+- `--description` — the same prose phrase as the commit, since it becomes the PR title. Not the kebab branch slug.
 - `--summary` — drawn from the ticket's **Solution** section, not from the implementer's `summary`. The PR describes the intended change.
 - `--test-notes` — the verifier's evidence. This is the artifact that makes the PR reviewable: the human reviewer sees which criteria were checked and how.
 - `--change` is available and repeatable if the change list is worth spelling out.
@@ -270,6 +288,7 @@ Give the user, in this order:
 - **Either agent returns `openQuestions`** → surface them unanswered, alongside whatever else that iteration produced.
 - **Third consecutive FAIL** → stop. Present the itemized evidence from the final verification, state that three iterations were used, and **leave the branch intact** with the work in place so a human can pick it up. Do not commit, do not push, do not open a PR, and do not move the ticket to in-review. Leave it in the in-progress status — that is now true.
 - **`git push` rejected** → stop and report. There is no force flag, and inventing one with raw git is not the fix.
+- **`pr create` fails on `repo`** — either `repo (owner/repo) is required in config to create pull requests` or `Invalid repo format …`. This is a config error, not a work error, and by the time you see it **the commit has landed and the branch is pushed**. So: fix `repo` in `.claude/flight-rules.local.md` (confirm the value with the user first) and re-run **only** the `pr create` command, then carry on to the in-review transition. Do **not** redo the implement/verify loop, do not re-commit, and do **not** fall back to raw `gh pr create` — that bypasses the PR template, so the body would lose the summary, the ticket link and the verifier's test notes, which is the whole point of routing through the CLI. If the user can't supply a valid `owner/repo`, stop and report the branch name and commit sha so the PR can be opened by hand.
 
 ## What Good Looks Like
 

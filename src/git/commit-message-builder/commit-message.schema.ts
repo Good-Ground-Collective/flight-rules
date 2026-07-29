@@ -4,7 +4,8 @@ import { SemanticTypeSchema } from "../semantic-types.js";
 
 export const CommitMessageInputSchema = z.object({
     type: SemanticTypeSchema,
-    scope: z.string().min(2).max(12),
+    // Bare issue numbers make one-character scopes legitimate; 32 clears a 10-character tracker key plus a six-digit number.
+    scope: z.string().min(1).max(32),
     description: z.string().min(2).max(50),
     body: z.string().optional(),
     model: z.string().max(72).optional(),

@@ -32,6 +32,7 @@ describe('git commit command', () => {
     await run(executor, ['commit', '--file', 'src/foo.ts', '--type', 'feat', '--scope', 'cli', '--description', 'add thing'])
     expect(vi.mocked(executor.stage)).toHaveBeenCalledWith(['src/foo.ts'])
     expect(vi.mocked(executor.commit)).toHaveBeenCalledOnce()
+    expect(vi.mocked(executor.commit)).toHaveBeenCalledWith(expect.any(String), ['src/foo.ts'])
     expect(output).toHaveBeenCalledWith(expect.stringContaining('"sha":"abc123"') as string)
     output.mockRestore()
   })
@@ -42,6 +43,20 @@ describe('git commit command', () => {
     vi.stubEnv('AI_AGENT', '')
     await run(executor, ['commit', '--file', 'src/foo.ts', '--file', 'src/bar.ts', '--type', 'feat', '--scope', 'cli', '--description', 'add thing'])
     expect(vi.mocked(executor.stage)).toHaveBeenCalledWith(['src/foo.ts', 'src/bar.ts'])
+    expect(vi.mocked(executor.commit)).toHaveBeenCalledWith(expect.any(String), [
+      'src/foo.ts',
+      'src/bar.ts',
+    ])
+    output.mockRestore()
+  })
+
+  it('passes the same paths to commit so only they land, even with no --file', async () => {
+    const executor = makeMockExecutor()
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    vi.stubEnv('AI_AGENT', '')
+    await run(executor, ['commit', '--type', 'feat', '--scope', 'cli', '--description', 'add thing'])
+    expect(vi.mocked(executor.stage)).toHaveBeenCalledWith([])
+    expect(vi.mocked(executor.commit)).toHaveBeenCalledWith(expect.any(String), [])
     output.mockRestore()
   })
 

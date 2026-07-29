@@ -65,8 +65,9 @@ export function createGitCommand(getExecutor: () => GitExecutor): Command {
 
       const message = builder.build(commitMessagePartsValidation.data)
       const executor = getExecutor()
+      // Staged first because `commit --only` rejects an untracked pathspec.
       await executor.stage(opts.file)
-      await executor.commit(message)
+      await executor.commit(message, opts.file)
       const sha = await executor.getCommitSha()
       process.stdout.write(JSON.stringify({ sha, message }) + '\n')
     })

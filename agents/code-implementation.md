@@ -33,7 +33,7 @@ The skill gives you:
 2. Follow the Guided Walkthrough when present, but **trust the real code over the walkthrough** when they disagree; the walkthrough was written before you saw the tree.
 3. Match the surrounding idiom — file placement, naming, test framework and style. Read a neighboring module before inventing structure.
 4. Write and update tests alongside the code. Run them (Bash) and get them green before you hand back.
-5. **Never** run git, change branches, or open a PR. Do not edit tracker state. Leave the working tree with your changes staged for the skill to commit.
+5. **Never** run git, change branches, or open a PR — and that includes `git add`. Do not edit tracker state. Leave your changes in the working tree, **unstaged**; the skill stages the exact paths you report in `filesChanged` and commits only those. Anything you stage yourself that you did not report can ride into the commit unnoticed, which is precisely what the skill's explicit-path staging exists to prevent.
 
 ## When to stop and ask
 

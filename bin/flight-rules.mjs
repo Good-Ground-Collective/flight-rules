@@ -30900,7 +30900,8 @@ var SemanticTypeSchema = external_exports.enum(semanticTypes);
 var PushSpecSchema = external_exports.object({
   branch: external_exports.string().min(1, "branch is required"),
   remote: external_exports.string().min(1).default("origin"),
-  setUpstream: external_exports.boolean().default(false)
+  // Defaults true to match the CLI's `--no-set-upstream`, so a programmatic push tracks the branch too.
+  setUpstream: external_exports.boolean().default(true)
 });
 var NodeGitExecutor = class {
   execFile;
@@ -30912,7 +30913,11 @@ var NodeGitExecutor = class {
     if (files.length === 0) return;
     await this.execFile("git", ["add", "--", ...files]);
   }
-  async commit(message) {
+  async commit(message, files) {
+    if (files !== void 0 && files.length > 0) {
+      await this.execFile("git", ["commit", "--only", "-m", message, "--", ...files]);
+      return;
+    }
     await this.execFile("git", ["commit", "-m", message]);
   }
   async getCommitSha() {
@@ -30956,7 +30961,8 @@ import { dirname, join as join2 } from "node:path";
 // src/git/commit-message-builder/commit-message.schema.ts
 var CommitMessageInputSchema = external_exports.object({
   type: SemanticTypeSchema,
-  scope: external_exports.string().min(2).max(12),
+  // Bare issue numbers make one-character scopes legitimate; 32 clears a 10-character tracker key plus a six-digit number.
+  scope: external_exports.string().min(1).max(32),
   description: external_exports.string().min(2).max(50),
   body: external_exports.string().optional(),
   model: external_exports.string().max(72).optional(),
@@ -31047,7 +31053,7 @@ function createGitCommand(getExecutor) {
     const message = builder.build(commitMessagePartsValidation.data);
     const executor = getExecutor();
     await executor.stage(opts.file);
-    await executor.commit(message);
+    await executor.commit(message, opts.file);
     const sha = await executor.getCommitSha();
     process.stdout.write(JSON.stringify({ sha, message }) + "\n");
   });

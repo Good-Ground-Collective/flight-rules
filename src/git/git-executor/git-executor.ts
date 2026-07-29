@@ -17,14 +17,16 @@ export interface BranchSpec {
 export const PushSpecSchema = z.object({
   branch: z.string().min(1, 'branch is required'),
   remote: z.string().min(1).default('origin'),
-  setUpstream: z.boolean().default(false),
+  // Defaults true to match the CLI's `--no-set-upstream`, so a programmatic push tracks the branch too.
+  setUpstream: z.boolean().default(true),
 })
 
 export type PushSpec = z.input<typeof PushSpecSchema>
 
 export interface GitExecutor {
   stage(files: string[]): Promise<void>
-  commit(message: string): Promise<void>
+  // Restricted to `files` when given: anything else in the index is left behind.
+  commit(message: string, files?: readonly string[]): Promise<void>
   getCommitSha(): Promise<string>
   checkout(spec: BranchSpec, from?: string): Promise<string>
   getCurrentBranch(): Promise<string>
@@ -44,7 +46,12 @@ export class NodeGitExecutor implements GitExecutor {
     await this.execFile('git', ['add', '--', ...files])
   }
 
-  async commit(message: string): Promise<void> {
+  async commit(message: string, files?: readonly string[]): Promise<void> {
+    // `--only` excludes paths staged by anyone else; git rejects it without a pathspec, hence the fallback.
+    if (files !== undefined && files.length > 0) {
+      await this.execFile('git', ['commit', '--only', '-m', message, '--', ...files])
+      return
+    }
     await this.execFile('git', ['commit', '-m', message])
   }
 

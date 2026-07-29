@@ -47,6 +47,22 @@ describe('CommitMessageInputSchema', () => {
     expect(CommitMessageInputSchema.safeParse({ ...validInput, scope: '' }).success).toBe(false)
   })
 
+  it('accepts a single-character scope — a bare GitHub issue number like 7', () => {
+    expect(CommitMessageInputSchema.safeParse({ ...validInput, scope: '7' }).success).toBe(true)
+  })
+
+  it('accepts a long realistic Jira key', () => {
+    expect(
+      CommitMessageInputSchema.safeParse({ ...validInput, scope: 'PLATFORM-1234' }).success,
+    ).toBe(true)
+  })
+
+  it('still rejects a scope past the 32-character ceiling', () => {
+    expect(CommitMessageInputSchema.safeParse({ ...validInput, scope: 'x'.repeat(33) }).success).toBe(
+      false,
+    )
+  })
+
   it('rejects an empty description', () => {
     expect(CommitMessageInputSchema.safeParse({ ...validInput, description: '' }).success).toBe(false)
   })
