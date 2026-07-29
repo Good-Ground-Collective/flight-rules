@@ -77,3 +77,43 @@ describe('NodeGitExecutor.checkout', () => {
     expect(exec).not.toHaveBeenCalled()
   })
 })
+
+describe('NodeGitExecutor.getCurrentBranch', () => {
+  it('returns the trimmed abbreviated ref', async () => {
+    const exec = makeExec('feat/35-execute-work\n')
+    const executor = new NodeGitExecutor(exec)
+    const branch = await executor.getCurrentBranch()
+    expect(branch).toBe('feat/35-execute-work')
+    expect(exec).toHaveBeenCalledWith('git', ['rev-parse', '--abbrev-ref', 'HEAD'])
+  })
+})
+
+describe('NodeGitExecutor.push', () => {
+  it('pushes to origin by default', async () => {
+    const exec = makeExec()
+    const executor = new NodeGitExecutor(exec)
+    await executor.push({ branch: 'feat/35-execute-work' })
+    expect(exec).toHaveBeenCalledWith('git', ['push', 'origin', 'feat/35-execute-work'])
+  })
+
+  it('adds --set-upstream when requested', async () => {
+    const exec = makeExec()
+    const executor = new NodeGitExecutor(exec)
+    await executor.push({ branch: 'feat/35-x', setUpstream: true })
+    expect(exec).toHaveBeenCalledWith('git', ['push', '--set-upstream', 'origin', 'feat/35-x'])
+  })
+
+  it('honours an explicit remote', async () => {
+    const exec = makeExec()
+    const executor = new NodeGitExecutor(exec)
+    await executor.push({ branch: 'feat/35-x', remote: 'upstream' })
+    expect(exec).toHaveBeenCalledWith('git', ['push', 'upstream', 'feat/35-x'])
+  })
+
+  it('rejects an empty branch without shelling out', async () => {
+    const exec = makeExec()
+    const executor = new NodeGitExecutor(exec)
+    await expect(executor.push({ branch: '' })).rejects.toThrow()
+    expect(exec).not.toHaveBeenCalled()
+  })
+})

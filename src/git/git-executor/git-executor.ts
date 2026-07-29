@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { z } from 'zod'
 import { SemanticTypeSchema, semanticTypes } from '../semantic-types.js';
 
 type ExecFileFn = (
@@ -13,11 +14,21 @@ export interface BranchSpec {
   description?: string
 }
 
+export const PushSpecSchema = z.object({
+  branch: z.string().min(1, 'branch is required'),
+  remote: z.string().min(1).default('origin'),
+  setUpstream: z.boolean().default(false),
+})
+
+export type PushSpec = z.input<typeof PushSpecSchema>
+
 export interface GitExecutor {
   stage(files: string[]): Promise<void>
   commit(message: string): Promise<void>
   getCommitSha(): Promise<string>
   checkout(spec: BranchSpec, from?: string): Promise<string>
+  getCurrentBranch(): Promise<string>
+  push(spec: PushSpec): Promise<void>
 }
 
 export class NodeGitExecutor implements GitExecutor {
@@ -59,5 +70,18 @@ export class NodeGitExecutor implements GitExecutor {
     if (from !== undefined) args.push(from)
     await this.execFile('git', args)
     return branch
+  }
+
+  async getCurrentBranch(): Promise<string> {
+    const { stdout } = await this.execFile('git', ['rev-parse', '--abbrev-ref', 'HEAD'])
+    return stdout.trim()
+  }
+
+  async push(spec: PushSpec): Promise<void> {
+    const parsed = PushSpecSchema.parse(spec)
+    const args = ['push']
+    if (parsed.setUpstream) args.push('--set-upstream')
+    args.push(parsed.remote, parsed.branch)
+    await this.execFile('git', args)
   }
 }

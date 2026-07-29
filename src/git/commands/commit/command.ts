@@ -29,6 +29,11 @@ type GitCheckoutOptions = {
   from?: string
 }
 
+type GitPushOptions = {
+  remote: string
+  setUpstream: boolean
+}
+
 export function createGitCommand(getExecutor: () => GitExecutor): Command {
   const git = new Command('git')
 
@@ -84,6 +89,20 @@ export function createGitCommand(getExecutor: () => GitExecutor): Command {
         opts.from,
       )
       process.stdout.write(JSON.stringify({ branch, from: opts.from ?? null }) + '\n')
+    })
+
+  git
+    .command('push')
+    .exitOverride()
+    .option('--remote <remote>', 'remote to push to', 'origin')
+    .option('--no-set-upstream', 'do not set the upstream tracking ref')
+    .action(async (opts: GitPushOptions) => {
+      const executor = getExecutor()
+      const branch = await executor.getCurrentBranch()
+      await executor.push({ branch, remote: opts.remote, setUpstream: opts.setUpstream })
+      process.stdout.write(
+        JSON.stringify({ branch, remote: opts.remote, setUpstream: opts.setUpstream }) + '\n',
+      )
     })
 
   return git
