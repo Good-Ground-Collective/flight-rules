@@ -161,3 +161,26 @@ describe('ticket command', () => {
     errOutput.mockRestore()
   })
 })
+
+describe('ticket transitions command', () => {
+  it('prints the reachable statuses for the ticket', async () => {
+    const tracker = makeTracker()
+    vi.mocked(tracker.listTransitions).mockResolvedValue(['In Progress', 'Done'])
+    const write = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await createTicketCommand(() => tracker).parseAsync(['transitions', 'KAN-35'], { from: 'user' })
+    expect(tracker.listTransitions).toHaveBeenCalledWith('KAN-35')
+    expect(write).toHaveBeenCalledWith(
+      JSON.stringify({ id: 'KAN-35', transitions: ['In Progress', 'Done'] }) + '\n',
+    )
+    write.mockRestore()
+  })
+
+  it('prints an empty list rather than failing', async () => {
+    const tracker = makeTracker()
+    vi.mocked(tracker.listTransitions).mockResolvedValue([])
+    const write = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await createTicketCommand(() => tracker).parseAsync(['transitions', '7'], { from: 'user' })
+    expect(write).toHaveBeenCalledWith(JSON.stringify({ id: '7', transitions: [] }) + '\n')
+    write.mockRestore()
+  })
+})

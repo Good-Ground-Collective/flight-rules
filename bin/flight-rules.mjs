@@ -29517,6 +29517,15 @@ var GitHubTaskTracker = class {
       labels: [label]
     });
   }
+  async listTransitions(_ticketId) {
+    void _ticketId;
+    const { data } = await this.octokit.rest.issues.listLabelsForRepo({
+      owner: this.owner,
+      repo: this.repo,
+      per_page: 100
+    });
+    return data.map((label) => this.labelName(label)).filter((name) => name.startsWith("status:")).map((name) => name.slice("status:".length).replace(/-/g, " "));
+  }
   async updateEpicMetadata(epicId, patch) {
     const issueNumber = parseInt(epicId, 10);
     const { data } = await this.octokit.rest.issues.get({
@@ -30190,10 +30199,7 @@ var JiraTaskTracker = class {
     await this.client.request("DELETE", `/issueLink/${link.id}`);
   }
   async transitionTicket(ticketId, status) {
-    const response = await this.client.request(
-      "GET",
-      `/issue/${ticketId}/transitions`
-    );
+    const response = await this.fetchTransitions(ticketId);
     const match = response.transitions.find((transition) => transition.to.name.toLowerCase() === status.toLowerCase());
     if (match === void 0) {
       const available = response.transitions.map((transition) => transition.to.name).join(", ");
@@ -30202,6 +30208,10 @@ var JiraTaskTracker = class {
       );
     }
     await this.client.request("POST", `/issue/${ticketId}/transitions`, { transition: { id: match.id } });
+  }
+  async listTransitions(ticketId) {
+    const response = await this.fetchTransitions(ticketId);
+    return response.transitions.map((transition) => transition.to.name);
   }
   async updateEpicMetadata(epicId, patch) {
     await this.spliceDescriptionMetadata(epicId, patch);
@@ -30391,6 +30401,9 @@ var JiraTaskTracker = class {
       fields: "issuelinks"
     });
     return issue2.fields.issuelinks ?? [];
+  }
+  async fetchTransitions(ticketId) {
+    return this.client.request("GET", `/issue/${ticketId}/transitions`);
   }
   async resolveBlocksLinkType() {
     if (this.blocksLinkType === void 0) {
@@ -30718,6 +30731,10 @@ function createTicketCommand(getTracker) {
     await getTracker().transitionTicket(id, opts.to);
     process.stdout.write(JSON.stringify({ id, status: opts.to }) + "\n");
   });
+  ticket.command("transitions").exitOverride().argument("<id>", "ticket id").action(async (id) => {
+    const transitions = await getTracker().listTransitions(id);
+    process.stdout.write(JSON.stringify({ id, transitions }) + "\n");
+  });
   return ticket;
 }
 
@@ -30878,6 +30895,11 @@ var semanticTypes = [
 var SemanticTypeSchema = external_exports.enum(semanticTypes);
 
 // src/git/git-executor/git-executor.ts
+var PushSpecSchema = external_exports.object({
+  branch: external_exports.string().min(1, "branch is required"),
+  remote: external_exports.string().min(1).default("origin"),
+  setUpstream: external_exports.boolean().default(false)
+});
 var NodeGitExecutor = class {
   execFile;
   constructor(execFileFn) {
@@ -30911,6 +30933,17 @@ var NodeGitExecutor = class {
     if (from !== void 0) args.push(from);
     await this.execFile("git", args);
     return branch;
+  }
+  async getCurrentBranch() {
+    const { stdout } = await this.execFile("git", ["rev-parse", "--abbrev-ref", "HEAD"]);
+    return stdout.trim();
+  }
+  async push(spec) {
+    const parsed = PushSpecSchema.parse(spec);
+    const args = ["push"];
+    if (parsed.setUpstream) args.push("--set-upstream");
+    args.push(parsed.remote, parsed.branch);
+    await this.execFile("git", args);
   }
 };
 
@@ -31027,6 +31060,14 @@ function createGitCommand(getExecutor) {
       opts.from
     );
     process.stdout.write(JSON.stringify({ branch, from: opts.from ?? null }) + "\n");
+  });
+  git.command("push").exitOverride().option("--remote <remote>", "remote to push to", "origin").option("--no-set-upstream", "do not set the upstream tracking ref").action(async (opts) => {
+    const executor = getExecutor();
+    const branch = await executor.getCurrentBranch();
+    await executor.push({ branch, remote: opts.remote, setUpstream: opts.setUpstream });
+    process.stdout.write(
+      JSON.stringify({ branch, remote: opts.remote, setUpstream: opts.setUpstream }) + "\n"
+    );
   });
   return git;
 }
