@@ -10862,10 +10862,10 @@ function useColor() {
 // node_modules/commander/index.js
 var program = new Command();
 
-// src/cli.ts
+// src/cli/cli.ts
 import { join as join3 } from "node:path";
 
-// src/config.ts
+// src/shared/config.ts
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -25386,7 +25386,7 @@ config(en_default());
 // src/tasks/jira-task-tracker/jira-host.ts
 var JiraHostSchema = external_exports.string().transform((host) => host.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, ""));
 
-// src/config.ts
+// src/shared/config.ts
 var seedCompetencies = [
   "define-a-schema",
   "wire-an-endpoint",
@@ -25404,7 +25404,9 @@ var seedCompetencies = [
 var ConfigSchema = external_exports.object({
   tracker: external_exports.enum(["github", "jira"]),
   repo: external_exports.string().optional().describe("GitHub owner/repo; required when tracker is github"),
-  jiraHost: JiraHostSchema.optional().describe("Atlassian Cloud host, e.g. acme.atlassian.net"),
+  jiraHost: JiraHostSchema.optional().describe(
+    "Atlassian Cloud host, e.g. acme.atlassian.net"
+  ),
   jiraEmail: external_exports.string().optional().describe("Atlassian account email for Basic auth"),
   jiraProject: external_exports.string().optional().describe("Jira project key holding epics and tickets"),
   jpdProject: external_exports.string().optional().describe("Jira Product Discovery project key holding initiatives"),
@@ -25415,13 +25417,20 @@ var ConfigSchema = external_exports.object({
   competencies: external_exports.array(external_exports.string()).default([...seedCompetencies])
 }).superRefine((cfg, ctx) => {
   if (cfg.tracker === "github" && cfg.repo === void 0) {
-    ctx.addIssue({ code: "custom", path: ["repo"], message: "repo is required when tracker is github" });
+    ctx.addIssue({
+      code: "custom",
+      path: ["repo"],
+      message: "repo is required when tracker is github"
+    });
   }
   if (cfg.tracker === "jira") {
-    ;
     ["jiraHost", "jiraEmail", "jiraProject"].forEach((field) => {
       if (cfg[field] === void 0) {
-        ctx.addIssue({ code: "custom", path: [field], message: `${field} is required when tracker is jira` });
+        ctx.addIssue({
+          code: "custom",
+          path: [field],
+          message: `${field} is required when tracker is jira`
+        });
       }
     });
   }
@@ -25463,7 +25472,9 @@ function parseFrontmatter(contents) {
       const blockMatch = nextLine.match(/^\s+-\s+(.*)$/);
       if (blockMatch) {
         const item = blockMatch[1];
-        blockItems.push(item !== void 0 ? item.trim().replace(/^["']|["']$/g, "") : "");
+        blockItems.push(
+          item !== void 0 ? item.trim().replace(/^["']|["']$/g, "") : ""
+        );
         j++;
       } else {
         break;
@@ -25477,7 +25488,8 @@ function parseFrontmatter(contents) {
     if (rawValue === "true") data[key] = true;
     else if (rawValue === "false") data[key] = false;
     else if (rawValue === "null") data[key] = null;
-    else if (rawValue !== "" && !isNaN(Number(rawValue))) data[key] = Number(rawValue);
+    else if (rawValue !== "" && !isNaN(Number(rawValue)))
+      data[key] = Number(rawValue);
     else if (rawValue.startsWith("[") && rawValue.endsWith("]")) {
       data[key] = rawValue.slice(1, -1).split(",").map((v) => v.trim().replace(/^["']|["']$/g, ""));
     } else {
@@ -25502,21 +25514,34 @@ function getRfcDir(config2, cwd) {
   return join(cwd, "rfcs");
 }
 
-// src/env.ts
+// src/shared/env.ts
 var EnvSchema = external_exports.object({
   githubToken: external_exports.string().optional(),
   jiraToken: external_exports.string().optional(),
   jiraEmail: external_exports.string().optional(),
   jiraHost: JiraHostSchema.optional()
 });
-function readEnv(source = process.env) {
-  return EnvSchema.parse({
-    githubToken: source["GITHUB_TOKEN"],
-    jiraToken: source["JIRA_TOKEN"] ?? source["JIRA_API_TOKEN"] ?? source["JIRA_API_KEY"],
-    jiraEmail: source["JIRA_EMAIL"],
-    jiraHost: source["JIRA_HOST"]
-  });
-}
+var EnvLoader = class {
+  overrides;
+  cachedEnv = null;
+  constructor(overrides = {}) {
+    this.overrides = overrides;
+  }
+  load(source = process.env, forceRefresh = false) {
+    if (!forceRefresh && this.cachedEnv) return this.cachedEnv;
+    this.cachedEnv = EnvSchema.parse({
+      githubToken: source["GITHUB_TOKEN"],
+      jiraToken: source["JIRA_TOKEN"] ?? source["JIRA_API_TOKEN"] ?? source["JIRA_API_KEY"],
+      jiraEmail: source["JIRA_EMAIL"],
+      jiraHost: source["JIRA_HOST"]
+    });
+    this.cachedEnv = {
+      ...this.cachedEnv,
+      ...this.overrides
+    };
+    return this.cachedEnv;
+  }
+};
 
 // node_modules/universal-user-agent/index.js
 function getUserAgent() {
@@ -30762,8 +30787,12 @@ function createCompetenciesCommand(getConfig) {
 
 // src/tasks/commands/check/command.ts
 function credentialFor(tracker, env) {
-  if (tracker === "github") return { name: "GITHUB_TOKEN", value: env.githubToken };
-  return { name: "JIRA_TOKEN (or JIRA_API_TOKEN / JIRA_API_KEY)", value: env.jiraToken };
+  if (tracker === "github")
+    return { name: "GITHUB_TOKEN", value: env.githubToken };
+  return {
+    name: "JIRA_TOKEN (or JIRA_API_TOKEN / JIRA_API_KEY)",
+    value: env.jiraToken
+  };
 }
 function createCheckCommand(getConfig, getTracker) {
   const check2 = new Command("check");
@@ -30775,11 +30804,20 @@ function createCheckCommand(getConfig, getTracker) {
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
       checks.push({ name: "config", ok: false, detail });
-      process.stdout.write(JSON.stringify({ tracker: null, repo: null, checks, ok: false }) + "\n");
-      throw new Error("flight-rules check failed \u2014 config could not be resolved", { cause: err });
+      process.stdout.write(
+        JSON.stringify({ tracker: null, repo: null, checks, ok: false }) + "\n"
+      );
+      throw new Error(
+        "flight-rules check failed \u2014 config could not be resolved",
+        { cause: err }
+      );
     }
-    checks.push({ name: "config", ok: true, detail: `tracker=${config2.tracker} repo=${config2.repo}` });
-    const credential = credentialFor(config2.tracker, readEnv());
+    checks.push({
+      name: "config",
+      ok: true,
+      detail: `tracker=${config2.tracker} repo=${config2.repo}`
+    });
+    const credential = credentialFor(config2.tracker, new EnvLoader().load());
     const credOk = credential.value !== void 0;
     checks.push({
       name: "credentials",
@@ -30789,17 +30827,30 @@ function createCheckCommand(getConfig, getTracker) {
     if (credOk) {
       try {
         await getTracker().ping();
-        checks.push({ name: "reachable", ok: true, detail: `${config2.repo} responded` });
+        checks.push({
+          name: "reachable",
+          ok: true,
+          detail: `${config2.repo} responded`
+        });
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err);
         checks.push({ name: "reachable", ok: false, detail });
       }
     } else {
-      checks.push({ name: "reachable", ok: false, detail: "skipped \u2014 credentials missing" });
+      checks.push({
+        name: "reachable",
+        ok: false,
+        detail: "skipped \u2014 credentials missing"
+      });
     }
     const ok = checks.every((c) => c.ok);
     process.stdout.write(
-      JSON.stringify({ tracker: config2.tracker, repo: config2.repo, checks, ok }) + "\n"
+      JSON.stringify({
+        tracker: config2.tracker,
+        repo: config2.repo,
+        checks,
+        ok
+      }) + "\n"
     );
     if (!ok) throw new Error("flight-rules check failed \u2014 see report above");
   });
@@ -31098,10 +31149,10 @@ function createPrCommand(getHost) {
 // src/version.ts
 var appVersion = false ? "0.0.0-dev" : "1.23.1";
 
-// src/cli.ts
+// src/cli/cli.ts
 function buildTracker(overrideTracker) {
   const config2 = getConfigFromEnv(overrideTracker);
-  const env = readEnv();
+  const env = new EnvLoader().load();
   if (config2.tracker === "github") {
     if (env.githubToken === void 0) throw new Error("GITHUB_TOKEN environment variable is required");
     if (config2.repo === void 0) throw new Error("repo is required when tracker is github");
@@ -31129,7 +31180,7 @@ function buildTracker(overrideTracker) {
 }
 function buildPrHost(overrideTracker) {
   const config2 = getConfigFromEnv(overrideTracker);
-  const env = readEnv();
+  const env = new EnvLoader().load();
   if (env.githubToken === void 0) {
     throw new Error("GITHUB_TOKEN environment variable is required to create pull requests");
   }

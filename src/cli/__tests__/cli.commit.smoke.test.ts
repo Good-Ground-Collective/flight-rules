@@ -8,9 +8,9 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 // KAN-29: drives `git commit` end-to-end through the built binary against a
 // scratch git repository. Requires `npm run build` to have run first, like
 // cli.smoke.test.ts — source changes are invisible here until rebuilt.
-const bundle = fileURLToPath(new URL('../bin/flight-rules.mjs', import.meta.url))
+const bundle = fileURLToPath(new URL('../../../bin/flight-rules.mjs', import.meta.url))
 const pkg = JSON.parse(
-  readFileSync(fileURLToPath(new URL('../package.json', import.meta.url)), 'utf8'),
+  readFileSync(fileURLToPath(new URL('../../../package.json', import.meta.url)), 'utf8'),
 ) as { version: string }
 
 const git = (cwd: string, args: string[]): string =>

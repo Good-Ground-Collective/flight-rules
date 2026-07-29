@@ -32,7 +32,7 @@ vi.mock('@octokit/graphql', () => ({
   graphql: Object.assign(vi.fn(), { defaults: vi.fn().mockReturnValue(vi.fn()) }),
 }))
 
-vi.mock('./tasks/jira-task-tracker/jira-client.js', () => ({
+vi.mock('../../tasks/jira-task-tracker/jira-client.js', () => ({
   JiraClient: class {
     request = vi.fn().mockResolvedValue({ accountId: 'acct-1' })
   },
