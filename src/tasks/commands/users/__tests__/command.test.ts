@@ -11,6 +11,7 @@ const makeTracker = (): TaskTracker => ({
   blockTicket: vi.fn(),
   unblockTicket: vi.fn(),
   transitionTicket: vi.fn(),
+  listTransitions: vi.fn().mockResolvedValue([]),
   updateEpicMetadata: vi.fn(),
   updateTicketMetadata: vi.fn(),
   updateTddMetadata: vi.fn(),

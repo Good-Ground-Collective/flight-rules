@@ -262,6 +262,21 @@ export class GitHubTaskTracker implements TaskTracker {
     })
   }
 
+  async listTransitions(_ticketId: string): Promise<string[]> {
+    void _ticketId // required by the TaskTracker interface; unused here
+    // GitHub has no workflow, so the reachable vocabulary is whatever `status:`
+    // labels the repo already defines; an empty result is valid.
+    const { data } = await this.octokit.rest.issues.listLabelsForRepo({
+      owner: this.owner,
+      repo: this.repo,
+      per_page: 100,
+    })
+    return data
+      .map((label) => this.labelName(label))
+      .filter((name) => name.startsWith('status:'))
+      .map((name) => name.slice('status:'.length).replace(/-/g, ' '))
+  }
+
   async updateEpicMetadata(epicId: string, patch: Partial<EntityMetadata>): Promise<void> {
     const issueNumber = parseInt(epicId, 10)
     const { data } = await this.octokit.rest.issues.get({

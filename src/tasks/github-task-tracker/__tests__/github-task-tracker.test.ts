@@ -17,6 +17,7 @@ vi.mock('@octokit/rest', () => ({
           listForRepo: vi.fn(),
           addLabels: vi.fn(),
           removeLabel: vi.fn(),
+          listLabelsForRepo: vi.fn(),
         },
         orgs: {
           listMembers: vi.fn(),
@@ -626,5 +627,31 @@ describe('GitHubTracker.transitionTicket', () => {
 
     const ticket = await tracker.getTicket('7')
     expect(ticket.status).toBe('in-progress')
+  })
+})
+
+describe('GitHubTracker.listTransitions', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('returns repo status labels in human form', async () => {
+    const tracker = makeTracker()
+    // @ts-expect-error — accessing private field for test setup
+    const issues = tracker.octokit.rest.issues
+    vi.mocked(issues.listLabelsForRepo).mockResolvedValue({
+      data: [{ name: 'status:in-progress' }, { name: 'bug' }, { name: 'status:in-review' }],
+    } as never)
+
+    await expect(tracker.listTransitions('7')).resolves.toEqual(['in progress', 'in review'])
+  })
+
+  it('returns an empty list when the repo defines no status labels', async () => {
+    const tracker = makeTracker()
+    // @ts-expect-error — accessing private field for test setup
+    const issues = tracker.octokit.rest.issues
+    vi.mocked(issues.listLabelsForRepo).mockResolvedValue({
+      data: [{ name: 'bug' }],
+    } as never)
+
+    await expect(tracker.listTransitions('7')).resolves.toEqual([])
   })
 })
