@@ -3,47 +3,6 @@ import preflight from "@good-ground-collective/preflight";
 import { defineConfig, globalIgnores } from "eslint/config";
 import tseslint from "typescript-eslint";
 
-// Restates preflight's `naming-convention` entries — a rule's options replace
-// rather than merge, so adding the Schema carve-out means re-declaring every
-// entry preflight ships alongside it. Split in two so the test override can
-// drop the object-literal half without repeating the identifier half.
-const identifierNaming = [
-  {
-    selector: "variableLike",
-    filter: { regex: "^(NULL_|UNKNOWN_)", match: true },
-    format: ["UPPER_CASE"],
-    prefix: ["NULL_", "UNKNOWN_"],
-  },
-  {
-    // Zod schemas (and similar declarative value constructors) carry the
-    // type-shape they describe, so PascalCase with a `Schema` suffix reads
-    // naturally alongside the `z.infer<typeof FooSchema>` type export. Scoped
-    // to the suffix via regex so plain PascalCase variable names remain
-    // rejected. Not in preflight — this is the one local addition.
-    selector: "variable",
-    format: ["PascalCase"],
-    filter: { regex: "Schema$", match: true },
-  },
-  {
-    selector: "variableLike",
-    format: ["camelCase"],
-    filter: { regex: "^(?!NULL_|UNKNOWN_).*", match: true },
-    leadingUnderscore: "allow",
-  },
-  { selector: "typeLike", format: ["PascalCase"] },
-  { selector: "classProperty", modifiers: ["static"], format: ["UPPER_CASE"] },
-  {
-    selector: "interface",
-    format: ["PascalCase"],
-    custom: { regex: "^I[A-Z]", match: false },
-  },
-];
-
-const objectLiteralNaming = [
-  { selector: "objectLiteralProperty", modifiers: ["requiresQuotes"], format: null },
-  { selector: "objectLiteralProperty", format: ["camelCase"] },
-];
-
 export default defineConfig([
   // `bin/` is the esbuild bundle and `vitest.config.ts` is excluded from
   // tsconfig, so the project service can't type it.
@@ -59,8 +18,9 @@ export default defineConfig([
   // fuzzier extras; it registers the preflight/@typescript-eslint/unicorn/import-x
   // plugins, scopes itself to **/*.ts + **/*.tsx, and sets the TS parser.
   //
-  // It already carries `member-ordering` and `no-explicit-any` verbatim as we had
-  // them, so those are gone from the local block below.
+  // It already carries `member-ordering`, `no-explicit-any` and the whole
+  // `naming-convention` policy — including the Schema/Validator PascalCase
+  // carve-out — so none of those are restated locally.
   ...preflight.configs.recommended,
 
   {
@@ -85,12 +45,6 @@ export default defineConfig([
           "ts-expect-error": "allow-with-description",
         },
       ],
-
-      "@typescript-eslint/naming-convention": [
-        "error",
-        ...identifierNaming,
-        ...objectLiteralNaming,
-      ],
     },
   },
 
@@ -105,7 +59,6 @@ export default defineConfig([
       "@typescript-eslint/no-unsafe-type-assertion": "off",
       "preflight/no-loose-functions": "off",
       "preflight/no-planning-identifiers": "off",
-      "@typescript-eslint/naming-convention": ["error", ...identifierNaming],
     },
   },
 ]);
