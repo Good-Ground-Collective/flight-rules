@@ -33,10 +33,15 @@ export default defineConfig([
       },
     },
     rules: {
-      // `create<Name>Command` factories are declarative constructors that hand
-      // back a configured Commander object — the same category as the built-in
-      // Schema/Validator suffixes, not behaviour hiding outside a service.
-      "preflight/no-loose-functions": ["error", { allowedSuffixes: ["Command"] }],
+      // `create<Name>Command` and `buildProgram` are declarative constructors
+      // that hand back a configured Commander object — the same category as the
+      // built-in Schema/Validator suffixes, not behaviour hiding outside a
+      // service. The rule matches on the binding name, so a factory whose name
+      // does not end this way (buildTracker, buildPrHost) is not covered.
+      "preflight/no-loose-functions": [
+        "error",
+        { allowedSuffixes: ["Command", "Program"] },
+      ],
 
       // Type-aware assertion bans — not in preflight, and they need the
       // projectService wired above.

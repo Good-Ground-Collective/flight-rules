@@ -90,7 +90,6 @@ function getConfigFromEnv(overrideTracker?: string): Config {
   return { ...config, tracker: overrideTracker }
 }
 
-// eslint-disable-next-line preflight/no-loose-functions -- buildProgram is module-level behaviour awaiting a home on a service; tracked in KAN-39
 export function buildProgram(
   getTracker: (overrideTracker?: string) => TaskTracker,
   getConfig: (overrideTracker?: string) => Config,
