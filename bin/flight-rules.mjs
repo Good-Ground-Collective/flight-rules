@@ -25411,6 +25411,8 @@ var ConfigSchema = external_exports.object({
   jiraProject: external_exports.string().optional().describe("Jira project key holding epics and tickets"),
   jpdProject: external_exports.string().optional().describe("Jira Product Discovery project key holding initiatives"),
   confluenceSpaceKey: external_exports.string().optional().describe("Confluence space key holding technical design docs"),
+  inProgressStatus: external_exports.string().optional().describe("Tracker status meaning work has started; discovered and stored on first run"),
+  inReviewStatus: external_exports.string().optional().describe("Tracker status meaning a PR is open; discovered and stored on first run"),
   defaultLabels: external_exports.array(external_exports.string()).default([]),
   rfcStorage: external_exports.enum(["local", "global"]).default("local"),
   rfcStoragePath: external_exports.string().optional(),
