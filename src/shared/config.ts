@@ -72,6 +72,7 @@ const ConfigSchema = z
 
 export type Config = z.infer<typeof ConfigSchema>;
 
+// eslint-disable-next-line preflight/no-loose-functions -- parseFrontmatter is module-level behaviour awaiting a home on a service; tracked in KAN-39
 function parseFrontmatter(contents: string): Record<string, unknown> {
   // Simple YAML frontmatter parser for this use case
   // Matches YAML frontmatter between --- delimiters
@@ -156,12 +157,14 @@ function parseFrontmatter(contents: string): Record<string, unknown> {
   return data;
 }
 
+// eslint-disable-next-line preflight/no-loose-functions -- readConfig is module-level behaviour awaiting a home on a service; tracked in KAN-39
 export function readConfig(configPath: string): Config {
   const contents = readFileSync(configPath, "utf-8");
   const data = parseFrontmatter(contents);
   return ConfigSchema.parse(data);
 }
 
+// eslint-disable-next-line preflight/no-loose-functions -- getRfcDir is module-level behaviour awaiting a home on a service; tracked in KAN-39
 export function getRfcDir(config: Config, cwd: string): string {
   if (config.rfcStorage === "global") {
     if (config.rfcStoragePath === undefined) {

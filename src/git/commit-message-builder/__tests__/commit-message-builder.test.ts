@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { type CommitMessageInput } from '../commit-message.schema.js'
+import type { DefaultCommitMessageBuilder } from '../commit-message-builder.js'
 
 vi.mock('node:fs', () => ({
   readFileSync: vi.fn().mockReturnValue(JSON.stringify({ version: '1.2.3' })),
 }))
 
-let commitMessageBuilderClass: typeof import('../commit-message-builder.js')['DefaultCommitMessageBuilder']
+let commitMessageBuilderClass: typeof DefaultCommitMessageBuilder
 
 beforeEach(async () => {
   vi.clearAllMocks()

@@ -36,6 +36,7 @@ export class GitHubPullRequestHost implements PullRequestHost {
   private readonly repo: string
   private readonly builder: PullRequestBuilder
 
+  // eslint-disable-next-line preflight/constructor-single-props -- multi-parameter constructor predates charter M-5; tracked in KAN-39
   constructor(props: GitHubPullRequestHostProps, builder: PullRequestBuilder = new DefaultPullRequestBuilder()) {
     const parsed = GitHubPullRequestHostPropsSchema.parse(props)
     this.octokit = new Octokit({ auth: parsed.token })

@@ -1,7 +1,5 @@
 #!/usr/bin/env node
-// Executable entry point for the bundled CLI. Kept separate from cli.ts so the
-// bundle always runs when invoked — no argv-based "am I the main module"
-// sniffing, which silently no-ops when the binary is renamed or wrapped.
+// Separate from cli.ts so the bundle always runs when invoked, without argv-based main-module sniffing that breaks when the binary is renamed.
 import { CommanderError } from 'commander'
 import { run } from './cli/cli.js'
 

@@ -4,7 +4,7 @@ const detailsClose = /^<\/details>/
 const checklistItem = /^-\s+\[( |x|X)\]\s+(.*)$/
 
 /** Level-2 heading text → section key. Anything else stops accumulation. */
-const HEADING_KEYS: Record<string, SectionKey> = {
+const headingKeys: Record<string, SectionKey> = {
   'Problem Statement': 'problemStatement',
   Solution: 'solution',
   'Acceptance Criteria': 'acceptanceCriteria',
@@ -57,7 +57,7 @@ export class LayeredBodySectionsParser implements BodySectionsParser {
 
       const heading = line.match(headingLine)
       if (heading?.[1] !== undefined) {
-        current = HEADING_KEYS[heading[1]]
+        current = headingKeys[heading[1]]
         if (current !== undefined) raw[current] = []
         i++
         continue

@@ -2,6 +2,7 @@ import { Command } from 'commander'
 import { PullRequestTemplateSchema } from '../../../git/pr-template/pr-template.js'
 import type { PullRequestHost } from '../../pull-request-host/pull-request-host.js'
 
+// eslint-disable-next-line preflight/no-loose-functions -- collect is module-level behaviour awaiting a home on a service; tracked in KAN-39
 function collect(value: string, previous: string[]): string[] {
   return [...previous, value]
 }

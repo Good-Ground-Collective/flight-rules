@@ -1,8 +1,10 @@
+/* eslint-disable preflight/no-planning-identifiers -- RFC ids are this module's subject matter, not a reference to some external planning system that will outlive its meaning */
 import { readdirSync } from "node:fs";
 import { Command } from "commander";
 import { getRfcDir } from "../../../shared/config.js";
 import type { Config } from "../../../shared/config.js";
 
+// eslint-disable-next-line preflight/no-loose-functions -- getNextRfcId is module-level behaviour awaiting a home on a service; tracked in KAN-39
 function getNextRfcId(rfcDir: string): string {
   let files: string[];
   try {

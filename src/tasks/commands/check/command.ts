@@ -5,6 +5,7 @@ import type { TaskTracker } from "../../task-tracker/task-tracker.js";
 
 type Check = { name: string; ok: boolean; detail: string };
 
+// eslint-disable-next-line preflight/no-loose-functions -- credentialFor is module-level behaviour awaiting a home on a service; tracked in KAN-39
 function credentialFor(
   tracker: Config["tracker"],
   env: Env,

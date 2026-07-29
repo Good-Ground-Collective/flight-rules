@@ -20,6 +20,7 @@ import { GitHubPullRequestHost, type PullRequestHost } from '../pr/pull-request-
 import { createPrCommand } from '../pr/commands/pr/command.js'
 import { appVersion } from '../version.js'
 
+// eslint-disable-next-line preflight/no-loose-functions -- buildTracker is module-level behaviour awaiting a home on a service; tracked in KAN-39
 function buildTracker(overrideTracker?: string): TaskTracker {
   const config = getConfigFromEnv(overrideTracker)
   // A loader per invocation: the cache is per-instance, and each CLI run must
@@ -57,6 +58,7 @@ function buildTracker(overrideTracker?: string): TaskTracker {
   })
 }
 
+// eslint-disable-next-line preflight/no-loose-functions -- buildPrHost is module-level behaviour awaiting a home on a service; tracked in KAN-39
 function buildPrHost(overrideTracker?: string): PullRequestHost {
   const config = getConfigFromEnv(overrideTracker)
   const env = new EnvLoader().load()
@@ -76,6 +78,7 @@ function buildPrHost(overrideTracker?: string): PullRequestHost {
   return new GitHubPullRequestHost({ token: env.githubToken, owner, repo })
 }
 
+// eslint-disable-next-line preflight/no-loose-functions -- getConfigFromEnv is module-level behaviour awaiting a home on a service; tracked in KAN-39
 function getConfigFromEnv(overrideTracker?: string): Config {
   const configPath =
     process.env['FLIGHT_RULES_CONFIG'] ?? join(process.cwd(), '.claude', 'flight-rules.local.md')
@@ -87,6 +90,7 @@ function getConfigFromEnv(overrideTracker?: string): Config {
   return { ...config, tracker: overrideTracker }
 }
 
+// eslint-disable-next-line preflight/no-loose-functions -- buildProgram is module-level behaviour awaiting a home on a service; tracked in KAN-39
 export function buildProgram(
   getTracker: (overrideTracker?: string) => TaskTracker,
   getConfig: (overrideTracker?: string) => Config,
@@ -120,6 +124,7 @@ export function buildProgram(
   return program
 }
 
+// eslint-disable-next-line preflight/no-loose-functions -- run is module-level behaviour awaiting a home on a service; tracked in KAN-39
 export async function run(argv: string[]): Promise<void> {
   await buildProgram(buildTracker, getConfigFromEnv, buildPrHost).parseAsync(argv, { from: 'user' })
 }

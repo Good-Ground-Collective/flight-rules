@@ -1,6 +1,7 @@
-// Replaced at build time by esbuild's `define` (see scripts/build.mjs).
-// Falls back when running un-bundled (e.g. vitest, ts-node) where the define
-// is absent.
+/**
+ * Replaced at build time by esbuild's `define` (see scripts/build.mjs). Absent
+ * when running un-bundled (e.g. vitest, ts-node), hence the fallback below.
+ */
 declare const _appVersion: string
 
 export const appVersion: string =

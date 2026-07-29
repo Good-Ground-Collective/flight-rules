@@ -1,7 +1,9 @@
-// A structural, permissive view of an Atlassian Document Format node. Real Jira
-// descriptions carry heterogeneous block content (paragraphs, expands, code
-// blocks, …), so nodes are walked by `type`/`attrs` rather than modelled
-// exhaustively.
+/**
+ * A structural, permissive view of an Atlassian Document Format node. Real Jira
+ * descriptions carry heterogeneous block content (paragraphs, expands, code
+ * blocks, …), so nodes are walked by `type`/`attrs` rather than modelled
+ * exhaustively.
+ */
 export interface AdfNode {
   type: string
   attrs?: Record<string, unknown>

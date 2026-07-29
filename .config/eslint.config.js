@@ -33,6 +33,11 @@ export default defineConfig([
       },
     },
     rules: {
+      // `create<Name>Command` factories are declarative constructors that hand
+      // back a configured Commander object — the same category as the built-in
+      // Schema/Validator suffixes, not behaviour hiding outside a service.
+      "preflight/no-loose-functions": ["error", { allowedSuffixes: ["Command"] }],
+
       // Type-aware assertion bans — not in preflight, and they need the
       // projectService wired above.
       "@typescript-eslint/consistent-type-assertions": ["error", { assertionStyle: "never" }],
@@ -50,8 +55,10 @@ export default defineConfig([
 
   // Test-file carve-outs. Tests describe a contract rather than ship behaviour,
   // so the idioms the charter bans in source are load-bearing here: arrange
-  // helpers live at module scope, fixtures name fake tickets, and mock DI
-  // containers are keyed by the class name they stand in for.
+  // helpers live at module scope, fixtures name fake tickets, mock DI
+  // containers are keyed by the class name they stand in for, a stubbed
+  // dependency's whole body is often a `throw`, and a suite is worth a
+  // paragraph describing the contract it pins.
   {
     files: ["**/*.test.ts"],
     rules: {
@@ -59,6 +66,8 @@ export default defineConfig([
       "@typescript-eslint/no-unsafe-type-assertion": "off",
       "preflight/no-loose-functions": "off",
       "preflight/no-planning-identifiers": "off",
+      "preflight/no-throw-helpers": "off",
+      "preflight/no-paragraph-comments": "off",
     },
   },
 ]);
