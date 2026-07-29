@@ -35,7 +35,7 @@ From the returned layered body, extract:
 - **Acceptance Criteria** — the contract. This is what the verifier checks and the only definition of done.
 - **Guided Walkthrough** — files, patterns, and test approach, when the ticket has one.
 
-Also note the ticket's title (for the branch slug) and its labels.
+Also note the ticket's title (for the branch slug), its labels, and its `metadata` — `metadata.epicId` is how you find the parent epic in step 5.
 
 **If the Acceptance Criteria section is missing or empty, stop and ask the user.** Never infer the contract from the Problem Statement, and never write criteria yourself — a fabricated contract makes the verifier's PASS meaningless. A ticket with no criteria isn't ready; say so and stop.
 
@@ -70,12 +70,18 @@ It prints `{"id":"…","transitions":["To Do","In Progress","In Review","Done"]}
 - When the list is non-empty, offer the discovered names as the options — "Which status means work has started?" and "Which status means a PR is open and awaiting review?"
 - When the list is **empty**, that is a valid state, not an error (a fresh GitHub repo has no `status:` labels yet). Ask for free text instead and explain that the tracker will create the status on first use.
 
-**Store** both answers by rewriting `.claude/flight-rules.local.md` with `Write`, exactly as `skills/setup/SKILL.md` does — preserve every existing frontmatter field verbatim and add:
+**Store** both answers by rewriting `.claude/flight-rules.local.md` with `Write`, exactly as `skills/setup/SKILL.md` does. The two new keys go **inside the `---` frontmatter fences**, alongside the existing fields, which you preserve verbatim. Write the whole file:
 
 ```markdown
+---
+tracker: <existing value>
+<every other existing field, unchanged>
 inProgressStatus: <the chosen in-progress status>
 inReviewStatus: <the chosen in-review status>
+---
 ```
+
+The delimiters matter. The config loader reads only the block between the **first** `---` pair at the very start of the file, and the schema is non-strict — so anything written after the closing `---` is silently dropped with no error, and this step would then re-prompt on every single run instead of once.
 
 Later runs in this repo are then fully non-interactive.
 
@@ -110,7 +116,7 @@ Build the brief you will hand `code-implementation`. It gets exactly:
 
 - **The ticket's full layered body** — Problem Statement, Solution, Acceptance Criteria, and the Guided Walkthrough when present. Don't summarize it; the agent is a lower-tier model and paraphrase loses the contract.
 - **A pointer to the coding charter**: `${CLAUDE_PLUGIN_ROOT}/docs/coding-charter.md`. Pass the path, not your précis of it — the agent is required to read it in full.
-- **Parent RFC / TDD content, when the ticket links one.** Read the parent epic for the technical writeup:
+- **Parent RFC / TDD content, when the ticket links one.** Read the parent epic for the technical writeup, using the `metadata.epicId` you noted in step 1:
 
   ```bash
   flight-rules epic get <epicId>
@@ -170,7 +176,13 @@ charterConcerns:
 verified: true | false
 ```
 
-**c. Read `verified`.** `true` exits the loop and you ship. `false` means iterate — go back to (a) with the FAIL evidence, unless you have already used three iterations, in which case stop (see Error handling). Any `UNVERIFIABLE` verdict goes to the user, whatever `verified` says.
+**c. Read `verified`, then branch in this order:**
+
+1. **`verified: true`** → exit the loop and ship (step 7).
+2. **Any `UNVERIFIABLE` verdict** → **stop and ask the user**, before spending another iteration. UNVERIFIABLE takes precedence over FAIL. The verifier also reports `verified: false` in this case, so do not let that pull you into a retry: an UNVERIFIABLE criterion is untestable *as written*, which is a ticket bug the implementer cannot fix with code. Re-dispatching burns an iteration of a hard-capped three and changes nothing.
+3. **FAIL only, no UNVERIFIABLE** → iterate. Go back to (a) with the FAIL evidence, unless you have already used three iterations, in which case stop (see Error handling).
+
+Only a FAIL-only result iterates.
 
 Three iterations is a **hard ceiling**, not a target. Do not restart the count, do not run a "quick fourth fix yourself", and never overrule a FAIL because you disagree with the verifier.
 
@@ -178,13 +190,23 @@ Three iterations is a **hard ceiling**, not a target. Do not restart the count, 
 
 Only once `verified: true`.
 
-**Commit.** Stage by explicit path — the command has no all-files flag, and that is deliberate, so an unrelated stray edit can never ride along. Repeat `--file` once per `filesChanged[].path`:
+**Commit.** Stage by explicit path — the command has no all-files flag, and that is deliberate, so an unrelated stray edit can never ride along. Repeat `--file` once per path:
 
 ```bash
 flight-rules git commit --type <type> --scope <id> --description <slug> --file <path> --file <path>
 ```
 
+The `--file` set is the **union of `filesChanged[].path` across every iteration**, not just the last one. Each dispatch reports only what *that* dispatch touched, so a retry's list is a subset. Iteration 1 might create a module and its test; iteration 2 fixes only the module and reports only the module — staging that alone would ship the fix without the test, so the PR diff would no longer be the tree the verifier passed. Accumulate the paths as you go, and de-duplicate.
+
 Never use a Claude Code auto-generated commit. The CLI owns the message format.
+
+Then confirm you staged everything:
+
+```bash
+git status --porcelain
+```
+
+It must be **empty**. Any remaining output means the verified tree is wider than what you committed — stop and reconcile before pushing rather than opening a PR that doesn't match what was verified.
 
 **Push.** The command resolves the branch from HEAD and sets upstream by default:
 
@@ -194,7 +216,13 @@ flight-rules git push
 
 There is no force flag. If the push is rejected, stop and tell the user — do not reach for raw git to get around it.
 
-**Open the PR.** The base is the repository's default branch (read it read-only, e.g. `gh repo view --json defaultBranchRef`); the head is the branch `git checkout` printed in step 4:
+**Open the PR.** The base is the repository's default branch — read it read-only, and ask for the bare string rather than a nested object:
+
+```bash
+gh repo view --json defaultBranchRef --jq .defaultBranchRef.name
+```
+
+The head is the branch `git checkout` printed in step 4:
 
 ```bash
 flight-rules pr create --type <type> --scope <id> --description <slug> --summary "<from the ticket's Solution>" --ticket-id <id> --test-notes "<the verifier's per-criterion evidence>" --base <default-branch> --head <branch>
@@ -238,7 +266,7 @@ Give the user, in this order:
 - **Missing or empty Acceptance Criteria** → stop and ask. Never invent the contract.
 - **`flight-rules check` fails** → stop and show the report. Fix config or credentials before running.
 - **`ticket status` reports the transition is unreachable** → the CLI's error carries an `available:` list. Show it to the user, ask which status they meant, then **write the corrected value back** into `.claude/flight-rules.local.md` so the next run doesn't repeat the mistake. Don't retry blind.
-- **Verifier returns `UNVERIFIABLE`** → do not treat it as PASS and do not treat it as FAIL. Surface the criterion and the verifier's question to the user and ask how to proceed. An untestable criterion is usually a ticket bug, not a code bug.
+- **Verifier returns `UNVERIFIABLE`** → do not treat it as PASS and do not treat it as FAIL, and **do not iterate**. Stop before spending another iteration, surface the criterion and the verifier's question to the user, and ask how to proceed. An untestable criterion is usually a ticket bug, not a code bug — another implementation pass cannot fix it. This takes precedence over any FAIL in the same result.
 - **Either agent returns `openQuestions`** → surface them unanswered, alongside whatever else that iteration produced.
 - **Third consecutive FAIL** → stop. Present the itemized evidence from the final verification, state that three iterations were used, and **leave the branch intact** with the work in place so a human can pick it up. Do not commit, do not push, do not open a PR, and do not move the ticket to in-review. Leave it in the in-progress status — that is now true.
 - **`git push` rejected** → stop and report. There is no force flag, and inventing one with raw git is not the fix.
@@ -249,7 +277,7 @@ A reviewer can grade a run against this list:
 
 - The branch name follows the convention `flight-rules git checkout` produces — no hand-cut branches in the history.
 - Every commit message is CLI-generated, correctly typed and scoped to the ticket id.
-- Only files the implementer reported are in the commit; nothing unrelated rode along.
+- The commit contains exactly the union of the paths the implementer reported across all iterations: nothing unrelated rode along, and nothing the verifier passed was left behind. The working tree is clean afterwards.
 - The PR body matches the template: summary from the ticket's Solution, the ticket id linked, and test notes carrying the verifier's per-criterion evidence.
 - The ticket's status trail reads to-do → in-progress → in-review, with the in-review transition happening *after* the PR exists.
 - No acceptance criterion shipped without a PASS verdict backed by evidence, and no acceptance-criteria checkbox was ticked.
