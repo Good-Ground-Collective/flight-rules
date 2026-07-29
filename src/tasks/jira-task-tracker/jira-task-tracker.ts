@@ -269,9 +269,7 @@ export class JiraTaskTracker implements TaskTracker {
     )
     if (alreadyLinked) return
 
-    // JPD's Delivery tab reads the delivery link with the idea as the
-    // outward issue and the delivery epic as the inward issue; the reverse
-    // creates the link but the rollup does not surface it.
+    // Idea outward, epic inward: the reverse still creates the link, but JPD's Delivery rollup will not surface it.
     await this.client.request('POST', '/issueLink', {
       type: { name: deliveryLinkType },
       outwardIssue: { key: initiativeId },
@@ -373,9 +371,7 @@ export class JiraTaskTracker implements TaskTracker {
     const blocking: string[] = []
     links.forEach((link) => {
       if (link.type.name !== blocksLinkType) return
-      // On the fetched issue, Jira surfaces the partner in the partner's slot:
-      // the blocker sits in outwardIssue (this issue is blocked by it), the
-      // blocked sits in inwardIssue (this issue blocks it).
+      // Jira reports the partner in the partner's own slot, so outward is what blocks this issue and inward is what it blocks.
       if (link.outwardIssue !== undefined) blockedBy.push(link.outwardIssue.key)
       if (link.inwardIssue !== undefined) blocking.push(link.inwardIssue.key)
     })

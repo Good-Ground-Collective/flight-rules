@@ -8,9 +8,7 @@ const maxBackoffMs = 30_000
 
 const JiraErrorBodySchema = z.object({
   errorMessages: z.array(z.string()).optional(),
-  // Per-field catch: a malformed `errors` map (Jira usually returns
-  // field -> string, but off-contract/gateway bodies vary) must not discard a
-  // valid sibling `errorMessages`, which a top-level catch would.
+  // Caught per-field so an off-contract `errors` map cannot discard a valid sibling `errorMessages`.
   errors: z.record(z.string(), z.string()).optional().catch(undefined),
   message: z.string().optional(),
 })

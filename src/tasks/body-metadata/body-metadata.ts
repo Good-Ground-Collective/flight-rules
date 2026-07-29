@@ -17,8 +17,7 @@ export class BodyMetadataService {
     if (typeof raw !== 'object' || Array.isArray(raw)) {
       throw new Error('malformed flight-rules metadata block')
     }
-    // `size` is derived from the entity's kind, not stored — drop any legacy
-    // copy so it is ignored on read and cleaned out on the next splice.
+    // `size` is derived from the entity's kind, so a legacy stored copy is dropped rather than read.
     Reflect.deleteProperty(raw, 'size')
     return EntityMetadataSchema.parse(raw)
   }

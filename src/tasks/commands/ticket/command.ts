@@ -3,7 +3,7 @@ import type { CreateTicketInput, TaskTracker } from '../../task-tracker/task-tra
 import { resolveBody } from '../resolve-body.js'
 import { bodySectionsParser, type BodySections, type SectionKey } from '../../body-sections/body-sections.js'
 
-const SECTION_FIELDS: Record<string, SectionKey> = {
+const sectionFields: Record<string, SectionKey> = {
   'problem-statement': 'problemStatement',
   solution: 'solution',
   'acceptance-criteria': 'acceptanceCriteria',
@@ -11,10 +11,11 @@ const SECTION_FIELDS: Record<string, SectionKey> = {
   'guided-walkthrough': 'guidedWalkthrough',
 }
 
+// eslint-disable-next-line preflight/no-loose-functions -- selectSection is module-level behaviour awaiting a home on a service; tracked in KAN-39
 function selectSection(id: string, sections: BodySections, name: string): Record<string, unknown> {
-  const field = SECTION_FIELDS[name]
+  const field = sectionFields[name]
   if (field === undefined) {
-    throw new Error(`unknown section "${name}" — expected one of: ${Object.keys(SECTION_FIELDS).join(', ')}`)
+    throw new Error(`unknown section "${name}" — expected one of: ${Object.keys(sectionFields).join(', ')}`)
   }
   return {
     id,

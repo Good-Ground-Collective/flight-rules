@@ -7,6 +7,7 @@ import { CommitMessageInputSchema } from '../../commit-message-builder/commit-me
 import type { GitExecutor } from '../../git-executor/git-executor.js'
 import { semanticTypes } from '../../semantic-types.js'
 
+// eslint-disable-next-line preflight/no-loose-functions -- collect is module-level behaviour awaiting a home on a service; tracked in KAN-39
 function collect(value: string, previous: string[]): string[] {
   return [...previous, value]
 }

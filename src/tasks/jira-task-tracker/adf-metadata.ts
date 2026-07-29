@@ -19,8 +19,7 @@ export class JiraAdfMetadataService implements AdfMetadataService {
     if (yaml === undefined) return {}
     const raw: unknown = parseYaml(yaml)
     if (raw === null || raw === undefined || typeof raw !== 'object' || Array.isArray(raw)) return {}
-    // `size` is derived from the entity's kind, not stored — drop any legacy
-    // copy so it is ignored on read and cleaned out on the next splice.
+    // `size` is derived from the entity's kind, so a legacy stored copy is dropped rather than read.
     Reflect.deleteProperty(raw, 'size')
     return EntityMetadataSchema.parse(raw)
   }

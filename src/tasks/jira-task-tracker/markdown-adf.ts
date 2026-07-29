@@ -135,6 +135,7 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
     )
   }
 
+  // eslint-disable-next-line preflight/no-paragraph-comments -- false positive on JSDoc attached to a method, see Good-Ground-Collective/preflight#21
   /**
    * Converts the `<details>` block spanning `lines[start..]` into an expand:
    * finds the matching `</details>` (nesting-aware), lifts the `<summary>`
@@ -146,8 +147,7 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
     let depth = 0
     let end = -1
     for (let j = start; j < lines.length; j++) {
-      // Count only line-anchored tags. A `<details>` mentioned mid-sentence or
-      // inside inline code is prose, not structure, and must not affect nesting.
+      // Only line-anchored tags count, so a `<details>` mentioned mid-sentence is prose rather than nesting.
       const trimmed = (lines[j] ?? '').trim()
       if (detailsOpen.test(trimmed)) depth++
       if (detailsClose.test(trimmed)) depth--
