@@ -1,12 +1,12 @@
-import { Command } from 'commander'
-import type { Config } from '../../../config.js'
+import { Command } from "commander";
+import type { Config } from "../../../shared/config.js";
 
 export function createCompetenciesCommand(getConfig: () => Config): Command {
-  const competencies = new Command('competencies')
+  const competencies = new Command("competencies");
 
   competencies.exitOverride().action(() => {
-    process.stdout.write(JSON.stringify(getConfig().competencies) + '\n')
-  })
+    process.stdout.write(JSON.stringify(getConfig().competencies) + "\n");
+  });
 
-  return competencies
+  return competencies;
 }

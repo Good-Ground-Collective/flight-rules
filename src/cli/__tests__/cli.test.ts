@@ -59,7 +59,7 @@ describe('run', () => {
     vi.stubEnv('FLIGHT_RULES_CONFIG', configPath)
 
     const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
-    const { run } = await import('./cli.js')
+    const { run } = await import('../cli.js')
     await run(['epic', 'create', '--title', 'T', '--body', 'B'])
 
     expect(output).toHaveBeenCalledWith(expect.stringContaining('"id":"1"') as string)
@@ -68,7 +68,7 @@ describe('run', () => {
 
   it('does not require GITHUB_TOKEN to show help', async () => {
     vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
-    const { run } = await import('./cli.js')
+    const { run } = await import('../cli.js')
     // program-level exitOverride makes --help reject rather than process.exit
     await expect(run(['--help'])).rejects.toThrow()
   })
@@ -84,7 +84,7 @@ describe('run', () => {
     vi.stubEnv('FLIGHT_RULES_CONFIG', configPath)
 
     const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
-    const { run } = await import('./cli.js')
+    const { run } = await import('../cli.js')
     await run(['check'])
 
     expect(output).toHaveBeenCalledWith(expect.stringContaining('"tracker":"jira"') as string)
@@ -102,7 +102,7 @@ describe('run', () => {
     vi.stubEnv('FLIGHT_RULES_CONFIG', configPath)
 
     const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
-    const { run } = await import('./cli.js')
+    const { run } = await import('../cli.js')
     await run(['--tracker', 'github', 'check'])
 
     expect(output).toHaveBeenCalledWith(expect.stringContaining('"tracker":"github"') as string)
