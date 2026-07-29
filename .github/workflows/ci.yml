@@ -9,6 +9,9 @@ on:
 jobs:
   ci:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     steps:
       - uses: actions/checkout@v4
 
@@ -17,7 +20,11 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
 
+      # .npmrc points @good-ground-collective at GitHub Packages, which rejects
+      # anonymous reads even for public packages, so the install needs a token.
       - run: npm ci
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Typecheck
         run: npm run typecheck
@@ -39,6 +46,7 @@ jobs:
       contents: write
       pull-requests: write
       issues: write
+      packages: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -50,6 +58,8 @@ jobs:
           cache: npm
 
       - run: npm ci
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # semantic-release's @semantic-release/git plugin commits the version bump
       # and rebuilt binary back to main, so it needs a git identity.
