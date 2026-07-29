@@ -9,10 +9,10 @@ import { describe, it, expect } from 'vitest'
 // import TS source directly and cannot catch these, so this spawns the real
 // artifacts. Requires `npm run build` to have run first (CI builds before
 // `npm test`).
-const bundle = fileURLToPath(new URL('../bin/flight-rules.mjs', import.meta.url))
-const shim = fileURLToPath(new URL('../bin/flight-rules', import.meta.url))
+const bundle = fileURLToPath(new URL('../../../bin/flight-rules.mjs', import.meta.url))
+const shim = fileURLToPath(new URL('../../../bin/flight-rules', import.meta.url))
 const pkg = JSON.parse(
-  readFileSync(fileURLToPath(new URL('../package.json', import.meta.url)), 'utf8'),
+  readFileSync(fileURLToPath(new URL('../../../package.json', import.meta.url)), 'utf8'),
 )
 
 describe('built binary smoke test', () => {

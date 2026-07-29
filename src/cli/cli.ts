@@ -1,28 +1,30 @@
 import { join } from 'node:path'
 import { Command } from 'commander'
-import { readConfig } from './config.js'
-import type { Config } from './config.js'
-import { readEnv } from './env.js'
-import { GitHubTaskTracker } from './tasks/github-task-tracker/github-task-tracker.js'
-import { JiraTaskTracker } from './tasks/jira-task-tracker/jira-task-tracker.js'
-import { createEpicCommand } from './tasks/commands/epic/command.js'
-import { createInitiativeCommand } from './tasks/commands/initiative/command.js'
-import { createTicketCommand } from './tasks/commands/ticket/command.js'
-import { createTddCommand } from './tasks/commands/tdd/command.js'
-import { createUsersCommand } from './tasks/commands/users/command.js'
-import { createRfcCommand } from './tasks/commands/rfc/command.js'
-import { createCompetenciesCommand } from './tasks/commands/competencies/command.js'
-import { createCheckCommand } from './tasks/commands/check/command.js'
-import type { TaskTracker } from './tasks/task-tracker/task-tracker.js'
-import { NodeGitExecutor } from './git/git-executor/git-executor.js'
-import { createGitCommand } from './git/commands/commit/command.js'
-import { GitHubPullRequestHost, type PullRequestHost } from './pr/pull-request-host/pull-request-host.js'
-import { createPrCommand } from './pr/commands/pr/command.js'
-import { appVersion } from './version.js'
+import { readConfig } from '../shared/config.js'
+import type { Config } from '../shared/config.js'
+import { EnvLoader } from '../shared/env.js'
+import { GitHubTaskTracker } from '../tasks/github-task-tracker/github-task-tracker.js'
+import { JiraTaskTracker } from '../tasks/jira-task-tracker/jira-task-tracker.js'
+import { createEpicCommand } from '../tasks/commands/epic/command.js'
+import { createInitiativeCommand } from '../tasks/commands/initiative/command.js'
+import { createTicketCommand } from '../tasks/commands/ticket/command.js'
+import { createTddCommand } from '../tasks/commands/tdd/command.js'
+import { createUsersCommand } from '../tasks/commands/users/command.js'
+import { createRfcCommand } from '../tasks/commands/rfc/command.js'
+import { createCompetenciesCommand } from '../tasks/commands/competencies/command.js'
+import { createCheckCommand } from '../tasks/commands/check/command.js'
+import type { TaskTracker } from '../tasks/task-tracker/task-tracker.js'
+import { NodeGitExecutor } from '../git/git-executor/git-executor.js'
+import { createGitCommand } from '../git/commands/commit/command.js'
+import { GitHubPullRequestHost, type PullRequestHost } from '../pr/pull-request-host/pull-request-host.js'
+import { createPrCommand } from '../pr/commands/pr/command.js'
+import { appVersion } from '../version.js'
 
 function buildTracker(overrideTracker?: string): TaskTracker {
   const config = getConfigFromEnv(overrideTracker)
-  const env = readEnv()
+  // A loader per invocation: the cache is per-instance, and each CLI run must
+  // observe the ambient environment as it stands now.
+  const env = new EnvLoader().load()
 
   if (config.tracker === 'github') {
     if (env.githubToken === undefined) throw new Error('GITHUB_TOKEN environment variable is required')
@@ -57,7 +59,7 @@ function buildTracker(overrideTracker?: string): TaskTracker {
 
 function buildPrHost(overrideTracker?: string): PullRequestHost {
   const config = getConfigFromEnv(overrideTracker)
-  const env = readEnv()
+  const env = new EnvLoader().load()
 
   if (env.githubToken === undefined) {
     throw new Error('GITHUB_TOKEN environment variable is required to create pull requests')

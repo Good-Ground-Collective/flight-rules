@@ -3,7 +3,7 @@
 // bundle always runs when invoked — no argv-based "am I the main module"
 // sniffing, which silently no-ops when the binary is renamed or wrapped.
 import { CommanderError } from 'commander'
-import { run } from './cli.js'
+import { run } from './cli/cli.js'
 
 run(process.argv.slice(2)).catch((err: unknown) => {
   if (err instanceof CommanderError) {

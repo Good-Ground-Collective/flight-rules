@@ -1,6 +1,6 @@
 import { Command } from "commander";
 import type { Config } from "../../../shared/config.js";
-import { readEnv, type Env } from "../../../shared/env.js";
+import { EnvLoader, type Env } from "../../../shared/env.js";
 import type { TaskTracker } from "../../task-tracker/task-tracker.js";
 
 type Check = { name: string; ok: boolean; detail: string };
@@ -46,7 +46,9 @@ export function createCheckCommand(
       detail: `tracker=${config.tracker} repo=${config.repo}`,
     });
 
-    const credential = credentialFor(config.tracker, readEnv());
+    // A loader per run: the cache is per-instance, and `check` reports on the
+    // environment as it stands at invocation time.
+    const credential = credentialFor(config.tracker, new EnvLoader().load());
     const credOk = credential.value !== undefined;
     checks.push({
       name: "credentials",
