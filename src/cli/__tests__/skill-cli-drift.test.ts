@@ -38,6 +38,9 @@ const invocationsIn = (markdown: string): string[] => {
   return found
 }
 
+/** A bare `<id>`/`<slug>` or a bracket-wrapped optional segment, never a real subcommand name. */
+const looksLikePlaceholder = (token: string): boolean => /^[<[]/.test(token)
+
 /** Walks the token path into the command tree, then checks each long flag. */
 const resolve = (invocation: string): string => {
   const tokens = invocation.split(/\s+/).slice(1)
@@ -57,7 +60,16 @@ const resolve = (invocation: string): string => {
     const child = node.commands.find(
       (candidate) => candidate.name() === token || candidate.aliases().includes(token),
     )
-    if (child === undefined) break
+    if (child === undefined) {
+      // A non-flag token that fails to match a child is only a tolerated
+      // placeholder/positional-arg when it looks like one, or when `node`
+      // is a leaf with nothing further to dispatch to. Otherwise `node`
+      // still has real subcommands and this token was a failed attempt to
+      // name one — e.g. a skill still saying `ticket get` after the CLI
+      // renamed it to `ticket fetch`. That is drift, not a placeholder.
+      if (looksLikePlaceholder(token) || node.commands.length === 0) break
+      return `no command matched: ${invocation}`
+    }
     node = child
     index += 1
   }
@@ -66,8 +78,12 @@ const resolve = (invocation: string): string => {
   // `flight-rules --help`), which is a legitimate bare invocation.
   if (node === program && !stoppedOnFlag) return `no command matched: ${invocation}`
   for (const token of tokens.slice(index)) {
-    if (!token.startsWith('--')) continue
-    const flag = token.split('=')[0] ?? token
+    // Strip a single wrapping bracket (`[--from`, `<base>]`) so an optional
+    // flag written as `[--flag <arg>]` in a skill's usage line still gets
+    // checked against the CLI's real options instead of being skipped.
+    const bare = token.replace(/^\[/, '').replace(/\]$/, '')
+    if (!bare.startsWith('--')) continue
+    const flag = bare.split('=')[0] ?? bare
     const known =
       node.options.some((option) => option.long === flag) ||
       flag === '--help' ||
