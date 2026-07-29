@@ -7,7 +7,9 @@ description: "First-run setup for the flight-rules plugin. Creates .claude/fligh
 
 This skill creates the per-project configuration file for flight-rules and verifies your environment is ready. It takes about two minutes. Run it once per repository you want to use the plugin in.
 
-If `.claude/flight-rules.local.md` already exists, read it and show the current values before asking whether to reconfigure.
+The config file is `$FLIGHT_RULES_CONFIG` when that variable is set, otherwise `.claude/flight-rules.local.md`. The CLI honours the override, so every read and write below means whichever path is in effect.
+
+If that file already exists, read it and show the current values before asking whether to reconfigure.
 
 ---
 
@@ -155,6 +157,11 @@ Ask each question in order, one at a time.
 **Jira project key**
 > "Which Jira project key will hold epics and tickets? (e.g. `PROJ`)"
 
+**GitHub repository**
+> "Which GitHub repository does the code live in? (`owner/repo`)"
+
+Ask this even though the tracker is Jira: pull requests always land on GitHub, and `flight-rules pr create` throws before parsing its options when `repo` is absent. Suggest `gh repo view --json nameWithOwner --jq .nameWithOwner` as the default if the user is unsure.
+
 **JPD project key**
 > "Which Jira Product Discovery project holds initiatives (Ideas)? (e.g. `DISC`) — hit enter to skip if you're not using JPD yet."
 
@@ -169,7 +176,7 @@ Ask each question in order, one at a time.
 
 ## Step 5 (Jira): Write the config file
 
-Create `.claude/` if it doesn't exist. Write `.claude/flight-rules.local.md`. Note there is **no `repo`** field for Jira; work is identified by project keys.
+Create `.claude/` if it doesn't exist. Write the config file. Jira identifies *work* by project keys, but `repo` is still required — pull requests land on GitHub whichever tracker holds the tickets.
 
 ```markdown
 ---
@@ -178,6 +185,7 @@ jiraHost: <host>
 jiraEmail: <email>
 jiraProject: <project key>
 jpdProject: <jpd project key>
+repo: <owner/repo>
 rfcStorage: local
 ---
 ```

@@ -15,7 +15,13 @@ export interface BranchSpec {
 }
 
 export const PushSpecSchema = z.object({
-  branch: z.string().min(1, 'branch is required'),
+  // A detached HEAD makes `rev-parse --abbrev-ref` yield the literal "HEAD", which would push a ref rather than a branch.
+  branch: z
+    .string()
+    .min(1, 'branch is required')
+    .refine((branch) => branch !== 'HEAD', {
+      message: 'cannot push from a detached HEAD — check out a branch first',
+    }),
   remote: z.string().min(1).default('origin'),
   // Defaults true to match the CLI's `--no-set-upstream`, so a programmatic push tracks the branch too.
   setUpstream: z.boolean().default(true),

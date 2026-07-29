@@ -15,6 +15,7 @@ This is the skill that builds the thing. You are handed a **ticket id**; you han
 
 - You are handed a **ticket id**.
 - Run everything from the **repo root** (the `flight-rules` CLI resolves config relative to CWD).
+- **The config file is `$FLIGHT_RULES_CONFIG` when that variable is set, otherwise `.claude/flight-rules.local.md`.** The CLI honours the override, so every read and write below means whichever path is in effect — reading one file and writing the other would strand your answers where nothing looks for them.
 - `flight-rules check` reports `"ok": true`. If it doesn't, fix the environment first — the run mutates tracker state, and a half-configured CLI fails partway through.
 - Config carries a **`repo`** field (`owner/repo`). `flight-rules pr create` needs it regardless of tracker — the PR always lands on GitHub — and it throws before parsing a single option when it is missing. On a Jira-tracked repo `repo` is often absent, because the tracker doesn't need it and `skills/setup/SKILL.md` doesn't ask for it. **Step 2 discovers and stores it**, and it must be settled *before* the loop runs: reaching step 7 without it means a pushed branch and no PR.
 - The **working tree is clean**. A dirty tree stops the run *before any mutation*: the commit step commits by explicit path, so pre-existing edits to a file the implementer also touched would be swept into the commit silently.
@@ -66,7 +67,7 @@ flight-rules ticket transitions <id>
 
 It prints something like `{"id":"…","transitions":["In Progress","Done"]}` and mutates nothing.
 
-**That list is not the board.** On **Jira** it is scoped to the ticket's **current** status — only transitions reachable from where the issue sits right now. You are taking this snapshot while the ticket is still in to-do, so on any gated company-managed workflow the in-review status is simply **not in it**; you won't reach that status until step 7. The illustrative four-name list above is the permissive team-managed case, not the norm. On **GitHub** the list is the repo's existing `status:` labels, which is likewise whatever happens to have been used before.
+**That list is not the board.** On **Jira** it is scoped to the ticket's **current** status — only transitions reachable from where the issue sits right now. You are taking this snapshot while the ticket is still in to-do, so on any gated company-managed workflow the in-review status is simply **not in it**; you won't reach that status until step 7. The illustrative list above shows that restrictive case — a permissive team-managed board might return every status at once, but do not count on it. On **GitHub** the list is the repo's existing `status:` labels, lowercased, which is likewise whatever happens to have been used before; a Jira board returns its own capitalisation (`In Review`), so the two trackers legitimately differ in form.
 
 **Discover** `repo` when it is missing — read it from the git remote, read-only:
 
@@ -94,7 +95,7 @@ inReviewStatus: <the chosen in-review status>
 ---
 ```
 
-Omit any key that was already present and correct; never write a key twice.
+A key that was already present and correct needs no new value — carry it through unchanged. This is about which keys you *add*, not which keys survive: every existing field stays in the file, and no key appears twice.
 
 The delimiters matter. The config loader reads only the block between the **first** `---` pair at the very start of the file, and the schema is non-strict — so anything written after the closing `---` is silently dropped with no error, and this step would then re-prompt on every single run instead of once.
 
@@ -205,7 +206,7 @@ Three iterations is a **hard ceiling**, not a target. Do not restart the count, 
 
 Only once `verified: true`.
 
-**Commit.** Stage by explicit path — the command has no all-files flag, and that is deliberate, so an unrelated stray edit can never ride along. Repeat `--file` once per path:
+**Commit.** Stage by explicit path. Passing any `--file` scopes the commit to exactly those paths, so an unrelated stray edit cannot ride along; **omitting `--file` entirely commits the whole index**, which is why you always pass it. Repeat `--file` once per path:
 
 ```bash
 flight-rules git commit --type <type> --scope <id> --description "<description>" --file <path> --file <path>
@@ -216,6 +217,14 @@ flight-rules git commit --type <type> --scope <id> --description "<description>"
 The `--file` set is the **union of `filesChanged[].path` across every iteration**, not just the last one. Each dispatch reports only what *that* dispatch touched, so a retry's list is a subset. Iteration 1 might create a module and its test; iteration 2 fixes only the module and reports only the module — staging that alone would ship the fix without the test, so the PR diff would no longer be the tree the verifier passed. Accumulate the paths as you go, and de-duplicate.
 
 Never use a Claude Code auto-generated commit. The CLI owns the message format.
+
+**If the change touches `src/`, rebuild the bundle before committing** and add it to the `--file` set:
+
+```bash
+npm run build
+```
+
+`bin/flight-rules.mjs` is a tracked build artifact this repo commits deliberately. CI builds but never diffs the result, so a PR that changes `src/` without rebuilding ships a bundle contradicting its own diff — and the stale binary is what anyone running the CLI from this branch actually executes.
 
 Then confirm you committed everything:
 
