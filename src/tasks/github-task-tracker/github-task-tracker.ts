@@ -167,7 +167,7 @@ export class GitHubTaskTracker implements TaskTracker {
       labels: ['ticket', ...input.labels],
       ...(input.assignee !== undefined ? { assignee: input.assignee } : {}),
     })
-    await this.linkTicketToEpic(String(data.number), input.epicId)
+    if (input.epicId !== undefined) await this.linkTicketToEpic(String(data.number), input.epicId)
     return this.mapTicket(data, [], [], [], this.bodyMetadata.parse(data.body ?? ''))
   }
 

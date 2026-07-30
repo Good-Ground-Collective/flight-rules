@@ -29240,7 +29240,8 @@ var CreateEpicInputSchema = external_exports.object({
 var CreateTicketInputSchema = external_exports.object({
   title: external_exports.string(),
   body: external_exports.string(),
-  epicId: external_exports.string(),
+  /** Absent for a standalone ticket: a ticket-sized RFC has no epic to parent to. */
+  epicId: external_exports.string().optional(),
   labels: external_exports.array(external_exports.string()).default([]),
   assignee: external_exports.string().optional(),
   metadata: EntityMetadataSchema.partial().optional()
@@ -29438,7 +29439,7 @@ var GitHubTaskTracker = class {
       labels: ["ticket", ...input.labels],
       ...input.assignee !== void 0 ? { assignee: input.assignee } : {}
     });
-    await this.linkTicketToEpic(String(data.number), input.epicId);
+    if (input.epicId !== void 0) await this.linkTicketToEpic(String(data.number), input.epicId);
     return this.mapTicket(data, [], [], [], this.bodyMetadata.parse(data.body ?? ""));
   }
   async getTicket(id) {
@@ -30173,8 +30174,8 @@ var JiraTaskTracker = class {
         issuetype: { name: issuetype },
         summary: input.title,
         description,
-        parent: { key: input.epicId },
         labels: input.labels,
+        ...input.epicId !== void 0 ? { parent: { key: input.epicId } } : {},
         ...input.assignee !== void 0 ? { assignee: { accountId: input.assignee } } : {}
       }
     });
@@ -30718,12 +30719,12 @@ function selectSection(id, sections, name) {
 }
 function createTicketCommand(getTracker) {
   const ticket = new Command("ticket");
-  ticket.command("create").exitOverride().requiredOption("--title <title>", "ticket title").option("--body <body>", "ticket body (or use --body-file)").option("--body-file <path>", "read the ticket body from a file").requiredOption("--epic-id <id>", "parent epic id").option("--labels <labels>", "comma-separated labels").option("--assignee <user>", "assignee login").action(async (opts) => {
+  ticket.command("create").exitOverride().requiredOption("--title <title>", "ticket title").option("--body <body>", "ticket body (or use --body-file)").option("--body-file <path>", "read the ticket body from a file").option("--epic-id <id>", "parent epic id; omit to create a standalone ticket").option("--labels <labels>", "comma-separated labels").option("--assignee <user>", "assignee login").action(async (opts) => {
     const input = {
       title: opts.title,
       body: resolveBody({ body: opts.body, bodyFile: opts.bodyFile }),
-      epicId: opts.epicId,
       labels: opts.labels !== void 0 ? opts.labels.split(",") : [],
+      ...opts.epicId !== void 0 ? { epicId: opts.epicId } : {},
       ...opts.assignee !== void 0 ? { assignee: opts.assignee } : {}
     };
     const result = await getTracker().createTicket(input);

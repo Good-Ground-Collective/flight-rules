@@ -116,12 +116,14 @@ describe('ticket command', () => {
     await expect(run(tracker, ['get', '7', '--section', 'bogus'])).rejects.toThrow(/unknown section/)
   })
 
-  it('rejects "create" when --epic-id is missing', async () => {
+  it('creates a standalone ticket when --epic-id is omitted', async () => {
     const tracker = makeTracker()
-    const errOutput = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
-    await expect(run(tracker, ['create', '--title', 'T', '--body', 'B'])).rejects.toThrow(CommanderError)
-    expect(tracker.createTicket).not.toHaveBeenCalled()
-    errOutput.mockRestore()
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(tracker, ['create', '--title', 'T', '--body', 'B'])
+    expect(tracker.createTicket).toHaveBeenCalledWith({ title: 'T', body: 'B', labels: [] })
+    expect(vi.mocked(tracker.createTicket).mock.calls[0]?.[0]).not.toHaveProperty('epicId')
+    expect(output).toHaveBeenCalledWith(JSON.stringify(mockTicket) + '\n')
+    output.mockRestore()
   })
 
   it('calls blockTicket for "block"', async () => {
