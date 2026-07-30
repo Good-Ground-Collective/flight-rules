@@ -154,6 +154,20 @@ Dispatch the two agents in strict alternation. Count iterations out loud; you wi
 
 **a. Dispatch `code-implementation`** with the brief from step 5. On **iterations 2 and 3**, add the previous verifier's itemized FAIL entries **verbatim** — the criterion, the verdict, and the evidence exactly as the verifier wrote them. That evidence *is* the definition of what still needs fixing; rewriting it in your own words is how a retry loses the thread.
 
+**Set the model by iteration.** `Agent`'s `model` parameter overrides the agent's frontmatter, so pass it explicitly on the dispatch:
+
+| Iteration | `model` |
+|---|---|
+| 1 | *omit* — inherits `sonnet` from frontmatter |
+| 2 | *omit* — inherits `sonnet` from frontmatter |
+| 3 (final) | `opus` |
+
+Sonnet is the tier this pipeline is built around: `break-down-work` writes each ticket's Guided Walkthrough so a Sonnet-tier agent can build from it, and a first attempt against a good walkthrough is exactly the case that choice was made for. But by iteration 3 the verifier has rejected the work twice with itemized reasons, and re-running the same tier against the same criteria is close to a coin flip. Escalate rather than spend the last of a hard-capped three on a repeat.
+
+This is bounded by construction — it can only fire on a ticket that has already failed verification twice, so the happy path never leaves sonnet. Do **not** escalate early on a hunch that the ticket looks hard; the retry count is the only signal.
+
+**The verifier stays on sonnet at every iteration**, including against an escalated implementer. That asymmetry is deliberate: the verifier checks explicit acceptance criteria and reports per-criterion verdicts with evidence — it checks a stated contract rather than synthesizing one — and a cheap gate is a feature, not a compromise. Never pass `model` on a `code-verifier` dispatch.
+
 It returns a trailing YAML block:
 
 ```yaml
@@ -280,6 +294,7 @@ Give the user, in this order:
 ## Guardrails
 
 - **Maximum 3 loop iterations, hard.** No restarting the count, no fourth attempt under another name.
+- **The implementer escalates to opus only on iteration 3, and the verifier never escalates.** Iterations 1 and 2 run the frontmatter default. A ticket that "looks hard" is not a reason to escalate early — two recorded FAILs is the only one.
 - **Never merge.** This skill opens a PR and stops. Merging is a human decision.
 - **Never let an unverified change reach a PR.** `verified: true` is the only key that unlocks step 7.
 - **Never tick acceptance-criteria checkboxes.** The `items[].done` flags are read-only to this skill; the verifier's itemized verdict is the record of what passed. A ticked box in a tracker is a claim nobody checked.
@@ -310,4 +325,5 @@ A reviewer can grade a run against this list:
 - The ticket's status trail reads to-do → in-progress → in-review, with the in-review transition happening *after* the PR exists.
 - No acceptance criterion shipped without a PASS verdict backed by evidence, and no acceptance-criteria checkbox was ticked.
 - The run summary states the iteration count, and every `charterConcerns` and `openQuestions` entry reached the user.
+- Iterations 1 and 2 ran the implementer at its default tier; opus appears only if a third iteration was reached, and never on the verifier.
 - The PR is open and unmerged, waiting on a human.

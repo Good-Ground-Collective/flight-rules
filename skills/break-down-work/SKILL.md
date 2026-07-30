@@ -88,6 +88,8 @@ Add one or two **cross-cutting briefs** for shared concerns the sketch implies (
 
 Dispatch **all briefs at once** (concurrently, in a single batch) to the `research-agent`. Each is single-shot: one brief in, one mode-typed findings report out. Do not dispatch serially; do not fold them into one mega-brief. Keep the batch reasonable (≈ one per child plus the cross-cutting briefs).
 
+**Take the agent's model as it comes** — it runs `opus` by default, deliberately. Research is the one stage in this pipeline with no gate downstream: an implementation is checked criterion-by-criterion by `code-verifier` before it can reach a PR, but a findings report goes straight into the Guided Walkthrough and from there into every ticket derived from it. An error here is amplified, not caught. It is also the cheapest stage — a handful of single-shot, read-only dispatches sitting in front of a per-ticket, multi-turn, up-to-three-attempt execution loop. Do not route by `depth` or `mode` to save money; the saving is a rounding error and the rule is one more thing to get wrong. Override downward only when a human explicitly asks for a cheap survey.
+
 Collect every findings report before synthesizing.
 
 ### 5. Synthesize the breakdown
