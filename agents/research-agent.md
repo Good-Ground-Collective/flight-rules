@@ -2,7 +2,7 @@
 name: research-agent
 description: Single-shot investigator that answers one focused research brief by reading code and/or searching the web, and returns a structured, mode-typed findings report. Dispatch one per question; parallel fan-out is the caller's job. Use for grounding decomposition/planning in real code, or for ad-hoc questions like "does library X support Y, and how do I do it with the Z SDK?".
 tools: Glob, Grep, LS, Read, WebSearch, WebFetch
-model: sonnet
+model: opus
 color: cyan
 ---
 
