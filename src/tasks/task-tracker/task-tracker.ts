@@ -70,7 +70,8 @@ export const CreateEpicInputSchema = z.object({
 export const CreateTicketInputSchema = z.object({
   title: z.string(),
   body: z.string(),
-  epicId: z.string(),
+  /** Absent for a standalone ticket: a ticket-sized RFC has no epic to parent to. */
+  epicId: z.string().optional(),
   labels: z.array(z.string()).default([]),
   assignee: z.string().optional(),
   metadata: EntityMetadataSchema.partial().optional(),

@@ -122,8 +122,8 @@ export class JiraTaskTracker implements TaskTracker {
         issuetype: { name: issuetype },
         summary: input.title,
         description,
-        parent: { key: input.epicId },
         labels: input.labels,
+        ...(input.epicId !== undefined ? { parent: { key: input.epicId } } : {}),
         ...(input.assignee !== undefined ? { assignee: { accountId: input.assignee } } : {}),
       },
     })

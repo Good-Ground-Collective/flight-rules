@@ -147,6 +147,63 @@ describe('GitHubTracker.getTicket', () => {
   })
 })
 
+describe('GitHubTracker.createTicket', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  const createdIssue = {
+    data: {
+      number: 7,
+      state: 'open',
+      labels: [{ name: 'ticket' }],
+      title: 'Standalone',
+      body: 'Ticket body',
+      assignee: null,
+      updated_at: '2026-01-01T00:00:00Z',
+    },
+  }
+
+  it('links the new ticket to its epic as a sub-issue', async () => {
+    const tracker = makeTracker()
+    // @ts-expect-error — accessing private field for test setup
+    const mockCreate = vi.mocked(tracker.octokit.rest.issues.create)
+    // @ts-expect-error — accessing private field for test setup
+    const mockRequest = vi.mocked(tracker.octokit.request)
+    // @ts-expect-error — accessing private field for test setup
+    const mockGet = vi.mocked(tracker.octokit.rest.issues.get)
+
+    mockCreate.mockResolvedValueOnce(createdIssue as never)
+    mockRequest.mockImplementation((route: string) => {
+      if (route.startsWith('GET')) return Promise.resolve({ data: [] } as never)
+      return Promise.resolve({ data: {} } as never)
+    })
+    mockGet.mockResolvedValueOnce({ data: { id: 999, number: 7 } } as never)
+
+    await tracker.createTicket({ title: 'Standalone', body: 'Ticket body', epicId: '10', labels: [] })
+
+    expect(mockRequest).toHaveBeenCalledWith(
+      'POST /repos/{owner}/{repo}/issues/{issue_number}/sub_issues',
+      { owner: 'acme', repo: 'proj', issue_number: 10, sub_issue_id: 999 },
+    )
+  })
+
+  it('creates a standalone ticket without touching the sub-issue API when no epicId is given', async () => {
+    const tracker = makeTracker()
+    // @ts-expect-error — accessing private field for test setup
+    const mockCreate = vi.mocked(tracker.octokit.rest.issues.create)
+    // @ts-expect-error — accessing private field for test setup
+    const mockRequest = vi.mocked(tracker.octokit.request)
+
+    mockCreate.mockResolvedValueOnce(createdIssue as never)
+
+    const ticket = await tracker.createTicket({ title: 'Standalone', body: 'Ticket body', labels: [] })
+
+    expect(ticket.id).toBe('7')
+    expect(ticket.size).toBe('ticket')
+    expect(ticket.metadata.epicId).toBeUndefined()
+    expect(mockRequest).not.toHaveBeenCalled()
+  })
+})
+
 describe('GitHubTracker.linkTicketToEpic', () => {
   beforeEach(() => vi.clearAllMocks())
 

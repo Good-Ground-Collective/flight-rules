@@ -168,7 +168,13 @@ flight-rules ticket create --title "<title>" --body-file ticket-saw.md --epic-id
 flight-rules ticket block <ticketId> --by <blockerTicketId>
 ```
 
-**ticket:** create the single ticket under its epic.
+**ticket:**
+```bash
+# a ticket-sized RFC has no parent epic — omit --epic-id and the ticket is created standalone
+flight-rules ticket create --title "<title>" --body-file ticket.md   # → { "id": <ticketId> }
+```
+
+Only pass `--epic-id` when this hop really does sit under an existing epic. Do **not** invent a wrapper epic to satisfy the flag — a ticket-sized RFC maps to one parentless ticket, and a single-child epic is hierarchy noise.
 
 ### 10. Verify and stop
 
