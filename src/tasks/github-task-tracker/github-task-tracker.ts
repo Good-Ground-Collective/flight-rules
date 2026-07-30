@@ -473,7 +473,11 @@ export class GitHubTaskTracker implements TaskTracker {
     return data.id
   }
 
-  // Every `status:` label the repo defines, paginated so a repo with more than one page cannot silently omit some.
+  /**
+   * Every `status:` label the repo defines, paginated so a repo with more than
+   * one page of labels cannot silently omit some. The vocabulary is repo-wide,
+   * which is why `listTransitions` ignores the ticket id it is handed.
+   */
   private async statusLabelNames(): Promise<string[]> {
     const labels = await this.octokit.paginate(
       this.octokit.rest.issues.listLabelsForRepo,

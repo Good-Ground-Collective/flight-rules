@@ -135,7 +135,6 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
     )
   }
 
-  // eslint-disable-next-line preflight/no-paragraph-comments -- false positive on JSDoc attached to a method, see Good-Ground-Collective/preflight#21
   /**
    * Converts the `<details>` block spanning `lines[start..]` into an expand:
    * finds the matching `</details>` (nesting-aware), lifts the `<summary>`
