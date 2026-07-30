@@ -242,7 +242,11 @@ export class GitHubTaskTracker implements TaskTracker {
     // GitHub has no native in-progress/in-review concept, so status is encoded
     // as a `status:<slug>` label (matching the epic/ticket label convention).
     const issueNumber = parseInt(ticketId, 10)
-    const label = `status:${status.trim().toLowerCase().replace(/\s+/g, '-')}`
+    const slug = `status:${status.trim().toLowerCase().replace(/\s+/g, '-')}`
+    // A label the repo already defines under different capitalisation is the
+    // same status, so reuse its exact name rather than adding a second label.
+    const existing = await this.statusLabelNames()
+    const label = existing.find((name) => name.toLowerCase() === slug) ?? slug
     const { data: issue } = await this.octokit.rest.issues.get({
       owner: this.owner,
       repo: this.repo,
@@ -250,7 +254,10 @@ export class GitHubTaskTracker implements TaskTracker {
     })
     const stale = issue.labels
       .map((l) => this.labelName(l))
-      .filter((name) => name.startsWith('status:') && name !== label)
+      .filter(
+        (name) =>
+          name.startsWith('status:') && name.toLowerCase() !== label.toLowerCase(),
+      )
     for (const name of stale) {
       await this.octokit.rest.issues.removeLabel({ owner: this.owner, repo: this.repo, issue_number: issueNumber, name })
     }
@@ -262,19 +269,11 @@ export class GitHubTaskTracker implements TaskTracker {
     })
   }
 
-  async listTransitions(_ticketId: string): Promise<string[]> {
-    void _ticketId // required by the TaskTracker interface; unused here
-    // GitHub has no workflow, so the reachable vocabulary is whatever `status:`
-    // labels the repo already defines; an empty result is valid.
-    const { data } = await this.octokit.rest.issues.listLabelsForRepo({
-      owner: this.owner,
-      repo: this.repo,
-      per_page: 100,
-    })
-    return data
-      .map((label) => this.labelName(label))
-      .filter((name) => name.startsWith('status:'))
-      .map((name) => name.slice('status:'.length).replace(/-/g, ' '))
+  async listTransitions(): Promise<string[]> {
+    // The vocabulary is repo-wide, so the ticket id is irrelevant; lowercased so the value round-trips through transitionTicket to the same label.
+    return (await this.statusLabelNames()).map((name) =>
+      name.slice('status:'.length).replace(/-/g, ' ').toLowerCase(),
+    )
   }
 
   async updateEpicMetadata(epicId: string, patch: Partial<EntityMetadata>): Promise<void> {
@@ -472,6 +471,21 @@ export class GitHubTaskTracker implements TaskTracker {
       issue_number: issueNumber,
     })
     return data.id
+  }
+
+  /**
+   * Every `status:` label the repo defines, paginated so a repo with more than
+   * one page of labels cannot silently omit some. The vocabulary is repo-wide,
+   * which is why `listTransitions` ignores the ticket id it is handed.
+   */
+  private async statusLabelNames(): Promise<string[]> {
+    const labels = await this.octokit.paginate(
+      this.octokit.rest.issues.listLabelsForRepo,
+      { owner: this.owner, repo: this.repo, per_page: 100 },
+    )
+    return labels
+      .map((label) => this.labelName(label))
+      .filter((name) => name.startsWith('status:'))
   }
 
   private labelName(label: OctokitLabelData): string {

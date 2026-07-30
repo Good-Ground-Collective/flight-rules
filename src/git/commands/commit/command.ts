@@ -43,7 +43,12 @@ export function createGitCommand(getExecutor: () => GitExecutor): Command {
     .requiredOption('--type <type>', 'conventional commit type')
     .requiredOption('--scope <scope>', 'conventional commit scope')
     .requiredOption('--description <description>', 'commit description')
-    .option('--file <file>', 'file to stage (repeatable)', collect, [])
+    .option(
+      '--file <file>',
+      'file to stage (repeatable); scopes the commit to exactly these paths. Omitting it commits the whole index',
+      collect,
+      [],
+    )
     .option('--body <body>', 'commit body')
     .option('--footer <footer>', 'commit footer (repeatable)', collect, [])
     .option('--model <model>', 'model identifier')
@@ -99,11 +104,13 @@ export function createGitCommand(getExecutor: () => GitExecutor): Command {
     .option('--no-set-upstream', 'do not set the upstream tracking ref')
     .action(async (opts: GitPushOptions) => {
       const executor = getExecutor()
-      const branch = await executor.getCurrentBranch()
-      await executor.push({ branch, remote: opts.remote, setUpstream: opts.setUpstream })
-      process.stdout.write(
-        JSON.stringify({ branch, remote: opts.remote, setUpstream: opts.setUpstream }) + '\n',
-      )
+      const spec = {
+        branch: await executor.getCurrentBranch(),
+        remote: opts.remote,
+        setUpstream: opts.setUpstream,
+      }
+      await executor.push(spec)
+      process.stdout.write(JSON.stringify(spec) + '\n')
     })
 
   return git

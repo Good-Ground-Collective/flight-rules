@@ -21,17 +21,28 @@ const skillFiles = readdirSync(skillsDir, { withFileTypes: true })
   .filter((entry) => entry.isDirectory())
   .map((entry) => join(skillsDir, entry.name, 'SKILL.md'))
 
-/** Lines beginning `flight-rules` inside fenced code blocks, prose excluded. */
+/**
+ * Lines beginning `flight-rules` inside fenced code blocks, prose excluded.
+ * Fences are matched by their exact run length so a four-backtick block
+ * containing three-backtick example content cannot desynchronise the toggle.
+ */
 const invocationsIn = (markdown: string): string[] => {
   const lines = markdown.split('\n')
   const found: string[] = []
-  let fenced = false
+  let openFence: string | null = null
   for (const line of lines) {
-    if (line.trimStart().startsWith('```')) {
-      fenced = !fenced
+    const fence = /^\s*(`{3,})/.exec(line)?.[1]
+    if (fence !== undefined) {
+      if (openFence === null) {
+        openFence = fence
+        continue
+      }
+      // Only a run at least as long as the opener closes the block; a shorter
+      // run is content inside it.
+      if (fence.length >= openFence.length) openFence = null
       continue
     }
-    if (!fenced) continue
+    if (openFence === null) continue
     const trimmed = line.trim().replace(/^\$ /, '')
     if (trimmed.startsWith('flight-rules ')) found.push(trimmed)
   }
@@ -77,6 +88,7 @@ const resolve = (invocation: string): string => {
   // didn't stop because the very first token was a top-level flag (e.g.
   // `flight-rules --help`), which is a legitimate bare invocation.
   if (node === program && !stoppedOnFlag) return `no command matched: ${invocation}`
+  const flags = new Set<string>()
   for (const token of tokens.slice(index)) {
     // Strip a single wrapping bracket (`[--from`, `<base>]`) so an optional
     // flag written as `[--flag <arg>]` in a skill's usage line still gets
@@ -84,11 +96,26 @@ const resolve = (invocation: string): string => {
     const bare = token.replace(/^\[/, '').replace(/\]$/, '')
     if (!bare.startsWith('--')) continue
     const flag = bare.split('=')[0] ?? bare
+    flags.add(flag)
+    // `--no-x` is only valid when Commander was told that option is negatable;
+    // inferring it from the presence of `--x` would accept flags that do not exist.
     const known =
-      node.options.some((option) => option.long === flag) ||
-      flag === '--help' ||
-      node.options.some((option) => option.long === flag.replace(/^--no-/, '--'))
+      node.options.some((option) => option.long === flag) || flag === '--help'
     if (!known) return `unknown flag ${flag} for "${node.name()}": ${invocation}`
+  }
+  // Commander exits before the action body when a mandatory option is absent,
+  // so a skill omitting one fails at runtime rather than at lint time. Checked
+  // only for a fully-resolved leaf: a partially-walked path may be an
+  // illustrative fragment rather than a complete invocation.
+  const fullyResolved = node !== program && node.commands.length === 0
+  if (fullyResolved && !flags.has('--help')) {
+    const missing = node.options
+      .filter((option) => option.mandatory)
+      .map((option) => option.long)
+      .filter((long): long is string => long !== undefined && !flags.has(long))
+    if (missing.length > 0) {
+      return `missing required ${missing.join(', ')} for "${node.name()}": ${invocation}`
+    }
   }
   return 'ok'
 }

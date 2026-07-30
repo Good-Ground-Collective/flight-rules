@@ -25411,8 +25411,12 @@ var ConfigSchema = external_exports.object({
   jiraProject: external_exports.string().optional().describe("Jira project key holding epics and tickets"),
   jpdProject: external_exports.string().optional().describe("Jira Product Discovery project key holding initiatives"),
   confluenceSpaceKey: external_exports.string().optional().describe("Confluence space key holding technical design docs"),
-  inProgressStatus: external_exports.string().optional().describe("Tracker status meaning work has started; discovered and stored on first run"),
-  inReviewStatus: external_exports.string().optional().describe("Tracker status meaning a PR is open; discovered and stored on first run"),
+  inProgressStatus: external_exports.string().optional().describe(
+    "Tracker status meaning work has started; discovered and stored on first run"
+  ),
+  inReviewStatus: external_exports.string().optional().describe(
+    "Tracker status meaning a PR is open; discovered and stored on first run"
+  ),
   defaultLabels: external_exports.array(external_exports.string()).default([]),
   rfcStorage: external_exports.enum(["local", "global"]).default("local"),
   rfcStoragePath: external_exports.string().optional(),
@@ -29502,13 +29506,17 @@ var GitHubTaskTracker = class {
   }
   async transitionTicket(ticketId, status) {
     const issueNumber = parseInt(ticketId, 10);
-    const label = `status:${status.trim().toLowerCase().replace(/\s+/g, "-")}`;
+    const slug = `status:${status.trim().toLowerCase().replace(/\s+/g, "-")}`;
+    const existing = await this.statusLabelNames();
+    const label = existing.find((name) => name.toLowerCase() === slug) ?? slug;
     const { data: issue2 } = await this.octokit.rest.issues.get({
       owner: this.owner,
       repo: this.repo,
       issue_number: issueNumber
     });
-    const stale = issue2.labels.map((l) => this.labelName(l)).filter((name) => name.startsWith("status:") && name !== label);
+    const stale = issue2.labels.map((l) => this.labelName(l)).filter(
+      (name) => name.startsWith("status:") && name.toLowerCase() !== label.toLowerCase()
+    );
     for (const name of stale) {
       await this.octokit.rest.issues.removeLabel({ owner: this.owner, repo: this.repo, issue_number: issueNumber, name });
     }
@@ -29519,14 +29527,10 @@ var GitHubTaskTracker = class {
       labels: [label]
     });
   }
-  async listTransitions(_ticketId) {
-    void _ticketId;
-    const { data } = await this.octokit.rest.issues.listLabelsForRepo({
-      owner: this.owner,
-      repo: this.repo,
-      per_page: 100
-    });
-    return data.map((label) => this.labelName(label)).filter((name) => name.startsWith("status:")).map((name) => name.slice("status:".length).replace(/-/g, " "));
+  async listTransitions() {
+    return (await this.statusLabelNames()).map(
+      (name) => name.slice("status:".length).replace(/-/g, " ").toLowerCase()
+    );
   }
   async updateEpicMetadata(epicId, patch) {
     const issueNumber = parseInt(epicId, 10);
@@ -29683,6 +29687,18 @@ var GitHubTaskTracker = class {
       issue_number: issueNumber
     });
     return data.id;
+  }
+  /**
+   * Every `status:` label the repo defines, paginated so a repo with more than
+   * one page of labels cannot silently omit some. The vocabulary is repo-wide,
+   * which is why `listTransitions` ignores the ticket id it is handed.
+   */
+  async statusLabelNames() {
+    const labels = await this.octokit.paginate(
+      this.octokit.rest.issues.listLabelsForRepo,
+      { owner: this.owner, repo: this.repo, per_page: 100 }
+    );
+    return labels.map((label) => this.labelName(label)).filter((name) => name.startsWith("status:"));
   }
   labelName(label) {
     if (typeof label === "string") return label;
@@ -29933,7 +29949,6 @@ var LayeredBodyAdfConverter = class {
   startsBlock(line) {
     return fenceOpen.test(line) || headingLine.test(line) || taskLine.test(line) || bulletLine.test(line) || detailsOpen.test(line.trim());
   }
-  // eslint-disable-next-line preflight/no-paragraph-comments -- false positive on JSDoc attached to a method, see Good-Ground-Collective/preflight#21
   /**
    * Converts the `<details>` block spanning `lines[start..]` into an expand:
    * finds the matching `</details>` (nesting-aware), lifts the `<summary>`
@@ -30898,7 +30913,10 @@ var SemanticTypeSchema = external_exports.enum(semanticTypes);
 
 // src/git/git-executor/git-executor.ts
 var PushSpecSchema = external_exports.object({
-  branch: external_exports.string().min(1, "branch is required"),
+  // A detached HEAD makes `rev-parse --abbrev-ref` yield the literal "HEAD", which would push a ref rather than a branch.
+  branch: external_exports.string().min(1, "branch is required").refine((branch) => branch !== "HEAD", {
+    message: "cannot push from a detached HEAD \u2014 check out a branch first"
+  }),
   remote: external_exports.string().min(1).default("origin"),
   // Defaults true to match the CLI's `--no-set-upstream`, so a programmatic push tracks the branch too.
   setUpstream: external_exports.boolean().default(true)
@@ -31036,7 +31054,12 @@ function collect(value, previous) {
 }
 function createGitCommand(getExecutor) {
   const git = new Command("git");
-  git.command("commit").exitOverride().requiredOption("--type <type>", "conventional commit type").requiredOption("--scope <scope>", "conventional commit scope").requiredOption("--description <description>", "commit description").option("--file <file>", "file to stage (repeatable)", collect, []).option("--body <body>", "commit body").option("--footer <footer>", "commit footer (repeatable)", collect, []).option("--model <model>", "model identifier").action(async (opts) => {
+  git.command("commit").exitOverride().requiredOption("--type <type>", "conventional commit type").requiredOption("--scope <scope>", "conventional commit scope").requiredOption("--description <description>", "commit description").option(
+    "--file <file>",
+    "file to stage (repeatable); scopes the commit to exactly these paths. Omitting it commits the whole index",
+    collect,
+    []
+  ).option("--body <body>", "commit body").option("--footer <footer>", "commit footer (repeatable)", collect, []).option("--model <model>", "model identifier").action(async (opts) => {
     const builder = new DefaultCommitMessageBuilder({
       binPath: process.argv[1] ?? "",
       agentEnv: process.env["AI_AGENT"]
@@ -31071,11 +31094,13 @@ function createGitCommand(getExecutor) {
   });
   git.command("push").exitOverride().option("--remote <remote>", "remote to push to", "origin").option("--no-set-upstream", "do not set the upstream tracking ref").action(async (opts) => {
     const executor = getExecutor();
-    const branch = await executor.getCurrentBranch();
-    await executor.push({ branch, remote: opts.remote, setUpstream: opts.setUpstream });
-    process.stdout.write(
-      JSON.stringify({ branch, remote: opts.remote, setUpstream: opts.setUpstream }) + "\n"
-    );
+    const spec = {
+      branch: await executor.getCurrentBranch(),
+      remote: opts.remote,
+      setUpstream: opts.setUpstream
+    };
+    await executor.push(spec);
+    process.stdout.write(JSON.stringify(spec) + "\n");
   });
   return git;
 }

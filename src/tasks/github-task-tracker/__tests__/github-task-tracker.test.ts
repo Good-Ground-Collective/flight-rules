@@ -5,6 +5,9 @@ vi.mock('@octokit/rest', () => ({
   Octokit: vi.fn().mockImplementation(function () {
     return {
       request: vi.fn(),
+      // Defaults to no repo labels, which is the pre-existing behaviour: with
+      // nothing to reuse, transitionTicket falls back to the slug it derived.
+      paginate: vi.fn().mockResolvedValue([]),
       rest: {
         issues: {
           create: vi.fn(),
@@ -586,6 +589,38 @@ describe('GitHubTracker.ping', () => {
 describe('GitHubTracker.transitionTicket', () => {
   beforeEach(() => vi.clearAllMocks())
 
+  it('reuses a repo label that differs only in case, rather than creating a duplicate', async () => {
+    const tracker = makeTracker()
+    // @ts-expect-error — accessing private field for test setup
+    const octokit = tracker.octokit
+    vi.mocked(octokit.paginate).mockResolvedValue([{ name: 'status:Needs-QA' }] as never)
+    vi.mocked(octokit.rest.issues.get).mockResolvedValueOnce({
+      data: { number: 7, labels: [{ name: 'ticket' }] },
+    } as never)
+    vi.mocked(octokit.rest.issues.addLabels).mockResolvedValue({} as never)
+
+    await tracker.transitionTicket('7', 'needs qa')
+
+    expect(vi.mocked(octokit.rest.issues.addLabels)).toHaveBeenCalledWith(
+      expect.objectContaining({ labels: ['status:Needs-QA'] }),
+    )
+  })
+
+  it('does not treat the case-variant label it is about to apply as stale', async () => {
+    const tracker = makeTracker()
+    // @ts-expect-error — accessing private field for test setup
+    const octokit = tracker.octokit
+    vi.mocked(octokit.paginate).mockResolvedValue([{ name: 'status:Needs-QA' }] as never)
+    vi.mocked(octokit.rest.issues.get).mockResolvedValueOnce({
+      data: { number: 7, labels: [{ name: 'status:Needs-QA' }] },
+    } as never)
+    vi.mocked(octokit.rest.issues.addLabels).mockResolvedValue({} as never)
+
+    await tracker.transitionTicket('7', 'needs qa')
+
+    expect(vi.mocked(octokit.rest.issues.removeLabel)).not.toHaveBeenCalled()
+  })
+
   it('swaps any existing status label for the new status:<slug> label', async () => {
     const tracker = makeTracker()
     // @ts-expect-error — accessing private field for test setup
@@ -633,25 +668,41 @@ describe('GitHubTracker.transitionTicket', () => {
 describe('GitHubTracker.listTransitions', () => {
   beforeEach(() => vi.clearAllMocks())
 
+  const stubLabels = (tracker: GitHubTaskTracker, names: string[]): void => {
+    // @ts-expect-error — accessing private field for test setup
+    vi.mocked(tracker.octokit.paginate).mockResolvedValue(
+      names.map((name) => ({ name })) as never,
+    )
+  }
+
   it('returns repo status labels in human form', async () => {
     const tracker = makeTracker()
-    // @ts-expect-error — accessing private field for test setup
-    const issues = tracker.octokit.rest.issues
-    vi.mocked(issues.listLabelsForRepo).mockResolvedValue({
-      data: [{ name: 'status:in-progress' }, { name: 'bug' }, { name: 'status:in-review' }],
-    } as never)
+    stubLabels(tracker, ['status:in-progress', 'bug', 'status:in-review'])
 
-    await expect(tracker.listTransitions('7')).resolves.toEqual(['in progress', 'in review'])
+    await expect(tracker.listTransitions()).resolves.toEqual(['in progress', 'in review'])
   })
 
   it('returns an empty list when the repo defines no status labels', async () => {
     const tracker = makeTracker()
-    // @ts-expect-error — accessing private field for test setup
-    const issues = tracker.octokit.rest.issues
-    vi.mocked(issues.listLabelsForRepo).mockResolvedValue({
-      data: [{ name: 'bug' }],
-    } as never)
+    stubLabels(tracker, ['bug'])
 
-    await expect(tracker.listTransitions('7')).resolves.toEqual([])
+    await expect(tracker.listTransitions()).resolves.toEqual([])
+  })
+
+  it('lowercases so the value round-trips through transitionTicket unchanged', async () => {
+    const tracker = makeTracker()
+    stubLabels(tracker, ['status:Needs-QA'])
+
+    await expect(tracker.listTransitions()).resolves.toEqual(['needs qa'])
+  })
+
+  it('paginates rather than capping at one page', async () => {
+    const tracker = makeTracker()
+    const many = Array.from({ length: 150 }, (_, index) => `status:s${index}`)
+    stubLabels(tracker, many)
+
+    await expect(tracker.listTransitions()).resolves.toHaveLength(150)
+    // @ts-expect-error — accessing private field for the assertion
+    expect(tracker.octokit.paginate).toHaveBeenCalled()
   })
 })

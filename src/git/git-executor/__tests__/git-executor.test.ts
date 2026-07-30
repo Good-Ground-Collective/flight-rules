@@ -137,6 +137,13 @@ describe('NodeGitExecutor.push', () => {
     expect(exec).toHaveBeenCalledWith('git', ['push', '--set-upstream', 'upstream', 'feat/35-x'])
   })
 
+  it('rejects a detached HEAD without shelling out', async () => {
+    const exec = makeExec()
+    const executor = new NodeGitExecutor(exec)
+    await expect(executor.push({ branch: 'HEAD' })).rejects.toThrow(/detached HEAD/)
+    expect(exec).not.toHaveBeenCalled()
+  })
+
   it('rejects an empty branch without shelling out', async () => {
     const exec = makeExec()
     const executor = new NodeGitExecutor(exec)
