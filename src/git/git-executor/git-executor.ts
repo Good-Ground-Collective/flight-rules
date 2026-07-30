@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { z } from 'zod'
 import { SemanticTypeSchema, semanticTypes } from '../semantic-types.js';
 
 type ExecFileFn = (
@@ -13,11 +14,23 @@ export interface BranchSpec {
   description?: string
 }
 
+export const PushSpecSchema = z.object({
+  branch: z.string().min(1, 'branch is required'),
+  remote: z.string().min(1).default('origin'),
+  // Defaults true to match the CLI's `--no-set-upstream`, so a programmatic push tracks the branch too.
+  setUpstream: z.boolean().default(true),
+})
+
+export type PushSpec = z.input<typeof PushSpecSchema>
+
 export interface GitExecutor {
   stage(files: string[]): Promise<void>
-  commit(message: string): Promise<void>
+  // Restricted to `files` when given: anything else in the index is left behind.
+  commit(message: string, files?: readonly string[]): Promise<void>
   getCommitSha(): Promise<string>
   checkout(spec: BranchSpec, from?: string): Promise<string>
+  getCurrentBranch(): Promise<string>
+  push(spec: PushSpec): Promise<void>
 }
 
 export class NodeGitExecutor implements GitExecutor {
@@ -33,7 +46,12 @@ export class NodeGitExecutor implements GitExecutor {
     await this.execFile('git', ['add', '--', ...files])
   }
 
-  async commit(message: string): Promise<void> {
+  async commit(message: string, files?: readonly string[]): Promise<void> {
+    // `--only` excludes paths staged by anyone else; git rejects it without a pathspec, hence the fallback.
+    if (files !== undefined && files.length > 0) {
+      await this.execFile('git', ['commit', '--only', '-m', message, '--', ...files])
+      return
+    }
     await this.execFile('git', ['commit', '-m', message])
   }
 
@@ -59,5 +77,18 @@ export class NodeGitExecutor implements GitExecutor {
     if (from !== undefined) args.push(from)
     await this.execFile('git', args)
     return branch
+  }
+
+  async getCurrentBranch(): Promise<string> {
+    const { stdout } = await this.execFile('git', ['rev-parse', '--abbrev-ref', 'HEAD'])
+    return stdout.trim()
+  }
+
+  async push(spec: PushSpec): Promise<void> {
+    const parsed = PushSpecSchema.parse(spec)
+    const args = ['push']
+    if (parsed.setUpstream) args.push('--set-upstream')
+    args.push(parsed.remote, parsed.branch)
+    await this.execFile('git', args)
   }
 }

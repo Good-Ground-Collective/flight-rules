@@ -101,5 +101,14 @@ export function createTicketCommand(getTracker: () => TaskTracker): Command {
       process.stdout.write(JSON.stringify({ id, status: opts.to }) + '\n')
     })
 
+  ticket
+    .command('transitions')
+    .exitOverride()
+    .argument('<id>', 'ticket id')
+    .action(async (id: string) => {
+      const transitions = await getTracker().listTransitions(id)
+      process.stdout.write(JSON.stringify({ id, transitions }) + '\n')
+    })
+
   return ticket
 }

@@ -12,6 +12,8 @@ const makeMockExecutor = (): GitExecutor => ({
   commit: vi.fn().mockResolvedValue(undefined),
   getCommitSha: vi.fn().mockResolvedValue('abc123'),
   checkout: vi.fn().mockResolvedValue('feat/25-saw'),
+  getCurrentBranch: vi.fn().mockResolvedValue('feat/25-saw'),
+  push: vi.fn().mockResolvedValue(undefined),
 })
 
 const run = (executor: GitExecutor, args: string[]) =>
@@ -30,6 +32,7 @@ describe('git commit command', () => {
     await run(executor, ['commit', '--file', 'src/foo.ts', '--type', 'feat', '--scope', 'cli', '--description', 'add thing'])
     expect(vi.mocked(executor.stage)).toHaveBeenCalledWith(['src/foo.ts'])
     expect(vi.mocked(executor.commit)).toHaveBeenCalledOnce()
+    expect(vi.mocked(executor.commit)).toHaveBeenCalledWith(expect.any(String), ['src/foo.ts'])
     expect(output).toHaveBeenCalledWith(expect.stringContaining('"sha":"abc123"') as string)
     output.mockRestore()
   })
@@ -40,6 +43,20 @@ describe('git commit command', () => {
     vi.stubEnv('AI_AGENT', '')
     await run(executor, ['commit', '--file', 'src/foo.ts', '--file', 'src/bar.ts', '--type', 'feat', '--scope', 'cli', '--description', 'add thing'])
     expect(vi.mocked(executor.stage)).toHaveBeenCalledWith(['src/foo.ts', 'src/bar.ts'])
+    expect(vi.mocked(executor.commit)).toHaveBeenCalledWith(expect.any(String), [
+      'src/foo.ts',
+      'src/bar.ts',
+    ])
+    output.mockRestore()
+  })
+
+  it('passes the same paths to commit so only they land, even with no --file', async () => {
+    const executor = makeMockExecutor()
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    vi.stubEnv('AI_AGENT', '')
+    await run(executor, ['commit', '--type', 'feat', '--scope', 'cli', '--description', 'add thing'])
+    expect(vi.mocked(executor.stage)).toHaveBeenCalledWith([])
+    expect(vi.mocked(executor.commit)).toHaveBeenCalledWith(expect.any(String), [])
     output.mockRestore()
   })
 
@@ -99,5 +116,39 @@ describe('git checkout command', () => {
     await expect(run(executor, ['checkout', '--type', 'feat'])).rejects.toThrow(CommanderError)
     expect(vi.mocked(executor.checkout)).not.toHaveBeenCalled()
     errOutput.mockRestore()
+  })
+})
+
+describe('git push command', () => {
+  it('resolves the branch from HEAD and sets upstream by default', async () => {
+    const executor = makeMockExecutor()
+    const write = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(executor, ['push'])
+    expect(executor.getCurrentBranch).toHaveBeenCalled()
+    expect(executor.push).toHaveBeenCalledWith({
+      branch: 'feat/25-saw',
+      remote: 'origin',
+      setUpstream: true,
+    })
+    expect(write).toHaveBeenCalledWith(expect.stringContaining('"branch":"feat/25-saw"') as string)
+    write.mockRestore()
+  })
+
+  it('honours --remote and --no-set-upstream', async () => {
+    const executor = makeMockExecutor()
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(executor, ['push', '--remote', 'upstream', '--no-set-upstream'])
+    expect(executor.push).toHaveBeenCalledWith({
+      branch: 'feat/25-saw',
+      remote: 'upstream',
+      setUpstream: false,
+    })
+  })
+
+  it('has no force option', () => {
+    const push = createGitCommand(() => makeMockExecutor())
+      .commands.find((c) => c.name() === 'push')
+    expect(push).toBeDefined()
+    expect(push?.options.some((o) => o.long === '--force')).toBe(false)
   })
 })

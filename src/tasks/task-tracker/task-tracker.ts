@@ -115,6 +115,7 @@ export interface TaskTracker {
   blockTicket(ticketId: string, blockedById: string): Promise<void>
   unblockTicket(ticketId: string, blockedById: string): Promise<void>
   transitionTicket(ticketId: string, status: string): Promise<void>
+  listTransitions(ticketId: string): Promise<string[]>
   updateEpicMetadata(epicId: string, patch: Partial<EntityMetadata>): Promise<void>
   updateTicketMetadata(ticketId: string, patch: Partial<EntityMetadata>): Promise<void>
   updateTddMetadata(tddId: string, patch: Partial<EntityMetadata>): Promise<void>

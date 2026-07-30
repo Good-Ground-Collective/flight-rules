@@ -30,7 +30,7 @@ Read the coding charter: `${CLAUDE_PLUGIN_ROOT}/docs/coding-charter.md`. Charter
 
 ## When to stop and ask
 
-If a criterion is untestable as written — missing environment, ambiguous wording, contradicts another criterion — mark it `UNVERIFIABLE` and return a question for the user rather than guessing a verdict.
+If a criterion is untestable as written — missing environment, ambiguous wording, contradicts another criterion — mark it `UNVERIFIABLE` and put a question for the user in `openQuestions` rather than guessing a verdict.
 
 ## Output — return exactly this
 
@@ -44,7 +44,11 @@ criteria:
     evidence: <what you inspected or ran, and what it showed>
 charterConcerns:
   - <a charter violation you noticed, or omit the list when there are none>
+openQuestions:
+  - <a question for the user, or omit the list entirely when there are none>
 verified: <true only when every criterion is PASS>
 ```
+
+Every question you raise — in particular the one that accompanies an `UNVERIFIABLE` verdict — belongs in `openQuestions`. The skill looks for that key and nowhere else; a question left in prose is a question the user never sees.
 
 The execute-work skill parses `verified` and the FAIL items to drive the next iteration, so keep the keys exactly as shown and make `verified` true only when nothing is FAIL or UNVERIFIABLE.

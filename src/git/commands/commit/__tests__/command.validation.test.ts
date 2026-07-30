@@ -12,6 +12,8 @@ const makeMockExecutor = (): GitExecutor => ({
   commit: vi.fn().mockResolvedValue(undefined),
   getCommitSha: vi.fn().mockResolvedValue('abc123'),
   checkout: vi.fn().mockResolvedValue('feat/25-saw'),
+  getCurrentBranch: vi.fn().mockResolvedValue('feat/25-saw'),
+  push: vi.fn().mockResolvedValue(undefined),
 })
 
 const run = (executor: GitExecutor, args: string[]) =>
@@ -97,6 +99,7 @@ describe('git commit message assembly from the command layer (KAN-29)', () => {
     ])
     expect(vi.mocked(executor.commit)).toHaveBeenCalledWith(
       'feat(cli): add thing\n\nbecause reasons\n\nReviewed-By: alice\nCo-Authored-By: bob <bob@example.com>\nFlight-Rules-Version: 1.2.3\nModel-Used: claude-sonnet-5',
+      ['src/foo.ts'],
     )
     output.mockRestore()
   })
@@ -105,7 +108,7 @@ describe('git commit message assembly from the command layer (KAN-29)', () => {
     const executor = makeMockExecutor()
     const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
     await run(executor, ['commit', '--file', 'src/foo.ts', '--type', 'fix', '--scope', 'core', '--description', 'fix bug'])
-    expect(vi.mocked(executor.commit)).toHaveBeenCalledWith('fix(core): fix bug\n\nFlight-Rules-Version: 1.2.3')
+    expect(vi.mocked(executor.commit)).toHaveBeenCalledWith('fix(core): fix bug\n\nFlight-Rules-Version: 1.2.3', ['src/foo.ts'])
     output.mockRestore()
   })
 

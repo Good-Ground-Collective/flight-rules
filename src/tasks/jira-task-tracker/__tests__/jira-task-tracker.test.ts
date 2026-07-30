@@ -53,3 +53,26 @@ describe('JiraTaskTracker.getUsers', () => {
     })
   })
 })
+
+describe('JiraTaskTracker.listTransitions', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('returns the target status names reachable from the current status', async () => {
+    request.mockResolvedValueOnce({
+      transitions: [
+        { id: '11', to: { name: 'In Progress' } },
+        { id: '21', to: { name: 'Done' } },
+      ],
+    })
+    await expect(makeTracker().listTransitions('PROJ-35')).resolves.toEqual([
+      'In Progress',
+      'Done',
+    ])
+    expect(request).toHaveBeenCalledWith('GET', '/issue/PROJ-35/transitions')
+  })
+
+  it('returns an empty list when no transitions are reachable', async () => {
+    request.mockResolvedValueOnce({ transitions: [] })
+    await expect(makeTracker().listTransitions('PROJ-35')).resolves.toEqual([])
+  })
+})

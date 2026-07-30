@@ -175,13 +175,7 @@ export class JiraTaskTracker implements TaskTracker {
   }
 
   async transitionTicket(ticketId: string, status: string): Promise<void> {
-    // Transitions are workflow- and current-status-specific, so this must be
-    // resolved per call (not cached like the instance-wide link types): only
-    // transitions reachable from the issue's current status are returned.
-    const response = await this.client.request<JiraTransitionsResponse>(
-      'GET',
-      `/issue/${ticketId}/transitions`,
-    )
+    const response = await this.fetchTransitions(ticketId)
     const match = response.transitions.find((transition) => transition.to.name.toLowerCase() === status.toLowerCase())
     if (match === undefined) {
       const available = response.transitions.map((transition) => transition.to.name).join(', ')
@@ -190,6 +184,11 @@ export class JiraTaskTracker implements TaskTracker {
       )
     }
     await this.client.request('POST', `/issue/${ticketId}/transitions`, { transition: { id: match.id } })
+  }
+
+  async listTransitions(ticketId: string): Promise<string[]> {
+    const response = await this.fetchTransitions(ticketId)
+    return response.transitions.map((transition) => transition.to.name)
   }
 
   async updateEpicMetadata(epicId: string, patch: Partial<EntityMetadata>): Promise<void> {
@@ -416,6 +415,11 @@ export class JiraTaskTracker implements TaskTracker {
       fields: 'issuelinks',
     })
     return issue.fields.issuelinks ?? []
+  }
+
+  private async fetchTransitions(ticketId: string): Promise<JiraTransitionsResponse> {
+    // Resolved per call, not cached: only transitions reachable from the issue's current status are returned.
+    return this.client.request<JiraTransitionsResponse>('GET', `/issue/${ticketId}/transitions`)
   }
 
   private async resolveBlocksLinkType(): Promise<string> {

@@ -21,10 +21,32 @@ describe('NodeGitExecutor.stage', () => {
 })
 
 describe('NodeGitExecutor.commit', () => {
-  it('calls git commit -m with the message', async () => {
+  it('restricts the commit to the named paths with --only', async () => {
+    const exec = makeExec()
+    const executor = new NodeGitExecutor(exec)
+    await executor.commit('feat(scope): description', ['src/foo.ts', 'src/bar.ts'])
+    expect(exec).toHaveBeenCalledWith('git', [
+      'commit',
+      '--only',
+      '-m',
+      'feat(scope): description',
+      '--',
+      'src/foo.ts',
+      'src/bar.ts',
+    ])
+  })
+
+  it('commits the whole index when no paths are given', async () => {
     const exec = makeExec()
     const executor = new NodeGitExecutor(exec)
     await executor.commit('feat(scope): description')
+    expect(exec).toHaveBeenCalledWith('git', ['commit', '-m', 'feat(scope): description'])
+  })
+
+  it('commits the whole index rather than passing --only with an empty pathspec', async () => {
+    const exec = makeExec()
+    const executor = new NodeGitExecutor(exec)
+    await executor.commit('feat(scope): description', [])
     expect(exec).toHaveBeenCalledWith('git', ['commit', '-m', 'feat(scope): description'])
   })
 })
@@ -74,6 +96,51 @@ describe('NodeGitExecutor.checkout', () => {
     const exec = makeExec()
     const executor = new NodeGitExecutor(exec)
     await expect(executor.checkout({ type: 'feat', scope: '   ' })).rejects.toThrow(/scope/)
+    expect(exec).not.toHaveBeenCalled()
+  })
+})
+
+describe('NodeGitExecutor.getCurrentBranch', () => {
+  it('returns the trimmed abbreviated ref', async () => {
+    const exec = makeExec('feat/35-execute-work\n')
+    const executor = new NodeGitExecutor(exec)
+    const branch = await executor.getCurrentBranch()
+    expect(branch).toBe('feat/35-execute-work')
+    expect(exec).toHaveBeenCalledWith('git', ['rev-parse', '--abbrev-ref', 'HEAD'])
+  })
+})
+
+describe('NodeGitExecutor.push', () => {
+  it('pushes to origin and sets upstream by default, matching the CLI', async () => {
+    const exec = makeExec()
+    const executor = new NodeGitExecutor(exec)
+    await executor.push({ branch: 'feat/35-execute-work' })
+    expect(exec).toHaveBeenCalledWith('git', [
+      'push',
+      '--set-upstream',
+      'origin',
+      'feat/35-execute-work',
+    ])
+  })
+
+  it('omits --set-upstream when explicitly disabled', async () => {
+    const exec = makeExec()
+    const executor = new NodeGitExecutor(exec)
+    await executor.push({ branch: 'feat/35-x', setUpstream: false })
+    expect(exec).toHaveBeenCalledWith('git', ['push', 'origin', 'feat/35-x'])
+  })
+
+  it('honours an explicit remote', async () => {
+    const exec = makeExec()
+    const executor = new NodeGitExecutor(exec)
+    await executor.push({ branch: 'feat/35-x', remote: 'upstream' })
+    expect(exec).toHaveBeenCalledWith('git', ['push', '--set-upstream', 'upstream', 'feat/35-x'])
+  })
+
+  it('rejects an empty branch without shelling out', async () => {
+    const exec = makeExec()
+    const executor = new NodeGitExecutor(exec)
+    await expect(executor.push({ branch: '' })).rejects.toThrow()
     expect(exec).not.toHaveBeenCalled()
   })
 })

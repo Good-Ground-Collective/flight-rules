@@ -147,3 +147,33 @@ describe("getRfcDir", () => {
     );
   });
 });
+
+describe("readConfig status names", () => {
+  it("parses optional status names when present", () => {
+    const filePath = setupFixture(`---
+tracker: jira
+jiraHost: acme.atlassian.net
+jiraEmail: e@acme.com
+jiraProject: KAN
+inProgressStatus: In Progress
+inReviewStatus: Ready for Review
+---
+`);
+    const config = readConfig(filePath);
+    expect(config.inProgressStatus).toBe("In Progress");
+    expect(config.inReviewStatus).toBe("Ready for Review");
+  });
+
+  it("leaves them undefined when absent, with no default applied", () => {
+    const filePath = setupFixture(`---
+tracker: jira
+jiraHost: acme.atlassian.net
+jiraEmail: e@acme.com
+jiraProject: KAN
+---
+`);
+    const config: Config = readConfig(filePath);
+    expect(config.inProgressStatus).toBeUndefined();
+    expect(config.inReviewStatus).toBeUndefined();
+  });
+});

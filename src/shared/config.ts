@@ -44,6 +44,14 @@ const ConfigSchema = z
       .string()
       .optional()
       .describe("Confluence space key holding technical design docs"),
+    inProgressStatus: z
+      .string()
+      .optional()
+      .describe("Tracker status meaning work has started; discovered and stored on first run"),
+    inReviewStatus: z
+      .string()
+      .optional()
+      .describe("Tracker status meaning a PR is open; discovered and stored on first run"),
     defaultLabels: z.array(z.string()).default([]),
     rfcStorage: z.enum(["local", "global"]).default("local"),
     rfcStoragePath: z.string().optional(),
