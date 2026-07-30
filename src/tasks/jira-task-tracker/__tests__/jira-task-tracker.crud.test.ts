@@ -127,6 +127,27 @@ describe('JiraTaskTracker.createTicket', () => {
     expect(body.fields['assignee']).toEqual({ accountId: 'acct-1' })
     expect(body.fields['labels']).toEqual(['backend'])
   })
+
+  it('omits parent entirely when no epicId is given', async () => {
+    request.mockImplementation((method: string, path: string) => {
+      if (path.startsWith('/issue/createmeta')) return Promise.resolve(createMeta)
+      if (method === 'GET' && path === '/issueLinkType') return Promise.resolve(blocksLinkTypes)
+      if (method === 'POST' && path === '/issue') return Promise.resolve({ id: 'id-PROJ-3', key: 'PROJ-3' })
+      if (method === 'GET' && path === '/issue/PROJ-3')
+        return Promise.resolve(issue('PROJ-3', { summary: 'Standalone' }))
+      throw new Error(`unexpected ${method} ${path}`)
+    })
+
+    const ticket = await makeTracker().createTicket({ title: 'Standalone', body: 'do the thing', labels: [] })
+
+    expect(ticket.id).toBe('PROJ-3')
+    expect(ticket.size).toBe('ticket')
+
+    const body = postCallBody()
+    expect(body.fields['issuetype']).toEqual({ name: 'Story' })
+    // Jira rejects `parent: {}`, so the key has to be absent rather than undefined.
+    expect(body.fields).not.toHaveProperty('parent')
+  })
 })
 
 describe('JiraTaskTracker markdown ⇄ ADF descriptions', () => {
