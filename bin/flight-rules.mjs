@@ -31222,7 +31222,7 @@ function createPrCommand(getHost) {
 }
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.25.0";
+var appVersion = false ? "0.0.0-dev" : "1.25.1";
 
 // src/cli/cli.ts
 function buildTracker(overrideTracker) {
