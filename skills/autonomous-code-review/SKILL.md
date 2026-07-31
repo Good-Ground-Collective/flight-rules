@@ -1,6 +1,6 @@
 ---
 name: autonomous-code-review
-description: "Unattended, maximally strict review of a factory-authored PR. Enumerates every objective coding-charter violation as an inline comment — deferring to the repo's linter for the mandates it provably enforces and reading the diff for the rest — raises judgment-call mandates once each, and submits a COMMENT review ending in an ESCALATE-or-CLEAR verdict on whether guided-code-review still needs a human. Use after execute-work opens a PR, or standalone against any PR the factory wrote."
+description: "Unattended, maximally strict review of a factory-authored PR. Enumerates every objective coding-charter violation as an inline comment — deferring to the repo's linter for the mandates it provably enforces and reading the diff for the rest — raises judgment-call mandates once each, and reviews holistically for security, correctness, design and test quality. Submits a COMMENT review ending in an ESCALATE-or-CLEAR verdict on whether guided-code-review still needs a human. Use after execute-work opens a PR, or standalone against any PR the factory wrote."
 ---
 
 # Autonomous Code Review
@@ -228,12 +228,40 @@ grouping this with newlines" learns to scroll past the whole review.
 
 ### 4. Holistic pass
 
-Charter compliance is not code quality. Read the diff for security holes, logic
-errors, incorrect edge-case handling, race conditions, unhandled failure modes,
-and tests that assert nothing. **Code that is perfectly charter-compliant can
-still be broken**, and these findings are the ones that drive escalation.
+**Charter compliance is not code quality.** Code that satisfies all thirteen
+mandates can still be insecure, wrong, or badly shaped, and this is where the
+findings that actually matter come from. Never let the exhaustive Tier A pass
+become the review — a diff can be spotless against every mandate and still be
+the wrong change.
 
-Every holistic finding is inline, at its line, regardless of severity.
+Three lenses, all of them required:
+
+**Correctness and security.** Logic errors, incorrect or missing edge-case
+handling, off-by-ones, race conditions and ordering assumptions, unhandled
+failure modes, swallowed errors, injection and traversal, authz checks that
+don't gate what they claim to, secrets or tokens reaching logs, unvalidated
+input crossing a trust boundary.
+
+**Design and structure.** The wrong abstraction, or a missing one. Logic
+duplicated across the diff that wants extracting. A module or class doing two
+unrelated jobs. A leaky boundary — a layer reaching past an interface into
+something it shouldn't know about. A data structure fighting its access pattern.
+Coupling that makes the change expensive to undo. A public surface wider than
+its callers need.
+
+**Testing.** Tests that assert nothing, assert on mocks rather than behaviour,
+or pin the implementation so tightly that any refactor reds them. A new failure
+mode with no test covering it.
+
+**A design finding must name a concrete consequence** — what breaks, what gets
+harder, what will need rewriting later. "I would have structured this
+differently" is a preference, not a finding, and shipping preferences as
+findings is how this skill's escalation signal stops meaning anything.
+
+Every holistic finding is inline at its line, regardless of severity. A concern
+that genuinely spans the diff and won't anchor to one place goes in the body
+instead — but reach for that only when it's true, since a finding in the body is
+one the remediation agent has to go looking for.
 
 ### 5. Decide the verdict
 
@@ -292,7 +320,7 @@ escalationReasons:
   - <one line per trigger from step 5, omit the list when CLEAR>
 tierA: <count of inline charter comments posted>
 tierB: <count of judgment observations in this body>
-holistic: <count of security/correctness/logic findings>
+holistic: <count of correctness/security, design/structure and testing findings>
 lint: ran | absent | failed
 charterCoverage:
   enforced: [<mandate ids a linter checked, e.g. M-1, M-2>]
@@ -392,6 +420,10 @@ State the fix, don't gesture at it. "Violates M-11" is not a remediation brief;
 
 - Every objective charter violation in the diff has an inline comment, and each
   one names its fix concretely enough to act on without the diff in hand.
+- All three holistic lenses actually ran. A review that is only charter findings
+  is a review that stopped at the easy half — the Tier A pass is exhaustive
+  precisely so there is attention left for security, design and tests.
+- Every design finding names a concrete consequence rather than a preference.
 - No Tier B mandate appears more than once, and none appears inline.
 - All seven Tier A mandates appear in `charterCoverage`, split honestly across
   `enforced`, `reviewed` and `waived`, and the body names the last two in prose.
