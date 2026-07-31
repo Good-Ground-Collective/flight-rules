@@ -12,12 +12,17 @@ comments — but **the human always casts the final verdict.** The skill never
 approves or requests changes on its own. It ends by creating a review in a
 **pending** state that the human tweaks and submits on GitHub.
 
-An autonomous, auto-approving variant is separate future work. This skill is the
-*guided* one: a human is making the call.
+`autonomous-code-review` is the unattended counterpart, and the two are not
+interchangeable. It runs first, against factory-authored code, and enumerates
+every objective charter violation exhaustively. This skill runs second, for a
+human, and deliberately *suppresses* nits so real findings get top billing — see
+the weighting rules in Step 1. A PR that arrives here still carrying charter
+noise is a PR the autonomous pass never saw.
 
 All GitHub interaction goes through the `gh` CLI. The exact commands live in
-`references/github-review-api.md` — read that file when you reach a step that
-touches GitHub.
+`${CLAUDE_PLUGIN_ROOT}/docs/github-review-api.md` — read that file when you
+reach a step that touches GitHub. Sections 1–5 are the ones this skill uses;
+§6 belongs to the autonomous skill.
 
 ---
 
