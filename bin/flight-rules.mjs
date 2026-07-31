@@ -31223,7 +31223,7 @@ function createPrCommand(getHost) {
 }
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.27.0";
+var appVersion = false ? "0.0.0-dev" : "1.28.0";
 
 // src/cli/cli.ts
 function buildTracker(overrideTracker) {
