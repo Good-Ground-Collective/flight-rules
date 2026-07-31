@@ -1,8 +1,16 @@
 # GitHub Review API — `gh` Recipes
 
-The exact commands the guided-code-review skill uses to talk to GitHub. Read
-this file only when you reach a step that needs GitHub. Everything here runs
-through the `gh` CLI, which is already authenticated in the user's environment.
+The exact commands the code-review skills use to talk to GitHub. Read this file
+only when you reach a step that needs GitHub. Everything here runs through the
+`gh` CLI, which is already authenticated in the user's environment.
+
+Two skills share this reference and they post **different kinds of review**:
+
+- `guided-code-review` creates a **PENDING** review (§4) that a human submits.
+- `autonomous-code-review` submits a **COMMENT** review (§6) with no human in
+  the loop.
+
+Sections 1–3 and 5 are common to both.
 
 `gh api` automatically substitutes `{owner}` and `{repo}` for the current
 repository, so the literal string `repos/{owner}/{repo}/...` works as-is when
@@ -47,6 +55,7 @@ gh pr diff [PR] | grep -cE '^[+-]'
 ```
 
 If the count exceeds **10000**, stop and ask the author to split the PR.
+`autonomous-code-review` handles this case differently — see §6.
 
 ## 4. Create the PENDING review
 
@@ -102,8 +111,35 @@ the finding. Remove that comment from the `comments` array, append its text to
 the `body` with an explicit `path:line` reference, and re-post. Report to the
 user which findings were relocated to the summary and why.
 
-## Caveat: reviewing your own PR
+**Anchor before you post.** A single bad anchor rejects the whole payload, and a
+review with thirty comments is thirty chances to lose the post. Check every
+`path:line` against the `@@` hunk headers before the first attempt; retrying is
+the fallback, not the plan.
 
-GitHub forbids **approving** your own PR, but a PENDING review carrying only
-comments on your own PR is allowed. Since this skill never submits an approve
-event, self-review during testing works. The human still submits the verdict.
+## 6. Submit a COMMENT review
+
+Identical payload to §4 with one added field:
+
+```json
+{
+  "event": "COMMENT",
+  "body": "<the review body>",
+  "comments": [ … ]
+}
+```
+
+`"event": "COMMENT"` submits the review immediately rather than leaving it
+pending. It records comments without casting a verdict, and every rule in §4
+about `path`, `line`, `side`, and hunk membership applies unchanged.
+
+**`COMMENT` is the only event available on your own PR.** GitHub rejects both
+`APPROVE` and `REQUEST_CHANGES` when the reviewer authored the PR, and the
+factory pipeline reviews PRs it opened itself. Never send either — a verdict
+belongs in the review body as a recommendation, not in the `event` field.
+
+### Too big to review
+
+Where §3 tells an interactive skill to stop and ask, an autonomous run has
+nobody to ask. Post a summary-only COMMENT review (empty `comments` array)
+stating that the diff exceeded the guard and was not reviewed, carrying an
+`ESCALATE` verdict. A silent skip reads as a clean review.

@@ -9,7 +9,7 @@ This is the skill that builds the thing. You are handed a **ticket id**; you han
 
 **The hard rule: this skill never merges, and never lets an unverified change reach a PR.** Those are one rule, not two. The verifier is the gate, and a human is the merge button. If you catch yourself opening a PR on the strength of the implementer's own say-so, stop — you have removed the only independent check in the pipeline.
 
-**Terminal state:** the PR is open, the ticket sits in the tracker's in-review status, and the user is holding a run summary they can grade.
+**Terminal state:** the PR is open and carries an autonomous charter review, the ticket sits in the tracker's in-review status, and the user is holding a run summary they can grade.
 
 ## Preconditions
 
@@ -281,14 +281,31 @@ flight-rules ticket status <id> --to "<inReviewStatus>"
 
 Then **stop.** Do not merge. Do not approve your own PR.
 
-### 8. Report
+### 8. Review the PR
+
+Invoke the **`autonomous-code-review`** skill against the PR you just opened. It is unattended and it never edits code — it posts a `COMMENT` review enumerating every objective charter violation on the diff, and ends in a machine-readable `verdict` of `ESCALATE` or `CLEAR`.
+
+Hand it three things:
+
+- **The PR number or URL** from `pr create`.
+- **The verifier's `charterConcerns`**, verbatim. This is the step where they stop being a line in a run summary and start being review comments on the diff. The reviewer confirms each one against the PR before raising it, so passing a concern is not asserting it.
+- **Any `UNVERIFIABLE` criteria or `openQuestions`** still outstanding. They force `ESCALATE` on their own.
+
+Run this **after** the in-review transition, not before. The review is commentary on a PR that already exists and is already on the board; sequencing it earlier only widens the window where the ticket's status lies about reality.
+
+**The verdict does not gate anything here.** `ESCALATE` doesn't reopen the loop and `CLEAR` doesn't approve anything — this skill's terminal state is unchanged either way. The verdict is a routing hint for whoever picks the PR up, and you pass it through to the report.
+
+If the review fails to post, report that and carry on to step 9. A failed review is a missing signal, not a failed run: the PR is open, verified, and on the board, and re-running the review costs nothing. Do not retry the loop, and do not roll back the ticket status.
+
+### 9. Report
 
 Give the user, in this order:
 
 - **Iterations used** — 1, 2, or 3. Say it plainly; it is the honest signal of how hard this was.
 - **Per-criterion verdicts** — every criterion with its verdict and the verifier's evidence, including any `UNVERIFIABLE`.
 - **The PR URL**, and the branch name.
-- **Every `charterConcerns` entry** the verifier raised, verbatim. These didn't block the PR — they are for the human reviewer, so don't quietly drop them.
+- **The review verdict** — `ESCALATE` or `CLEAR`, its reasons, and the finding counts. Say plainly whether a human still needs to run `guided-code-review`.
+- **Every `charterConcerns` entry** the verifier raised, verbatim. These didn't block the PR — so don't quietly drop them, even where the review picked them up.
 - **Any `openQuestions`** from either agent, still unanswered.
 
 ## Guardrails
@@ -297,6 +314,7 @@ Give the user, in this order:
 - **The implementer escalates to opus only on iteration 3, and the verifier never escalates.** Iterations 1 and 2 run the frontmatter default. A ticket that "looks hard" is not a reason to escalate early — two recorded FAILs is the only one.
 - **Never merge.** This skill opens a PR and stops. Merging is a human decision.
 - **Never let an unverified change reach a PR.** `verified: true` is the only key that unlocks step 7.
+- **The autonomous review's verdict gates nothing.** `ESCALATE` does not reopen the implement/verify loop, `CLEAR` does not approve anything, and neither changes where this skill stops. Acting on a review finding here would put an unverified edit on the branch after the verifier signed off.
 - **Never tick acceptance-criteria checkboxes.** The `items[].done` flags are read-only to this skill; the verifier's itemized verdict is the record of what passed. A ticked box in a tracker is a claim nobody checked.
 - **All git and tracker mutations go through `flight-rules`.** Never hand-rolled `git commit`/`checkout`/`push`, never Claude Code auto-generated commits, never native tracker APIs (`gh issue edit`, the Jira REST API) for state changes. Read-only inspection with plain `git` or `gh` is fine.
 - **`openQuestions` and `UNVERIFIABLE` always reach the user, unanswered.** The agents ask when they are genuinely unsure. Answering on their behalf converts a flagged unknown into a silent guess — which is the exact failure the loop exists to prevent.
@@ -313,6 +331,7 @@ Give the user, in this order:
 - **Third consecutive FAIL** → stop. Present the itemized evidence from the final verification, state that three iterations were used, and **leave the branch intact** with the work in place so a human can pick it up. Do not commit, do not push, do not open a PR, and do not move the ticket to in-review. Leave it in the in-progress status — that is now true.
 - **`git push` rejected** → stop and report. There is no force flag, and inventing one with raw git is not the fix.
 - **`pr create` fails on `repo`** — either `repo (owner/repo) is required in config to create pull requests` or `Invalid repo format …`. This is a config error, not a work error, and by the time you see it **the commit has landed and the branch is pushed**. So: fix `repo` in `.claude/flight-rules.local.md` (confirm the value with the user first) and re-run **only** the `pr create` command, then carry on to the in-review transition. Do **not** redo the implement/verify loop, do not re-commit, and do **not** fall back to raw `gh pr create` — that bypasses the PR template, so the body would lose the summary, the ticket link and the verifier's test notes, which is the whole point of routing through the CLI. If the user can't supply a valid `owner/repo`, stop and report the branch name and commit sha so the PR can be opened by hand.
+- **`autonomous-code-review` fails to post** → report it in step 9 and finish the run. By this point the PR is open, the work is verified and the ticket has moved, so the review is the only thing missing and it can be re-run against the PR at any time. Do not retry the implement/verify loop, do not roll the ticket status back, and do not withhold the run summary.
 
 ## What Good Looks Like
 
@@ -326,4 +345,5 @@ A reviewer can grade a run against this list:
 - No acceptance criterion shipped without a PASS verdict backed by evidence, and no acceptance-criteria checkbox was ticked.
 - The run summary states the iteration count, and every `charterConcerns` and `openQuestions` entry reached the user.
 - Iterations 1 and 2 ran the implementer at its default tier; opus appears only if a third iteration was reached, and never on the verifier.
+- The PR carries a submitted `COMMENT` review from `autonomous-code-review`, posted after the in-review transition, and the run summary states its verdict.
 - The PR is open and unmerged, waiting on a human.
