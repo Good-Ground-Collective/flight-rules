@@ -1,6 +1,6 @@
 ---
 name: autonomous-code-review
-description: "Unattended, maximally strict review of a factory-authored PR. Runs the repo's linter as ground truth, enumerates every objective coding-charter violation as an inline comment, raises judgment-call mandates once each, and submits a COMMENT review ending in an ESCALATE-or-CLEAR verdict on whether guided-code-review still needs a human. Use after execute-work opens a PR, or standalone against any PR the factory wrote."
+description: "Unattended, maximally strict review of a factory-authored PR. Enumerates every objective coding-charter violation as an inline comment — deferring to the repo's linter for the mandates it provably enforces and reading the diff for the rest — raises judgment-call mandates once each, and submits a COMMENT review ending in an ESCALATE-or-CLEAR verdict on whether guided-code-review still needs a human. Use after execute-work opens a PR, or standalone against any PR the factory wrote."
 ---
 
 # Autonomous Code Review
@@ -91,21 +91,55 @@ Then the guards:
   you — and say so in the body. Never re-flag findings owned by the branch
   underneath; the remediation agent would fix them on the wrong branch.
 
-### 2. Run the linter — it is ground truth
+### 2. Establish charter coverage, then lint
 
-**Do not hand-check by reading what the repo's linter already decides
-mechanically.** An agent grepping a diff is a worse linter than the linter, and
-it is nondeterministic in a gate that is supposed to be strict.
+**You are responsible for every Tier A mandate on every changed file. Always.**
+The linter is an optimization, never a precondition: where a mandate is provably
+enforced you may take the linter's output instead of re-deriving it by reading,
+because an agent grepping a diff is a worse and less deterministic linter than
+the linter. Where it isn't enforced, the mandate is yours. Nothing about a
+repo's tooling narrows what this skill checks — it only changes *how* each
+mandate gets checked.
 
-**Discover** the lint command rather than assuming one. In order:
+**Never infer coverage from the presence of a linter.** "The repo has eslint" and
+"the repo checks the charter" are different claims. A repo can lint hard against
+a config that has never heard of `preflight`, and if you run it, transcribe some
+style warnings and move on, every Tier A mandate has silently gone unchecked
+behind a green-looking review. That failure is worse than no linter at all,
+because it looks like coverage. Measure coverage; do not assume it.
 
-1. A `lint` script in `package.json`.
-2. The lint invocation in CI — `.github/workflows/*.yml` frequently carries the
-   real command when no npm script does (`npx eslint src/`, for instance).
-3. A bare `npx eslint` when an `eslint.config.*` is present at the root.
+**Establish coverage per mandate, before linting.** `eslint --print-config`
+resolves the full config for one file, including which rules are on and at what
+severity:
 
-**Run it scoped to the files this PR changed**, in JSON so you can anchor the
-results:
+```bash
+npx eslint --print-config <a changed file>
+```
+
+Run it once per distinct path pattern in the diff — typically one source file
+and one test file, since overrides usually split on exactly that line. Then read
+the `rules` map. Each Tier A mandate lands in one of **three** states for that
+path, and the difference between the last two is the whole point of this step:
+
+| In the resolved `rules` map | State | What you do |
+|---|---|---|
+| `preflight/<rule>` at `1`/`2` (`"warn"`/`"error"`) | **enforced** | Run the linter; transcribe its findings into comments. |
+| `preflight/<rule>` at `0`/`"off"` | **waived** | Nothing. The repo turned it off deliberately. |
+| No `preflight/<rule>` key at all | **reviewed** | Read the diff for it yourself, as you do for Tier B. |
+
+**Waived and reviewed print almost identically and mean opposite things.** A
+rule set to `0` only exists in the map because the config loaded `preflight` and
+then switched it off — that is a decision the repo made with more context than
+you have. A rule that is simply *missing* means `preflight` was never installed;
+nobody decided anything, and the mandate is yours.
+
+Get this backwards in either direction and the review is wrong: treat waived as
+reviewed and you overrule a documented decision on every file it touches; treat
+reviewed as waived and you skip the mandate entirely while reporting a clean
+pass.
+
+**Then run the linter, scoped to the files this PR changed**, in JSON so you can
+anchor the results:
 
 ```bash
 npx eslint --format json <changed source files>
@@ -116,19 +150,22 @@ not cause; commenting on those is both wrong and unanchorable, since GitHub
 rejects a comment on a line outside the diff.
 
 Each message gives you `filePath`, `line`, `ruleId` and `message` — everything
-an inline comment needs.
+an inline comment needs. Discover the invocation rather than assuming one: a
+`lint` script in `package.json`, else the lint step in `.github/workflows/*.yml`
+(which often carries the real command when no npm script does), else bare
+`npx eslint` when an `eslint.config.*` resolves.
 
-**Respect the repo's lint configuration.** A rule switched off in an override is
-a decision the repo already made, not a gap for you to cover. `flight-rules`
-itself disables four `preflight` rules for `**/*.test.ts` with a comment
-explaining why test files legitimately need the banned idioms. Re-raising those
-as charter findings means overruling a documented decision from a position of
-less context. If you believe an override is wrong, that is one Tier B
-observation about the config — not a comment on every file it touches.
+**On waived mandates.** `flight-rules` itself waives four rules for
+`**/*.test.ts`, with a comment explaining why test files legitimately need the
+idioms the charter bans in source. Re-raising those would be overruling a
+documented decision from a position of less context. If you believe a waiver is
+wrong, that is *one* Tier B observation about the config — never a comment on
+every file it covers.
 
-**If no linter exists, or the run fails,** say so plainly in the review body and
-check the mechanical mandates yourself. Never let a missing linter turn into a
-silently narrower review.
+**Non-JavaScript repos, no eslint at all, or a lint run that fails** all land in
+the same place: nothing is enforced, nothing is waived, and all seven Tier A
+mandates are `reviewed`. You check every one of them by reading and the body
+says so. A missing linter must never quietly become a narrower review.
 
 ### 3. Charter pass, in two tiers
 
@@ -139,19 +176,28 @@ on its bad findings — it costs you the good ones.
 
 **Tier A — objective. Zero tolerance, one inline comment per instance.**
 
-| Mandate | Linted by `preflight` as |
+Each row names the `preflight` rule that *can* enforce it. Whether it actually
+does is what step 2 measured, per file — never what this table asserts.
+
+| Mandate | Enforceable by `preflight` as |
 |---|---|
 | M-1 no planning-system identifiers | `no-planning-identifiers` |
 | M-2 structural: no paragraph block comments | `no-paragraph-comments` |
 | M-3 interface → class → optional singleton | `service-shape`, `no-loose-functions` |
 | M-5 single Zod-validated props object | `constructor-single-props` |
-| M-7 camelCase TS object keys | *(not linted — yours)* |
+| M-7 camelCase TS object keys | *(no rule exists — always yours)* |
 | M-10 flat if-else over nested switch+if | `no-switch-with-nested-if` |
 | M-11 typed errors thrown at the call site | `no-throw-helpers`, `error-class-sets-name` |
 
-Where the repo lints with `preflight`, step 2 has already found these and you
-are transcribing its output into review comments with remediation detail
-attached. Where it doesn't, they are yours to find by reading.
+**Every row is accounted for on every PR**, in one of the three states step 2
+resolved. `enforced` → transcribe the linter's findings, adding the remediation
+detail it can't produce. `reviewed` → read the diff for it yourself. `waived` →
+skip it, because the repo said so. The first two produce the same output: an
+inline comment per instance.
+
+M-7 has no `preflight` rule at all, so it can never be `enforced` and is read by
+hand on every PR — a standing reminder that "linted" was never the boundary of
+Tier A.
 
 **This is the exact inversion of `guided-code-review`'s weighting rules.** There,
 M-1 leaks are ignored unless there is exactly one. Here, every instance gets a
@@ -203,7 +249,13 @@ sufficient:
   migrations, or deletion paths.
 - Any upstream `UNVERIFIABLE` criterion or unanswered `openQuestions`.
 - `src/` changed with no accompanying test changes.
-- The too-big guard fired, or the linter was absent or failed.
+- The too-big guard fired.
+
+Note that **`reviewed` Tier A mandates do not escalate by themselves.** You
+checked them by reading — a weaker check than a linter, but a real one — and
+escalating on that alone would mean this skill never returns `CLEAR` outside
+repos that already run `preflight`. Report the coverage and let the findings
+decide.
 
 **`CLEAR` — low enough risk to approve on green CI.** Every one of these must
 hold:
@@ -224,8 +276,12 @@ merged defect.
 The review **body** carries, in this order:
 
 1. **What the PR does** — a short plain-language summary.
-2. **How it was reviewed** — the lint command you ran (or why none ran), and any
-   scoping from the stacked-PR or too-big guards.
+2. **How it was reviewed** — the lint command you ran (or why none ran), each
+   Tier A mandate's coverage state, and any scoping from the stacked-PR or
+   too-big guards. **Name the `reviewed` and `waived` mandates explicitly.** A
+   reader has to be able to tell which findings a linter stands behind, which
+   rest on an agent's reading, and which the repo opted out of. Burying that
+   distinction is how "reviewed" gets mistaken for "verified."
 3. **Tier B observations** — one paragraph each.
 4. **The verdict**, as prose plus this fenced block, verbatim keys:
 
@@ -238,8 +294,20 @@ tierA: <count of inline charter comments posted>
 tierB: <count of judgment observations in this body>
 holistic: <count of security/correctness/logic findings>
 lint: ran | absent | failed
+charterCoverage:
+  enforced: [<mandate ids a linter checked, e.g. M-1, M-2>]
+  reviewed: [<mandate ids you checked by reading, e.g. M-7, M-11>]
+  waived: [<mandate ids the repo's config deliberately disables>]
 ```
 ````
+
+The three lists must together account for **every Tier A mandate** — M-1, M-2,
+M-3, M-5, M-7, M-10, M-11. A mandate in none of them is a mandate nobody
+checked, and this block is the only place that becomes visible.
+
+`lint: absent` with all seven under `reviewed` is a complete, honest review.
+`lint: ran` with mandates in none of the lists is precisely the failure this
+block exists to make impossible to hide.
 
 Downstream automation reads `verdict` and nothing else, so keep the key spelled
 exactly that way and put it in the body — a verdict that exists only in your
@@ -286,8 +354,13 @@ State the fix, don't gesture at it. "Violates M-11" is not a remediation brief;
 - **Never carry `guided-code-review`'s suppression rules across.** Every Tier A
   instance gets a comment.
 - **Never fan a Tier B mandate out into per-instance inline comments.**
+- **Never skip a Tier A mandate because the repo doesn't lint it.** Coverage
+  changes how you check; it never changes what you check.
+- **Never treat the presence of a linter as evidence the charter was checked.**
+  Resolve the rules per file and report the split.
 - **Never overrule the repo's lint configuration** by re-raising a rule it
-  deliberately disables.
+  deliberately disables — as distinct from a rule that is merely absent, which
+  you check yourself.
 - **`CLEAR` is never the default.** Ambiguity escalates.
 
 ## Error handling
@@ -296,8 +369,14 @@ State the fix, don't gesture at it. "Violates M-11" is not a remediation brief;
   from `execute-work` the PR is handed to you, so this cannot fire.
 - **Diff over the guard** → summary-only review, verdict `ESCALATE`. Never skip
   silently.
-- **No linter, or the lint run fails** → check Tier A by reading, record
-  `lint: absent` or `lint: failed`, and escalate. Say it in the body.
+- **No linter, the lint run fails, or a non-JavaScript repo** → every Tier A
+  mandate moves to `charterCoverage.reviewed`, you check all seven by reading,
+  and the body says so. Record `lint: absent` or `lint: failed`. This is a
+  normal, complete review, not a degraded one — do not escalate on this alone.
+- **A linter that doesn't enforce the charter** (eslint with an unrelated
+  config, `preflight` not installed) → the most dangerous case, because the run
+  succeeds and looks like coverage. `--print-config` is what catches it. Treat
+  every mandate absent from the resolved rules as `reviewed`, not as passed.
 - **`422` on a comment anchor** → relocate that finding into the body with an
   explicit `path:line` and re-post (reference §5). Never drop the finding.
 - **`gh` unauthenticated or the post fails** → report it. Your findings are
@@ -314,8 +393,13 @@ State the fix, don't gesture at it. "Violates M-11" is not a remediation brief;
 - Every objective charter violation in the diff has an inline comment, and each
   one names its fix concretely enough to act on without the diff in hand.
 - No Tier B mandate appears more than once, and none appears inline.
-- The linter ran, scoped to the changed files, and its output — not the agent's
-  reading — is what the Tier A comments are built from.
+- All seven Tier A mandates appear in `charterCoverage`, split honestly across
+  `enforced`, `reviewed` and `waived`, and the body names the last two in prose.
+- Coverage was resolved with `--print-config`, not inferred from the fact that a
+  lint command exists.
+- Where a mandate was enforced, the comments are built from the linter's output
+  rather than the agent's reading — and where it wasn't, the review says so
+  plainly instead of letting a green lint run imply coverage it never had.
 - Nothing the repo's lint config deliberately disables was re-raised.
 - The review is `COMMENT`; no approval and no change-request was attempted.
 - The body ends in a `verdict` block a pipeline can parse.
