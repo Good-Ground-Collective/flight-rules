@@ -28,6 +28,34 @@ describe('markdownAdfConverter.toAdf', () => {
     ])
   })
 
+  it('converts an inline markdown link to a text node with a link mark', () => {
+    const doc = markdownAdfConverter.toAdf('See the [source](https://example.com/x.ts) for details')
+    expect(doc.content).toEqual([
+      {
+        type: 'paragraph',
+        content: [
+          { type: 'text', text: 'See the ' },
+          { type: 'text', text: 'source', marks: [{ type: 'link', attrs: { href: 'https://example.com/x.ts' } }] },
+          { type: 'text', text: ' for details' },
+        ],
+      },
+    ])
+  })
+
+  it('composes marks when a link label is itself bold or code', () => {
+    const doc = markdownAdfConverter.toAdf('[**bold**](https://a.dev) and [`code`](https://b.dev)')
+    expect(doc.content).toEqual([
+      {
+        type: 'paragraph',
+        content: [
+          { type: 'text', text: 'bold', marks: [{ type: 'strong' }, { type: 'link', attrs: { href: 'https://a.dev' } }] },
+          { type: 'text', text: ' and ' },
+          { type: 'text', text: 'code', marks: [{ type: 'code' }, { type: 'link', attrs: { href: 'https://b.dev' } }] },
+        ],
+      },
+    ])
+  })
+
   it('converts a fenced code block to a codeBlock with its language', () => {
     const doc = markdownAdfConverter.toAdf('```ts\nconst x = 1\n```')
     expect(doc.content).toEqual([
@@ -83,6 +111,9 @@ describe('markdown ⇄ ADF round-trip', () => {
   const cases: Array<[string, string]> = [
     ['heading', '## Solution'],
     ['paragraph with marks', 'Ship **now** via `npm run build` today'],
+    ['inline link', 'Read the [changelog](https://example.com/CHANGELOG.md) first'],
+    ['link at end of line', 'Full diff: [PR #42](https://github.com/o/r/pull/42)'],
+    ['bold link label', 'Merged in [**#42**](https://github.com/o/r/pull/42) yesterday'],
     ['code block with language', '```ts\nconst x = 1\nexport { x }\n```'],
     ['code block without language', '```\nplain text\n```'],
     ['task list', '- [ ] verifiable condition\n- [x] already done'],
