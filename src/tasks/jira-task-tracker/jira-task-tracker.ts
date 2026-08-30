@@ -35,6 +35,9 @@ import type {
   TaskTracker,
   TechnicalDesign,
   Ticket,
+  UpdateEpicInput,
+  UpdateInitiativeInput,
+  UpdateTicketInput,
 } from '../task-tracker/task-tracker.js'
 
 const metadataExpandTitle = 'LLM Context'
@@ -221,6 +224,25 @@ export class JiraTaskTracker implements TaskTracker {
     })
   }
 
+  async updateEpicDescription(epicId: string, input: UpdateEpicInput): Promise<Epic> {
+    await this.replaceIssueBody(epicId, input)
+    return this.getEpic(epicId)
+  }
+
+  async updateTicketDescription(ticketId: string, input: UpdateTicketInput): Promise<Ticket> {
+    await this.replaceIssueBody(ticketId, input)
+    return this.getTicket(ticketId)
+  }
+
+  async updateInitiativeDescription(initiativeId: string, input: UpdateInitiativeInput): Promise<Initiative> {
+    // Initiatives (JPD Ideas) carry no entity-metadata block, so the body is
+    // written straight through without a metadata re-merge.
+    const fields: Record<string, unknown> = { description: this.bodyFormat.toAdf(input.body) }
+    if (input.title !== undefined) fields['summary'] = input.title
+    await this.client.request('PUT', `/issue/${initiativeId}`, { fields })
+    return this.getInitiative(initiativeId)
+  }
+
   async createInitiative(input: CreateInitiativeInput): Promise<Initiative> {
     const projectKey = await this.ensureJpdProject()
 
@@ -375,6 +397,22 @@ export class JiraTaskTracker implements TaskTracker {
       if (link.inwardIssue !== undefined) blocking.push(link.inwardIssue.key)
     })
     return { blockedBy, blocking }
+  }
+
+  private async replaceIssueBody(
+    key: string,
+    input: { body: string; title?: string | undefined; labels?: string[] | undefined },
+  ): Promise<void> {
+    const issue = await this.client.request<JiraIssue>('GET', `/issue/${key}`, undefined, { fields: 'description' })
+    // Preserve the entity-metadata block: rebuild the description from the new
+    // body, then splice the metadata carried on the existing description back in
+    // (an edited body, read back via `get`, never carries it), so the same
+    // markdown→ADF path as create runs without clobbering the LLM Context expand.
+    const description = this.metadata.splice(this.bodyFormat.toAdf(input.body), this.parseMetadata(issue))
+    const fields: Record<string, unknown> = { description }
+    if (input.title !== undefined) fields['summary'] = input.title
+    if (input.labels !== undefined) fields['labels'] = input.labels
+    await this.client.request('PUT', `/issue/${key}`, { fields })
   }
 
   private async spliceDescriptionMetadata(key: string, patch: Partial<EntityMetadata>): Promise<void> {

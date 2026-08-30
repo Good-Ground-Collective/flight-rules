@@ -34,6 +34,13 @@ type CreateTicketOptions = {
   assignee?: string
 }
 
+type EditTicketOptions = {
+  body?: string
+  bodyFile?: string
+  title?: string
+  labels?: string
+}
+
 export function createTicketCommand(getTracker: () => TaskTracker): Command {
   const ticket = new Command('ticket')
 
@@ -55,6 +62,23 @@ export function createTicketCommand(getTracker: () => TaskTracker): Command {
         ...(opts.assignee !== undefined ? { assignee: opts.assignee } : {}),
       }
       const result = await getTracker().createTicket(input)
+      process.stdout.write(JSON.stringify(result) + '\n')
+    })
+
+  ticket
+    .command('edit')
+    .exitOverride()
+    .argument('<id>', 'ticket id')
+    .option('--body <body>', 'new ticket body (or use --body-file)')
+    .option('--body-file <path>', 'read the new ticket body from a file')
+    .option('--title <title>', 'new ticket title (unchanged if omitted)')
+    .option('--labels <labels>', 'comma-separated labels replacing existing free-form labels')
+    .action(async (id: string, opts: EditTicketOptions) => {
+      const result = await getTracker().updateTicketDescription(id, {
+        body: resolveBody({ body: opts.body, bodyFile: opts.bodyFile }),
+        ...(opts.title !== undefined ? { title: opts.title } : {}),
+        ...(opts.labels !== undefined ? { labels: opts.labels.split(',') } : {}),
+      })
       process.stdout.write(JSON.stringify(result) + '\n')
     })
 

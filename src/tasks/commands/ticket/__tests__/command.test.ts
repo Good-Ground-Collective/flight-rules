@@ -31,6 +31,9 @@ const makeTracker = (): TaskTracker => ({
   updateEpicMetadata: vi.fn(),
   updateTicketMetadata: vi.fn(),
   updateTddMetadata: vi.fn(),
+  updateEpicDescription: vi.fn(),
+  updateTicketDescription: vi.fn().mockResolvedValue(mockTicket),
+  updateInitiativeDescription: vi.fn(),
   createTechnicalDesign: vi.fn(),
   createInitiative: vi.fn(),
   getInitiative: vi.fn(),
@@ -79,6 +82,33 @@ describe('ticket command', () => {
     const tracker = makeTracker()
     await expect(run(tracker, ['create', '--title', 'T', '--epic-id', '5'])).rejects.toThrow('one of --body or --body-file')
     expect(tracker.createTicket).not.toHaveBeenCalled()
+  })
+
+  it('calls updateTicketDescription and prints JSON for "edit"', async () => {
+    const tracker = makeTracker()
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(tracker, ['edit', '7', '--body', 'Rewritten body'])
+    expect(tracker.updateTicketDescription).toHaveBeenCalledWith('7', { body: 'Rewritten body' })
+    expect(output).toHaveBeenCalledWith(JSON.stringify(mockTicket) + '\n')
+    output.mockRestore()
+  })
+
+  it('passes --title and comma-split --labels through "edit"', async () => {
+    const tracker = makeTracker()
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(tracker, ['edit', '7', '--body', 'B', '--title', 'New Title', '--labels', 'bug,ui'])
+    expect(tracker.updateTicketDescription).toHaveBeenCalledWith('7', {
+      body: 'B',
+      title: 'New Title',
+      labels: ['bug', 'ui'],
+    })
+    output.mockRestore()
+  })
+
+  it('rejects "edit" when neither --body nor --body-file is given', async () => {
+    const tracker = makeTracker()
+    await expect(run(tracker, ['edit', '7'])).rejects.toThrow('one of --body or --body-file')
+    expect(tracker.updateTicketDescription).not.toHaveBeenCalled()
   })
 
   it('calls getTicket and prints JSON for "get"', async () => {

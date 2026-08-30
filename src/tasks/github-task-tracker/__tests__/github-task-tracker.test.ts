@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { GitHubTaskTracker } from '../github-task-tracker.js'
+import { BodyMetadataService } from '../../body-metadata/body-metadata.js'
 
 vi.mock('@octokit/rest', () => ({
   Octokit: vi.fn().mockImplementation(function () {
@@ -16,6 +17,7 @@ vi.mock('@octokit/rest', () => ({
           createComment: vi.fn(),
           listComments: vi.fn(),
           createMilestone: vi.fn(),
+          updateMilestone: vi.fn(),
           getMilestone: vi.fn(),
           listForRepo: vi.fn(),
           addLabels: vi.fn(),
@@ -415,6 +417,110 @@ describe('GitHubTracker.updateTicketMetadata', () => {
         body: expect.stringContaining('Use JWT rotation') as string,
       }),
     )
+  })
+})
+
+describe('GitHubTracker.updateEpicDescription', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('rewrites the body preserving metadata, keeps the epic + status labels, and replaces free-form labels', async () => {
+    const tracker = makeTracker()
+    const existingBody = new BodyMetadataService().splice('old epic body', { notes: 'keep me' })
+    // @ts-expect-error — accessing private field for test setup
+    const mockGet = vi.mocked(tracker.octokit.rest.issues.get)
+    // @ts-expect-error — accessing private field for test setup
+    const mockUpdate = vi.mocked(tracker.octokit.rest.issues.update)
+    // @ts-expect-error — accessing private field for test setup
+    const mockListComments = vi.mocked(tracker.octokit.rest.issues.listComments)
+    // @ts-expect-error — accessing private field for test setup
+    const mockRequest = vi.mocked(tracker.octokit.request)
+
+    mockGet.mockResolvedValue({
+      data: {
+        number: 42,
+        state: 'open',
+        labels: [{ name: 'epic' }, { name: 'status:in-progress' }, { name: 'stale' }],
+        title: 'My Epic',
+        body: existingBody,
+        updated_at: '2026-01-01T00:00:00Z',
+        assignee: null,
+      },
+    } as never)
+    mockUpdate.mockResolvedValue({} as never)
+    mockListComments.mockResolvedValue({ data: [] } as never)
+    mockRequest.mockResolvedValue({ data: [] } as never)
+
+    await tracker.updateEpicDescription('42', { body: 'brand new epic body', labels: ['bug'] })
+
+    const call = mockUpdate.mock.calls[0]?.[0] as { body: string; labels: string[]; issue_number: number }
+    expect(call.issue_number).toBe(42)
+    expect(call.body).toContain('brand new epic body')
+    expect(call.body).toContain('notes: keep me')
+    expect(call.labels).toEqual(['epic', 'status:in-progress', 'bug'])
+  })
+
+  it('leaves labels untouched when --labels is not supplied', async () => {
+    const tracker = makeTracker()
+    // @ts-expect-error — accessing private field for test setup
+    const mockGet = vi.mocked(tracker.octokit.rest.issues.get)
+    // @ts-expect-error — accessing private field for test setup
+    const mockUpdate = vi.mocked(tracker.octokit.rest.issues.update)
+    // @ts-expect-error — accessing private field for test setup
+    const mockListComments = vi.mocked(tracker.octokit.rest.issues.listComments)
+    // @ts-expect-error — accessing private field for test setup
+    const mockRequest = vi.mocked(tracker.octokit.request)
+
+    mockGet.mockResolvedValue({
+      data: {
+        number: 42,
+        state: 'open',
+        labels: [{ name: 'epic' }],
+        title: 'My Epic',
+        body: 'old',
+        updated_at: '2026-01-01T00:00:00Z',
+        assignee: null,
+      },
+    } as never)
+    mockUpdate.mockResolvedValue({} as never)
+    mockListComments.mockResolvedValue({ data: [] } as never)
+    mockRequest.mockResolvedValue({ data: [] } as never)
+
+    await tracker.updateEpicDescription('42', { body: 'new' })
+
+    const call = mockUpdate.mock.calls[0]?.[0] as Record<string, unknown>
+    expect(call).not.toHaveProperty('labels')
+  })
+})
+
+describe('GitHubTracker.updateInitiativeDescription', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('updates the milestone description and title, then returns the initiative', async () => {
+    const tracker = makeTracker()
+    // @ts-expect-error — accessing private field for test setup
+    const mockUpdateMilestone = vi.mocked(tracker.octokit.rest.issues.updateMilestone)
+    // @ts-expect-error — accessing private field for test setup
+    const mockGetMilestone = vi.mocked(tracker.octokit.rest.issues.getMilestone)
+    // @ts-expect-error — accessing private field for test setup
+    const mockListForRepo = vi.mocked(tracker.octokit.rest.issues.listForRepo)
+
+    mockUpdateMilestone.mockResolvedValue({} as never)
+    mockGetMilestone.mockResolvedValue({
+      data: { number: 7, title: 'New Idea', description: 'new idea body' },
+    } as never)
+    mockListForRepo.mockResolvedValue({ data: [] } as never)
+
+    const initiative = await tracker.updateInitiativeDescription('7', { body: 'new idea body', title: 'New Idea' })
+
+    expect(mockUpdateMilestone).toHaveBeenCalledWith({
+      owner: 'acme',
+      repo: 'proj',
+      milestone_number: 7,
+      description: 'new idea body',
+      title: 'New Idea',
+    })
+    expect(initiative.title).toBe('New Idea')
+    expect(initiative.body).toBe('new idea body')
   })
 })
 

@@ -84,6 +84,29 @@ export const CreateTechnicalDesignInputSchema = z.object({
   metadata: EntityMetadataSchema.partial().optional(),
 })
 
+/**
+ * A body-replacing edit. `body` is required (an edit always rewrites the
+ * human-facing description); `title` and `labels` are absent to leave those
+ * fields untouched. Entity metadata is preserved by the tracker, not passed
+ * here — it is re-merged from the existing description on write.
+ */
+export const UpdateEpicInputSchema = z.object({
+  body: z.string(),
+  title: z.string().optional(),
+  labels: z.array(z.string()).optional(),
+})
+
+export const UpdateTicketInputSchema = z.object({
+  body: z.string(),
+  title: z.string().optional(),
+  labels: z.array(z.string()).optional(),
+})
+
+export const UpdateInitiativeInputSchema = z.object({
+  body: z.string(),
+  title: z.string().optional(),
+})
+
 export const InitiativeSchema = z.object({
   id: z.string(),
   size: z.literal('initiative'),
@@ -106,6 +129,9 @@ export type CreateTicketInput = z.infer<typeof CreateTicketInputSchema>
 export type CreateTechnicalDesignInput = z.infer<typeof CreateTechnicalDesignInputSchema>
 export type Initiative = z.infer<typeof InitiativeSchema>
 export type CreateInitiativeInput = z.infer<typeof CreateInitiativeInputSchema>
+export type UpdateEpicInput = z.infer<typeof UpdateEpicInputSchema>
+export type UpdateTicketInput = z.infer<typeof UpdateTicketInputSchema>
+export type UpdateInitiativeInput = z.infer<typeof UpdateInitiativeInputSchema>
 
 export interface TaskTracker {
   createEpic(input: CreateEpicInput): Promise<Epic>
@@ -120,6 +146,9 @@ export interface TaskTracker {
   updateEpicMetadata(epicId: string, patch: Partial<EntityMetadata>): Promise<void>
   updateTicketMetadata(ticketId: string, patch: Partial<EntityMetadata>): Promise<void>
   updateTddMetadata(tddId: string, patch: Partial<EntityMetadata>): Promise<void>
+  updateEpicDescription(epicId: string, input: UpdateEpicInput): Promise<Epic>
+  updateTicketDescription(ticketId: string, input: UpdateTicketInput): Promise<Ticket>
+  updateInitiativeDescription(initiativeId: string, input: UpdateInitiativeInput): Promise<Initiative>
   createInitiative(input: CreateInitiativeInput): Promise<Initiative>
   getInitiative(id: string): Promise<Initiative>
   linkEpicToInitiative(epicId: string, initiativeId: string): Promise<void>

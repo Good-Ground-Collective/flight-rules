@@ -11,12 +11,13 @@ const mockInitiative: Initiative = {
   epics: [{ id: '19', title: 'Decomposition' }],
 }
 
-const makeTracker = (): Pick<TaskTracker, 'createInitiative' | 'getInitiative'> => ({
+const makeTracker = (): Pick<TaskTracker, 'createInitiative' | 'getInitiative' | 'updateInitiativeDescription'> => ({
   createInitiative: vi.fn().mockResolvedValue(mockInitiative),
   getInitiative: vi.fn().mockResolvedValue(mockInitiative),
+  updateInitiativeDescription: vi.fn().mockResolvedValue(mockInitiative),
 })
 
-const run = (tracker: Pick<TaskTracker, 'createInitiative' | 'getInitiative'>, args: string[]) =>
+const run = (tracker: Pick<TaskTracker, 'createInitiative' | 'getInitiative' | 'updateInitiativeDescription'>, args: string[]) =>
   createInitiativeCommand(() => tracker as TaskTracker)
     .exitOverride()
     .parseAsync(args, { from: 'user' })
@@ -40,6 +41,24 @@ describe('initiative command', () => {
     expect(tracker.getInitiative).toHaveBeenCalledWith('7')
     expect(output).toHaveBeenCalledWith(JSON.stringify(mockInitiative) + '\n')
     output.mockRestore()
+  })
+
+  it('calls updateInitiativeDescription and prints JSON for "edit"', async () => {
+    const tracker = makeTracker()
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(tracker, ['edit', '7', '--body', 'Rewritten body', '--title', 'New Title'])
+    expect(tracker.updateInitiativeDescription).toHaveBeenCalledWith('7', {
+      body: 'Rewritten body',
+      title: 'New Title',
+    })
+    expect(output).toHaveBeenCalledWith(JSON.stringify(mockInitiative) + '\n')
+    output.mockRestore()
+  })
+
+  it('rejects "edit" when neither --body nor --body-file is given', async () => {
+    const tracker = makeTracker()
+    await expect(run(tracker, ['edit', '7'])).rejects.toThrow('one of --body or --body-file')
+    expect(tracker.updateInitiativeDescription).not.toHaveBeenCalled()
   })
 
   it('rejects "create" when --title is missing', async () => {
