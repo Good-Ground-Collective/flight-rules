@@ -31107,14 +31107,17 @@ function createGitCommand(getExecutor) {
 }
 
 // src/git/pr-template/pr-template.ts
+var maxChangeLineLength = 256;
+var maxChangeLines = 5;
 var PullRequestTemplateSchema = external_exports.object({
   type: external_exports.enum(semanticTypes),
   scope: external_exports.string().min(1),
   description: external_exports.string().min(1),
-  summary: external_exports.string().min(1),
-  changes: external_exports.array(external_exports.string()).default([]),
-  ticketId: external_exports.string().optional(),
-  testNotes: external_exports.string().optional(),
+  whatWasChanged: external_exports.array(external_exports.string().min(1).max(maxChangeLineLength)).min(1).max(maxChangeLines),
+  whyWasItChanged: external_exports.string().min(1),
+  otsMaterials: external_exports.string().min(1).optional(),
+  ticketId: external_exports.string().min(1).optional(),
+  ticketUrl: external_exports.url().optional(),
   baseBranch: external_exports.string().min(1),
   headBranch: external_exports.string().min(1),
   reviewers: external_exports.array(external_exports.string()).default([]),
@@ -31124,17 +31127,43 @@ var DefaultPullRequestBuilder = class {
   build(input) {
     const parsed = PullRequestTemplateSchema.parse(input);
     const title = `${parsed.type}(${parsed.scope}): ${parsed.description}`;
-    const sections = ["## Summary", "", parsed.summary];
-    if (parsed.changes.length > 0) {
-      sections.push("", "## Changes", "", ...parsed.changes.map((change) => `- ${change}`));
+    const sections = [
+      "## What Was Changed",
+      "",
+      ...parsed.whatWasChanged.map((change) => `- ${change}`),
+      "",
+      "## Why Was It Changed",
+      "",
+      parsed.whyWasItChanged
+    ];
+    if (parsed.otsMaterials !== void 0) {
+      sections.push(
+        "",
+        "## OTS Materials",
+        "",
+        "<details><summary>Click to expand</summary>",
+        "",
+        parsed.otsMaterials,
+        "",
+        "</details>"
+      );
     }
-    if (parsed.ticketId !== void 0) {
-      sections.push("", "## Ticket", "", parsed.ticketId);
-    }
-    if (parsed.testNotes !== void 0) {
-      sections.push("", "## Testing", "", parsed.testNotes);
+    const ticketLink = this.renderTicketLink(parsed.ticketId, parsed.ticketUrl);
+    if (ticketLink !== void 0) {
+      sections.push("", "## Ticket Link", "", `- ${ticketLink}`);
     }
     return { title, body: sections.join("\n") };
+  }
+  /**
+   * A markdown link when a URL is present, the bare id when only an id is, the
+   * bare URL when only a URL is, and nothing when neither is — so the section
+   * is omitted rather than rendered empty.
+   */
+  renderTicketLink(ticketId, ticketUrl) {
+    if (ticketId !== void 0 && ticketUrl !== void 0) return `[${ticketId}](${ticketUrl})`;
+    if (ticketId !== void 0) return ticketId;
+    if (ticketUrl !== void 0) return ticketUrl;
+    return void 0;
   }
 };
 var pullRequestBuilder = new DefaultPullRequestBuilder();
@@ -31202,17 +31231,18 @@ function collect2(value, previous) {
 }
 function createPrCommand(getHost) {
   const pr = new Command("pr");
-  pr.command("create").exitOverride().requiredOption("--type <type>", "conventional commit type").requiredOption("--scope <scope>", "conventional commit scope").requiredOption("--description <description>", "PR title description").requiredOption("--summary <summary>", "PR summary section").requiredOption("--base <base>", "base branch to merge into").requiredOption("--head <head>", "head branch to merge from").option("--change <change>", "a change line (repeatable)", collect2, []).option("--ticket-id <id>", "tracker ticket id").option("--test-notes <notes>", "testing section").option("--reviewer <reviewer>", "reviewer to request (repeatable)", collect2, []).option("--label <label>", "label to apply (repeatable)", collect2, []).action(async (opts) => {
+  pr.command("create").exitOverride().requiredOption("--type <type>", "conventional commit type").requiredOption("--scope <scope>", "conventional commit scope").requiredOption("--description <description>", "PR title description").requiredOption("--why <why>", 'the "Why Was It Changed" prose section').requiredOption("--what <what>", 'a "What Was Changed" bullet (repeatable, 1-5)', collect2, []).requiredOption("--base <base>", "base branch to merge into").requiredOption("--head <head>", "head branch to merge from").option("--ots <markdown>", 'the "OTS Materials" block (raw markdown/JSON)').option("--ticket-id <id>", "tracker ticket id").option("--ticket-url <url>", "tracker ticket url").option("--reviewer <reviewer>", "reviewer to request (repeatable)", collect2, []).option("--label <label>", "label to apply (repeatable)", collect2, []).action(async (opts) => {
     const template = PullRequestTemplateSchema.parse({
       type: opts.type,
       scope: opts.scope,
       description: opts.description,
-      summary: opts.summary,
-      changes: opts.change,
+      whatWasChanged: opts.what,
+      whyWasItChanged: opts.why,
       baseBranch: opts.base,
       headBranch: opts.head,
+      ...opts.ots !== void 0 ? { otsMaterials: opts.ots } : {},
       ...opts.ticketId !== void 0 ? { ticketId: opts.ticketId } : {},
-      ...opts.testNotes !== void 0 ? { testNotes: opts.testNotes } : {},
+      ...opts.ticketUrl !== void 0 ? { ticketUrl: opts.ticketUrl } : {},
       reviewers: opts.reviewer,
       labels: opts.label
     });

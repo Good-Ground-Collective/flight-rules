@@ -11,12 +11,13 @@ type PrCreateOptions = {
   type: string
   scope: string
   description: string
-  summary: string
+  why: string
+  what: string[]
+  ots?: string
   base: string
   head: string
-  change: string[]
   ticketId?: string
-  testNotes?: string
+  ticketUrl?: string
   reviewer: string[]
   label: string[]
 }
@@ -29,12 +30,13 @@ export function createPrCommand(getHost: () => PullRequestHost): Command {
     .requiredOption('--type <type>', 'conventional commit type')
     .requiredOption('--scope <scope>', 'conventional commit scope')
     .requiredOption('--description <description>', 'PR title description')
-    .requiredOption('--summary <summary>', 'PR summary section')
+    .requiredOption('--why <why>', 'the "Why Was It Changed" prose section')
+    .requiredOption('--what <what>', 'a "What Was Changed" bullet (repeatable, 1-5)', collect, [])
     .requiredOption('--base <base>', 'base branch to merge into')
     .requiredOption('--head <head>', 'head branch to merge from')
-    .option('--change <change>', 'a change line (repeatable)', collect, [])
+    .option('--ots <markdown>', 'the "OTS Materials" block (raw markdown/JSON)')
     .option('--ticket-id <id>', 'tracker ticket id')
-    .option('--test-notes <notes>', 'testing section')
+    .option('--ticket-url <url>', 'tracker ticket url')
     .option('--reviewer <reviewer>', 'reviewer to request (repeatable)', collect, [])
     .option('--label <label>', 'label to apply (repeatable)', collect, [])
     .action(async (opts: PrCreateOptions) => {
@@ -42,12 +44,13 @@ export function createPrCommand(getHost: () => PullRequestHost): Command {
         type: opts.type,
         scope: opts.scope,
         description: opts.description,
-        summary: opts.summary,
-        changes: opts.change,
+        whatWasChanged: opts.what,
+        whyWasItChanged: opts.why,
         baseBranch: opts.base,
         headBranch: opts.head,
+        ...(opts.ots !== undefined ? { otsMaterials: opts.ots } : {}),
         ...(opts.ticketId !== undefined ? { ticketId: opts.ticketId } : {}),
-        ...(opts.testNotes !== undefined ? { testNotes: opts.testNotes } : {}),
+        ...(opts.ticketUrl !== undefined ? { ticketUrl: opts.ticketUrl } : {}),
         reviewers: opts.reviewer,
         labels: opts.label,
       })

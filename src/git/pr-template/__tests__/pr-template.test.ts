@@ -10,10 +10,11 @@ const fullInput: PullRequestTemplate = {
   type: 'feat',
   scope: 'KAN-30',
   description: 'add pr template',
-  summary: 'Adds a Zod schema and renderer for pull requests.',
-  changes: ['schema', 'renderer'],
+  whatWasChanged: ['Added a Zod schema for PR bodies.', 'Added a deterministic renderer.'],
+  whyWasItChanged: 'Agentic PR bodies read as slop. This gives every PR the same human-facing shape.',
+  otsMaterials: '```json\n{ "ok": true }\n```',
   ticketId: 'KAN-30',
-  testNotes: 'unit tests assert exact output',
+  ticketUrl: 'https://example.atlassian.net/browse/KAN-30',
   baseBranch: 'main',
   headBranch: 'feat/KAN-30-pr-template-schema',
   reviewers: [],
@@ -39,22 +40,40 @@ describe('PullRequestTemplateSchema', () => {
     expect(PullRequestTemplateSchema.safeParse({ ...fullInput, description: '' }).success).toBe(false)
   })
 
-  it('rejects an empty summary', () => {
-    expect(PullRequestTemplateSchema.safeParse({ ...fullInput, summary: '' }).success).toBe(false)
+  it('rejects empty why prose', () => {
+    expect(PullRequestTemplateSchema.safeParse({ ...fullInput, whyWasItChanged: '' }).success).toBe(false)
   })
 
-  it('defaults changes, reviewers, and labels to empty arrays', () => {
+  it('requires at least one what-was-changed bullet', () => {
+    expect(PullRequestTemplateSchema.safeParse({ ...fullInput, whatWasChanged: [] }).success).toBe(false)
+  })
+
+  it('rejects more than five what-was-changed bullets', () => {
+    const six = ['a', 'b', 'c', 'd', 'e', 'f']
+    expect(PullRequestTemplateSchema.safeParse({ ...fullInput, whatWasChanged: six }).success).toBe(false)
+  })
+
+  it('rejects a bullet longer than 256 characters', () => {
+    const tooLong = 'x'.repeat(257)
+    expect(PullRequestTemplateSchema.safeParse({ ...fullInput, whatWasChanged: [tooLong] }).success).toBe(false)
+  })
+
+  it('rejects a non-url ticket url', () => {
+    expect(PullRequestTemplateSchema.safeParse({ ...fullInput, ticketUrl: 'not a url' }).success).toBe(false)
+  })
+
+  it('defaults reviewers and labels to empty arrays', () => {
     const result = PullRequestTemplateSchema.safeParse({
       type: 'feat',
       scope: 'KAN-30',
       description: 'add pr template',
-      summary: 'a summary',
+      whatWasChanged: ['one change'],
+      whyWasItChanged: 'a reason',
       baseBranch: 'main',
       headBranch: 'feat/x',
     })
     expect(result.success).toBe(true)
     if (result.success) {
-      expect(result.data.changes).toEqual([])
       expect(result.data.reviewers).toEqual([])
       expect(result.data.labels).toEqual([])
     }
@@ -69,39 +88,50 @@ describe('DefaultPullRequestBuilder.build', () => {
     expect(title).toBe('feat(KAN-30): add pr template')
     expect(body).toBe(
       [
-        '## Summary',
+        '## What Was Changed',
         '',
-        'Adds a Zod schema and renderer for pull requests.',
+        '- Added a Zod schema for PR bodies.',
+        '- Added a deterministic renderer.',
         '',
-        '## Changes',
+        '## Why Was It Changed',
         '',
-        '- schema',
-        '- renderer',
+        'Agentic PR bodies read as slop. This gives every PR the same human-facing shape.',
         '',
-        '## Ticket',
+        '## OTS Materials',
         '',
-        'KAN-30',
+        '<details><summary>Click to expand</summary>',
         '',
-        '## Testing',
+        '```json\n{ "ok": true }\n```',
         '',
-        'unit tests assert exact output',
+        '</details>',
+        '',
+        '## Ticket Link',
+        '',
+        '- [KAN-30](https://example.atlassian.net/browse/KAN-30)',
       ].join('\n'),
     )
   })
 
-  it('omits optional sections when their fields are absent', () => {
+  it('omits OTS Materials and Ticket Link when their fields are absent', () => {
     const { body } = builder.build({
       type: 'fix',
       scope: 'core',
       description: 'fix bug',
-      summary: 'Just a summary.',
-      changes: [],
+      whatWasChanged: ['Fixed the thing.'],
+      whyWasItChanged: 'It was broken.',
       baseBranch: 'main',
       headBranch: 'fix/x',
       reviewers: [],
       labels: [],
     })
-    expect(body).toBe('## Summary\n\nJust a summary.')
+    expect(body).toBe(
+      ['## What Was Changed', '', '- Fixed the thing.', '', '## Why Was It Changed', '', 'It was broken.'].join('\n'),
+    )
+  })
+
+  it('renders a bare ticket id when no url is supplied', () => {
+    const { body } = builder.build({ ...fullInput, otsMaterials: undefined, ticketUrl: undefined })
+    expect(body).toContain('## Ticket Link\n\n- KAN-30')
   })
 
   it('produces byte-identical output for the same input', () => {
