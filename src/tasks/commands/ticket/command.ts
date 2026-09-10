@@ -3,6 +3,11 @@ import type { CreateTicketInput, TaskTracker } from '../../task-tracker/task-tra
 import { resolveBody } from '../resolve-body.js'
 import { bodySectionsParser, type BodySections, type SectionKey } from '../../body-sections/body-sections.js'
 
+// eslint-disable-next-line preflight/no-loose-functions -- collect is module-level behaviour awaiting a home on a service; tracked in KAN-39
+function collect(value: string, previous: string[]): string[] {
+  return [...previous, value]
+}
+
 const sectionFields: Record<string, SectionKey> = {
   'problem-statement': 'problemStatement',
   solution: 'solution',
@@ -108,6 +113,23 @@ export function createTicketCommand(getTracker: () => TaskTracker): Command {
     .action(async (id: string) => {
       const transitions = await getTracker().listTransitions(id)
       process.stdout.write(JSON.stringify({ id, transitions }) + '\n')
+    })
+
+  ticket
+    .command('label')
+    .exitOverride()
+    .argument('<id>', 'ticket id')
+    .option('--add <label>', 'label to add (repeatable)', collect, [])
+    .option('--remove <label>', 'label to remove (repeatable)', collect, [])
+    .action(async (id: string, opts: { add: string[]; remove: string[] }) => {
+      if (opts.add.length === 0 && opts.remove.length === 0) {
+        throw new Error('ticket label needs at least one --add or --remove')
+      }
+      const tracker = getTracker()
+      // Removals run first so a swap never leaves both lifecycle labels present if the addition fails.
+      for (const label of opts.remove) await tracker.removeLabel(id, label)
+      for (const label of opts.add) await tracker.addLabel(id, label)
+      process.stdout.write(JSON.stringify({ id, added: opts.add, removed: opts.remove }) + '\n')
     })
 
   return ticket

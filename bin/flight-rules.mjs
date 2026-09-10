@@ -29308,6 +29308,26 @@ ${block}`;
   }
 };
 
+// src/tasks/task-tracker/unsupported-tracker-operation-error.ts
+var UnsupportedTrackerOperationPropsSchema = external_exports.object({
+  tracker: external_exports.string().min(1),
+  operation: external_exports.string().min(1),
+  remedy: external_exports.string().min(1).optional()
+});
+var UnsupportedTrackerOperationError = class extends Error {
+  tracker;
+  operation;
+  constructor(props) {
+    const parsed = UnsupportedTrackerOperationPropsSchema.parse(props);
+    super(
+      `The ${parsed.tracker} tracker does not support ${parsed.operation}` + (parsed.remedy !== void 0 ? ` \u2014 ${parsed.remedy}` : "")
+    );
+    this.name = "UnsupportedTrackerOperationError";
+    this.tracker = parsed.tracker;
+    this.operation = parsed.operation;
+  }
+};
+
 // src/tasks/github-task-tracker/github-task-tracker.ts
 var IssueRefListSchema = external_exports.array(external_exports.object({ number: external_exports.number() }));
 var GitHubTaskTracker = class {
@@ -29531,6 +29551,29 @@ var GitHubTaskTracker = class {
   async listTransitions() {
     return (await this.statusLabelNames()).map(
       (name) => name.slice("status:".length).replace(/-/g, " ").toLowerCase()
+    );
+  }
+  /**
+   * GitHub labels double as the tracker's type system — `epic`/`ticket` and
+   * `status:<slug>` — so a generic label write could silently change a
+   * ticket's size or status. Label lifecycle writes are Jira-only.
+   */
+  addLabel(ticketId, label) {
+    return Promise.reject(
+      new UnsupportedTrackerOperationError({
+        tracker: "GitHub",
+        operation: `adding the label "${label}" to issue #${ticketId}`,
+        remedy: "GitHub labels encode issue size and status and are owned by the tracker; use --tracker jira"
+      })
+    );
+  }
+  removeLabel(ticketId, label) {
+    return Promise.reject(
+      new UnsupportedTrackerOperationError({
+        tracker: "GitHub",
+        operation: `removing the label "${label}" from issue #${ticketId}`,
+        remedy: "GitHub labels encode issue size and status and are owned by the tracker; use --tracker jira"
+      })
     );
   }
   async updateEpicMetadata(epicId, patch) {
@@ -30231,6 +30274,16 @@ var JiraTaskTracker = class {
     const response = await this.fetchTransitions(ticketId);
     return response.transitions.map((transition) => transition.to.name);
   }
+  /**
+   * Jira's `add`/`remove` label verbs are set operations, so the write is
+   * atomic against whatever labels the issue already has — no read first.
+   */
+  async addLabel(ticketId, label) {
+    await this.client.request("PUT", `/issue/${ticketId}`, { update: { labels: [{ add: label }] } });
+  }
+  async removeLabel(ticketId, label) {
+    await this.client.request("PUT", `/issue/${ticketId}`, { update: { labels: [{ remove: label }] } });
+  }
   async updateEpicMetadata(epicId, patch) {
     await this.spliceDescriptionMetadata(epicId, patch);
   }
@@ -30698,6 +30751,9 @@ var LayeredBodySectionsParser = class {
 var bodySectionsParser = new LayeredBodySectionsParser();
 
 // src/tasks/commands/ticket/command.ts
+function collect(value, previous) {
+  return [...previous, value];
+}
 var sectionFields = {
   "problem-statement": "problemStatement",
   solution: "solution",
@@ -30752,6 +30808,15 @@ function createTicketCommand(getTracker) {
   ticket.command("transitions").exitOverride().argument("<id>", "ticket id").action(async (id) => {
     const transitions = await getTracker().listTransitions(id);
     process.stdout.write(JSON.stringify({ id, transitions }) + "\n");
+  });
+  ticket.command("label").exitOverride().argument("<id>", "ticket id").option("--add <label>", "label to add (repeatable)", collect, []).option("--remove <label>", "label to remove (repeatable)", collect, []).action(async (id, opts) => {
+    if (opts.add.length === 0 && opts.remove.length === 0) {
+      throw new Error("ticket label needs at least one --add or --remove");
+    }
+    const tracker = getTracker();
+    for (const label of opts.remove) await tracker.removeLabel(id, label);
+    for (const label of opts.add) await tracker.addLabel(id, label);
+    process.stdout.write(JSON.stringify({ id, added: opts.add, removed: opts.remove }) + "\n");
   });
   return ticket;
 }
@@ -31050,7 +31115,7 @@ var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
 };
 
 // src/git/commands/commit/command.ts
-function collect(value, previous) {
+function collect2(value, previous) {
   return [...previous, value];
 }
 function createGitCommand(getExecutor) {
@@ -31058,9 +31123,9 @@ function createGitCommand(getExecutor) {
   git.command("commit").exitOverride().requiredOption("--type <type>", "conventional commit type").requiredOption("--scope <scope>", "conventional commit scope").requiredOption("--description <description>", "commit description").option(
     "--file <file>",
     "file to stage (repeatable); scopes the commit to exactly these paths. Omitting it commits the whole index",
-    collect,
+    collect2,
     []
-  ).option("--body <body>", "commit body").option("--footer <footer>", "commit footer (repeatable)", collect, []).option("--model <model>", "model identifier").action(async (opts) => {
+  ).option("--body <body>", "commit body").option("--footer <footer>", "commit footer (repeatable)", collect2, []).option("--model <model>", "model identifier").action(async (opts) => {
     const builder = new DefaultCommitMessageBuilder({
       binPath: process.argv[1] ?? "",
       agentEnv: process.env["AI_AGENT"]
@@ -31197,12 +31262,12 @@ var GitHubPullRequestHost = class {
 };
 
 // src/pr/commands/pr/command.ts
-function collect2(value, previous) {
+function collect3(value, previous) {
   return [...previous, value];
 }
 function createPrCommand(getHost) {
   const pr = new Command("pr");
-  pr.command("create").exitOverride().requiredOption("--type <type>", "conventional commit type").requiredOption("--scope <scope>", "conventional commit scope").requiredOption("--description <description>", "PR title description").requiredOption("--summary <summary>", "PR summary section").requiredOption("--base <base>", "base branch to merge into").requiredOption("--head <head>", "head branch to merge from").option("--change <change>", "a change line (repeatable)", collect2, []).option("--ticket-id <id>", "tracker ticket id").option("--test-notes <notes>", "testing section").option("--reviewer <reviewer>", "reviewer to request (repeatable)", collect2, []).option("--label <label>", "label to apply (repeatable)", collect2, []).action(async (opts) => {
+  pr.command("create").exitOverride().requiredOption("--type <type>", "conventional commit type").requiredOption("--scope <scope>", "conventional commit scope").requiredOption("--description <description>", "PR title description").requiredOption("--summary <summary>", "PR summary section").requiredOption("--base <base>", "base branch to merge into").requiredOption("--head <head>", "head branch to merge from").option("--change <change>", "a change line (repeatable)", collect3, []).option("--ticket-id <id>", "tracker ticket id").option("--test-notes <notes>", "testing section").option("--reviewer <reviewer>", "reviewer to request (repeatable)", collect3, []).option("--label <label>", "label to apply (repeatable)", collect3, []).action(async (opts) => {
     const template = PullRequestTemplateSchema.parse({
       type: opts.type,
       scope: opts.scope,
