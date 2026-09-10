@@ -10863,7 +10863,7 @@ function useColor() {
 var program = new Command();
 
 // src/cli/cli.ts
-import { join as join3 } from "node:path";
+import { join as join4 } from "node:path";
 
 // src/shared/config.ts
 import { readFileSync } from "node:fs";
@@ -31106,6 +31106,13 @@ function createGitCommand(getExecutor) {
   return git;
 }
 
+// src/pr/pull-request-host/gh-pull-request-host.ts
+import { execFile as execFile2 } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join as join3 } from "node:path";
+import { promisify as promisify2 } from "node:util";
+
 // src/git/pr-template/pr-template.ts
 var PullRequestTemplateSchema = external_exports.object({
   type: external_exports.enum(semanticTypes),
@@ -31139,70 +31146,126 @@ var DefaultPullRequestBuilder = class {
 };
 var pullRequestBuilder = new DefaultPullRequestBuilder();
 
-// src/pr/pull-request-host/pull-request-host.ts
-var GitHubPullRequestHostPropsSchema = external_exports.object({
-  token: external_exports.string().min(1),
-  owner: external_exports.string().min(1),
-  repo: external_exports.string().min(1)
+// src/pr/pull-request-host/gh-pull-request-host.ts
+var GhPullRequestHostPropsSchema = external_exports.object({
+  repo: external_exports.string().regex(/^[^/\s]+\/[^/\s]+$/, 'expected "owner/repo"')
 });
-var GitHubPullRequestHost = class {
-  octokit;
-  owner;
+var pullUrl = /\/pull\/(\d+)\b/;
+var GhOutputParseError = class extends Error {
+  name = "GhOutputParseError";
+  constructor(stdout) {
+    super(`gh did not print a pull request URL on stdout: ${JSON.stringify(stdout)}`);
+  }
+};
+var GhPullRequestHost = class {
   repo;
   builder;
-  // eslint-disable-next-line preflight/constructor-single-props -- multi-parameter constructor predates charter M-5; tracked in KAN-39
-  constructor(props, builder = new DefaultPullRequestBuilder()) {
-    const parsed = GitHubPullRequestHostPropsSchema.parse(props);
-    this.octokit = new Octokit2({ auth: parsed.token });
-    this.owner = parsed.owner;
+  execFile;
+  constructor(props) {
+    const parsed = GhPullRequestHostPropsSchema.parse(props);
     this.repo = parsed.repo;
-    this.builder = builder;
+    this.builder = props.builder ?? new DefaultPullRequestBuilder();
+    const promisified = promisify2(execFile2);
+    this.execFile = props.execFileFn ?? ((file2, args) => promisified(file2, [...args]));
   }
-  async createPullRequest(input) {
+  async createPullRequest(input, options) {
     const template = PullRequestTemplateSchema.parse(input);
     const { title, body } = this.builder.build(template);
-    const response = await this.octokit.rest.pulls.create({
-      owner: this.owner,
-      repo: this.repo,
-      title,
+    const attach = options?.attach ?? [];
+    const created = await this.withBodyFile(
       body,
-      base: template.baseBranch,
-      head: template.headBranch
-    });
-    const created = { number: response.data.number, url: response.data.html_url };
-    if (template.reviewers.length > 0) {
-      await this.requestReviewers(created.number, template.reviewers);
-    }
-    if (template.labels.length > 0) {
-      await this.octokit.rest.issues.addLabels({
-        owner: this.owner,
-        repo: this.repo,
-        issue_number: created.number,
-        labels: template.labels
-      });
+      (bodyFile) => this.runCreate(template, title, bodyFile, attach)
+    );
+    for (const reviewer of template.reviewers) {
+      try {
+        await this.execFile("gh", ["pr", "edit", created.url, "--add-reviewer", reviewer]);
+      } catch {
+      }
     }
     return created;
   }
-  async requestReviewers(pullNumber, reviewers) {
+  async commentOnPullRequest(number4, body, options) {
+    const attach = options?.attach ?? [];
+    const { stdout } = await this.withBodyFile(
+      body,
+      (bodyFile) => this.execFile("gh", [
+        "pr",
+        "comment",
+        String(number4),
+        "--repo",
+        this.repo,
+        "--body-file",
+        bodyFile,
+        ...attach.flatMap((spec) => ["--attach", spec])
+      ])
+    );
+    return { url: stdout.trim() };
+  }
+  async runCreate(template, title, bodyFile, attach) {
+    const args = [
+      "pr",
+      "create",
+      "--repo",
+      this.repo,
+      "--base",
+      template.baseBranch,
+      "--head",
+      template.headBranch,
+      "--title",
+      title,
+      "--body-file",
+      bodyFile,
+      ...template.labels.flatMap((label) => ["--label", label]),
+      ...attach.flatMap((spec) => ["--attach", spec])
+    ];
     try {
-      await this.octokit.rest.pulls.requestReviewers({
-        owner: this.owner,
-        repo: this.repo,
-        pull_number: pullNumber,
-        reviewers
-      });
-    } catch {
+      const { stdout } = await this.execFile("gh", args);
+      return this.parseCreated(stdout);
+    } catch (err) {
+      const partialStdout = this.readStringProperty(err, "stdout");
+      if (partialStdout !== void 0 && pullUrl.test(partialStdout)) {
+        const partialStderr = this.readStringProperty(err, "stderr");
+        if (partialStderr !== void 0 && partialStderr.length > 0) {
+          process.stderr.write(partialStderr);
+        }
+        return this.parseCreated(partialStdout);
+      }
+      throw err;
     }
+  }
+  parseCreated(stdout) {
+    const url2 = stdout.trim();
+    const match = pullUrl.exec(url2);
+    if (match?.[1] === void 0) throw new GhOutputParseError(url2);
+    return { number: Number(match[1]), url: url2 };
+  }
+  async withBodyFile(body, run2) {
+    const dir = await mkdtemp(join3(tmpdir(), "flight-rules-"));
+    const bodyFile = join3(dir, "body.md");
+    try {
+      await writeFile(bodyFile, body, "utf8");
+      return await run2(bodyFile);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+  readStringProperty(err, key) {
+    if (typeof err !== "object" || err === null) return void 0;
+    if (key === "stdout" && "stdout" in err) return typeof err.stdout === "string" ? err.stdout : void 0;
+    if (key === "stderr" && "stderr" in err) return typeof err.stderr === "string" ? err.stderr : void 0;
+    return void 0;
   }
 };
 
-// src/pr/commands/pr/command.ts
+// src/shared/collect.ts
 function collect2(value, previous) {
   return [...previous, value];
 }
+
+// src/pr/commands/pr/command.ts
 function createPrCommand(getHost) {
   const pr = new Command("pr");
-  pr.command("create").exitOverride().requiredOption("--type <type>", "conventional commit type").requiredOption("--scope <scope>", "conventional commit scope").requiredOption("--description <description>", "PR title description").requiredOption("--summary <summary>", "PR summary section").requiredOption("--base <base>", "base branch to merge into").requiredOption("--head <head>", "head branch to merge from").option("--change <change>", "a change line (repeatable)", collect2, []).option("--ticket-id <id>", "tracker ticket id").option("--test-notes <notes>", "testing section").option("--reviewer <reviewer>", "reviewer to request (repeatable)", collect2, []).option("--label <label>", "label to apply (repeatable)", collect2, []).action(async (opts) => {
+  pr.command("create").exitOverride().requiredOption("--type <type>", "conventional commit type").requiredOption("--scope <scope>", "conventional commit scope").requiredOption("--description <description>", "PR title description").requiredOption("--summary <summary>", "PR summary section").requiredOption("--base <base>", "base branch to merge into").requiredOption("--head <head>", "head branch to merge from").option("--change <change>", "a change line (repeatable)", collect2, []).option("--ticket-id <id>", "tracker ticket id").option("--test-notes <notes>", "testing section").option("--reviewer <reviewer>", "reviewer to request (repeatable)", collect2, []).option("--label <label>", "label to apply (repeatable)", collect2, []).option("--attach <spec>", "file to attach, as <path>#<caption> (repeatable)", collect2, []).action(async (opts) => {
     const template = PullRequestTemplateSchema.parse({
       type: opts.type,
       scope: opts.scope,
@@ -31216,8 +31279,13 @@ function createPrCommand(getHost) {
       reviewers: opts.reviewer,
       labels: opts.label
     });
-    const created = await getHost().createPullRequest(template);
+    const created = await getHost().createPullRequest(template, { attach: opts.attach });
     process.stdout.write(JSON.stringify(created) + "\n");
+  });
+  pr.command("comment").exitOverride().argument("<number>", "pull request number").option("--body <body>", "comment body (or use --body-file)").option("--body-file <path>", "read the comment body from a file").option("--attach <spec>", "file to attach, as <path>#<caption> (repeatable)", collect2, []).action(async (number4, opts) => {
+    const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
+    const result = await getHost().commentOnPullRequest(Number(number4), body, { attach: opts.attach });
+    process.stdout.write(JSON.stringify(result) + "\n");
   });
   return pr;
 }
@@ -31256,21 +31324,13 @@ function buildTracker(overrideTracker) {
 }
 function buildPrHost(overrideTracker) {
   const config2 = getConfigFromEnv(overrideTracker);
-  const env = new EnvLoader().load();
-  if (env.githubToken === void 0) {
-    throw new Error("GITHUB_TOKEN environment variable is required to create pull requests");
-  }
   if (config2.repo === void 0) {
     throw new Error("repo (owner/repo) is required in config to create pull requests");
   }
-  const [owner, repo] = config2.repo.split("/");
-  if (owner === void 0 || repo === void 0) {
-    throw new Error(`Invalid repo format "${config2.repo}" \u2014 expected "owner/repo"`);
-  }
-  return new GitHubPullRequestHost({ token: env.githubToken, owner, repo });
+  return new GhPullRequestHost({ repo: config2.repo });
 }
 function getConfigFromEnv(overrideTracker) {
-  const configPath = process.env["FLIGHT_RULES_CONFIG"] ?? join3(process.cwd(), ".claude", "flight-rules.local.md");
+  const configPath = process.env["FLIGHT_RULES_CONFIG"] ?? join4(process.cwd(), ".claude", "flight-rules.local.md");
   const config2 = readConfig(configPath);
   if (overrideTracker === void 0) return config2;
   if (overrideTracker !== "github" && overrideTracker !== "jira") {

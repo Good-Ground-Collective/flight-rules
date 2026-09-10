@@ -1,11 +1,8 @@
 import { Command } from 'commander'
 import { PullRequestTemplateSchema } from '../../../git/pr-template/pr-template.js'
+import { collect } from '../../../shared/collect.js'
+import { resolveBody } from '../../../tasks/commands/resolve-body.js'
 import type { PullRequestHost } from '../../pull-request-host/pull-request-host.js'
-
-// eslint-disable-next-line preflight/no-loose-functions -- collect is module-level behaviour awaiting a home on a service; tracked in KAN-39
-function collect(value: string, previous: string[]): string[] {
-  return [...previous, value]
-}
 
 type PrCreateOptions = {
   type: string
@@ -19,6 +16,13 @@ type PrCreateOptions = {
   testNotes?: string
   reviewer: string[]
   label: string[]
+  attach: string[]
+}
+
+type PrCommentOptions = {
+  body?: string
+  bodyFile?: string
+  attach: string[]
 }
 
 export function createPrCommand(getHost: () => PullRequestHost): Command {
@@ -37,6 +41,7 @@ export function createPrCommand(getHost: () => PullRequestHost): Command {
     .option('--test-notes <notes>', 'testing section')
     .option('--reviewer <reviewer>', 'reviewer to request (repeatable)', collect, [])
     .option('--label <label>', 'label to apply (repeatable)', collect, [])
+    .option('--attach <spec>', 'file to attach, as <path>#<caption> (repeatable)', collect, [])
     .action(async (opts: PrCreateOptions) => {
       const template = PullRequestTemplateSchema.parse({
         type: opts.type,
@@ -51,8 +56,20 @@ export function createPrCommand(getHost: () => PullRequestHost): Command {
         reviewers: opts.reviewer,
         labels: opts.label,
       })
-      const created = await getHost().createPullRequest(template)
+      const created = await getHost().createPullRequest(template, { attach: opts.attach })
       process.stdout.write(JSON.stringify(created) + '\n')
+    })
+
+  pr.command('comment')
+    .exitOverride()
+    .argument('<number>', 'pull request number')
+    .option('--body <body>', 'comment body (or use --body-file)')
+    .option('--body-file <path>', 'read the comment body from a file')
+    .option('--attach <spec>', 'file to attach, as <path>#<caption> (repeatable)', collect, [])
+    .action(async (number: string, opts: PrCommentOptions) => {
+      const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile })
+      const result = await getHost().commentOnPullRequest(Number(number), body, { attach: opts.attach })
+      process.stdout.write(JSON.stringify(result) + '\n')
     })
 
   return pr

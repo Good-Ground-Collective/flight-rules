@@ -16,7 +16,8 @@ import { createCheckCommand } from '../tasks/commands/check/command.js'
 import type { TaskTracker } from '../tasks/task-tracker/task-tracker.js'
 import { NodeGitExecutor } from '../git/git-executor/git-executor.js'
 import { createGitCommand } from '../git/commands/commit/command.js'
-import { GitHubPullRequestHost, type PullRequestHost } from '../pr/pull-request-host/pull-request-host.js'
+import type { PullRequestHost } from '../pr/pull-request-host/pull-request-host.js'
+import { GhPullRequestHost } from '../pr/pull-request-host/gh-pull-request-host.js'
 import { createPrCommand } from '../pr/commands/pr/command.js'
 import { appVersion } from '../version.js'
 
@@ -61,21 +62,13 @@ function buildTracker(overrideTracker?: string): TaskTracker {
 // eslint-disable-next-line preflight/no-loose-functions -- buildPrHost is module-level behaviour awaiting a home on a service; tracked in KAN-39
 function buildPrHost(overrideTracker?: string): PullRequestHost {
   const config = getConfigFromEnv(overrideTracker)
-  const env = new EnvLoader().load()
 
-  if (env.githubToken === undefined) {
-    throw new Error('GITHUB_TOKEN environment variable is required to create pull requests')
-  }
   if (config.repo === undefined) {
     throw new Error('repo (owner/repo) is required in config to create pull requests')
   }
 
-  const [owner, repo] = config.repo.split('/')
-  if (owner === undefined || repo === undefined) {
-    throw new Error(`Invalid repo format "${config.repo}" — expected "owner/repo"`)
-  }
-
-  return new GitHubPullRequestHost({ token: env.githubToken, owner, repo })
+  // gh authenticates itself from its own keyring or GH_TOKEN/GITHUB_TOKEN.
+  return new GhPullRequestHost({ repo: config.repo })
 }
 
 // eslint-disable-next-line preflight/no-loose-functions -- getConfigFromEnv is module-level behaviour awaiting a home on a service; tracked in KAN-39
