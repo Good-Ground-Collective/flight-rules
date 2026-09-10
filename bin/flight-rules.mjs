@@ -10863,7 +10863,7 @@ function useColor() {
 var program = new Command();
 
 // src/cli/cli.ts
-import { join as join3 } from "node:path";
+import { join as join4 } from "node:path";
 
 // src/shared/config.ts
 import { readFileSync } from "node:fs";
@@ -30821,6 +30821,7 @@ function createCompetenciesCommand(getConfig) {
 }
 
 // src/tasks/commands/check/command.ts
+import { dirname, join as join2 } from "node:path";
 function credentialFor(tracker, env) {
   if (tracker === "github")
     return { name: "GITHUB_TOKEN", value: env.githubToken };
@@ -30829,7 +30830,7 @@ function credentialFor(tracker, env) {
     value: env.jiraToken
   };
 }
-function createCheckCommand(getConfig, getTracker) {
+function createCheckCommand(getConfig, getTracker, getConfigPath, getProbe) {
   const check2 = new Command("check");
   check2.exitOverride().action(async () => {
     const checks = [];
@@ -30878,7 +30879,13 @@ function createCheckCommand(getConfig, getTracker) {
         detail: "skipped \u2014 credentials missing"
       });
     }
-    const ok = checks.every((c) => c.ok);
+    const tools = await getProbe().probe({
+      repo: config2.repo,
+      recipePath: join2(dirname(getConfigPath()), "flight-rules.qa.md"),
+      env: process.env
+    });
+    checks.push(...tools);
+    const ok = checks.every((c) => c.ok || c.required === false);
     process.stdout.write(
       JSON.stringify({
         tracker: config2.tracker,
@@ -30975,7 +30982,7 @@ var NodeGitExecutor = class {
 
 // src/git/commit-message-builder/commit-message-builder.ts
 import { readFileSync as readFileSync3 } from "node:fs";
-import { dirname, join as join2 } from "node:path";
+import { dirname as dirname2, join as join3 } from "node:path";
 
 // src/git/commit-message-builder/commit-message.schema.ts
 var CommitMessageInputSchema = external_exports.object({
@@ -31031,7 +31038,7 @@ var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
   }
   static readPluginVersion(binPath) {
     try {
-      const pkgPath = join2(dirname(binPath), "..", "package.json");
+      const pkgPath = join3(dirname2(binPath), "..", "package.json");
       const parsed = JSON.parse(readFileSync3(pkgPath, "utf-8"));
       if (typeof parsed === "object" && parsed !== null && "version" in parsed && typeof parsed.version === "string") {
         return parsed.version;
@@ -31222,6 +31229,140 @@ function createPrCommand(getHost) {
   return pr;
 }
 
+// src/tasks/tool-probe/tool-probe.ts
+import { execFile as execFile2 } from "node:child_process";
+import { existsSync, readFileSync as readFileSync4 } from "node:fs";
+import { promisify as promisify2 } from "node:util";
+var minimumGhVersion = [2, 99, 0];
+var ghVersionLine = /gh version (\d+)\.(\d+)\.(\d+)/;
+var NodeToolProbe = class {
+  execFile;
+  constructor(props = {}) {
+    const promisified = promisify2(execFile2);
+    this.execFile = props.execFileFn ?? ((file2, args) => promisified(file2, [...args]));
+  }
+  async probe(input) {
+    const recipe = existsSync(input.recipePath) ? readFileSync4(input.recipePath, "utf8") : void 0;
+    const qaRequired = recipe !== void 0;
+    const opRequired = qaRequired && recipe.includes("op://");
+    const ghRequired = input.repo !== void 0;
+    const env = input.env ?? {};
+    const [gh, ghAuth, ghPush, playwright, ffmpeg, curl, op] = await Promise.all([
+      this.ghVersion(ghRequired),
+      this.ghAuth(ghRequired),
+      this.ghPush(input.repo, ghRequired),
+      this.present("tools:playwright-cli", "playwright-cli", ["--version"], qaRequired),
+      this.present("tools:ffmpeg", "ffmpeg", ["-version"], qaRequired),
+      this.present("tools:curl", "curl", ["--version"], qaRequired),
+      this.op(env, opRequired)
+    ]);
+    return [gh, ghAuth, ghPush, playwright, ffmpeg, curl, op];
+  }
+  async ghVersion(required2) {
+    try {
+      const { stdout } = await this.execFile("gh", ["--version"]);
+      const match = ghVersionLine.exec(stdout);
+      if (match === null) {
+        return { name: "tools:gh", ok: false, detail: `unrecognized version output: ${stdout.trim()}`, required: required2 };
+      }
+      const [, major, minor, patch] = match;
+      const version2 = [Number(major), Number(minor), Number(patch)];
+      const ok = this.meetsMinimumVersion(version2, minimumGhVersion);
+      const found = `${version2[0]}.${version2[1]}.${version2[2]}`;
+      return {
+        name: "tools:gh",
+        ok,
+        detail: ok ? `gh ${found}` : `gh ${found} is older than the required ${minimumGhVersion.join(".")}`,
+        required: required2
+      };
+    } catch (err) {
+      const detail = this.isMissingBinary(err) ? "not installed" : this.stderrOf(err);
+      return { name: "tools:gh", ok: false, detail, required: required2 };
+    }
+  }
+  async ghAuth(required2) {
+    try {
+      await this.execFile("gh", ["auth", "status"]);
+      return { name: "tools:gh-auth", ok: true, detail: "authenticated", required: required2 };
+    } catch (err) {
+      const detail = this.isMissingBinary(err) ? "not installed" : this.stderrOf(err);
+      return { name: "tools:gh-auth", ok: false, detail, required: required2 };
+    }
+  }
+  async ghPush(repo, required2) {
+    if (repo === void 0) {
+      return { name: "tools:gh-push", ok: false, detail: "skipped \u2014 repo is not configured", required: required2 };
+    }
+    try {
+      const { stdout } = await this.execFile("gh", [
+        "api",
+        `repos/${repo}`,
+        "--jq",
+        ".permissions.push"
+      ]);
+      const ok = stdout.trim() === "true";
+      return {
+        name: "tools:gh-push",
+        ok,
+        detail: ok ? `push access to ${repo}` : `no push access to ${repo}`,
+        required: required2
+      };
+    } catch (err) {
+      const detail = this.isMissingBinary(err) ? "not installed" : this.stderrOf(err);
+      return { name: "tools:gh-push", ok: false, detail, required: required2 };
+    }
+  }
+  async present(name, file2, args, required2) {
+    try {
+      const { stdout } = await this.execFile(file2, args);
+      return { name, ok: true, detail: stdout.trim().split("\n")[0] ?? "installed", required: required2 };
+    } catch (err) {
+      const detail = this.isMissingBinary(err) ? "not installed" : this.stderrOf(err);
+      return { name, ok: false, detail, required: required2 };
+    }
+  }
+  async op(env, required2) {
+    try {
+      await this.execFile("op", ["--version"]);
+    } catch (err) {
+      const detail = this.isMissingBinary(err) ? "not installed" : this.stderrOf(err);
+      return { name: "tools:op", ok: false, detail, required: required2 };
+    }
+    if (env["OP_SERVICE_ACCOUNT_TOKEN"] !== void 0) {
+      return { name: "tools:op", ok: true, detail: "authenticated via OP_SERVICE_ACCOUNT_TOKEN", required: required2 };
+    }
+    try {
+      await this.execFile("op", ["whoami", "--format=json"]);
+      return { name: "tools:op", ok: true, detail: "authenticated via op whoami", required: required2 };
+    } catch (err) {
+      const detail = this.isMissingBinary(err) ? "not installed" : this.stderrOf(err);
+      return { name: "tools:op", ok: false, detail: `not signed in \u2014 ${detail}`, required: required2 };
+    }
+  }
+  /** True when `version` is at least `minimum`, comparing major, minor, then patch. */
+  meetsMinimumVersion(version2, minimum) {
+    for (let i = 0; i < minimum.length; i++) {
+      const actual = version2[i] ?? 0;
+      const required2 = minimum[i] ?? 0;
+      if (actual !== required2) return actual > required2;
+    }
+    return true;
+  }
+  /** Distinguishes a missing binary (ENOENT) from a binary that ran and failed. */
+  isMissingBinary(err) {
+    return typeof err === "object" && err !== null && "code" in err && err.code === "ENOENT";
+  }
+  stderrOf(err) {
+    if (typeof err === "object" && err !== null && "stderr" in err) {
+      const stderr = err.stderr;
+      if (typeof stderr === "string") return stderr.trim();
+    }
+    if (err instanceof Error) return err.message;
+    return String(err);
+  }
+};
+var nodeToolProbe = new NodeToolProbe();
+
 // src/version.ts
 var appVersion = false ? "0.0.0-dev" : "1.29.0";
 
@@ -31269,16 +31410,18 @@ function buildPrHost(overrideTracker) {
   }
   return new GitHubPullRequestHost({ token: env.githubToken, owner, repo });
 }
+function resolveConfigPath() {
+  return process.env["FLIGHT_RULES_CONFIG"] ?? join4(process.cwd(), ".claude", "flight-rules.local.md");
+}
 function getConfigFromEnv(overrideTracker) {
-  const configPath = process.env["FLIGHT_RULES_CONFIG"] ?? join3(process.cwd(), ".claude", "flight-rules.local.md");
-  const config2 = readConfig(configPath);
+  const config2 = readConfig(resolveConfigPath());
   if (overrideTracker === void 0) return config2;
   if (overrideTracker !== "github" && overrideTracker !== "jira") {
     throw new Error(`Invalid --tracker "${overrideTracker}" \u2014 expected "github" or "jira"`);
   }
   return { ...config2, tracker: overrideTracker };
 }
-function buildProgram(getTracker, getConfig, getPrHost) {
+function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = resolveConfigPath) {
   const program2 = new Command("flight-rules");
   program2.version(appVersion);
   program2.exitOverride();
@@ -31300,11 +31443,14 @@ function buildProgram(getTracker, getConfig, getPrHost) {
   program2.addCommand(createUsersCommand(tracker));
   program2.addCommand(createRfcCommand(config2));
   program2.addCommand(createCompetenciesCommand(config2));
-  program2.addCommand(createCheckCommand(config2, tracker));
+  const probe = () => new NodeToolProbe();
+  program2.addCommand(createCheckCommand(config2, tracker, getConfigPath, probe));
   return program2;
 }
 async function run(argv) {
-  await buildProgram(buildTracker, getConfigFromEnv, buildPrHost).parseAsync(argv, { from: "user" });
+  await buildProgram(buildTracker, getConfigFromEnv, buildPrHost, resolveConfigPath).parseAsync(argv, {
+    from: "user"
+  });
 }
 
 // src/main.ts

@@ -1,9 +1,11 @@
+import { dirname, join } from "node:path";
 import { Command } from "commander";
 import type { Config } from "../../../shared/config.js";
 import { EnvLoader, type Env } from "../../../shared/env.js";
 import type { TaskTracker } from "../../task-tracker/task-tracker.js";
+import type { ToolProbe } from "../../tool-probe/tool-probe.js";
 
-type Check = { name: string; ok: boolean; detail: string };
+type Check = { name: string; ok: boolean; detail: string; required?: boolean };
 
 // eslint-disable-next-line preflight/no-loose-functions -- credentialFor is module-level behaviour awaiting a home on a service; tracked in KAN-39
 function credentialFor(
@@ -21,6 +23,8 @@ function credentialFor(
 export function createCheckCommand(
   getConfig: () => Config,
   getTracker: () => TaskTracker,
+  getConfigPath: () => string,
+  getProbe: () => ToolProbe,
 ): Command {
   const check = new Command("check");
 
@@ -77,7 +81,14 @@ export function createCheckCommand(
       });
     }
 
-    const ok = checks.every((c) => c.ok);
+    const tools = await getProbe().probe({
+      repo: config.repo,
+      recipePath: join(dirname(getConfigPath()), "flight-rules.qa.md"),
+      env: process.env,
+    });
+    checks.push(...tools);
+
+    const ok = checks.every((c) => c.ok || c.required === false);
     process.stdout.write(
       JSON.stringify({
         tracker: config.tracker,
