@@ -29982,12 +29982,18 @@ var LayeredBodyAdfConverter = class {
   }
   parseInline(text) {
     const nodes = [];
-    const pattern = /\*\*([^*]+)\*\*|`([^`]+)`/g;
+    const pattern = /\*\*([^*]+)\*\*|`([^`]+)`|\[([^\]]+)\]\(([^)]+)\)/g;
     let last = 0;
     for (let match = pattern.exec(text); match !== null; match = pattern.exec(text)) {
       if (match.index > last) nodes.push({ type: "text", text: text.slice(last, match.index) });
       if (match[1] !== void 0) nodes.push({ type: "text", text: match[1], marks: [{ type: "strong" }] });
       else if (match[2] !== void 0) nodes.push({ type: "text", text: match[2], marks: [{ type: "code" }] });
+      else if (match[3] !== void 0 && match[4] !== void 0) {
+        const href = match[4];
+        for (const child of this.parseInline(match[3])) {
+          nodes.push({ ...child, marks: [...child.marks ?? [], { type: "link", attrs: { href } }] });
+        }
+      }
       last = match.index + match[0].length;
     }
     if (last < text.length) nodes.push({ type: "text", text: text.slice(last) });
@@ -30614,6 +30620,23 @@ function createInitiativeCommand(getTracker) {
     const result = await getTracker().getInitiative(id);
     process.stdout.write(JSON.stringify(result) + "\n");
   });
+  initiative.command("plan").exitOverride().argument("<id>", "initiative id").action(async (id) => {
+    const tracker = getTracker();
+    const initiativeData = await tracker.getInitiative(id);
+    const epics = await Promise.all(initiativeData.epics.map((e) => tracker.getEpic(e.id)));
+    const planner = new DependencyPlannerService();
+    const plan = planner.plan(
+      epics.flatMap((e) => e.childIssues).map((ticket) => ({
+        id: ticket.id,
+        status: ticket.status,
+        blockedBy: ticket.blockedBy
+      }))
+    );
+    process.stdout.write(JSON.stringify(plan) + "\n");
+    if (plan.cycles.length > 0) {
+      throw new Error(`dependency cycle detected among tickets: ${plan.cycles.join(", ")}`);
+    }
+  });
   return initiative;
 }
 
@@ -31223,7 +31246,7 @@ function createPrCommand(getHost) {
 }
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.29.0";
+var appVersion = false ? "0.0.0-dev" : "1.30.0";
 
 // src/cli/cli.ts
 function buildTracker(overrideTracker) {
