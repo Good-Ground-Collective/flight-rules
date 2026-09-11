@@ -102,6 +102,52 @@ describe('markdownAdfConverter.toAdf', () => {
     expect(expand?.content?.some((n) => n.type === 'codeBlock')).toBe(true)
   })
 
+  it('splits a soft line break into text, hardBreak, text within one paragraph', () => {
+    const doc = markdownAdfConverter.toAdf('line one\nline two')
+    expect(doc.content).toEqual([
+      {
+        type: 'paragraph',
+        content: [
+          { type: 'text', text: 'line one' },
+          { type: 'hardBreak' },
+          { type: 'text', text: 'line two' },
+        ],
+      },
+    ])
+  })
+
+  it('splits a loose bullet list into two sibling bulletList nodes', () => {
+    const doc = markdownAdfConverter.toAdf('- a\n\n- b')
+    expect(doc.content).toEqual([
+      {
+        type: 'bulletList',
+        content: [{ type: 'listItem', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'a' }] }] }],
+      },
+      {
+        type: 'bulletList',
+        content: [{ type: 'listItem', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'b' }] }] }],
+      },
+    ])
+  })
+
+  it('converts an ordered list with a start offset to attrs.order', () => {
+    const doc = markdownAdfConverter.toAdf('3. third\n4. fourth')
+    const [list] = doc.content
+    expect(list?.type).toBe('orderedList')
+    expect(list?.attrs).toEqual({ order: 3 })
+  })
+
+  it('leaves attrs off an ordered list that starts at one', () => {
+    const doc = markdownAdfConverter.toAdf('1. first\n2. second')
+    const [list] = doc.content
+    expect(list?.type).toBe('orderedList')
+    expect(list?.attrs).toBeUndefined()
+  })
+
+  it('converts a thematic break to a rule node', () => {
+    expect(markdownAdfConverter.toAdf('---').content).toEqual([{ type: 'rule' }])
+  })
+
   it('produces an empty doc for an empty body', () => {
     expect(markdownAdfConverter.toAdf('').content).toEqual([])
   })
@@ -118,7 +164,18 @@ describe('markdown ⇄ ADF round-trip', () => {
     ['code block without language', '```\nplain text\n```'],
     ['task list', '- [ ] verifiable condition\n- [x] already done'],
     ['bullet list', '- first\n- second'],
+    ['ordered list', '1. first\n2. second'],
+    ['ordered list with a start offset', '3. third\n4. fourth'],
+    ['loose bullet list', '- first\n\n- second'],
+    ['loose ordered list keeps numbering', '1. first\n\n2. second'],
+    ['rule', '---'],
     ['multi-line paragraph', 'line one\nline two'],
+    ['literal emphasis', 'Ship *now* today'],
+    ['literal strikethrough', 'Drop ~~this~~ instead'],
+    ['literal link stays byte-stable', 'See [docs](https://x.dev) first'],
+    ['literal image', '![a](https://x.dev/a.png)'],
+    ['literal table', '| A |\n| --- |\n| 1 |'],
+    ['literal blockquote', '> quoted line'],
     ['details block', '<details><summary>Guided Walkthrough</summary>\n\nDo the thing.\n\n</details>'],
     [
       'details containing a fenced code block',

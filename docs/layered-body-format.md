@@ -61,6 +61,40 @@ size: ticket
 </details>
 ```
 
+## Supported markdown
+
+`LayeredBodyAdfConverter.toAdf` parses with `mdast-util-from-markdown` plus the
+GFM extensions and maps a fixed subset of nodes to ADF. The read direction
+(`toMarkdown`) is a hand-written emitter, so `*`/`_` are never over-escaped and
+the round-trip stays byte-stable.
+
+Mapped constructs:
+
+- **Headings** (`#`–`######`) → `heading` with `attrs.level`.
+- **Paragraphs** → `paragraph`; a soft line break becomes a `hardBreak` so single
+  newlines survive the round-trip.
+- **Inline marks**: bold (`**x**`) → `strong`, inline code (`` `x` ``) → `code`,
+  and links (`[label](href)`) → a `link` mark on the label text.
+- **Fenced code** → `codeBlock`, carrying the language in `attrs.language`.
+- **Bullet lists** → `bulletList`; **task lists** (`- [ ]` / `- [x]`) → `taskList`
+  with `TODO`/`DONE` task items; **ordered lists** → `orderedList`.
+- **Thematic breaks** (`---`) → `rule`.
+- **`<details>`/`<summary>` pairs** → `expand`, the summary as `attrs.title`;
+  nested details nest.
+
+Degradation and normalizations:
+
+- **Literal-text degradation.** Any construct outside the subset — emphasis,
+  strikethrough, images, tables, blockquotes, stray HTML — is kept as literal
+  text sliced from its markdown source, so it round-trips byte-identically until
+  its own node-family ticket claims it. An unclosed `<details>` degrades to
+  literal paragraph text rather than looping.
+- **Loose lists.** A list with blank lines between its items (a *loose* list) has
+  no ADF equivalent, so it emits as one single-item list per item; the emitter's
+  `\n\n` block join reproduces the blank lines.
+- **Ordered-list renumbering.** `orderedList` markers are rendered from the list
+  start (`attrs.order`, defaulting to 1), not from the source digits.
+
 ## Rules
 
 - **The Guided Walkthrough is a separate `<details>` block, not inside the YAML.**
