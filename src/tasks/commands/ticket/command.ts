@@ -2,6 +2,7 @@ import { Command } from 'commander'
 import type { CreateTicketInput, TaskTracker } from '../../task-tracker/task-tracker.js'
 import { resolveBody } from '../resolve-body.js'
 import { blobSectionSource, sectionSelector } from '../../body-sections/body-sections.js'
+import { bodyFormatDetector } from '../../body-sections/body-format-detector.js'
 
 // eslint-disable-next-line preflight/no-loose-functions -- collect is module-level behaviour awaiting a home on a service; tracked in KAN-39
 function collect(value: string, previous: string[]): string[] {
@@ -76,7 +77,12 @@ export function createTicketCommand(getTracker: () => TaskTracker): Command {
         process.stdout.write(JSON.stringify(result) + '\n')
         return
       }
-      const sections = blobSectionSource.read({ body: result.body })
+      const format = bodyFormatDetector.detect({
+        body: result.body,
+        metadata: result.metadata,
+        issueType: result.issueType,
+      })
+      const sections = blobSectionSource.read({ body: result.body, format })
       process.stdout.write(JSON.stringify(sectionSelector.select(id, sections, opts.section)) + '\n')
     })
 

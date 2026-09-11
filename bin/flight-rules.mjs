@@ -29194,7 +29194,9 @@ var import_yaml = __toESM(require_dist2(), 1);
 var EntityMetadataSchema = external_exports.object({
   tddId: external_exports.number().optional(),
   epicId: external_exports.number().optional(),
-  notes: external_exports.string().optional()
+  notes: external_exports.string().optional(),
+  /** Explicit body-format override read first by BodyFormatDetector (docs/bug-report-format.md). */
+  kind: external_exports.enum(["bug", "story"]).optional()
 }).passthrough();
 var CommentSchema = external_exports.object({
   id: external_exports.string(),
@@ -31139,6 +31141,27 @@ var BodySectionSelector = class {
 };
 var sectionSelector = new BodySectionSelector();
 
+// src/tasks/body-sections/body-format-detector.ts
+var placeholderIssueTypes = ["unknown", "issue"];
+var PrecedenceBodyFormatDetector = class {
+  detect(input) {
+    const { body, metadata, issueType } = input;
+    if (metadata.kind === "bug") return "bug-report";
+    if (metadata.kind === "story") return "layered-body";
+    const explicitType = this.explicitIssueType(issueType);
+    if (explicitType === "bug") return "bug-report";
+    if (explicitType !== void 0) return "layered-body";
+    return blobSectionSource.read({ body }).format;
+  }
+  /** The lower-cased issue type, or `undefined` when absent or a tracker placeholder. */
+  explicitIssueType(issueType) {
+    if (issueType === void 0) return void 0;
+    const lowered = issueType.toLowerCase();
+    return placeholderIssueTypes.includes(lowered) ? void 0 : lowered;
+  }
+};
+var bodyFormatDetector = new PrecedenceBodyFormatDetector();
+
 // src/tasks/commands/ticket/command.ts
 function collect(value, previous) {
   return [...previous, value];
@@ -31170,7 +31193,12 @@ function createTicketCommand(getTracker) {
       process.stdout.write(JSON.stringify(result) + "\n");
       return;
     }
-    const sections = blobSectionSource.read({ body: result.body });
+    const format = bodyFormatDetector.detect({
+      body: result.body,
+      metadata: result.metadata,
+      issueType: result.issueType
+    });
+    const sections = blobSectionSource.read({ body: result.body, format });
     process.stdout.write(JSON.stringify(sectionSelector.select(id, sections, opts.section)) + "\n");
   });
   ticket.command("block").exitOverride().argument("<id>", "ticket id to block").requiredOption("--by <blockerId>", "id of the ticket that must close first").action(async (id, opts) => {

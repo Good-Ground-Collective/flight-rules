@@ -8,6 +8,8 @@ export const EntityMetadataSchema = z
     tddId: z.number().optional(),
     epicId: z.number().optional(),
     notes: z.string().optional(),
+    /** Explicit body-format override read first by BodyFormatDetector (docs/bug-report-format.md). */
+    kind: z.enum(['bug', 'story']).optional(),
   })
   .passthrough()
 

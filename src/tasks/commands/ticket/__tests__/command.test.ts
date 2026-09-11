@@ -152,6 +152,7 @@ describe('ticket command', () => {
     const tracker = makeTracker()
     vi.mocked(tracker.getTicket).mockResolvedValue({
       ...mockTicket,
+      issueType: 'Bug',
       body: '## Symptom\n\nBroken.\n\n## Fixed When\n\n- [ ] it works\n- [x] test added\n',
     })
     const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
@@ -171,10 +172,42 @@ describe('ticket command', () => {
     output.mockRestore()
   })
 
+  // Regression for the placeholder-issueType integration bug: an untyped GitHub
+  // issue reaches the command with issueType 'Issue' (what the GitHub adapter
+  // yields for `issue.type?.name ?? 'Issue'`) and no metadata.kind. Before the
+  // fix the detector treated 'Issue' as an authoritative non-bug type, forced
+  // layered-body, and `get --section fixed-when` returned markdown:null/items:[]
+  // — silently hiding the bug's verification requirements.
+  it('treats a GitHub-untyped ticket (issueType "Issue") with a Symptom body as a bug-report for "get --section fixed-when"', async () => {
+    const tracker = makeTracker()
+    vi.mocked(tracker.getTicket).mockResolvedValue({
+      ...mockTicket,
+      issueType: 'Issue',
+      metadata: {},
+      body: '## Symptom\n\nCrashes on save.\n\n## Fixed When\n\n- [ ] no crash\n- [x] regression test added\n',
+    })
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(tracker, ['get', '7', '--section', 'fixed-when'])
+    expect(output).toHaveBeenCalledWith(
+      JSON.stringify({
+        id: '7',
+        section: 'fixed-when',
+        format: 'bug-report',
+        markdown: '- [ ] no crash\n- [x] regression test added',
+        items: [
+          { text: 'no crash', done: false },
+          { text: 'regression test added', done: true },
+        ],
+      }) + '\n',
+    )
+    output.mockRestore()
+  })
+
   it('returns markdown null and empty items for acceptance-criteria on a bug-report body', async () => {
     const tracker = makeTracker()
     vi.mocked(tracker.getTicket).mockResolvedValue({
       ...mockTicket,
+      issueType: 'Bug',
       body: '## Symptom\n\nBroken.\n\n## Fixed When\n\n- [ ] it works\n',
     })
     const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
@@ -184,6 +217,49 @@ describe('ticket command', () => {
         id: '7',
         section: 'acceptance-criteria',
         format: 'bug-report',
+        markdown: null,
+        items: [],
+      }) + '\n',
+    )
+    output.mockRestore()
+  })
+
+  it('detects a Jira Bug with no metadata and no recognizable headings as bug-report', async () => {
+    const tracker = makeTracker()
+    vi.mocked(tracker.getTicket).mockResolvedValue({
+      ...mockTicket,
+      issueType: 'Bug',
+      metadata: {},
+      body: 'Plain description with no level-2 headings at all.\n',
+    })
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(tracker, ['get', '7', '--section', 'symptom'])
+    expect(output).toHaveBeenCalledWith(
+      JSON.stringify({
+        id: '7',
+        section: 'symptom',
+        format: 'bug-report',
+        markdown: null,
+      }) + '\n',
+    )
+    output.mockRestore()
+  })
+
+  it('lets metadata.kind override a contradictory heading for "get --section"', async () => {
+    const tracker = makeTracker()
+    vi.mocked(tracker.getTicket).mockResolvedValue({
+      ...mockTicket,
+      issueType: 'Bug',
+      metadata: { kind: 'story' },
+      body: '## Symptom\n\nLooks like a bug body.\n',
+    })
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(tracker, ['get', '7', '--section', 'acceptance-criteria'])
+    expect(output).toHaveBeenCalledWith(
+      JSON.stringify({
+        id: '7',
+        section: 'acceptance-criteria',
+        format: 'layered-body',
         markdown: null,
         items: [],
       }) + '\n',
