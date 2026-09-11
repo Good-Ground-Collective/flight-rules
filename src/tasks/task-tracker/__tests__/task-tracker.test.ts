@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  AttachmentSchema,
   CommentSchema,
   EntityMetadataSchema,
   TicketSchema,
@@ -55,6 +56,37 @@ describe('TicketSchema', () => {
     })
     expect(result.blockedBy).toEqual([])
     expect(result.blocking).toEqual([])
+  })
+
+  it('defaults attachments, reporter, and issueType when the keys are absent', () => {
+    const result = TicketSchema.parse({
+      id: '1',
+      size: 'ticket',
+      status: 'open',
+      labels: [],
+      title: 'T',
+      body: 'B',
+      comments: [],
+      assignee: null,
+      updatedAt: '2026-01-01T00:00:00Z',
+    })
+    expect(result.attachments).toEqual([])
+    expect(result.reporter).toBeNull()
+    expect(result.issueType).toBe('unknown')
+  })
+})
+
+describe('AttachmentSchema', () => {
+  it('parses an attachment with size omitted', () => {
+    const result = AttachmentSchema.parse({
+      id: 'a1',
+      filename: 'screenshot.png',
+      mimeType: 'image/png',
+    })
+    expect(result.id).toBe('a1')
+    expect(result.filename).toBe('screenshot.png')
+    expect(result.mimeType).toBe('image/png')
+    expect(result.size).toBeUndefined()
   })
 })
 

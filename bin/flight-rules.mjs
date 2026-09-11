@@ -10862,12 +10862,9 @@ function useColor() {
 // ../../../node_modules/commander/index.js
 var program = new Command();
 
-// src/cli/cli.ts
-import { join as join5 } from "node:path";
-
 // src/shared/config.ts
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 
 // ../../../node_modules/zod/v4/classic/external.js
 var external_exports = {};
@@ -25420,6 +25417,9 @@ var ConfigSchema = external_exports.object({
   defaultLabels: external_exports.array(external_exports.string()).default([]),
   rfcStorage: external_exports.enum(["local", "global"]).default("local"),
   rfcStoragePath: external_exports.string().optional(),
+  qaRecipe: external_exports.string().optional().describe(
+    "Path to the per-repo QA recipe; relative paths resolve against the directory holding this config file; defaults to flight-rules.qa.md beside it"
+  ),
   competencies: external_exports.array(external_exports.string()).default([...seedCompetencies])
 }).superRefine((cfg, ctx) => {
   if (cfg.tracker === "github" && cfg.repo === void 0) {
@@ -25518,6 +25518,14 @@ function getRfcDir(config2, cwd) {
     return config2.rfcStoragePath;
   }
   return join(cwd, "rfcs");
+}
+function resolveConfigPath(cwd, override) {
+  return override ?? join(cwd, ".claude", "flight-rules.local.md");
+}
+function getQaRecipePath(config2, configPath) {
+  const recipe = config2.qaRecipe ?? "flight-rules.qa.md";
+  if (isAbsolute(recipe)) return recipe;
+  return resolve(dirname(configPath), recipe);
 }
 
 // src/shared/env.ts
@@ -29195,6 +29203,13 @@ var CommentSchema = external_exports.object({
   createdAt: external_exports.string(),
   updatedAt: external_exports.string()
 });
+var AttachmentSchema = external_exports.object({
+  id: external_exports.string(),
+  filename: external_exports.string(),
+  mimeType: external_exports.string(),
+  size: external_exports.number().optional(),
+  mediaUuid: external_exports.string().optional()
+});
 var TechnicalDesignSchema = external_exports.object({
   id: external_exports.string(),
   epicId: external_exports.string(),
@@ -29213,6 +29228,9 @@ var TicketSchema = external_exports.object({
   body: external_exports.string(),
   comments: external_exports.array(CommentSchema),
   assignee: external_exports.string().nullable(),
+  attachments: external_exports.array(AttachmentSchema).default([]),
+  reporter: external_exports.string().nullable().default(null),
+  issueType: external_exports.string().default("unknown"),
   blockedBy: external_exports.array(external_exports.string()).default([]),
   blocking: external_exports.array(external_exports.string()).default([]),
   metadata: EntityMetadataSchema.default({}),
@@ -29833,6 +29851,9 @@ var GitHubTaskTracker = class {
       body: issue2.body ?? "",
       comments: comments.map((c) => this.mapComment(c)),
       assignee: issue2.assignee?.login ?? null,
+      attachments: [],
+      reporter: issue2.user?.login ?? null,
+      issueType: issue2.type?.name ?? "Issue",
       blockedBy,
       blocking,
       metadata,
@@ -29937,7 +29958,7 @@ var JiraClient = class {
       const retryAfterSeconds = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : defaultRetryAfterSeconds;
       const jitter = 0.7 + Math.random() * 0.6;
       const delayMs = Math.min(retryAfterSeconds * 1e3 * jitter, maxBackoffMs);
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      await new Promise((resolve2) => setTimeout(resolve2, delayMs));
       return this.fetchWithRetry(url2, init, attempt + 1);
     }
     return res;
@@ -29989,7 +30010,7 @@ var ConfluenceClient = class {
       const retryAfterSeconds = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : defaultRetryAfterSeconds2;
       const jitter = 0.7 + Math.random() * 0.6;
       const delayMs = Math.min(retryAfterSeconds * 1e3 * jitter, maxBackoffMs2);
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      await new Promise((resolve2) => setTimeout(resolve2, delayMs));
       return this.fetchWithRetry(url2, init, attempt + 1);
     }
     return res;
@@ -30267,6 +30288,7 @@ var jiraAdfMetadataService = new JiraAdfMetadataService();
 // src/tasks/jira-task-tracker/jira-task-tracker.ts
 var metadataExpandTitle = "LLM Context";
 var issueFields = "summary,status,labels,assignee,description,issuelinks,updated";
+var ticketFields = `${issueFields},attachment,reporter,issuetype`;
 var ideaIssueType = "Idea";
 var jpdProjectType = "product_discovery";
 var deliveryLinkOutward = "implements";
@@ -30339,7 +30361,7 @@ var JiraTaskTracker = class {
   }
   async getTicket(id) {
     const [issue2, blocksLinkType] = await Promise.all([
-      this.client.request("GET", `/issue/${id}`, void 0, { fields: issueFields }),
+      this.client.request("GET", `/issue/${id}`, void 0, { fields: ticketFields }),
       this.resolveBlocksLinkType()
     ]);
     return this.mapTicket(issue2, blocksLinkType);
@@ -30530,7 +30552,7 @@ var JiraTaskTracker = class {
     const [page, blocksLinkType] = await Promise.all([
       this.client.request("GET", "/search/jql", void 0, {
         jql: `parent = ${epicKey}`,
-        fields: issueFields,
+        fields: ticketFields,
         maxResults: 100
       }),
       this.resolveBlocksLinkType()
@@ -30548,11 +30570,22 @@ var JiraTaskTracker = class {
       body: this.extractBody(issue2.fields.description),
       comments: [],
       assignee: issue2.fields.assignee?.accountId ?? null,
+      attachments: this.mapAttachments(issue2.fields.attachment ?? []),
+      reporter: issue2.fields.reporter?.accountId ?? null,
+      issueType: issue2.fields.issuetype?.name ?? "unknown",
       blockedBy,
       blocking,
       metadata: this.parseMetadata(issue2),
       updatedAt: issue2.fields.updated ?? ""
     };
+  }
+  mapAttachments(attachments) {
+    return attachments.map((attachment) => ({
+      id: attachment.id,
+      filename: attachment.filename ?? "",
+      mimeType: attachment.mimeType ?? "application/octet-stream",
+      ...attachment.size !== void 0 ? { size: attachment.size } : {}
+    }));
   }
   blockingLinks(links, blocksLinkType) {
     const blockedBy = [];
@@ -31128,6 +31161,34 @@ function createRfcCommand(getConfig, getCwd = () => process.cwd()) {
   return rfc;
 }
 
+// src/tasks/commands/qa/command.ts
+import { existsSync, statSync } from "node:fs";
+function createQaCommand(getConfig, getConfigPath) {
+  const qa = new Command("qa");
+  qa.command("recipe").exitOverride().action(() => {
+    const config2 = getConfig();
+    if (config2.qaRecipe !== void 0 && config2.qaRecipe.trim() === "") {
+      throw new Error(
+        "qaRecipe is set to a blank value \u2014 give it a path to the QA recipe file, or remove the key to fall back to the default beside the config"
+      );
+    }
+    const path2 = getQaRecipePath(config2, getConfigPath());
+    if (!existsSync(path2)) {
+      throw new Error(
+        `QA recipe not found at ${path2} \u2014 run /flight-rules:setup to scaffold it, or set qaRecipe in the config`
+      );
+    }
+    if (!statSync(path2).isFile()) {
+      throw new Error(
+        `QA recipe at ${path2} is not a regular file \u2014 set qaRecipe to the recipe file's path`
+      );
+    }
+    process.stdout.write(`${path2}
+`);
+  });
+  return qa;
+}
+
 // src/tasks/commands/competencies/command.ts
 function createCompetenciesCommand(getConfig) {
   const competencies = new Command("competencies");
@@ -31138,7 +31199,6 @@ function createCompetenciesCommand(getConfig) {
 }
 
 // src/tasks/commands/check/command.ts
-import { dirname, join as join2 } from "node:path";
 function credentialFor(tracker, env) {
   if (tracker === "github")
     return { name: "GITHUB_TOKEN", value: env.githubToken };
@@ -31198,7 +31258,7 @@ function createCheckCommand(getConfig, getTracker, getConfigPath, getProbe) {
     }
     const tools = await getProbe().probe({
       repo: config2.repo,
-      recipePath: join2(dirname(getConfigPath()), "flight-rules.qa.md"),
+      recipePath: getQaRecipePath(config2, getConfigPath()),
       env: process.env
     });
     checks.push(...tools);
@@ -31299,7 +31359,7 @@ var NodeGitExecutor = class {
 
 // src/git/commit-message-builder/commit-message-builder.ts
 import { readFileSync as readFileSync3 } from "node:fs";
-import { dirname as dirname2, join as join3 } from "node:path";
+import { dirname as dirname2, join as join2 } from "node:path";
 
 // src/git/commit-message-builder/commit-message.schema.ts
 var CommitMessageInputSchema = external_exports.object({
@@ -31355,7 +31415,7 @@ var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
   }
   static readPluginVersion(binPath) {
     try {
-      const pkgPath = join3(dirname2(binPath), "..", "package.json");
+      const pkgPath = join2(dirname2(binPath), "..", "package.json");
       const parsed = JSON.parse(readFileSync3(pkgPath, "utf-8"));
       if (typeof parsed === "object" && parsed !== null && "version" in parsed && typeof parsed.version === "string") {
         return parsed.version;
@@ -31434,7 +31494,7 @@ function createGitCommand(getExecutor) {
 import { execFile as execFile2 } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join as join4 } from "node:path";
+import { join as join3 } from "node:path";
 import { promisify as promisify2 } from "node:util";
 
 // src/git/pr-template/pr-template.ts
@@ -31593,8 +31653,8 @@ var GhPullRequestHost = class {
     return { number: Number(match[1]), url: url2 };
   }
   async withBodyFile(body, run2) {
-    const dir = await mkdtemp(join4(tmpdir(), "flight-rules-"));
-    const bodyFile = join4(dir, "body.md");
+    const dir = await mkdtemp(join3(tmpdir(), "flight-rules-"));
+    const bodyFile = join3(dir, "body.md");
     try {
       await writeFile(bodyFile, body, "utf8");
       return await run2(bodyFile);
@@ -31646,7 +31706,7 @@ function createPrCommand(getHost) {
 
 // src/tasks/tool-probe/tool-probe.ts
 import { execFile as execFile3 } from "node:child_process";
-import { existsSync, readFileSync as readFileSync4 } from "node:fs";
+import { existsSync as existsSync2, readFileSync as readFileSync4 } from "node:fs";
 import { promisify as promisify3 } from "node:util";
 var minimumGhVersion = [2, 99, 0];
 var ghVersionLine = /gh version (\d+)\.(\d+)\.(\d+)/;
@@ -31657,7 +31717,7 @@ var NodeToolProbe = class {
     this.execFile = props.execFileFn ?? ((file2, args) => promisified(file2, [...args]));
   }
   async probe(input) {
-    const recipe = existsSync(input.recipePath) ? readFileSync4(input.recipePath, "utf8") : void 0;
+    const recipe = existsSync2(input.recipePath) ? readFileSync4(input.recipePath, "utf8") : void 0;
     const qaRequired = recipe !== void 0;
     const opRequired = qaRequired && recipe.includes("op://");
     const ghRequired = input.repo !== void 0;
@@ -31779,7 +31839,7 @@ var NodeToolProbe = class {
 var nodeToolProbe = new NodeToolProbe();
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.35.0";
+var appVersion = false ? "0.0.0-dev" : "1.37.0";
 
 // src/cli/cli.ts
 function buildTracker(overrideTracker) {
@@ -31817,18 +31877,16 @@ function buildPrHost(overrideTracker) {
   }
   return new GhPullRequestHost({ repo: config2.repo });
 }
-function resolveConfigPath() {
-  return process.env["FLIGHT_RULES_CONFIG"] ?? join5(process.cwd(), ".claude", "flight-rules.local.md");
-}
 function getConfigFromEnv(overrideTracker) {
-  const config2 = readConfig(resolveConfigPath());
+  const configPath = resolveConfigPath(process.cwd(), process.env["FLIGHT_RULES_CONFIG"]);
+  const config2 = readConfig(configPath);
   if (overrideTracker === void 0) return config2;
   if (overrideTracker !== "github" && overrideTracker !== "jira") {
     throw new Error(`Invalid --tracker "${overrideTracker}" \u2014 expected "github" or "jira"`);
   }
   return { ...config2, tracker: overrideTracker };
 }
-function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = resolveConfigPath) {
+function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = () => resolveConfigPath(process.cwd(), process.env["FLIGHT_RULES_CONFIG"])) {
   const program2 = new Command("flight-rules");
   program2.version(appVersion);
   program2.exitOverride();
@@ -31849,13 +31907,19 @@ function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = resolveC
   program2.addCommand(createPrCommand(prHost));
   program2.addCommand(createUsersCommand(tracker));
   program2.addCommand(createRfcCommand(config2));
+  program2.addCommand(createQaCommand(config2, getConfigPath));
   program2.addCommand(createCompetenciesCommand(config2));
   const probe = () => new NodeToolProbe();
   program2.addCommand(createCheckCommand(config2, tracker, getConfigPath, probe));
   return program2;
 }
 async function run(argv) {
-  await buildProgram(buildTracker, getConfigFromEnv, buildPrHost, resolveConfigPath).parseAsync(argv, {
+  await buildProgram(
+    buildTracker,
+    getConfigFromEnv,
+    buildPrHost,
+    () => resolveConfigPath(process.cwd(), process.env["FLIGHT_RULES_CONFIG"])
+  ).parseAsync(argv, {
     from: "user"
   });
 }
