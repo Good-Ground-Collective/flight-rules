@@ -30842,7 +30842,7 @@ var headingLine2 = /^##\s+(.+?)\s*$/;
 var detailsOpen2 = /^<details/;
 var detailsClose2 = /^<\/details>/;
 var checklistItem = /^-\s+\[( |x|X)\]\s+(.*)$/;
-var symptomHeading = /^##\s+Symptom\s*$/;
+var fenceLine = /^(`{3,}|~{3,})/;
 var layeredHeadingKeys = {
   "Problem Statement": "problemStatement",
   Solution: "solution",
@@ -30919,8 +30919,41 @@ var BlobSectionSource = class {
     }
     return sections;
   }
+  /**
+   * Classifies the body from its FIRST top-level `##` heading, not from any
+   * occurrence anywhere: a bug report leads with `## Symptom`, a layered body
+   * with `## Problem Statement`. A `## Symptom` buried inside a fenced code
+   * block or a `<details>` block (e.g. the Guided Walkthrough) must not flip a
+   * layered body to `bug-report`, so both are skipped exactly as the section
+   * parser skips them — details via `consumeDetails`, fences by tracking the
+   * open marker.
+   */
   sniff(lines) {
-    return lines.some((line) => symptomHeading.test(line)) ? "bug-report" : "layered-body";
+    let i = 0;
+    let openFence;
+    while (i < lines.length) {
+      const line = lines[i] ?? "";
+      const trimmed = line.trim();
+      if (openFence !== void 0) {
+        if (trimmed.startsWith(openFence)) openFence = void 0;
+        i++;
+        continue;
+      }
+      const fence = trimmed.match(fenceLine);
+      if (fence?.[1] !== void 0) {
+        openFence = fence[1];
+        i++;
+        continue;
+      }
+      if (detailsOpen2.test(trimmed)) {
+        i = this.consumeDetails(lines, i).next;
+        continue;
+      }
+      const heading = line.match(headingLine2);
+      if (heading?.[1] !== void 0) return heading[1] === "Symptom" ? "bug-report" : "layered-body";
+      i++;
+    }
+    return "layered-body";
   }
   checklistItems(lines) {
     return (lines ?? []).map((item) => item.match(checklistItem)).filter((match) => match !== null).map((match) => ({ text: (match[2] ?? "").trim(), done: match[1]?.toLowerCase() === "x" }));

@@ -2,7 +2,7 @@ const headingLine = /^##\s+(.+?)\s*$/
 const detailsOpen = /^<details/
 const detailsClose = /^<\/details>/
 const checklistItem = /^-\s+\[( |x|X)\]\s+(.*)$/
-const symptomHeading = /^##\s+Symptom\s*$/
+const fenceLine = /^(`{3,}|~{3,})/
 
 /** Level-2 heading text → section key for a layered body (docs/layered-body-format.md). */
 const layeredHeadingKeys: Record<string, SectionKey> = {
@@ -165,8 +165,48 @@ export class BlobSectionSource implements SectionSource {
     return sections
   }
 
+  /**
+   * Classifies the body from its FIRST top-level `##` heading, not from any
+   * occurrence anywhere: a bug report leads with `## Symptom`, a layered body
+   * with `## Problem Statement`. A `## Symptom` buried inside a fenced code
+   * block or a `<details>` block (e.g. the Guided Walkthrough) must not flip a
+   * layered body to `bug-report`, so both are skipped exactly as the section
+   * parser skips them — details via `consumeDetails`, fences by tracking the
+   * open marker.
+   */
   private sniff(lines: string[]): BodyFormat {
-    return lines.some((line) => symptomHeading.test(line)) ? 'bug-report' : 'layered-body'
+    let i = 0
+    let openFence: string | undefined
+
+    while (i < lines.length) {
+      const line = lines[i] ?? ''
+      const trimmed = line.trim()
+
+      if (openFence !== undefined) {
+        if (trimmed.startsWith(openFence)) openFence = undefined
+        i++
+        continue
+      }
+
+      const fence = trimmed.match(fenceLine)
+      if (fence?.[1] !== undefined) {
+        openFence = fence[1]
+        i++
+        continue
+      }
+
+      if (detailsOpen.test(trimmed)) {
+        i = this.consumeDetails(lines, i).next
+        continue
+      }
+
+      const heading = line.match(headingLine)
+      if (heading?.[1] !== undefined) return heading[1] === 'Symptom' ? 'bug-report' : 'layered-body'
+
+      i++
+    }
+
+    return 'layered-body'
   }
 
   private checklistItems(lines: string[] | undefined): AcceptanceCriterion[] {

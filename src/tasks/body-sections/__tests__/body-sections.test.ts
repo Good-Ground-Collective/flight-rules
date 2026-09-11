@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { blobSectionSource } from '../body-sections.js'
+import { blobSectionSource, sectionSelector } from '../body-sections.js'
 
 const prose = [
   '## Problem Statement',
@@ -191,5 +191,53 @@ describe('BlobSectionSource.read (format selection)', () => {
     expect(s.symptom).toBeUndefined()
     expect(s.problemStatement).toBeUndefined()
     expect(s.fixedWhenItems).toEqual([])
+  })
+
+  // Regression: a `## Symptom` that merely appears somewhere in a layered body —
+  // inside the Guided Walkthrough or a fenced code block — must not flip the
+  // format to bug-report and silently drop the real sections.
+  it('stays layered when ## Symptom appears in the Guided Walkthrough or a code fence', () => {
+    const walkthroughWithSymptom = [
+      '<details><summary>Guided Walkthrough</summary>',
+      '',
+      '1. Reproduce the reported issue:',
+      '',
+      '```markdown',
+      '## Symptom',
+      '',
+      'The button does nothing.',
+      '```',
+      '',
+      '## Symptom is called out in the prose here too.',
+      '',
+      '</details>',
+    ]
+    const body = [...prose, '', ...walkthroughWithSymptom, '', ...llmContext].join('\n')
+
+    const s = blobSectionSource.read({ body })
+    expect(s.format).toBe('layered-body')
+
+    const section = sectionSelector.select('T-1', s, 'acceptance-criteria')
+    expect(section.markdown).toBe('- [ ] first condition\n- [x] already done')
+    expect(section.items).toEqual([
+      { text: 'first condition', done: false },
+      { text: 'already done', done: true },
+    ])
+  })
+
+  it('skips a leading fence or details block when finding the first heading', () => {
+    const fencedBody = ['```md', '## Symptom', 'not a real heading', '```', '', ...prose].join('\n')
+    expect(blobSectionSource.read({ body: fencedBody }).format).toBe('layered-body')
+
+    const detailsBody = [
+      '<details><summary>Context</summary>',
+      '',
+      '## Symptom',
+      '',
+      '</details>',
+      '',
+      ...prose,
+    ].join('\n')
+    expect(blobSectionSource.read({ body: detailsBody }).format).toBe('layered-body')
   })
 })
