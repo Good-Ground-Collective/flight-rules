@@ -98,6 +98,18 @@ Mapped constructs:
   text, and `\@{…}` is an escape that reads back as literal `@{…}`. Only the id
   is required — Jira may re-resolve the display name from it on render, so a
   mention with no display reads back as `@{id|}`.
+- **Inline attachments.** A paragraph that is a single image whose target
+  resolves against the caller's media lookup → `mediaSingle` (with
+  `attrs.layout: 'center'`) wrapping a `media` node (`attrs.type: 'file'`, `id`
+  the media-services UUID, `collection` the empty string, `alt`, and
+  `width`/`height` when known). The target's basename keys the lookup after a
+  leading `attachment:` and any directories are stripped, and a target that is
+  itself a media UUID resolves too. On read, `media`/`mediaInline` become
+  `![alt](attachment:<filename>)`, degrading to `![alt](attachment:<uuid>)` when
+  the lookup is empty; a `media` node Jira authored with `type: 'external'` reads
+  back as `![alt](url)`. Local paths normalize to the `attachment:` form:
+  `![BEFORE](./before.png)` → `![BEFORE](attachment:before.png)`. An external or
+  unresolved image stays literal text on write.
 - **Thematic breaks** (`---`) → `rule`.
 - **`<details>`/`<summary>` pairs** → `expand`, the summary as `attrs.title`;
   nested details nest.
@@ -119,10 +131,10 @@ Mapped constructs:
 
 Degradation and normalizations:
 
-- **Literal-text degradation.** Images and stray HTML are kept as literal text
-  sliced from their markdown source, so they round-trip byte-identically until
-  their own node-family ticket claims them. An unclosed `<details>` degrades to
-  literal paragraph text rather than looping.
+- **Literal-text degradation.** An image with no matching attachment (and every
+  external image URL) and stray HTML are kept as literal text sliced from their
+  markdown source, so they round-trip byte-identically. An unclosed `<details>`
+  degrades to literal paragraph text rather than looping.
 - **Demotions on tables, quotes, and panels.** ADF's content models are narrower
   than GFM's, so some detail is a documented one-way loss:
   - **Column alignment is lost.** ADF paragraphs inside cells carry no alignment,

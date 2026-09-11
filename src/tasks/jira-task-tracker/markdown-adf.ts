@@ -2,8 +2,28 @@ import { fromMarkdown } from 'mdast-util-from-markdown'
 import { gfmFromMarkdown } from 'mdast-util-gfm'
 import { gfm } from 'micromark-extension-gfm'
 import { decodeString } from 'micromark-util-decode-string'
-import type { Blockquote, List, ListItem, PhrasingContent, Root, RootContent, Table } from 'mdast'
+import type { Blockquote, List, ListItem, Paragraph, PhrasingContent, Root, RootContent, Table } from 'mdast'
+import { z } from 'zod'
 import type { AdfDocNode, AdfMark, AdfNode } from './adf.js'
+
+/**
+ * One uploaded attachment addressed by its media-services UUID. `collection` is
+ * the empty string for a Jira issue (Jira normalizes any other value on save),
+ * and `width`/`height` are supplied when the upload path knows the image's pixel
+ * dimensions, which Atlassian requires for the media to render.
+ */
+export const MediaRefSchema = z.object({
+  mediaUuid: z.string().min(1),
+  collection: z.string().default(''),
+  width: z.number().int().positive().optional(),
+  height: z.number().int().positive().optional(),
+})
+
+/** Attachments keyed by filename, the human-legible key that survives a read-modify-write. */
+export const MediaLookupSchema = z.record(z.string(), MediaRefSchema)
+
+export type MediaRef = z.infer<typeof MediaRefSchema>
+export type MediaLookup = z.infer<typeof MediaLookupSchema>
 
 const detailsOpen = /^<details>/
 const detailsClose = /^<\/details>/
@@ -41,8 +61,8 @@ const quoteContent: ReadonlySet<string> = new Set(['paragraph', 'bulletList', 'o
 const panelContent: ReadonlySet<string> = new Set(['paragraph', 'heading', 'bulletList', 'orderedList'])
 
 export interface MarkdownAdfConverter {
-  toAdf(markdown: string): AdfDocNode
-  toMarkdown(nodes: AdfNode[]): string
+  toAdf(markdown: string, media?: MediaLookup): AdfDocNode
+  toMarkdown(nodes: AdfNode[], media?: MediaLookup): string
 }
 
 /**
@@ -63,22 +83,31 @@ export interface MarkdownAdfConverter {
  * than GFM's (a blockquote rejects headings and nested quotes, a panel rejects
  * code blocks, a cell holds one paragraph), disallowed children degrade to
  * literal paragraph text sliced from source so the ADF stays schema-valid and the
- * markdown round-trips. Anything still outside the mapped subset (images) degrades
- * the same way; unknown ADF nodes flatten to their text on read. A
+ * markdown round-trips. A paragraph that is a single image whose target resolves
+ * in the optional `MediaLookup` (keyed by filename, or matched by media UUID)
+ * becomes a `mediaSingle > media` node so an uploaded attachment renders inline,
+ * and reads back to an `![alt](attachment:<filename>)` reference, degrading to the
+ * UUID when the lookup is empty; an external or unresolved image stays literal
+ * text. Unknown ADF nodes flatten to their text on read. A
  * `@{accountId|Display Name}` token in inline text becomes an ADF `mention` node
  * and back; identity is resolved outside the converter, so the display written is
  * only a hint.
  */
 export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
-  toAdf(markdown: string): AdfDocNode {
+  toAdf(markdown: string, media: MediaLookup = {}): AdfDocNode {
     const source = markdown.replace(/\r\n/g, '\n')
     const tree = this.parse(source)
-    return { version: 1, type: 'doc', content: this.blocks(tree.children, source) }
+    return { version: 1, type: 'doc', content: this.blocks(tree.children, source, undefined, media) }
   }
 
-  toMarkdown(nodes: AdfNode[]): string {
+  toMarkdown(nodes: AdfNode[], media: MediaLookup = {}): string {
+    const names = new Map(Object.entries(media).map(([filename, ref]) => [ref.mediaUuid, filename]))
+    return this.render(nodes, names)
+  }
+
+  private render(nodes: AdfNode[], names: Map<string, string>): string {
     return nodes
-      .map((node) => this.blockToMarkdown(node))
+      .map((node) => this.blockToMarkdown(node, names))
       .filter((block) => block.length > 0)
       .join('\n\n')
   }
@@ -93,7 +122,7 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
    * type falls outside the set degrades to literal paragraph text rather than an
    * invalid child.
    */
-  private blocks(nodes: RootContent[], source: string, allowed?: ReadonlySet<string>): AdfNode[] {
+  private blocks(nodes: RootContent[], source: string, allowed?: ReadonlySet<string>, media: MediaLookup = {}): AdfNode[] {
     const out: AdfNode[] = []
     let i = 0
     while (i < nodes.length) {
@@ -124,18 +153,18 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
         i++
         continue
       }
-      out.push(this.blockNode(node, source))
+      out.push(this.blockNode(node, source, media))
       i++
     }
     return out
   }
 
-  private blockNode(node: RootContent, source: string): AdfNode {
+  private blockNode(node: RootContent, source: string, media: MediaLookup): AdfNode {
     switch (node.type) {
       case 'heading':
         return { type: 'heading', attrs: { level: node.depth }, content: this.inline(node.children, source) }
       case 'paragraph':
-        return { type: 'paragraph', content: this.inline(node.children, source) }
+        return this.mediaSingle(node, media) ?? { type: 'paragraph', content: this.inline(node.children, source) }
       case 'code': {
         const lang = node.lang
         const hasLang = lang !== null && lang !== undefined && lang !== ''
@@ -154,6 +183,50 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
       default:
         return this.literalBlock(node, source)
     }
+  }
+
+  /**
+   * A paragraph that holds a single image becomes an inline `mediaSingle > media`
+   * node when its target resolves in the lookup, so an uploaded attachment renders
+   * where the reader is looking. Returns undefined for anything else — an image
+   * mid-sentence, or an unresolved target — leaving the paragraph to map its image
+   * to literal text. `layout` is required by ADF; `alt` is emitted for Jira's own
+   * example even though it is undocumented, and `width`/`height` only when known.
+   */
+  private mediaSingle(node: Paragraph, media: MediaLookup): AdfNode | undefined {
+    const [only, ...rest] = node.children
+    if (only === undefined || only.type !== 'image' || rest.length > 0) return undefined
+    const ref = this.resolveMedia(only.url, media)
+    if (ref === undefined) return undefined
+    return {
+      type: 'mediaSingle',
+      attrs: { layout: 'center' },
+      content: [
+        {
+          type: 'media',
+          attrs: {
+            type: 'file',
+            id: ref.mediaUuid,
+            collection: ref.collection,
+            alt: only.alt ?? '',
+            ...(ref.width !== undefined ? { width: ref.width } : {}),
+            ...(ref.height !== undefined ? { height: ref.height } : {}),
+          },
+        },
+      ],
+    }
+  }
+
+  /**
+   * Resolves an image target to an uploaded attachment. The target's basename
+   * (after stripping a leading `attachment:` and any directories) keys the lookup
+   * first; failing that, the raw target after the prefix is matched against a
+   * media UUID, so `attachment:<uuid>` resolves without a filename entry.
+   */
+  private resolveMedia(target: string, media: MediaLookup): MediaRef | undefined {
+    const stripped = target.replace(/^attachment:/, '')
+    const basename = stripped.slice(stripped.lastIndexOf('/') + 1)
+    return media[basename] ?? Object.values(media).find((ref) => ref.mediaUuid === stripped)
   }
 
   /** The ADF block type an mdast node maps to, or `''` when it only degrades to literal text. */
@@ -491,14 +564,14 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
     return source.slice(node.position?.start.offset ?? 0, node.position?.end.offset ?? 0)
   }
 
-  private blockToMarkdown(node: AdfNode): string {
+  private blockToMarkdown(node: AdfNode, names: Map<string, string>): string {
     switch (node.type) {
       case 'heading': {
         const level = typeof node.attrs?.['level'] === 'number' ? node.attrs['level'] : 1
-        return `${'#'.repeat(level)} ${this.inlineToMarkdown(node.content ?? [])}`
+        return `${'#'.repeat(level)} ${this.inlineToMarkdown(node.content ?? [], names)}`
       }
       case 'paragraph':
-        return this.inlineToMarkdown(node.content ?? [])
+        return this.inlineToMarkdown(node.content ?? [], names)
       case 'codeBlock': {
         const language = typeof node.attrs?.['language'] === 'string' ? node.attrs['language'] : ''
         const text = (node.content ?? []).map((child) => child.text ?? '').join('')
@@ -507,30 +580,55 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
       case 'taskList':
         // A taskItem is inline-only, so it renders as a single checklist line.
         return (node.content ?? [])
-          .map((item) => `- [${item.attrs?.['state'] === 'DONE' ? 'x' : ' '}] ${this.inlineToMarkdown(item.content ?? [])}`)
+          .map(
+            (item) =>
+              `- [${item.attrs?.['state'] === 'DONE' ? 'x' : ' '}] ${this.inlineToMarkdown(item.content ?? [], names)}`,
+          )
           .join('\n')
       case 'bulletList':
-        return (node.content ?? []).map((item) => this.listItemToMarkdown(item, '- ')).join('\n')
+        return (node.content ?? []).map((item) => this.listItemToMarkdown(item, '- ', names)).join('\n')
       case 'orderedList': {
         const order = typeof node.attrs?.['order'] === 'number' ? node.attrs['order'] : 1
-        return (node.content ?? []).map((item, index) => this.listItemToMarkdown(item, `${order + index}. `)).join('\n')
+        return (node.content ?? [])
+          .map((item, index) => this.listItemToMarkdown(item, `${order + index}. `, names))
+          .join('\n')
       }
       case 'expand': {
         const title = typeof node.attrs?.['title'] === 'string' ? node.attrs['title'] : ''
-        return `<details><summary>${title}</summary>\n\n${this.toMarkdown(node.content ?? [])}\n\n</details>`
+        return `<details><summary>${title}</summary>\n\n${this.render(node.content ?? [], names)}\n\n</details>`
       }
       case 'rule':
         return '---'
       case 'table':
-        return this.tableToMarkdown(node)
+        return this.tableToMarkdown(node, names)
       case 'blockquote':
-        return this.quoteToMarkdown(this.containerBody(node.content ?? []))
+        return this.quoteToMarkdown(this.containerBody(node.content ?? [], names))
       case 'panel':
-        return this.panelToMarkdown(node)
+        return this.panelToMarkdown(node, names)
+      // A media node lands here directly (inside a mediaSingle) or standalone; both read back as a reference.
+      case 'mediaSingle':
+      case 'mediaGroup':
+        return (node.content ?? []).map((child) => this.blockToMarkdown(child, names)).join('\n\n')
+      case 'media':
+        return this.mediaReference(node, names)
       default:
-        // unknown blocks (media, layoutSection, …) flatten so UI-authored content never throws
-        return node.text ?? this.toMarkdown(node.content ?? [])
+        // unknown blocks (layoutSection, …) flatten so UI-authored content never throws
+        return node.text ?? this.render(node.content ?? [], names)
     }
+  }
+
+  /**
+   * Recovers an image reference from a `media` (or `mediaInline`) node. A
+   * `type: 'external'` node carries a `url` and reads back as `![alt](url)`;
+   * otherwise the filename comes from the inverted lookup and degrades to the
+   * media UUID, never to `alt`, which Jira does not always preserve.
+   */
+  private mediaReference(node: AdfNode, names: Map<string, string>): string {
+    const alt = typeof node.attrs?.['alt'] === 'string' ? node.attrs['alt'] : ''
+    const url = node.attrs?.['url']
+    if (typeof url === 'string') return `![${alt}](${url})`
+    const id = typeof node.attrs?.['id'] === 'string' ? node.attrs['id'] : ''
+    return `![${alt}](attachment:${names.get(id) ?? id})`
   }
 
   /**
@@ -539,10 +637,10 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
    * blank line. That reproduces `> ## x` then `> body` (a heading demoted to
    * literal text inside a quote) and a panel heading followed by a paragraph.
    */
-  private containerBody(nodes: AdfNode[]): string {
+  private containerBody(nodes: AdfNode[], names: Map<string, string>): string {
     let out = ''
     for (const node of nodes) {
-      const rendered = this.blockToMarkdown(node)
+      const rendered = this.blockToMarkdown(node, names)
       if (rendered.length === 0) continue
       if (out.length === 0) {
         out = rendered
@@ -565,10 +663,10 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
    * Emits an admonition as `> [!TYPE]` over the quoted body. An unknown panelType
    * has no marker to restore, so it degrades to a plain blockquote.
    */
-  private panelToMarkdown(node: AdfNode): string {
+  private panelToMarkdown(node: AdfNode, names: Map<string, string>): string {
     const panelType = typeof node.attrs?.['panelType'] === 'string' ? node.attrs['panelType'] : ''
     const marker = alertMarkers[panelType]
-    const body = this.containerBody(node.content ?? [])
+    const body = this.containerBody(node.content ?? [], names)
     if (marker === undefined) return this.quoteToMarkdown(body)
     return body.length === 0 ? `> [!${marker}]` : `> [!${marker}]\n${this.quoteToMarkdown(body)}`
   }
@@ -578,10 +676,10 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
    * representable in ADF and is dropped), then the body. The first row is always
    * the header even when its cells read back as `tableCell`.
    */
-  private tableToMarkdown(node: AdfNode): string {
+  private tableToMarkdown(node: AdfNode, names: Map<string, string>): string {
     const lines: string[] = []
     ;(node.content ?? []).forEach((row, index) => {
-      const cells = (row.content ?? []).map((cell) => this.cellToMarkdown(cell))
+      const cells = (row.content ?? []).map((cell) => this.cellToMarkdown(cell, names))
       lines.push(`| ${cells.join(' | ')} |`)
       if (index === 0) lines.push(`| ${cells.map(() => '---').join(' | ')} |`)
     })
@@ -593,9 +691,9 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
    * cell's internal newlines collapse to spaces, and a literal `|` re-escapes so
    * it survives GFM's cell parse (which unescapes `\|`) instead of splitting the row.
    */
-  private cellToMarkdown(cell: AdfNode): string {
+  private cellToMarkdown(cell: AdfNode, names: Map<string, string>): string {
     return (cell.content ?? [])
-      .map((block) => this.blockToMarkdown(block))
+      .map((block) => this.blockToMarkdown(block, names))
       .join(' ')
       .replace(/\n/g, ' ')
       .replace(/\|/g, '\\|')
@@ -608,10 +706,10 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
    * lines then indent by the marker width, nesting `- ` at two spaces, `1. ` at
    * three, and `10. ` at four.
    */
-  private listItemToMarkdown(item: AdfNode, marker: string): string {
+  private listItemToMarkdown(item: AdfNode, marker: string, names: Map<string, string>): string {
     let body = ''
     for (const block of item.content ?? []) {
-      const rendered = this.blockToMarkdown(block)
+      const rendered = this.blockToMarkdown(block, names)
       if (rendered.length === 0) continue
       const nestedList = block.type === 'bulletList' || block.type === 'orderedList' || block.type === 'taskList'
       body = body.length === 0 ? rendered : `${body}${nestedList ? '\n' : '\n\n'}${rendered}`
@@ -630,7 +728,7 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
    * verbatim; all other text is escaped so decoded literals (`literal *x*`)
    * don't re-parse as syntax.
    */
-  private inlineToMarkdown(nodes: AdfNode[]): string {
+  private inlineToMarkdown(nodes: AdfNode[], names: Map<string, string>): string {
     let out = ''
     const open: AdfMark[] = []
     const closeFrom = (from: number): void => {
@@ -640,6 +738,11 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
       }
     }
     for (const node of nodes) {
+      if (node.type === 'mediaInline') {
+        // An inline attachment reads back as its reference beside the surrounding text; marks stay open around it.
+        out += this.mediaReference(node, names)
+        continue
+      }
       if (node.type === 'mention') {
         // A code span swallows a following mention into its literal text, so it
         // closes here (the next text reopens it); other marks wrap the mention
@@ -658,7 +761,7 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
       if (node.text === undefined) {
         // A content-bearing inline node can't share a span, so flush open marks and reapply its own innermost-first.
         closeFrom(0)
-        const inner = node.content !== undefined ? this.inlineToMarkdown(node.content) : ''
+        const inner = node.content !== undefined ? this.inlineToMarkdown(node.content, names) : ''
         out += [...(node.marks ?? [])].reverse().reduce((text, mark) => this.applyMark(text, mark), inner)
         continue
       }

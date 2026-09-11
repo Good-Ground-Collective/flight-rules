@@ -5,7 +5,7 @@ import { JiraClient } from './jira-client.js'
 import { ConfluenceClient } from './confluence-client.js'
 import { ExtensionMimeTypeResolver, type MimeTypeResolver } from '../mime-types/mime-types.js'
 import type { AdfDocNode, AdfNode } from './adf.js'
-import { markdownAdfConverter, type MarkdownAdfConverter } from './markdown-adf.js'
+import { markdownAdfConverter, type MarkdownAdfConverter, type MediaLookup } from './markdown-adf.js'
 import { JiraAdfMetadataService, type AdfMetadataService } from './adf-metadata.js'
 import type {
   JiraAssignableUser,
@@ -598,9 +598,13 @@ export class JiraTaskTracker implements TaskTracker {
     return description === null || description === undefined ? {} : this.metadata.parse(description)
   }
 
-  private extractBody(description: AdfDocNode | null | undefined): string {
+  /** @param media filenames to uploaded media UUIDs, empty until the read path can resolve an issue's attachments. */
+  private extractBody(description: AdfDocNode | null | undefined, media: MediaLookup = {}): string {
     if (description === null || description === undefined) return ''
-    return this.bodyFormat.toMarkdown(description.content.filter((node) => !this.isMetadataNode(node)))
+    return this.bodyFormat.toMarkdown(
+      description.content.filter((node) => !this.isMetadataNode(node)),
+      media,
+    )
   }
 
   private isMetadataNode(node: AdfNode): boolean {
