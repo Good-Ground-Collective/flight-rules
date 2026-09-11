@@ -1,5 +1,7 @@
 name: relock
 on:
+  push:
+    branches: [chore/relock-linux]
   workflow_dispatch:
 permissions:
   contents: write
