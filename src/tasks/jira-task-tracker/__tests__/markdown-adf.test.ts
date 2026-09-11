@@ -458,9 +458,11 @@ describe('markdownAdfConverter.toAdf <details> resilience (KAN-38)', () => {
 
 describe('markdownAdfConverter.toAdf tables, blockquotes, and admonitions', () => {
   // ADF content models: a blockquote never holds a heading or a nested quote, and
-  // a panel never holds a code block, table, panel, or quote. This walks a whole
-  // toAdf result and fails if any container carries an illegal child.
+  // a panel never holds a code block, table, panel, or quote. Both require at least
+  // one child. This walks a whole toAdf result and fails on any illegal child or
+  // empty container.
   const assertContentModel = (node: AdfNode): void => {
+    if (node.type === 'blockquote' || node.type === 'panel') expect((node.content ?? []).length).toBeGreaterThan(0)
     for (const child of node.content ?? []) {
       if (node.type === 'blockquote') expect(['heading', 'blockquote']).not.toContain(child.type)
       if (node.type === 'panel') expect(['codeBlock', 'table', 'panel', 'blockquote']).not.toContain(child.type)
@@ -478,10 +480,43 @@ describe('markdownAdfConverter.toAdf tables, blockquotes, and admonitions', () =
     '> outer\n>\n> > inner',
     '> [!NOTE]\n> Run:\n>\n> ```sh\n> npm test\n> ```',
     '| Field | Value |\n| --- | --- |\n| a | b |',
+    '> [!NOTE]',
+    '>',
+    '> > one\n> > two',
+    '> | A | B |\n> | --- | --- |\n> | a | b |',
+    '> - [ ] one\n> - [x] two',
   ]
 
   it.each(bodies)('emits schema-valid container content for %#', (markdown) => {
     for (const node of markdownAdfConverter.toAdf(markdown).content) assertContentModel(node)
+  })
+
+  const repeated: Array<[string, string]> = [
+    ['a multiline nested quote', '> > one\n> > two'],
+    ['a quoted table', '> | A | B |\n> | --- | --- |\n> | a | b |'],
+    ['a quoted task list', '> - [ ] one\n> - [x] two'],
+  ]
+
+  it.each(repeated)('stays stable across two round trips for %s', (_name, markdown) => {
+    const first = roundTrip(markdown)
+    const second = roundTrip(first)
+    expect(second).toBe(first)
+    // A demoted child must not accrete an outer quote prefix on each pass.
+    expect(first).toBe(markdown)
+  })
+
+  it('gives a marker-only alert a single empty paragraph, never an empty panel', () => {
+    const [panel] = markdownAdfConverter.toAdf('> [!NOTE]').content
+    expect(panel?.type).toBe('panel')
+    expect(panel?.content).toEqual([{ type: 'paragraph', content: [] }])
+    expect(roundTrip('> [!NOTE]')).toBe('> [!NOTE]')
+  })
+
+  it('gives a bare quote a single empty paragraph, never an empty blockquote', () => {
+    const [quote] = markdownAdfConverter.toAdf('>').content
+    expect(quote?.type).toBe('blockquote')
+    expect(quote?.content).toEqual([{ type: 'paragraph', content: [] }])
+    expect(roundTrip('>')).toBe('>')
   })
 
   const markerPanels: Array<[string, string]> = [

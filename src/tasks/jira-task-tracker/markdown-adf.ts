@@ -99,7 +99,7 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
         continue
       }
       if (allowed !== undefined && !allowed.has(this.adfType(node))) {
-        out.push(this.literalBlock(node, source))
+        out.push(this.literalBlock(node, source, true))
         i++
         continue
       }
@@ -193,10 +193,19 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
     if (marker !== undefined && panelType !== undefined) {
       const rest = this.stripAlertMarker(node.children)
       if (rest.every((child) => panelContent.has(this.adfType(child)))) {
-        return { type: 'panel', attrs: { panelType }, content: this.blocks(rest, source, panelContent) }
+        return { type: 'panel', attrs: { panelType }, content: this.withBlockContent(this.blocks(rest, source, panelContent)) }
       }
     }
-    return { type: 'blockquote', content: this.blocks(node.children, source, quoteContent) }
+    return { type: 'blockquote', content: this.withBlockContent(this.blocks(node.children, source, quoteContent)) }
+  }
+
+  /**
+   * ADF's `panel` and `blockquote` content models require at least one child, so a
+   * marker-only alert or a bare `>` (which leave no body) get an empty paragraph
+   * rather than an empty, schema-invalid container.
+   */
+  private withBlockContent(nodes: AdfNode[]): AdfNode[] {
+    return nodes.length === 0 ? [{ type: 'paragraph', content: [] }] : nodes
   }
 
   private alertType(node: Blockquote): string | undefined {
@@ -387,8 +396,25 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
     return out
   }
 
-  private literalBlock(node: RootContent, source: string): AdfNode {
-    return { type: 'paragraph', content: this.textSegments(this.literal(node, source), []) }
+  /**
+   * Degrades an unmappable block to a literal paragraph of its source text. When
+   * demoted into a container that re-quotes its body (a blockquote), the outer
+   * `> ` on each continuation line belongs to the enclosing quote, not the child —
+   * mdast strips it from the first line only — so `stripEnclosingQuote` removes one
+   * quote level from the rest. Otherwise a nested quote, quoted table, or quoted
+   * task list would accrete a `>` on every round trip.
+   */
+  private literalBlock(node: RootContent, source: string, stripEnclosingQuote = false): AdfNode {
+    const text = this.literal(node, source)
+    const inner = stripEnclosingQuote ? this.stripEnclosingQuote(text) : text
+    return { type: 'paragraph', content: this.textSegments(inner, []) }
+  }
+
+  private stripEnclosingQuote(text: string): string {
+    return text
+      .split('\n')
+      .map((line, index) => (index === 0 ? line : line.replace(/^> ?/, '')))
+      .join('\n')
   }
 
   private literal(node: RootContent | PhrasingContent, source: string): string {

@@ -38984,7 +38984,7 @@ var LayeredBodyAdfConverter = class {
         continue;
       }
       if (allowed !== void 0 && !allowed.has(this.adfType(node2))) {
-        out.push(this.literalBlock(node2, source));
+        out.push(this.literalBlock(node2, source, true));
         i++;
         continue;
       }
@@ -39073,10 +39073,18 @@ var LayeredBodyAdfConverter = class {
     if (marker !== void 0 && panelType !== void 0) {
       const rest = this.stripAlertMarker(node2.children);
       if (rest.every((child) => panelContent.has(this.adfType(child)))) {
-        return { type: "panel", attrs: { panelType }, content: this.blocks(rest, source, panelContent) };
+        return { type: "panel", attrs: { panelType }, content: this.withBlockContent(this.blocks(rest, source, panelContent)) };
       }
     }
-    return { type: "blockquote", content: this.blocks(node2.children, source, quoteContent) };
+    return { type: "blockquote", content: this.withBlockContent(this.blocks(node2.children, source, quoteContent)) };
+  }
+  /**
+   * ADF's `panel` and `blockquote` content models require at least one child, so a
+   * marker-only alert or a bare `>` (which leave no body) get an empty paragraph
+   * rather than an empty, schema-invalid container.
+   */
+  withBlockContent(nodes) {
+    return nodes.length === 0 ? [{ type: "paragraph", content: [] }] : nodes;
   }
   alertType(node2) {
     const first = node2.children[0];
@@ -39243,8 +39251,21 @@ var LayeredBodyAdfConverter = class {
     });
     return out;
   }
-  literalBlock(node2, source) {
-    return { type: "paragraph", content: this.textSegments(this.literal(node2, source), []) };
+  /**
+   * Degrades an unmappable block to a literal paragraph of its source text. When
+   * demoted into a container that re-quotes its body (a blockquote), the outer
+   * `> ` on each continuation line belongs to the enclosing quote, not the child —
+   * mdast strips it from the first line only — so `stripEnclosingQuote` removes one
+   * quote level from the rest. Otherwise a nested quote, quoted table, or quoted
+   * task list would accrete a `>` on every round trip.
+   */
+  literalBlock(node2, source, stripEnclosingQuote = false) {
+    const text4 = this.literal(node2, source);
+    const inner = stripEnclosingQuote ? this.stripEnclosingQuote(text4) : text4;
+    return { type: "paragraph", content: this.textSegments(inner, []) };
+  }
+  stripEnclosingQuote(text4) {
+    return text4.split("\n").map((line, index2) => index2 === 0 ? line : line.replace(/^> ?/, "")).join("\n");
   }
   literal(node2, source) {
     return source.slice(node2.position?.start.offset ?? 0, node2.position?.end.offset ?? 0);
