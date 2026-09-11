@@ -3,11 +3,8 @@ import type { CreateTicketInput, TaskTracker } from '../../task-tracker/task-tra
 import { resolveBody } from '../resolve-body.js'
 import { blobSectionSource, sectionSelector } from '../../body-sections/body-sections.js'
 import { bodyFormatDetector } from '../../body-sections/body-format-detector.js'
-
-// eslint-disable-next-line preflight/no-loose-functions -- collect is module-level behaviour awaiting a home on a service; tracked in KAN-39
-function collect(value: string, previous: string[]): string[] {
-  return [...previous, value]
-}
+import { collect } from '../../../shared/collect.js'
+import { TrackerEvidenceService } from '../../evidence/evidence.js'
 
 type CreateTicketOptions = {
   title: string
@@ -23,6 +20,7 @@ type EditTicketOptions = {
   bodyFile?: string
   title?: string
   labels?: string
+  attach: string[]
 }
 
 export function createTicketCommand(getTracker: () => TaskTracker): Command {
@@ -57,9 +55,16 @@ export function createTicketCommand(getTracker: () => TaskTracker): Command {
     .option('--body-file <path>', 'read the new ticket body from a file')
     .option('--title <title>', 'new ticket title (unchanged if omitted)')
     .option('--labels <labels>', 'comma-separated labels replacing existing free-form labels')
+    .option('--attach <spec>', 'file to attach, as <path>#<caption> (repeatable)', collect, [])
     .action(async (id: string, opts: EditTicketOptions) => {
-      const result = await getTracker().updateTicketDescription(id, {
-        body: resolveBody({ body: opts.body, bodyFile: opts.bodyFile }),
+      const tracker = getTracker()
+      const raw = resolveBody({ body: opts.body, bodyFile: opts.bodyFile })
+      const body =
+        opts.attach.length === 0
+          ? raw
+          : (await new TrackerEvidenceService({ tracker }).attach({ ticketId: id, body: raw, specs: opts.attach })).body
+      const result = await tracker.updateTicketDescription(id, {
+        body,
         ...(opts.title !== undefined ? { title: opts.title } : {}),
         ...(opts.labels !== undefined ? { labels: opts.labels.split(',') } : {}),
       })
@@ -129,9 +134,15 @@ export function createTicketCommand(getTracker: () => TaskTracker): Command {
     .argument('<id>', 'ticket id')
     .option('--body <body>', 'comment body (or use --body-file)')
     .option('--body-file <path>', 'read the comment body from a file')
-    .action(async (id: string, opts: { body?: string; bodyFile?: string }) => {
-      const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile })
-      const comment = await getTracker().addComment(id, body)
+    .option('--attach <spec>', 'file to attach, as <path>#<caption> (repeatable)', collect, [])
+    .action(async (id: string, opts: { body?: string; bodyFile?: string; attach: string[] }) => {
+      const tracker = getTracker()
+      const raw = resolveBody({ body: opts.body, bodyFile: opts.bodyFile })
+      const body =
+        opts.attach.length === 0
+          ? raw
+          : (await new TrackerEvidenceService({ tracker }).attach({ ticketId: id, body: raw, specs: opts.attach })).body
+      const comment = await tracker.addComment(id, body)
       process.stdout.write(JSON.stringify(comment) + '\n')
     })
 
