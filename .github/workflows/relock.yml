@@ -5,6 +5,7 @@ on:
   workflow_dispatch:
 permissions:
   contents: write
+  packages: read
 jobs:
   relock:
     runs-on: ubuntu-latest
@@ -12,15 +13,19 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version-file: .nvmrc
       - name: Regenerate lockfile on Linux
         run: |
           rm -f package-lock.json
           npm install --no-audit --no-fund
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Sanity-check npm ci with the new lock
         run: |
           rm -rf node_modules
           npm ci
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Push regenerated lockfile to a fix branch
         run: |
           git config user.name "github-actions[bot]"
