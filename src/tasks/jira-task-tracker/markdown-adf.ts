@@ -1,12 +1,12 @@
-import type { AdfDocNode, AdfNode } from './adf.js'
+import { fromMarkdown } from 'mdast-util-from-markdown'
+import { gfmFromMarkdown } from 'mdast-util-gfm'
+import { gfm } from 'micromark-extension-gfm'
+import type { List, ListItem, PhrasingContent, Root, RootContent } from 'mdast'
+import type { AdfDocNode, AdfMark, AdfNode } from './adf.js'
 
-const fenceOpen = /^```(\S*)\s*$/
-const fenceClose = /^```\s*$/
-const headingLine = /^(#{1,6})\s+(.*)$/
-const taskLine = /^-\s+\[( |x|X)\]\s+(.*)$/
-const bulletLine = /^-\s+(.*)$/
 const detailsOpen = /^<details>/
 const detailsClose = /^<\/details>/
+const summaryTag = /<summary>([\s\S]*?)<\/summary>/
 
 export interface MarkdownAdfConverter {
   toAdf(markdown: string): AdfDocNode
@@ -15,18 +15,22 @@ export interface MarkdownAdfConverter {
 
 /**
  * Bidirectional markdown ⇄ ADF conversion for the layered-body subset
- * (docs/layered-body-format.md): headings, paragraphs with bold / code marks,
- * fenced code blocks, task lists, bullet lists, and `<details>` blocks (mapped
- * to ADF expands). Written bodies render as structured content in the Jira UI,
- * while reads reconstruct markdown so downstream pipeline steps
- * (break-down-work, execution agents) keep getting the format they parse.
- * Anything outside the subset degrades gracefully: unknown markdown stays
- * literal paragraph text on write, unknown ADF nodes flatten to their text on
- * read.
+ * (docs/layered-body-format.md): headings, paragraphs with bold / code / link
+ * marks, fenced code blocks, task lists, bullet and ordered lists, thematic
+ * breaks, and `<details>` blocks (mapped to ADF expands). The write direction
+ * parses with `mdast-util-from-markdown` plus the GFM extensions and maps mdast
+ * nodes to ADF in a `switch` on `node.type`; the read direction is a
+ * hand-written emitter, kept off mdast so `*`/`_` are never over-escaped and
+ * the round-trip stays byte-stable. Anything outside the mapped subset degrades
+ * to literal text sliced from the node's source position on write, so it
+ * round-trips unchanged until its own node-family ticket claims it; unknown ADF
+ * nodes flatten to their text on read.
  */
 export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
   toAdf(markdown: string): AdfDocNode {
-    return { version: 1, type: 'doc', content: this.parseBlocks(markdown.replace(/\r\n/g, '\n').split('\n')) }
+    const source = markdown.replace(/\r\n/g, '\n')
+    const tree = this.parse(source)
+    return { version: 1, type: 'doc', content: this.blocks(tree.children, source) }
   }
 
   toMarkdown(nodes: AdfNode[]): string {
@@ -36,120 +40,89 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
       .join('\n\n')
   }
 
-  private parseBlocks(lines: string[]): AdfNode[] {
-    const nodes: AdfNode[] = []
-    let i = 0
-    while (i < lines.length) {
-      const line = lines[i]
-      if (line === undefined || line.trim() === '') {
-        i++
-        continue
-      }
-
-      const fence = line.match(fenceOpen)
-      if (fence) {
-        const body: string[] = []
-        let j = i + 1
-        while (j < lines.length && !fenceClose.test(lines[j] ?? '')) {
-          body.push(lines[j] ?? '')
-          j++
-        }
-        nodes.push({
-          type: 'codeBlock',
-          attrs: fence[1] !== undefined && fence[1] !== '' ? { language: fence[1] } : {},
-          content: body.length > 0 ? [{ type: 'text', text: body.join('\n') }] : [],
-        })
-        i = j + 1
-        continue
-      }
-
-      const heading = line.match(headingLine)
-      if (heading !== null && heading[1] !== undefined && heading[2] !== undefined) {
-        nodes.push({ type: 'heading', attrs: { level: heading[1].length }, content: this.parseInline(heading[2]) })
-        i++
-        continue
-      }
-
-      if (detailsOpen.test(line.trim())) {
-        const details = this.parseDetails(lines, i)
-        if (details !== undefined) {
-          nodes.push(details.node)
-          i = details.next
-          continue
-        }
-        // unclosed <details>: emit the opening line as literal text so parsing always advances
-        nodes.push({ type: 'paragraph', content: this.parseInline(line) })
-        i++
-        continue
-      }
-
-      if (taskLine.test(line)) {
-        const items: AdfNode[] = []
-        while (i < lines.length) {
-          const task = lines[i]?.match(taskLine)
-          if (task === null || task === undefined || task[2] === undefined) break
-          items.push({
-            type: 'taskItem',
-            attrs: { localId: `task-${items.length + 1}`, state: task[1]?.toLowerCase() === 'x' ? 'DONE' : 'TODO' },
-            content: this.parseInline(task[2]),
-          })
-          i++
-        }
-        nodes.push({ type: 'taskList', attrs: { localId: 'task-list' }, content: items })
-        continue
-      }
-
-      if (bulletLine.test(line)) {
-        const items: AdfNode[] = []
-        while (i < lines.length) {
-          const bullet = lines[i]?.match(bulletLine)
-          if (bullet === null || bullet === undefined || bullet[1] === undefined) break
-          items.push({ type: 'listItem', content: [{ type: 'paragraph', content: this.parseInline(bullet[1]) }] })
-          i++
-        }
-        nodes.push({ type: 'bulletList', content: items })
-        continue
-      }
-
-      // hardBreaks between lines so single newlines survive the round-trip
-      const paragraph: AdfNode[] = []
-      while (i < lines.length) {
-        const current = lines[i]
-        if (current === undefined || current.trim() === '' || this.startsBlock(current)) break
-        if (paragraph.length > 0) paragraph.push({ type: 'hardBreak' })
-        paragraph.push(...this.parseInline(current))
-        i++
-      }
-      if (paragraph.length > 0) nodes.push({ type: 'paragraph', content: paragraph })
-    }
-    return nodes
+  private parse(markdown: string): Root {
+    return fromMarkdown(markdown, { extensions: [gfm()], mdastExtensions: [gfmFromMarkdown()] })
   }
 
-  private startsBlock(line: string): boolean {
-    return (
-      fenceOpen.test(line) ||
-      headingLine.test(line) ||
-      taskLine.test(line) ||
-      bulletLine.test(line) ||
-      detailsOpen.test(line.trim())
-    )
+  private blocks(nodes: RootContent[], source: string): AdfNode[] {
+    const out: AdfNode[] = []
+    let i = 0
+    while (i < nodes.length) {
+      const node = nodes[i]
+      if (node === undefined) {
+        i++
+        continue
+      }
+      if (node.type === 'html' && detailsOpen.test(node.value)) {
+        const paired = this.pairDetails(nodes, i, source)
+        if (paired !== undefined) {
+          out.push(paired.node)
+          i = paired.next
+          continue
+        }
+        // Unclosed <details>: emit the opener as literal text so parsing always advances.
+        out.push(this.literalBlock(node, source))
+        i++
+        continue
+      }
+      if (node.type === 'list') {
+        out.push(...this.listNodes(node, source))
+        i++
+        continue
+      }
+      out.push(this.blockNode(node, source))
+      i++
+    }
+    return out
+  }
+
+  private blockNode(node: RootContent, source: string): AdfNode {
+    switch (node.type) {
+      case 'heading':
+        return { type: 'heading', attrs: { level: node.depth }, content: this.inline(node.children, source) }
+      case 'paragraph':
+        return { type: 'paragraph', content: this.inline(node.children, source) }
+      case 'code': {
+        const lang = node.lang
+        const hasLang = lang !== null && lang !== undefined && lang !== ''
+        return {
+          type: 'codeBlock',
+          attrs: hasLang ? { language: lang } : {},
+          content: node.value === '' ? [] : [{ type: 'text', text: node.value }],
+        }
+      }
+      case 'thematicBreak':
+        return { type: 'rule' }
+      default:
+        return this.literalBlock(node, source)
+    }
   }
 
   /**
-   * Converts the `<details>` block spanning `lines[start..]` into an expand:
-   * finds the matching `</details>` (nesting-aware), lifts the `<summary>`
-   * into the expand title, and parses what remains as blocks. Returns
-   * undefined for an unclosed block, which then falls through to plain
-   * paragraph text.
+   * Re-pairs a `<details>`/`</details>` run of sibling blocks into a single
+   * expand. `mdast-util-from-markdown` emits an `html` node for each opener and
+   * closer with the inner markdown as ordinary siblings between them, so this
+   * scans forward counting nesting depth on those html nodes. The `<summary>`
+   * (which shares the opener's html node) becomes the title; if the author left
+   * content after `</summary>` on the same html block instead of a blank line,
+   * that remainder is parsed and prepended to the inner blocks. An unclosed run
+   * returns undefined so the caller degrades the opener to literal text.
    */
-  private parseDetails(lines: string[], start: number): { node: AdfNode; next: number } | undefined {
+  private pairDetails(
+    nodes: RootContent[],
+    start: number,
+    source: string,
+  ): { node: AdfNode; next: number } | undefined {
+    const opener = nodes[start]
+    if (opener === undefined || opener.type !== 'html') return undefined
+
     let depth = 0
     let end = -1
-    for (let j = start; j < lines.length; j++) {
-      // Only line-anchored tags count, so a `<details>` mentioned mid-sentence is prose rather than nesting.
-      const trimmed = (lines[j] ?? '').trim()
-      if (detailsOpen.test(trimmed)) depth++
-      if (detailsClose.test(trimmed)) depth--
+    for (let j = start; j < nodes.length; j++) {
+      const sibling = nodes[j]
+      if (sibling === undefined) continue
+      if (sibling.type === 'html' && detailsOpen.test(sibling.value)) depth++
+      else if (sibling.type === 'html' && detailsClose.test(sibling.value)) depth--
       if (depth === 0) {
         end = j
         break
@@ -157,39 +130,103 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
     }
     if (end === -1) return undefined
 
-    const block = lines.slice(start, end + 1).join('\n')
-    const inner = block.replace(/^\s*<details>\s*/, '').replace(/\s*<\/details>\s*$/, '')
-    const summary = inner.match(/^\s*<summary>([\s\S]*?)<\/summary>\s*/)
+    const summary = opener.value.match(summaryTag)
     const title = summary?.[1]?.trim() ?? ''
-    const body = summary !== null ? inner.slice(summary[0].length) : inner
-    return {
-      node: { type: 'expand', attrs: { title }, content: this.parseBlocks(body.split('\n')) },
-      next: end + 1,
-    }
+    const remainder = summary === null ? '' : opener.value.slice((summary.index ?? 0) + summary[0].length)
+
+    const inner = this.blocks(nodes.slice(start + 1, end), source)
+    const leading = remainder.trim() === '' ? [] : this.blocks(this.parse(remainder).children, remainder)
+
+    return { node: { type: 'expand', attrs: { title }, content: [...leading, ...inner] }, next: end + 1 }
   }
 
-  private parseInline(text: string): AdfNode[] {
-    const nodes: AdfNode[] = []
-    // Bold / code / inline link. Their opening characters (* ` [) are distinct,
-    // so alternation order doesn't change which span wins at a given position.
-    const pattern = /\*\*([^*]+)\*\*|`([^`]+)`|\[([^\]]+)\]\(([^)]+)\)/g
-    let last = 0
-    for (let match = pattern.exec(text); match !== null; match = pattern.exec(text)) {
-      if (match.index > last) nodes.push({ type: 'text', text: text.slice(last, match.index) })
-      if (match[1] !== undefined) nodes.push({ type: 'text', text: match[1], marks: [{ type: 'strong' }] })
-      else if (match[2] !== undefined) nodes.push({ type: 'text', text: match[2], marks: [{ type: 'code' }] })
-      else if (match[3] !== undefined && match[4] !== undefined) {
-        // Recurse on the label so marks compose (a link whose label is bold/code
-        // carries both marks), then hang the link mark off each resulting node.
-        const href = match[4]
-        for (const child of this.parseInline(match[3])) {
-          nodes.push({ ...child, marks: [...(child.marks ?? []), { type: 'link', attrs: { href } }] })
-        }
-      }
-      last = match.index + match[0].length
+  private listNodes(node: List, source: string): AdfNode[] {
+    if (node.children.some((item) => item.checked === true || item.checked === false)) {
+      return [this.taskList(node, source)]
     }
-    if (last < text.length) nodes.push({ type: 'text', text: text.slice(last) })
-    return nodes
+
+    const ordered = node.ordered === true
+    const start = typeof node.start === 'number' ? node.start : 1
+
+    // ADF has no loose/tight concept, and today's output is one list per
+    // blank-separated run, so a spread list splits into single-item lists whose
+    // `\n\n` block join reproduces the blank lines.
+    const spread = node.spread === true || node.children.some((item) => item.spread === true)
+    if (spread) {
+      return node.children.map((item, index) => this.singleList(ordered, start + index, [item], source))
+    }
+    return [this.singleList(ordered, start, node.children, source)]
+  }
+
+  private singleList(ordered: boolean, order: number, items: ListItem[], source: string): AdfNode {
+    const content = items.map((item) => ({ type: 'listItem', content: this.blocks(item.children, source) }))
+    if (!ordered) return { type: 'bulletList', content }
+    return { type: 'orderedList', ...(order === 1 ? {} : { attrs: { order } }), content }
+  }
+
+  private taskList(node: List, source: string): AdfNode {
+    const content = node.children.map((item, index) => {
+      const first = item.children[0]
+      return {
+        type: 'taskItem',
+        attrs: { localId: `task-${index + 1}`, state: item.checked === true ? 'DONE' : 'TODO' },
+        content: first !== undefined && first.type === 'paragraph' ? this.inline(first.children, source) : [],
+      }
+    })
+    return { type: 'taskList', attrs: { localId: 'task-list' }, content }
+  }
+
+  private inline(nodes: PhrasingContent[], source: string, marks: AdfMark[] = []): AdfNode[] {
+    const out: AdfNode[] = []
+    for (const node of nodes) {
+      switch (node.type) {
+        case 'text':
+          out.push(...this.textSegments(node.value, marks))
+          break
+        case 'strong':
+          out.push(...this.inline(node.children, source, [...marks, { type: 'strong' }]))
+          break
+        // ADF's code mark excludes fontStyle marks, so any inherited strong is dropped.
+        case 'inlineCode':
+          out.push({ type: 'text', text: node.value, marks: [{ type: 'code' }] })
+          break
+        case 'break':
+          out.push({ type: 'hardBreak' })
+          break
+        case 'link': {
+          const href = node.url
+          for (const child of this.inline(node.children, source, marks)) {
+            out.push({ ...child, marks: [...(child.marks ?? []), { type: 'link', attrs: { href } }] })
+          }
+          break
+        }
+        default:
+          out.push({ type: 'text', text: this.literal(node, source), ...(marks.length > 0 ? { marks } : {}) })
+      }
+    }
+    return out
+  }
+
+  /**
+   * Splits a text value on soft line breaks. mdast keeps a soft break as a `\n`
+   * inside one `text` node, but today's ADF interleaves `hardBreak` nodes and
+   * the multi-line-paragraph round-trip depends on that.
+   */
+  private textSegments(value: string, marks: AdfMark[]): AdfNode[] {
+    const out: AdfNode[] = []
+    value.split('\n').forEach((segment, index) => {
+      if (index > 0) out.push({ type: 'hardBreak' })
+      out.push({ type: 'text', text: segment, ...(marks.length > 0 ? { marks } : {}) })
+    })
+    return out
+  }
+
+  private literalBlock(node: RootContent, source: string): AdfNode {
+    return { type: 'paragraph', content: this.textSegments(this.literal(node, source), []) }
+  }
+
+  private literal(node: RootContent | PhrasingContent, source: string): string {
+    return source.slice(node.position?.start.offset ?? 0, node.position?.end.offset ?? 0)
   }
 
   private blockToMarkdown(node: AdfNode): string {
@@ -216,10 +253,12 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
         return (node.content ?? [])
           .map((item) => `- ${this.toMarkdown(item.content ?? []).replace(/\n/g, '\n  ')}`)
           .join('\n')
-      case 'orderedList':
+      case 'orderedList': {
+        const order = typeof node.attrs?.['order'] === 'number' ? node.attrs['order'] : 1
         return (node.content ?? [])
-          .map((item, index) => `${index + 1}. ${this.toMarkdown(item.content ?? []).replace(/\n/g, '\n   ')}`)
+          .map((item, index) => `${order + index}. ${this.toMarkdown(item.content ?? []).replace(/\n/g, '\n   ')}`)
           .join('\n')
+      }
       case 'expand': {
         const title = typeof node.attrs?.['title'] === 'string' ? node.attrs['title'] : ''
         return `<details><summary>${title}</summary>\n\n${this.toMarkdown(node.content ?? [])}\n\n</details>`
