@@ -124,6 +124,18 @@ export function createTicketCommand(getTracker: () => TaskTracker): Command {
     })
 
   ticket
+    .command('comment')
+    .exitOverride()
+    .argument('<id>', 'ticket id')
+    .option('--body <body>', 'comment body (or use --body-file)')
+    .option('--body-file <path>', 'read the comment body from a file')
+    .action(async (id: string, opts: { body?: string; bodyFile?: string }) => {
+      const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile })
+      const comment = await getTracker().addComment(id, body)
+      process.stdout.write(JSON.stringify(comment) + '\n')
+    })
+
+  ticket
     .command('label')
     .exitOverride()
     .argument('<id>', 'ticket id')

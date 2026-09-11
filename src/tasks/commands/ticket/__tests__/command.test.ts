@@ -1,7 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { CommanderError } from 'commander'
-import type { TaskTracker, Ticket } from '../../../task-tracker/task-tracker.js'
+import type { Comment, TaskTracker, Ticket } from '../../../task-tracker/task-tracker.js'
 import { createTicketCommand } from '../command.js'
+
+vi.mock('node:fs', () => ({
+  readFileSync: vi.fn(),
+}))
+
+import { readFileSync } from 'node:fs'
 
 const mockTicket: Ticket = {
   id: '7',
@@ -341,6 +347,56 @@ describe('ticket transitions command', () => {
     await createTicketCommand(() => tracker).parseAsync(['transitions', '7'], { from: 'user' })
     expect(write).toHaveBeenCalledWith(JSON.stringify({ id: '7', transitions: [] }) + '\n')
     write.mockRestore()
+  })
+})
+
+describe('ticket comment command', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  const mockComment: Comment = {
+    id: 'c1',
+    body: 'hello',
+    author: 'SethAngell',
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z',
+  }
+
+  it('calls addComment with the inline --body and prints the comment JSON', async () => {
+    const tracker = makeTracker()
+    vi.mocked(tracker.addComment).mockResolvedValue(mockComment)
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(tracker, ['comment', 'PROJ-1', '--body', 'hello'])
+    expect(tracker.addComment).toHaveBeenCalledWith('PROJ-1', 'hello')
+    expect(output).toHaveBeenCalledWith(JSON.stringify(mockComment) + '\n')
+    expect(vi.mocked(readFileSync)).not.toHaveBeenCalled()
+    output.mockRestore()
+  })
+
+  it('reads --body-file and posts its contents', async () => {
+    const tracker = makeTracker()
+    vi.mocked(tracker.addComment).mockResolvedValue(mockComment)
+    vi.mocked(readFileSync).mockReturnValue('from file')
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(tracker, ['comment', 'PROJ-1', '--body-file', '/tmp/c.md'])
+    expect(vi.mocked(readFileSync)).toHaveBeenCalledWith('/tmp/c.md', 'utf8')
+    expect(tracker.addComment).toHaveBeenCalledWith('PROJ-1', 'from file')
+    output.mockRestore()
+  })
+
+  it('prefers --body-file over --body when both are given', async () => {
+    const tracker = makeTracker()
+    vi.mocked(tracker.addComment).mockResolvedValue(mockComment)
+    vi.mocked(readFileSync).mockReturnValue('from file')
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(tracker, ['comment', 'PROJ-1', '--body', 'inline', '--body-file', '/tmp/c.md'])
+    expect(tracker.addComment).toHaveBeenCalledWith('PROJ-1', 'from file')
+    output.mockRestore()
+  })
+
+  it('rejects when neither --body nor --body-file is given', async () => {
+    const tracker = makeTracker()
+    await expect(run(tracker, ['comment', 'PROJ-1'])).rejects.toThrow('one of --body or --body-file')
+    expect(tracker.addComment).not.toHaveBeenCalled()
   })
 })
 
