@@ -29764,6 +29764,14 @@ var GitHubTaskTracker = class {
       updatedAt: data.updated_at
     };
   }
+  // eslint-disable-next-line preflight/no-throw-helpers -- a capability stub's whole body is the throw
+  async addAttachment(ticketId, filePath) {
+    throw new UnsupportedTrackerOperationError({
+      tracker: "GitHub",
+      operation: `attaching ${filePath} to issue #${ticketId}`,
+      remedy: "GitHub issues have no attachment API; use --tracker jira, or gh --attach for pull requests"
+    });
+  }
   async getUsers() {
     const { data } = await this.octokit.rest.orgs.listMembers({
       org: this.owner,
@@ -29861,6 +29869,10 @@ var GitHubTaskTracker = class {
     };
   }
 };
+
+// src/tasks/jira-task-tracker/jira-task-tracker.ts
+import { readFileSync as readFileSync2 } from "node:fs";
+import { basename } from "node:path";
 
 // src/tasks/jira-task-tracker/jira-api-error.ts
 var JiraApiError = class extends Error {
@@ -30022,6 +30034,28 @@ var ConfluenceClient = class {
     throw new Error(`Confluence API ${res.status}${detail ? `: ${detail}` : ""}`);
   }
 };
+
+// src/tasks/mime-types/mime-types.ts
+import { extname } from "node:path";
+var mimeTypesByExtension = {
+  gif: "image/gif",
+  jpeg: "image/jpeg",
+  jpg: "image/jpeg",
+  mov: "video/quicktime",
+  mp4: "video/mp4",
+  png: "image/png",
+  svg: "image/svg+xml",
+  webm: "video/webm",
+  webp: "image/webp"
+};
+var fallbackMimeType = "application/octet-stream";
+var ExtensionMimeTypeResolver = class {
+  forFilename(filename) {
+    const extension = extname(filename).slice(1).toLowerCase();
+    return mimeTypesByExtension[extension] ?? fallbackMimeType;
+  }
+};
+var extensionMimeTypeResolver = new ExtensionMimeTypeResolver();
 
 // src/tasks/jira-task-tracker/markdown-adf.ts
 var fenceOpen = /^```(\S*)\s*$/;
@@ -30293,6 +30327,14 @@ var ideaIssueType = "Idea";
 var jpdProjectType = "product_discovery";
 var deliveryLinkOutward = "implements";
 var tddMetadataPropertyKey = "flight-rules-metadata";
+var mediaFileUrl = /\/file\/([0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12})\/binary/;
+var JiraUploadedAttachmentSchema = external_exports.object({
+  id: external_exports.union([external_exports.string(), external_exports.number()]).transform(String),
+  filename: external_exports.string(),
+  mimeType: external_exports.string(),
+  size: external_exports.number().optional()
+});
+var JiraUploadedAttachmentsSchema = external_exports.array(JiraUploadedAttachmentSchema);
 var JiraTaskTracker = class {
   client;
   confluence;
@@ -30301,6 +30343,7 @@ var JiraTaskTracker = class {
   confluenceSpaceKey;
   metadata = new JiraAdfMetadataService();
   bodyFormat = markdownAdfConverter;
+  mimeTypes = new ExtensionMimeTypeResolver();
   issueTypeNames;
   blocksLinkType;
   deliveryLinkType;
@@ -30538,6 +30581,23 @@ var JiraTaskTracker = class {
       updatedAt: comment.updated
     };
   }
+  /**
+   * Uploads a file as a native Jira attachment and resolves the media UUID that
+   * inline ADF media nodes address it by; Jira only reveals that UUID in the
+   * redirect it issues for the attachment's content URL.
+   */
+  async addAttachment(ticketId, filePath) {
+    const filename = basename(filePath);
+    const file2 = new File([readFileSync2(filePath)], filename, { type: this.mimeTypes.forFilename(filename) });
+    const uploaded = JiraUploadedAttachmentsSchema.parse(
+      await this.client.upload(`/issue/${ticketId}/attachments`, [file2])
+    );
+    const attachment = uploaded[0];
+    if (attachment === void 0) {
+      throw new Error(`Jira accepted the upload of ${filename} to ${ticketId} but returned no attachment`);
+    }
+    return this.mapAttachment(attachment, await this.resolveMediaUuid(attachment.id));
+  }
   async getUsers() {
     const users = await this.client.request("GET", "/user/assignable/search", void 0, {
       project: this.project,
@@ -30577,6 +30637,15 @@ var JiraTaskTracker = class {
       blocking,
       metadata: this.parseMetadata(issue2),
       updatedAt: issue2.fields.updated ?? ""
+    };
+  }
+  mapAttachment(uploaded, mediaUuid) {
+    return {
+      id: uploaded.id,
+      filename: uploaded.filename,
+      mimeType: uploaded.mimeType,
+      ...uploaded.size !== void 0 ? { size: uploaded.size } : {},
+      mediaUuid
     };
   }
   mapAttachments(attachments) {
@@ -30643,6 +30712,16 @@ var JiraTaskTracker = class {
   }
   async fetchTransitions(ticketId) {
     return this.client.request("GET", `/issue/${ticketId}/transitions`);
+  }
+  async resolveMediaUuid(attachmentId) {
+    const location = await this.client.locationFor(`/attachment/content/${attachmentId}`);
+    const uuid3 = mediaFileUrl.exec(location)?.[1];
+    if (uuid3 === void 0) {
+      throw new Error(
+        `Jira did not redirect attachment ${attachmentId} to a media file URL, so it cannot be embedded inline (location: ${location})`
+      );
+    }
+    return uuid3;
   }
   async resolveBlocksLinkType() {
     if (this.blocksLinkType === void 0) {
@@ -30740,9 +30819,9 @@ var JiraTaskTracker = class {
 };
 
 // src/tasks/commands/resolve-body.ts
-import { readFileSync as readFileSync2 } from "node:fs";
+import { readFileSync as readFileSync3 } from "node:fs";
 function resolveBody(opts) {
-  if (opts.bodyFile !== void 0) return readFileSync2(opts.bodyFile, "utf8");
+  if (opts.bodyFile !== void 0) return readFileSync3(opts.bodyFile, "utf8");
   if (opts.body !== void 0) return opts.body;
   throw new Error("one of --body or --body-file is required");
 }
@@ -31281,7 +31360,7 @@ var NodeGitExecutor = class {
 };
 
 // src/git/commit-message-builder/commit-message-builder.ts
-import { readFileSync as readFileSync3 } from "node:fs";
+import { readFileSync as readFileSync4 } from "node:fs";
 import { dirname as dirname2, join as join2 } from "node:path";
 
 // src/git/commit-message-builder/commit-message.schema.ts
@@ -31339,7 +31418,7 @@ var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
   static readPluginVersion(binPath) {
     try {
       const pkgPath = join2(dirname2(binPath), "..", "package.json");
-      const parsed = JSON.parse(readFileSync3(pkgPath, "utf-8"));
+      const parsed = JSON.parse(readFileSync4(pkgPath, "utf-8"));
       if (typeof parsed === "object" && parsed !== null && "version" in parsed && typeof parsed.version === "string") {
         return parsed.version;
       }
@@ -31629,7 +31708,7 @@ function createPrCommand(getHost) {
 
 // src/tasks/tool-probe/tool-probe.ts
 import { execFile as execFile3 } from "node:child_process";
-import { existsSync as existsSync2, readFileSync as readFileSync4 } from "node:fs";
+import { existsSync as existsSync2, readFileSync as readFileSync5 } from "node:fs";
 import { promisify as promisify3 } from "node:util";
 var minimumGhVersion = [2, 99, 0];
 var ghVersionLine = /gh version (\d+)\.(\d+)\.(\d+)/;
@@ -31640,7 +31719,7 @@ var NodeToolProbe = class {
     this.execFile = props.execFileFn ?? ((file2, args) => promisified(file2, [...args]));
   }
   async probe(input) {
-    const recipe = existsSync2(input.recipePath) ? readFileSync4(input.recipePath, "utf8") : void 0;
+    const recipe = existsSync2(input.recipePath) ? readFileSync5(input.recipePath, "utf8") : void 0;
     const qaRequired = recipe !== void 0;
     const opRequired = qaRequired && recipe.includes("op://");
     const ghRequired = input.repo !== void 0;
