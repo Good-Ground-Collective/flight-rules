@@ -54,7 +54,13 @@ const jpdProjectType = 'product_discovery'
 const deliveryLinkOutward = 'implements'
 const tddMetadataPropertyKey = 'flight-rules-metadata'
 
-const mediaFileUrl = /\/file\/([0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12})\/binary/
+// Anchored to the full pathname so only an exact `/file/<uuid>/binary` matches: a
+// login redirect, a trailing suffix (`/binary-invalid`), or extra path segments must
+// not yield a bogus mediaUuid. Query strings live outside the pathname, so the real
+// media URL (`.../file/<uuid>/binary?token=...`) still matches.
+const mediaFilePath = /^\/file\/([0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12})\/binary$/
+// Base for resolving a relative Location; absolute Jira media URLs keep their own origin.
+const mediaLocationBase = 'https://media.invalid/'
 
 const JiraUploadedAttachmentSchema = z.object({
   id: z.union([z.string(), z.number()]).transform(String),
@@ -535,13 +541,27 @@ export class JiraTaskTracker implements TaskTracker {
 
   private async resolveMediaUuid(attachmentId: string): Promise<string> {
     const location = await this.client.locationFor(`/attachment/content/${attachmentId}`)
-    const uuid = mediaFileUrl.exec(location)?.[1]
+    const uuid = this.extractMediaUuid(location)
     if (uuid === undefined) {
       throw new Error(
         `Jira did not redirect attachment ${attachmentId} to a media file URL, so it cannot be embedded inline (location: ${location})`,
       )
     }
     return uuid
+  }
+
+  // Extracts the media UUID only from a well-formed `/file/<uuid>/binary` pathname.
+  // Parses the Location as a URL (absolute media URLs keep their origin; a relative
+  // Location resolves against a base), then matches the anchored pathname — so an
+  // unparseable Location or any other path yields undefined and is rejected by the caller.
+  private extractMediaUuid(location: string): string | undefined {
+    let pathname: string
+    try {
+      pathname = new URL(location, mediaLocationBase).pathname
+    } catch {
+      return undefined
+    }
+    return mediaFilePath.exec(pathname)?.[1]
   }
 
   private async resolveBlocksLinkType(): Promise<string> {

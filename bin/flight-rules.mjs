@@ -30327,7 +30327,8 @@ var ideaIssueType = "Idea";
 var jpdProjectType = "product_discovery";
 var deliveryLinkOutward = "implements";
 var tddMetadataPropertyKey = "flight-rules-metadata";
-var mediaFileUrl = /\/file\/([0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12})\/binary/;
+var mediaFilePath = /^\/file\/([0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12})\/binary$/;
+var mediaLocationBase = "https://media.invalid/";
 var JiraUploadedAttachmentSchema = external_exports.object({
   id: external_exports.union([external_exports.string(), external_exports.number()]).transform(String),
   filename: external_exports.string(),
@@ -30715,13 +30716,26 @@ var JiraTaskTracker = class {
   }
   async resolveMediaUuid(attachmentId) {
     const location = await this.client.locationFor(`/attachment/content/${attachmentId}`);
-    const uuid3 = mediaFileUrl.exec(location)?.[1];
+    const uuid3 = this.extractMediaUuid(location);
     if (uuid3 === void 0) {
       throw new Error(
         `Jira did not redirect attachment ${attachmentId} to a media file URL, so it cannot be embedded inline (location: ${location})`
       );
     }
     return uuid3;
+  }
+  // Extracts the media UUID only from a well-formed `/file/<uuid>/binary` pathname.
+  // Parses the Location as a URL (absolute media URLs keep their origin; a relative
+  // Location resolves against a base), then matches the anchored pathname — so an
+  // unparseable Location or any other path yields undefined and is rejected by the caller.
+  extractMediaUuid(location) {
+    let pathname;
+    try {
+      pathname = new URL(location, mediaLocationBase).pathname;
+    } catch {
+      return void 0;
+    }
+    return mediaFilePath.exec(pathname)?.[1];
   }
   async resolveBlocksLinkType() {
     if (this.blocksLinkType === void 0) {

@@ -68,6 +68,41 @@ describe('JiraTaskTracker.addAttachment', () => {
     await expect(makeTracker().addAttachment('PROJ-2', '/tmp/before.png')).rejects.toThrow(/30003/)
   })
 
+  it('resolves the UUID from the real absolute media URL Jira returns', async () => {
+    upload.mockResolvedValue([{ id: '40004', filename: 'before.png', mimeType: 'image/png' }])
+    locationFor.mockResolvedValue(
+      'https://media.atlassian.com/file/abcdef01-2345-6789-abcd-ef0123456789/binary?token=xyz',
+    )
+
+    const attachment = await makeTracker().addAttachment('PROJ-2', '/tmp/before.png')
+
+    expect(attachment.mediaUuid).toBe('abcdef01-2345-6789-abcd-ef0123456789')
+  })
+
+  it('rejects a query-string-only match that is not on the redirect path', async () => {
+    upload.mockResolvedValue([{ id: '50005', filename: 'before.png', mimeType: 'image/png' }])
+    locationFor.mockResolvedValue('/login?dest=/file/12345678-1234-1234-1234-123456789abc/binary')
+
+    await expect(makeTracker().addAttachment('PROJ-2', '/tmp/before.png')).rejects.toThrow(/media file URL/)
+    await expect(makeTracker().addAttachment('PROJ-2', '/tmp/before.png')).rejects.toThrow(/50005/)
+  })
+
+  it('rejects a trailing suffix on the binary segment', async () => {
+    upload.mockResolvedValue([{ id: '60006', filename: 'before.png', mimeType: 'image/png' }])
+    locationFor.mockResolvedValue('/file/12345678-1234-1234-1234-123456789abc/binary-invalid')
+
+    await expect(makeTracker().addAttachment('PROJ-2', '/tmp/before.png')).rejects.toThrow(/media file URL/)
+    await expect(makeTracker().addAttachment('PROJ-2', '/tmp/before.png')).rejects.toThrow(/60006/)
+  })
+
+  it('rejects a non-URL Location whose path merely contains the media segment', async () => {
+    upload.mockResolvedValue([{ id: '70007', filename: 'before.png', mimeType: 'image/png' }])
+    locationFor.mockResolvedValue('not-a-url/file/12345678-1234-1234-1234-123456789abc/binary')
+
+    await expect(makeTracker().addAttachment('PROJ-2', '/tmp/before.png')).rejects.toThrow(/media file URL/)
+    await expect(makeTracker().addAttachment('PROJ-2', '/tmp/before.png')).rejects.toThrow(/70007/)
+  })
+
   it('rejects an off-contract upload response before locationFor is called', async () => {
     upload.mockResolvedValue([{ id: '10001' }])
 
