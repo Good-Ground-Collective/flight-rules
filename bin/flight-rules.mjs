@@ -31162,10 +31162,105 @@ var PrecedenceBodyFormatDetector = class {
 };
 var bodyFormatDetector = new PrecedenceBodyFormatDetector();
 
-// src/tasks/commands/ticket/command.ts
+// src/shared/collect.ts
 function collect(value, previous) {
   return [...previous, value];
 }
+
+// src/tasks/evidence/evidence.ts
+import { basename as basename2 } from "node:path/posix";
+var mediaReference = /(!?)\[([^\]]*)\]\(\s*<?([^\s()<>]+)>?(?:\s+"[^"]*")?\s*\)/g;
+var absoluteTarget = /^[a-zA-Z][a-zA-Z0-9+.-]*:|^\/\/|^#/;
+var localPrefix = /^(?:\.\/)+/;
+var fenceToggle = /^\s*```/;
+var AttachmentSpecSchema = external_exports.string().min(1).transform((spec) => {
+  const hash2 = spec.lastIndexOf("#");
+  const path2 = hash2 > 0 ? spec.slice(0, hash2) : spec;
+  const caption = hash2 > 0 ? spec.slice(hash2 + 1).trim() : "";
+  return { path: path2, caption: caption.length > 0 ? caption : basename2(path2) };
+});
+var DuplicateEvidenceNameError = class extends Error {
+  name = "DuplicateEvidenceNameError";
+  constructor(props) {
+    super(`Two attachments share the filename "${props.filename}": ${props.paths.join(", ")}`);
+  }
+};
+var TrackerEvidenceService = class {
+  tracker;
+  constructor(props) {
+    this.tracker = props.tracker;
+  }
+  async attach(input) {
+    const specs = input.specs.map((spec) => AttachmentSpecSchema.parse(spec));
+    this.rejectDuplicateNames(specs);
+    const attachments = await Promise.all(
+      specs.map(async (spec) => {
+        const uploaded = await this.tracker.addAttachment(input.ticketId, spec.path);
+        return { ...uploaded, path: spec.path, caption: spec.caption, referenced: false };
+      })
+    );
+    const byName = /* @__PURE__ */ new Map();
+    for (const attachment of attachments) byName.set(basename2(attachment.path), attachment);
+    const rewritten = this.rewriteReferences(input.body, byName);
+    return { body: this.appendUnreferenced(rewritten, attachments), attachments };
+  }
+  rejectDuplicateNames(specs) {
+    const paths = /* @__PURE__ */ new Map();
+    for (const spec of specs) {
+      const name = basename2(spec.path);
+      paths.set(name, [...paths.get(name) ?? [], spec.path]);
+    }
+    for (const [filename, group] of paths) {
+      if (group.length > 1) throw new DuplicateEvidenceNameError({ filename, paths: group });
+    }
+  }
+  rewriteReferences(body, byName) {
+    let inFence = false;
+    return body.split("\n").map((line) => {
+      if (fenceToggle.test(line)) {
+        inFence = !inFence;
+        return line;
+      }
+      return inFence ? line : this.rewriteLine(line, byName);
+    }).join("\n");
+  }
+  rewriteLine(line, byName) {
+    let result = "";
+    let last = 0;
+    mediaReference.lastIndex = 0;
+    for (let match = mediaReference.exec(line); match !== null; match = mediaReference.exec(line)) {
+      const whole = match[0];
+      const bang = match[1];
+      const label = match[2];
+      const target = match[3];
+      result += line.slice(last, match.index);
+      const attachment = bang !== void 0 && label !== void 0 && target !== void 0 ? this.resolve(target, byName) : void 0;
+      if (attachment === void 0 || bang === void 0 || label === void 0) {
+        result += whole;
+      } else {
+        attachment.referenced = true;
+        result += `${bang}[${label}](attachment:${attachment.filename})`;
+      }
+      last = match.index + whole.length;
+    }
+    return result + line.slice(last);
+  }
+  resolve(target, byName) {
+    if (absoluteTarget.test(target)) return void 0;
+    return byName.get(basename2(target.replace(localPrefix, "")));
+  }
+  appendUnreferenced(body, attachments) {
+    let result = body;
+    for (const attachment of attachments) {
+      if (!attachment.referenced) result += `
+
+![${attachment.caption}](attachment:${attachment.filename})`;
+    }
+    return result;
+  }
+};
+
+// src/tasks/commands/ticket/command.ts
 function createTicketCommand(getTracker) {
   const ticket = new Command("ticket");
   ticket.command("create").exitOverride().requiredOption("--title <title>", "ticket title").option("--body <body>", "ticket body (or use --body-file)").option("--body-file <path>", "read the ticket body from a file").option("--epic-id <id>", "parent epic id; omit to create a standalone ticket").option("--labels <labels>", "comma-separated labels").option("--assignee <user>", "assignee login").action(async (opts) => {
@@ -31179,9 +31274,12 @@ function createTicketCommand(getTracker) {
     const result = await getTracker().createTicket(input);
     process.stdout.write(JSON.stringify(result) + "\n");
   });
-  ticket.command("edit").exitOverride().argument("<id>", "ticket id").option("--body <body>", "new ticket body (or use --body-file)").option("--body-file <path>", "read the new ticket body from a file").option("--title <title>", "new ticket title (unchanged if omitted)").option("--labels <labels>", "comma-separated labels replacing existing free-form labels").action(async (id, opts) => {
-    const result = await getTracker().updateTicketDescription(id, {
-      body: resolveBody({ body: opts.body, bodyFile: opts.bodyFile }),
+  ticket.command("edit").exitOverride().argument("<id>", "ticket id").option("--body <body>", "new ticket body (or use --body-file)").option("--body-file <path>", "read the new ticket body from a file").option("--title <title>", "new ticket title (unchanged if omitted)").option("--labels <labels>", "comma-separated labels replacing existing free-form labels").option("--attach <spec>", "file to attach, as <path>#<caption> (repeatable)", collect, []).action(async (id, opts) => {
+    const tracker = getTracker();
+    const raw = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
+    const body = opts.attach.length === 0 ? raw : (await new TrackerEvidenceService({ tracker }).attach({ ticketId: id, body: raw, specs: opts.attach })).body;
+    const result = await tracker.updateTicketDescription(id, {
+      body,
       ...opts.title !== void 0 ? { title: opts.title } : {},
       ...opts.labels !== void 0 ? { labels: opts.labels.split(",") } : {}
     });
@@ -31215,9 +31313,11 @@ function createTicketCommand(getTracker) {
     const transitions = await getTracker().listTransitions(id);
     process.stdout.write(JSON.stringify({ id, transitions }) + "\n");
   });
-  ticket.command("comment").exitOverride().argument("<id>", "ticket id").option("--body <body>", "comment body (or use --body-file)").option("--body-file <path>", "read the comment body from a file").action(async (id, opts) => {
-    const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
-    const comment = await getTracker().addComment(id, body);
+  ticket.command("comment").exitOverride().argument("<id>", "ticket id").option("--body <body>", "comment body (or use --body-file)").option("--body-file <path>", "read the comment body from a file").option("--attach <spec>", "file to attach, as <path>#<caption> (repeatable)", collect, []).action(async (id, opts) => {
+    const tracker = getTracker();
+    const raw = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
+    const body = opts.attach.length === 0 ? raw : (await new TrackerEvidenceService({ tracker }).attach({ ticketId: id, body: raw, specs: opts.attach })).body;
+    const comment = await tracker.addComment(id, body);
     process.stdout.write(JSON.stringify(comment) + "\n");
   });
   ticket.command("label").exitOverride().argument("<id>", "ticket id").option("--add <label>", "label to add (repeatable)", collect, []).option("--remove <label>", "label to remove (repeatable)", collect, []).action(async (id, opts) => {
@@ -31796,15 +31896,10 @@ var GhPullRequestHost = class {
   }
 };
 
-// src/shared/collect.ts
-function collect3(value, previous) {
-  return [...previous, value];
-}
-
 // src/pr/commands/pr/command.ts
 function createPrCommand(getHost) {
   const pr = new Command("pr");
-  pr.command("create").exitOverride().requiredOption("--type <type>", "conventional commit type").requiredOption("--scope <scope>", "conventional commit scope").requiredOption("--description <description>", "PR title description").requiredOption("--why <why>", 'the "Why Was It Changed" prose section').requiredOption("--what <what>", 'a "What Was Changed" bullet (repeatable, 1-5)', collect3, []).requiredOption("--base <base>", "base branch to merge into").requiredOption("--head <head>", "head branch to merge from").option("--ots <markdown>", 'the "OTS Materials" block (raw markdown/JSON)').option("--ticket-id <id>", "tracker ticket id").option("--ticket-url <url>", "tracker ticket url").option("--reviewer <reviewer>", "reviewer to request (repeatable)", collect3, []).option("--label <label>", "label to apply (repeatable)", collect3, []).option("--attach <spec>", "file to attach, as <path>#<caption> (repeatable)", collect3, []).action(async (opts) => {
+  pr.command("create").exitOverride().requiredOption("--type <type>", "conventional commit type").requiredOption("--scope <scope>", "conventional commit scope").requiredOption("--description <description>", "PR title description").requiredOption("--why <why>", 'the "Why Was It Changed" prose section').requiredOption("--what <what>", 'a "What Was Changed" bullet (repeatable, 1-5)', collect, []).requiredOption("--base <base>", "base branch to merge into").requiredOption("--head <head>", "head branch to merge from").option("--ots <markdown>", 'the "OTS Materials" block (raw markdown/JSON)').option("--ticket-id <id>", "tracker ticket id").option("--ticket-url <url>", "tracker ticket url").option("--reviewer <reviewer>", "reviewer to request (repeatable)", collect, []).option("--label <label>", "label to apply (repeatable)", collect, []).option("--attach <spec>", "file to attach, as <path>#<caption> (repeatable)", collect, []).action(async (opts) => {
     const template = PullRequestTemplateSchema.parse({
       type: opts.type,
       scope: opts.scope,
@@ -31822,7 +31917,7 @@ function createPrCommand(getHost) {
     const created = await getHost().createPullRequest(template, { attach: opts.attach });
     process.stdout.write(JSON.stringify(created) + "\n");
   });
-  pr.command("comment").exitOverride().argument("<number>", "pull request number").option("--body <body>", "comment body (or use --body-file)").option("--body-file <path>", "read the comment body from a file").option("--attach <spec>", "file to attach, as <path>#<caption> (repeatable)", collect3, []).action(async (number4, opts) => {
+  pr.command("comment").exitOverride().argument("<number>", "pull request number").option("--body <body>", "comment body (or use --body-file)").option("--body-file <path>", "read the comment body from a file").option("--attach <spec>", "file to attach, as <path>#<caption> (repeatable)", collect, []).action(async (number4, opts) => {
     const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
     const result = await getHost().commentOnPullRequest(Number(number4), body, { attach: opts.attach });
     process.stdout.write(JSON.stringify(result) + "\n");

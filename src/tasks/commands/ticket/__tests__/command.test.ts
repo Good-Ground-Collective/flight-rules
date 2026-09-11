@@ -123,6 +123,26 @@ describe('ticket command', () => {
     expect(tracker.updateTicketDescription).not.toHaveBeenCalled()
   })
 
+  it('uploads each --attach before the edit write and rewrites the body', async () => {
+    const tracker = makeTracker()
+    const calls: string[] = []
+    vi.mocked(tracker.addAttachment).mockImplementation(async (_id: string, path: string) => {
+      calls.push('attach')
+      return { id: '1', filename: path.split('/').pop() ?? path, mimeType: 'image/png' }
+    })
+    vi.mocked(tracker.updateTicketDescription).mockImplementation(async () => {
+      calls.push('edit')
+      return mockTicket
+    })
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(tracker, ['edit', '7', '--body', '![shot](./before.png)', '--attach', './before.png'])
+    expect(calls).toEqual(['attach', 'edit'])
+    expect(tracker.updateTicketDescription).toHaveBeenCalledWith('7', {
+      body: '![shot](attachment:before.png)',
+    })
+    output.mockRestore()
+  })
+
   it('calls getTicket and prints JSON for "get"', async () => {
     const tracker = makeTracker()
     const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
@@ -397,6 +417,46 @@ describe('ticket comment command', () => {
     const tracker = makeTracker()
     await expect(run(tracker, ['comment', 'PROJ-1'])).rejects.toThrow('one of --body or --body-file')
     expect(tracker.addComment).not.toHaveBeenCalled()
+  })
+
+  it('uploads each --attach before addComment and posts the rewritten body', async () => {
+    const tracker = makeTracker()
+    const calls: string[] = []
+    vi.mocked(tracker.addAttachment).mockImplementation(async (_id: string, path: string) => {
+      calls.push('attach')
+      return { id: '1', filename: path.split('/').pop() ?? path, mimeType: 'image/png' }
+    })
+    vi.mocked(tracker.addComment).mockImplementation(async () => {
+      calls.push('comment')
+      return mockComment
+    })
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(tracker, [
+      'comment',
+      'PROJ-1',
+      '--body',
+      '![Login](./before.png)',
+      '--attach',
+      './before.png#Before',
+      '--attach',
+      './after.png',
+    ])
+    expect(calls).toEqual(['attach', 'attach', 'comment'])
+    expect(tracker.addComment).toHaveBeenCalledWith(
+      'PROJ-1',
+      '![Login](attachment:before.png)\n\n![after.png](attachment:after.png)',
+    )
+    output.mockRestore()
+  })
+
+  it('does not upload anything when no --attach is given', async () => {
+    const tracker = makeTracker()
+    vi.mocked(tracker.addComment).mockResolvedValue(mockComment)
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(tracker, ['comment', 'PROJ-1', '--body', 'plain'])
+    expect(tracker.addAttachment).not.toHaveBeenCalled()
+    expect(tracker.addComment).toHaveBeenCalledWith('PROJ-1', 'plain')
+    output.mockRestore()
   })
 })
 
