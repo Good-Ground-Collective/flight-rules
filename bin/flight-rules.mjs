@@ -31702,7 +31702,7 @@ var NodeToolProbe = class {
 var nodeToolProbe = new NodeToolProbe();
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.36.0";
+var appVersion = false ? "0.0.0-dev" : "1.37.0";
 
 // src/cli/cli.ts
 function buildTracker(overrideTracker) {
