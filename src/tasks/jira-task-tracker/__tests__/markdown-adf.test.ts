@@ -346,6 +346,61 @@ describe('markdownAdfConverter inline media', () => {
       markdownAdfConverter.toMarkdown(markdownAdfConverter.toAdf('![BEFORE](./before.png)', media).content, media),
     ).toBe('![BEFORE](attachment:before.png)')
   })
+
+  it('never resolves an inherited object property to id-less media', () => {
+    for (const key of ['constructor', 'toString', '__proto__']) {
+      expect(sized(`![x](attachment:${key})`)).toEqual({
+        type: 'paragraph',
+        content: [{ type: 'text', text: `![x](attachment:${key})` }],
+      })
+    }
+  })
+
+  it('keeps a resolving image literal inside a panel and a list item', () => {
+    const contains = (node: AdfNode, type: string): boolean =>
+      node.type === type || (node.content ?? []).some((child) => contains(child, type))
+    const panel = markdownAdfConverter.toAdf('> [!NOTE]\n> ![BEFORE](./before.png)', media).content
+    const list = markdownAdfConverter.toAdf('- ![BEFORE](./before.png)', media).content
+    for (const node of [...panel, ...list]) {
+      expect(contains(node, 'mediaSingle')).toBe(false)
+      expect(contains(node, 'media')).toBe(false)
+    }
+  })
+
+  it('leaves an external image literal even when its basename collides with a lookup entry', () => {
+    const markdown = '![x](https://example.com/before.png)'
+    expect(sized(markdown)).toEqual({ type: 'paragraph', content: [{ type: 'text', text: markdown }] })
+    expect(markdownAdfConverter.toMarkdown(markdownAdfConverter.toAdf(markdown, media).content, media)).toBe(markdown)
+  })
+
+  it('round-trips an attachment whose filename and alt need escaping', () => {
+    const tricky: MediaLookup = { 'screen shot.png': { mediaUuid: 's', collection: '' } }
+    const nodes: AdfNode[] = [
+      {
+        type: 'mediaSingle',
+        attrs: { layout: 'center' },
+        content: [{ type: 'media', attrs: { type: 'file', id: 's', collection: '', alt: 'a] b (c) \\ &copy;' } }],
+      },
+    ]
+    const markdown = markdownAdfConverter.toMarkdown(nodes, tricky)
+    expect(markdownAdfConverter.toAdf(markdown, tricky).content).toEqual(nodes)
+    expect(markdownAdfConverter.toMarkdown(markdownAdfConverter.toAdf(markdown, tricky).content, tricky)).toBe(markdown)
+  })
+
+  it('escapes an external destination containing a space and parentheses', () => {
+    const nodes: AdfNode[] = [
+      {
+        type: 'mediaSingle',
+        attrs: { layout: 'center' },
+        content: [{ type: 'media', attrs: { type: 'external', url: 'https://x.dev/a (b).png', alt: 'x' } }],
+      },
+    ]
+    const markdown = markdownAdfConverter.toMarkdown(nodes)
+    expect(markdown).toBe('![x](<https://x.dev/a (b).png>)')
+    // An external URL is never written back as media, so it re-reads as its own literal markdown, byte-stably.
+    expect(roundTrip(markdown)).toBe(markdown)
+    expect(roundTrip(roundTrip(markdown))).toBe(markdown)
+  })
 })
 
 describe('markdownAdfConverter.toAdf mark and nesting shapes', () => {

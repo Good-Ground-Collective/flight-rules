@@ -38950,6 +38950,8 @@ var MediaRefSchema = external_exports.object({
   height: external_exports.number().int().positive().optional()
 });
 var MediaLookupSchema = external_exports.record(external_exports.string(), MediaRefSchema);
+var attachmentPrefix = /^attachment:/;
+var externalTarget = /^[a-zA-Z][a-zA-Z0-9+.-]*:|^\/\//;
 var detailsOpen = /^<details>/;
 var detailsClose = /^<\/details>/;
 var summaryTag = /<summary>([\s\S]*?)<\/summary>/;
@@ -38971,7 +38973,7 @@ var LayeredBodyAdfConverter = class {
   toAdf(markdown, media = {}) {
     const source = markdown.replace(/\r\n/g, "\n");
     const tree = this.parse(source);
-    return { version: 1, type: "doc", content: this.blocks(tree.children, source, void 0, media) };
+    return { version: 1, type: "doc", content: this.blocks(tree.children, source, void 0, media, true) };
   }
   toMarkdown(nodes, media = {}) {
     const names = new Map(Object.entries(media).map(([filename, ref]) => [ref.mediaUuid, filename]));
@@ -38987,9 +38989,12 @@ var LayeredBodyAdfConverter = class {
    * Maps a run of sibling mdast blocks to ADF. `allowed`, when a container passes
    * it, restricts the output to that container's content model: a node whose ADF
    * type falls outside the set degrades to literal paragraph text rather than an
-   * invalid child.
+   * invalid child. `media` only reaches the block mapper at the document level
+   * (`allowMedia`): a `mediaSingle` is valid ADF as a top-level block but not
+   * inside a panel, blockquote, list item, or table cell, so nested runs resolve
+   * no attachments and an image there stays literal.
    */
-  blocks(nodes, source, allowed, media = {}) {
+  blocks(nodes, source, allowed, media = {}, allowMedia = false) {
     const out = [];
     let i = 0;
     while (i < nodes.length) {
@@ -39019,7 +39024,7 @@ var LayeredBodyAdfConverter = class {
         i++;
         continue;
       }
-      out.push(this.blockNode(node2, source, media));
+      out.push(this.blockNode(node2, source, allowMedia ? media : {}));
       i++;
     }
     return out;
@@ -39081,15 +39086,28 @@ var LayeredBodyAdfConverter = class {
     };
   }
   /**
-   * Resolves an image target to an uploaded attachment. The target's basename
-   * (after stripping a leading `attachment:` and any directories) keys the lookup
-   * first; failing that, the raw target after the prefix is matched against a
-   * media UUID, so `attachment:<uuid>` resolves without a filename entry.
+   * Resolves an image target to an uploaded attachment, or undefined to leave the
+   * image literal. An `attachment:` marker addresses an attachment directly — by
+   * exact media UUID first, then by filename — and is never treated as external.
+   * Any other URL scheme (or a protocol-relative `//`) is a genuine external image
+   * and resolves to nothing, so a lookup keyed by filename cannot hijack
+   * `https://host/before.png`. A bare local path resolves by basename.
    */
   resolveMedia(target, media) {
-    const stripped = target.replace(/^attachment:/, "");
-    const basename3 = stripped.slice(stripped.lastIndexOf("/") + 1);
-    return media[basename3] ?? Object.values(media).find((ref) => ref.mediaUuid === stripped);
+    if (attachmentPrefix.test(target)) {
+      const rest = target.replace(attachmentPrefix, "");
+      return this.mediaByUuid(rest, media) ?? this.mediaByName(rest, media);
+    }
+    if (externalTarget.test(target)) return void 0;
+    return this.mediaByName(target, media);
+  }
+  mediaByUuid(value, media) {
+    return Object.values(media).find((ref) => ref.mediaUuid === value);
+  }
+  /** Looks up a target's basename as an OWN entry, so inherited names (`constructor`, `__proto__`) never resolve. */
+  mediaByName(target, media) {
+    const basename3 = target.slice(target.lastIndexOf("/") + 1);
+    return Object.hasOwn(media, basename3) ? media[basename3] : void 0;
   }
   /** The ADF block type an mdast node maps to, or `''` when it only degrades to literal text. */
   adfType(node2) {
@@ -39434,17 +39452,28 @@ ${this.render(node2.content ?? [], names)}
     }
   }
   /**
-   * Recovers an image reference from a `media` (or `mediaInline`) node. A
-   * `type: 'external'` node carries a `url` and reads back as `![alt](url)`;
-   * otherwise the filename comes from the inverted lookup and degrades to the
-   * media UUID, never to `alt`, which Jira does not always preserve.
+   * Recovers an image reference from a `media` (or `mediaInline`) node, escaping
+   * the alt text and the destination exactly as a link's are so a filename with a
+   * space or bracket (a screenshot named `screen shot.png`) survives the round
+   * trip. A `type: 'external'` node carries a `url` and reads back as
+   * `![alt](url)`; otherwise the filename comes from the inverted lookup and
+   * degrades to the media UUID, never to `alt`, which Jira does not always preserve.
    */
   mediaReference(node2, names) {
     const alt = typeof node2.attrs?.["alt"] === "string" ? node2.attrs["alt"] : "";
     const url2 = node2.attrs?.["url"];
-    if (typeof url2 === "string") return `![${alt}](${url2})`;
     const id = typeof node2.attrs?.["id"] === "string" ? node2.attrs["id"] : "";
-    return `![${alt}](attachment:${names.get(id) ?? id})`;
+    const destination = typeof url2 === "string" ? url2 : `attachment:${names.get(id) ?? id}`;
+    return `![${this.encodeAlt(alt)}](${this.encodeDestination(destination)})`;
+  }
+  /**
+   * Escapes image alt text so `![alt](dest)` re-parses to the same alt: the `]`
+   * that would close the description early, `\` itself, the markdown delimiters
+   * that would reinterpret the name, and `&` (which would otherwise decode as an
+   * entity) each gain a backslash that mdast strips on the way back.
+   */
+  encodeAlt(alt) {
+    return alt.replace(/[\\[\]*`~_&]/g, (ch) => `\\${ch}`);
   }
   /**
    * Joins a container's child blocks. A markdown heading is self-delimiting, so
