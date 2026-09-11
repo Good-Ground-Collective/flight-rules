@@ -78,6 +78,11 @@ Validate that the input contains exactly one `/`.
 
 If they provide labels, split on commas and strip whitespace. If they skip, use an empty list.
 
+**QA lane** (optional)
+> "Will this repo use the QA lane (`capture-evidence`, `reproduce-bug`, `verify-ticket`)? If yes, where should the QA recipe live? Hit enter for the default, `.claude/flight-rules.qa.md`."
+
+A relative answer resolves against the config file's directory; an absolute path is used as is. Remember the answer for Step 5 and Step 7.
+
 ## Step 5 (GitHub): Write the config file
 
 Create `.claude/` if it doesn't exist. Write `.claude/flight-rules.local.md`:
@@ -110,6 +115,8 @@ rfcStoragePath: <path>
 ```
 
 Omit the `defaultLabels` block entirely if the user skipped that step.
+
+Add `qaRecipe: <path>` only when the user chose a non-default location. The default needs no key.
 
 ## Step 6 (GitHub): Smoke test
 
@@ -174,6 +181,11 @@ Ask this even though the tracker is Jira: pull requests always land on GitHub, a
 **Default labels** (optional)
 > "Any default labels to apply to every issue created from this project? Hit enter to skip."
 
+**QA lane** (optional)
+> "Will this repo use the QA lane (`capture-evidence`, `reproduce-bug`, `verify-ticket`)? If yes, where should the QA recipe live? Hit enter for the default, `.claude/flight-rules.qa.md`."
+
+A relative answer resolves against the config file's directory; an absolute path is used as is. Remember the answer for Step 5 and Step 7.
+
 ## Step 5 (Jira): Write the config file
 
 Create `.claude/` if it doesn't exist. Write the config file. Jira identifies *work* by project keys, but `repo` is still required — pull requests land on GitHub whichever tracker holds the tickets.
@@ -193,6 +205,7 @@ rfcStorage: local
 - Omit `jpdProject` if the user skipped it.
 - For global RFC storage, use `rfcStorage: global` and add `rfcStoragePath: <path>` instead of `rfcStorage: local`.
 - Add a `defaultLabels` block only if the user provided labels.
+- Add `qaRecipe: <path>` only when the user chose a non-default location. The default needs no key.
 
 `JIRA_TOKEN` and `JIRA_EMAIL` stay in the environment — never write them into the config file.
 
@@ -210,3 +223,27 @@ flight-rules check
   - `credentials` — `JIRA_TOKEN` (or `JIRA_EMAIL`) is not exported in this shell.
   - `reachable` — 401 means the token/email pair is wrong; 404 means the host or project key is wrong; a network error means the host domain is unreachable.
   - `config` — the config file was written incorrectly; show the file and offer to fix it.
+
+---
+
+## Step 7: Scaffold the QA recipe
+
+This step is shared by both branches and does not depend on the tracker. If the user declined the QA lane in Step 4, skip this step.
+
+Run:
+
+```bash
+flight-rules qa recipe
+```
+
+If it exits non-zero, the recipe is missing. Write the file at the path the message names, using the example from `${CLAUDE_PLUGIN_ROOT}/docs/qa-recipe-format.md`. Replace the `app` and host placeholders with what the user gave you. Leave everything else as placeholders. Then tell the user which sections they must fill in before a capture can run: Login and the credentials.
+
+Then run `git check-ignore -q <path>`. Exit 0 means Git ignores the recipe, so a capture runs against an untracked file. Show the offending rule:
+
+```bash
+git check-ignore -v <path>
+```
+
+Offer to change a `.claude` rule to `.claude/*` and add `!.claude/flight-rules.qa.md`. Explain in one sentence: a negation cannot re-include a file whose directory is excluded, so the directory rule must become a wildcard.
+
+Re-run `flight-rules qa recipe`. It prints the resolved path.
