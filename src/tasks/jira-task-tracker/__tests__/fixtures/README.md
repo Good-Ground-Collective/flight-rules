@@ -25,15 +25,19 @@ across the parallel converter PRs is caught as a reviewable golden diff.
 2. **The golden round-trips to the body.** `toMarkdown` of the golden, with the
    metadata expand stripped exactly as `JiraTaskTracker.extractBody` does, equals
    the fixture up to the LLM Context block, byte for byte.
-3. **The round trip preserves metadata.** `BodyMetadataService.parse` reads the
-   same metadata from the re-emitted body (with the LLM Context block re-attached)
-   as from the original fixture.
+3. **The converter carries the metadata values.** The metadata is read back from
+   the converted ADF with the production ADF-side reader (`JiraAdfMetadataService`,
+   the same one the tracker uses on read) and asserted to equal the fixture's
+   expected `epicId`/`kind`/`notes`. This runs before `UPDATE_GOLDEN` writes
+   anything, so a regenerate that drops or corrupts metadata fails instead of
+   baking the loss into the golden.
 
-The LLM Context block is split off for the round-trip leg because the expand
-emitter writes the single-line `<details><summary>` form and moves the sentinel
-comment, so the canonical multi-line block does not survive `toAdf` → `toMarkdown`
-byte for byte. The read path strips that expand before `toMarkdown` anyway, so the
-body re-emits exactly and the block's integrity is proven by the metadata parse.
+The metadata is checked on the ADF side, not on the round-tripped body text,
+because the expand emitter writes the single-line `<details><summary>` form and
+moves the sentinel comment, so the canonical multi-line LLM Context block does not
+survive `toAdf` → `toMarkdown` byte for byte and `BodyMetadataService`'s
+byte-strict regex would not match it. The metadata's real carrier in the converted
+output is the ADF `LLM Context` expand, so that is where the values are read.
 
 Every golden and every round-trip-table entry is also run through the
 `@atlaskit/adf-utils` validator and an `assertContentModel` tree walk
