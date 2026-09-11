@@ -1,7 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createCheckCommand } from "../command.js";
 import type { Config } from "../../../../shared/config.js";
 import type { TaskTracker } from "../../../task-tracker/task-tracker.js";
+import { NodeToolProbe } from "../../../tool-probe/tool-probe.js";
 import type { ToolCheck, ToolProbe } from "../../../tool-probe/tool-probe.js";
 
 const config: Config = {
@@ -126,6 +130,46 @@ describe("check command", () => {
     await run(() => config, makeTracker(), probe);
     const parsed = lastJson(output);
     expect(parsed.ok).toBe(true);
+    output.mockRestore();
+  });
+
+  it("treats tools:op as required when only an overridden recipe with op:// exists", async () => {
+    vi.stubEnv("GITHUB_TOKEN", "tok");
+    // A recipe outside the config dir, referenced via qaRecipe; no default
+    // flight-rules.qa.md beside the config exists.
+    const dir = mkdtempSync(join(tmpdir(), "fr-check-"));
+    const recipePath = join(dir, "custom-recipe.md");
+    writeFileSync(recipePath, "capture evidence from op://vault/item\n");
+    const configPath = join(dir, ".claude", "flight-rules.local.md");
+    const overridden: Config = { ...config, qaRecipe: recipePath };
+
+    // Real probe so the recipe is actually read; stub the spawns so no binary
+    // is required and every tool reports missing.
+    const enoent = Object.assign(new Error("not found"), { code: "ENOENT" });
+    const probe = new NodeToolProbe({
+      execFileFn: () => Promise.reject(enoent),
+    });
+
+    const output = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+    await expect(
+      createCheckCommand(
+        () => overridden,
+        () => makeTracker() as TaskTracker,
+        () => configPath,
+        () => probe,
+      )
+        .exitOverride()
+        .parseAsync([], { from: "user" }),
+    ).rejects.toThrow("check failed");
+
+    const parsed = lastJson(output);
+    const op = parsed.checks.find((c) => c.name === "tools:op") as
+      | (ToolCheck & { required: boolean })
+      | undefined;
+    expect(op).toBeDefined();
+    expect(op?.required).toBe(true);
     output.mockRestore();
   });
 

@@ -31017,14 +31017,25 @@ function createRfcCommand(getConfig, getCwd = () => process.cwd()) {
 }
 
 // src/tasks/commands/qa/command.ts
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 function createQaCommand(getConfig, getConfigPath) {
   const qa = new Command("qa");
   qa.command("recipe").exitOverride().action(() => {
-    const path2 = getQaRecipePath(getConfig(), getConfigPath());
+    const config2 = getConfig();
+    if (config2.qaRecipe !== void 0 && config2.qaRecipe.trim() === "") {
+      throw new Error(
+        "qaRecipe is set to a blank value \u2014 give it a path to the QA recipe file, or remove the key to fall back to the default beside the config"
+      );
+    }
+    const path2 = getQaRecipePath(config2, getConfigPath());
     if (!existsSync(path2)) {
       throw new Error(
         `QA recipe not found at ${path2} \u2014 run /flight-rules:setup to scaffold it, or set qaRecipe in the config`
+      );
+    }
+    if (!statSync(path2).isFile()) {
+      throw new Error(
+        `QA recipe at ${path2} is not a regular file \u2014 set qaRecipe to the recipe file's path`
       );
     }
     process.stdout.write(`${path2}
@@ -31043,7 +31054,6 @@ function createCompetenciesCommand(getConfig) {
 }
 
 // src/tasks/commands/check/command.ts
-import { dirname as dirname2, join as join2 } from "node:path";
 function credentialFor(tracker, env) {
   if (tracker === "github")
     return { name: "GITHUB_TOKEN", value: env.githubToken };
@@ -31103,7 +31113,7 @@ function createCheckCommand(getConfig, getTracker, getConfigPath, getProbe) {
     }
     const tools = await getProbe().probe({
       repo: config2.repo,
-      recipePath: join2(dirname2(getConfigPath()), "flight-rules.qa.md"),
+      recipePath: getQaRecipePath(config2, getConfigPath()),
       env: process.env
     });
     checks.push(...tools);
@@ -31204,7 +31214,7 @@ var NodeGitExecutor = class {
 
 // src/git/commit-message-builder/commit-message-builder.ts
 import { readFileSync as readFileSync3 } from "node:fs";
-import { dirname as dirname3, join as join3 } from "node:path";
+import { dirname as dirname2, join as join2 } from "node:path";
 
 // src/git/commit-message-builder/commit-message.schema.ts
 var CommitMessageInputSchema = external_exports.object({
@@ -31260,7 +31270,7 @@ var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
   }
   static readPluginVersion(binPath) {
     try {
-      const pkgPath = join3(dirname3(binPath), "..", "package.json");
+      const pkgPath = join2(dirname2(binPath), "..", "package.json");
       const parsed = JSON.parse(readFileSync3(pkgPath, "utf-8"));
       if (typeof parsed === "object" && parsed !== null && "version" in parsed && typeof parsed.version === "string") {
         return parsed.version;
@@ -31339,7 +31349,7 @@ function createGitCommand(getExecutor) {
 import { execFile as execFile2 } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join as join4 } from "node:path";
+import { join as join3 } from "node:path";
 import { promisify as promisify2 } from "node:util";
 
 // src/git/pr-template/pr-template.ts
@@ -31498,8 +31508,8 @@ var GhPullRequestHost = class {
     return { number: Number(match[1]), url: url2 };
   }
   async withBodyFile(body, run2) {
-    const dir = await mkdtemp(join4(tmpdir(), "flight-rules-"));
-    const bodyFile = join4(dir, "body.md");
+    const dir = await mkdtemp(join3(tmpdir(), "flight-rules-"));
+    const bodyFile = join3(dir, "body.md");
     try {
       await writeFile(bodyFile, body, "utf8");
       return await run2(bodyFile);
