@@ -170,12 +170,22 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
 
   private parseInline(text: string): AdfNode[] {
     const nodes: AdfNode[] = []
-    const pattern = /\*\*([^*]+)\*\*|`([^`]+)`/g
+    // Bold / code / inline link. Their opening characters (* ` [) are distinct,
+    // so alternation order doesn't change which span wins at a given position.
+    const pattern = /\*\*([^*]+)\*\*|`([^`]+)`|\[([^\]]+)\]\(([^)]+)\)/g
     let last = 0
     for (let match = pattern.exec(text); match !== null; match = pattern.exec(text)) {
       if (match.index > last) nodes.push({ type: 'text', text: text.slice(last, match.index) })
       if (match[1] !== undefined) nodes.push({ type: 'text', text: match[1], marks: [{ type: 'strong' }] })
       else if (match[2] !== undefined) nodes.push({ type: 'text', text: match[2], marks: [{ type: 'code' }] })
+      else if (match[3] !== undefined && match[4] !== undefined) {
+        // Recurse on the label so marks compose (a link whose label is bold/code
+        // carries both marks), then hang the link mark off each resulting node.
+        const href = match[4]
+        for (const child of this.parseInline(match[3])) {
+          nodes.push({ ...child, marks: [...(child.marks ?? []), { type: 'link', attrs: { href } }] })
+        }
+      }
       last = match.index + match[0].length
     }
     if (last < text.length) nodes.push({ type: 'text', text: text.slice(last) })
