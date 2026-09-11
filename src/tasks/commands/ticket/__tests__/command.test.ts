@@ -28,6 +28,8 @@ const makeTracker = (): TaskTracker => ({
   unblockTicket: vi.fn(),
   transitionTicket: vi.fn(),
   listTransitions: vi.fn().mockResolvedValue([]),
+  addLabel: vi.fn(),
+  removeLabel: vi.fn(),
   updateEpicMetadata: vi.fn(),
   updateTicketMetadata: vi.fn(),
   updateTddMetadata: vi.fn(),
@@ -184,5 +186,39 @@ describe('ticket transitions command', () => {
     await createTicketCommand(() => tracker).parseAsync(['transitions', '7'], { from: 'user' })
     expect(write).toHaveBeenCalledWith(JSON.stringify({ id: '7', transitions: [] }) + '\n')
     write.mockRestore()
+  })
+})
+
+describe('ticket label command', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('removes before adding and prints the applied labels as JSON', async () => {
+    const tracker = makeTracker()
+    const calls: string[] = []
+    vi.mocked(tracker.removeLabel).mockImplementation(async () => {
+      calls.push('remove')
+    })
+    vi.mocked(tracker.addLabel).mockImplementation(async () => {
+      calls.push('add')
+    })
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+
+    await run(tracker, ['label', 'PROJ-1', '--add', 'A', '--remove', 'B'])
+
+    expect(tracker.removeLabel).toHaveBeenCalledWith('PROJ-1', 'B')
+    expect(tracker.addLabel).toHaveBeenCalledWith('PROJ-1', 'A')
+    expect(calls).toEqual(['remove', 'add'])
+    expect(output).toHaveBeenCalledWith(
+      JSON.stringify({ id: 'PROJ-1', added: ['A'], removed: ['B'] }) + '\n',
+    )
+    output.mockRestore()
+  })
+
+  it('rejects when neither --add nor --remove is given', async () => {
+    const tracker = makeTracker()
+
+    await expect(run(tracker, ['label', 'PROJ-1'])).rejects.toThrow(/--add.*--remove|--remove.*--add/)
+    expect(tracker.addLabel).not.toHaveBeenCalled()
+    expect(tracker.removeLabel).not.toHaveBeenCalled()
   })
 })
