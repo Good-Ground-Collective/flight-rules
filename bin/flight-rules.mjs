@@ -30842,15 +30842,42 @@ var headingLine2 = /^##\s+(.+?)\s*$/;
 var detailsOpen2 = /^<details/;
 var detailsClose2 = /^<\/details>/;
 var checklistItem = /^-\s+\[( |x|X)\]\s+(.*)$/;
-var headingKeys = {
+var symptomHeading = /^##\s+Symptom\s*$/;
+var layeredHeadingKeys = {
   "Problem Statement": "problemStatement",
   Solution: "solution",
   "Acceptance Criteria": "acceptanceCriteria",
   "High-level technical writeup": "technicalWriteup"
 };
-var LayeredBodySectionsParser = class {
-  parse(body) {
-    const lines = body.replace(/\r\n/g, "\n").split("\n");
+var bugReportHeadingKeys = {
+  Symptom: "symptom",
+  Environment: "environment",
+  "Steps To Reproduce": "stepsToReproduce",
+  "Expected vs Actual": "expectedVsActual",
+  "Root Cause": "rootCause",
+  "Fixed When": "fixedWhen",
+  Evidence: "evidence"
+};
+var stringSectionKeys = [
+  "problemStatement",
+  "solution",
+  "acceptanceCriteria",
+  "technicalWriteup",
+  "guidedWalkthrough",
+  "symptom",
+  "environment",
+  "stepsToReproduce",
+  "expectedVsActual",
+  "rootCause",
+  "fixedWhen",
+  "evidence",
+  "reproductionNotes"
+];
+var BlobSectionSource = class {
+  read(input) {
+    const lines = input.body.replace(/\r\n/g, "\n").split("\n");
+    const format = input.format ?? this.sniff(lines);
+    const headingKeys = format === "bug-report" ? bugReportHeadingKeys : layeredHeadingKeys;
     const raw = {};
     let current;
     let i = 0;
@@ -30867,6 +30894,8 @@ var LayeredBodySectionsParser = class {
         const block = this.consumeDetails(lines, i);
         if (/guided walkthrough/i.test(block.title)) {
           raw.guidedWalkthrough = block.inner.split("\n");
+        } else if (/reproduction notes/i.test(block.title)) {
+          raw.reproductionNotes = block.inner.split("\n");
         }
         current = void 0;
         i = block.next;
@@ -30875,24 +30904,26 @@ var LayeredBodySectionsParser = class {
       if (current !== void 0) raw[current]?.push(line);
       i++;
     }
-    const items = (raw.acceptanceCriteria ?? []).map((item) => item.match(checklistItem)).filter((match) => match !== null).map((match) => ({ text: (match[2] ?? "").trim(), done: match[1]?.toLowerCase() === "x" }));
     const text = (key) => {
       const joined = (raw[key] ?? []).join("\n").trim();
       return joined.length > 0 ? joined : void 0;
     };
-    const problemStatement = text("problemStatement");
-    const solution = text("solution");
-    const acceptanceCriteria = text("acceptanceCriteria");
-    const technicalWriteup = text("technicalWriteup");
-    const guidedWalkthrough = text("guidedWalkthrough");
-    return {
-      ...problemStatement !== void 0 ? { problemStatement } : {},
-      ...solution !== void 0 ? { solution } : {},
-      ...acceptanceCriteria !== void 0 ? { acceptanceCriteria } : {},
-      ...technicalWriteup !== void 0 ? { technicalWriteup } : {},
-      ...guidedWalkthrough !== void 0 ? { guidedWalkthrough } : {},
-      acceptanceCriteriaItems: items
+    const sections = {
+      format,
+      acceptanceCriteriaItems: this.checklistItems(raw.acceptanceCriteria),
+      fixedWhenItems: this.checklistItems(raw.fixedWhen)
     };
+    for (const key of stringSectionKeys) {
+      const value = text(key);
+      if (value !== void 0) sections[key] = value;
+    }
+    return sections;
+  }
+  sniff(lines) {
+    return lines.some((line) => symptomHeading.test(line)) ? "bug-report" : "layered-body";
+  }
+  checklistItems(lines) {
+    return (lines ?? []).map((item) => item.match(checklistItem)).filter((match) => match !== null).map((match) => ({ text: (match[2] ?? "").trim(), done: match[1]?.toLowerCase() === "x" }));
   }
   consumeDetails(lines, start) {
     let depth = 0;
@@ -30915,30 +30946,43 @@ var LayeredBodySectionsParser = class {
     return { title, inner, next: end + 1 };
   }
 };
-var bodySectionsParser = new LayeredBodySectionsParser();
-
-// src/tasks/commands/ticket/command.ts
-function collect(value, previous) {
-  return [...previous, value];
-}
+var blobSectionSource = new BlobSectionSource();
 var sectionFields = {
   "problem-statement": "problemStatement",
   solution: "solution",
   "acceptance-criteria": "acceptanceCriteria",
   "technical-writeup": "technicalWriteup",
-  "guided-walkthrough": "guidedWalkthrough"
+  "guided-walkthrough": "guidedWalkthrough",
+  symptom: "symptom",
+  environment: "environment",
+  "steps-to-reproduce": "stepsToReproduce",
+  "expected-vs-actual": "expectedVsActual",
+  "root-cause": "rootCause",
+  "fixed-when": "fixedWhen",
+  evidence: "evidence",
+  "reproduction-notes": "reproductionNotes"
 };
-function selectSection(id, sections, name) {
-  const field = sectionFields[name];
-  if (field === void 0) {
-    throw new Error(`unknown section "${name}" \u2014 expected one of: ${Object.keys(sectionFields).join(", ")}`);
+var BodySectionSelector = class {
+  select(id, sections, slug) {
+    const field = sectionFields[slug];
+    if (field === void 0) {
+      throw new Error(`unknown section "${slug}" \u2014 expected one of: ${Object.keys(sectionFields).join(", ")}`);
+    }
+    return {
+      id,
+      section: slug,
+      format: sections.format,
+      markdown: sections[field] ?? null,
+      ...field === "acceptanceCriteria" ? { items: sections.acceptanceCriteriaItems } : {},
+      ...field === "fixedWhen" ? { items: sections.fixedWhenItems } : {}
+    };
   }
-  return {
-    id,
-    section: name,
-    markdown: sections[field] ?? null,
-    ...field === "acceptanceCriteria" ? { items: sections.acceptanceCriteriaItems } : {}
-  };
+};
+var sectionSelector = new BodySectionSelector();
+
+// src/tasks/commands/ticket/command.ts
+function collect(value, previous) {
+  return [...previous, value];
 }
 function createTicketCommand(getTracker) {
   const ticket = new Command("ticket");
@@ -30967,8 +31011,8 @@ function createTicketCommand(getTracker) {
       process.stdout.write(JSON.stringify(result) + "\n");
       return;
     }
-    const sections = bodySectionsParser.parse(result.body);
-    process.stdout.write(JSON.stringify(selectSection(id, sections, opts.section)) + "\n");
+    const sections = blobSectionSource.read({ body: result.body });
+    process.stdout.write(JSON.stringify(sectionSelector.select(id, sections, opts.section)) + "\n");
   });
   ticket.command("block").exitOverride().argument("<id>", "ticket id to block").requiredOption("--by <blockerId>", "id of the ticket that must close first").action(async (id, opts) => {
     await getTracker().blockTicket(id, opts.by);
