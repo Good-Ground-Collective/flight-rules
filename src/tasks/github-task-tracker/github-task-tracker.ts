@@ -4,6 +4,7 @@ import { BodyMetadataService } from '../body-metadata/body-metadata.js'
 import { z } from 'zod'
 import { UnsupportedTrackerOperationError } from '../task-tracker/unsupported-tracker-operation-error.js'
 import type {
+  Attachment,
   Comment,
   CreateEpicInput,
   CreateInitiativeInput,
@@ -501,6 +502,15 @@ export class GitHubTaskTracker implements TaskTracker {
       createdAt: data.created_at,
       updatedAt: data.updated_at,
     }
+  }
+
+  // eslint-disable-next-line preflight/no-throw-helpers -- a capability stub's whole body is the throw
+  async addAttachment(ticketId: string, filePath: string): Promise<Attachment> {
+    throw new UnsupportedTrackerOperationError({
+      tracker: 'GitHub',
+      operation: `attaching ${filePath} to issue #${ticketId}`,
+      remedy: 'GitHub issues have no attachment API; use --tracker jira, or gh --attach for pull requests',
+    })
   }
 
   async getUsers(): Promise<string[]> {

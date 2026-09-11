@@ -1,5 +1,9 @@
+import { readFileSync } from 'node:fs'
+import { basename } from 'node:path'
+import { z } from 'zod'
 import { JiraClient } from './jira-client.js'
 import { ConfluenceClient } from './confluence-client.js'
+import { ExtensionMimeTypeResolver, type MimeTypeResolver } from '../mime-types/mime-types.js'
 import type { AdfDocNode, AdfNode } from './adf.js'
 import { markdownAdfConverter, type MarkdownAdfConverter } from './markdown-adf.js'
 import { JiraAdfMetadataService, type AdfMetadataService } from './adf-metadata.js'
@@ -50,6 +54,23 @@ const jpdProjectType = 'product_discovery'
 const deliveryLinkOutward = 'implements'
 const tddMetadataPropertyKey = 'flight-rules-metadata'
 
+// Anchored to the full pathname so only an exact `/file/<uuid>/binary` matches: a
+// login redirect, a trailing suffix (`/binary-invalid`), or extra path segments must
+// not yield a bogus mediaUuid. Query strings live outside the pathname, so the real
+// media URL (`.../file/<uuid>/binary?token=...`) still matches.
+const mediaFilePath = /^\/file\/([0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12})\/binary$/
+// Base for resolving a relative Location; absolute Jira media URLs keep their own origin.
+const mediaLocationBase = 'https://media.invalid/'
+
+const JiraUploadedAttachmentSchema = z.object({
+  id: z.union([z.string(), z.number()]).transform(String),
+  filename: z.string(),
+  mimeType: z.string(),
+  size: z.number().optional(),
+})
+const JiraUploadedAttachmentsSchema = z.array(JiraUploadedAttachmentSchema)
+type JiraUploadedAttachment = z.infer<typeof JiraUploadedAttachmentSchema>
+
 /**
  * The Jira / Jira Product Discovery backend. Epics map to the Epic issue type
  * and tickets to Story; parentage rides the native `parent` field, and entity
@@ -69,6 +90,7 @@ export class JiraTaskTracker implements TaskTracker {
   private readonly confluenceSpaceKey: string | undefined
   private readonly metadata: AdfMetadataService = new JiraAdfMetadataService()
   private readonly bodyFormat: MarkdownAdfConverter = markdownAdfConverter
+  private readonly mimeTypes: MimeTypeResolver = new ExtensionMimeTypeResolver()
   private issueTypeNames: string[] | undefined
   private blocksLinkType: string | undefined
   private deliveryLinkType: string | undefined
@@ -357,6 +379,26 @@ export class JiraTaskTracker implements TaskTracker {
     }
   }
 
+  /**
+   * Uploads a file as a native Jira attachment and resolves the media UUID that
+   * inline ADF media nodes address it by; Jira only reveals that UUID in the
+   * redirect it issues for the attachment's content URL.
+   */
+  async addAttachment(ticketId: string, filePath: string): Promise<Attachment> {
+    const filename = basename(filePath)
+    const file = new File([readFileSync(filePath)], filename, { type: this.mimeTypes.forFilename(filename) })
+
+    const uploaded = JiraUploadedAttachmentsSchema.parse(
+      await this.client.upload<unknown>(`/issue/${ticketId}/attachments`, [file]),
+    )
+    const attachment = uploaded[0]
+    if (attachment === undefined) {
+      throw new Error(`Jira accepted the upload of ${filename} to ${ticketId} but returned no attachment`)
+    }
+
+    return this.mapAttachment(attachment, await this.resolveMediaUuid(attachment.id))
+  }
+
   async getUsers(): Promise<string[]> {
     const users = await this.client.request<JiraAssignableUser[]>('GET', '/user/assignable/search', undefined, {
       project: this.project,
@@ -399,6 +441,16 @@ export class JiraTaskTracker implements TaskTracker {
       blocking,
       metadata: this.parseMetadata(issue),
       updatedAt: issue.fields.updated ?? '',
+    }
+  }
+
+  private mapAttachment(uploaded: JiraUploadedAttachment, mediaUuid: string): Attachment {
+    return {
+      id: uploaded.id,
+      filename: uploaded.filename,
+      mimeType: uploaded.mimeType,
+      ...(uploaded.size !== undefined ? { size: uploaded.size } : {}),
+      mediaUuid,
     }
   }
 
@@ -485,6 +537,31 @@ export class JiraTaskTracker implements TaskTracker {
   private async fetchTransitions(ticketId: string): Promise<JiraTransitionsResponse> {
     // Resolved per call, not cached: only transitions reachable from the issue's current status are returned.
     return this.client.request<JiraTransitionsResponse>('GET', `/issue/${ticketId}/transitions`)
+  }
+
+  private async resolveMediaUuid(attachmentId: string): Promise<string> {
+    const location = await this.client.locationFor(`/attachment/content/${attachmentId}`)
+    const uuid = this.extractMediaUuid(location)
+    if (uuid === undefined) {
+      throw new Error(
+        `Jira did not redirect attachment ${attachmentId} to a media file URL, so it cannot be embedded inline (location: ${location})`,
+      )
+    }
+    return uuid
+  }
+
+  // Extracts the media UUID only from a well-formed `/file/<uuid>/binary` pathname.
+  // Parses the Location as a URL (absolute media URLs keep their origin; a relative
+  // Location resolves against a base), then matches the anchored pathname — so an
+  // unparseable Location or any other path yields undefined and is rejected by the caller.
+  private extractMediaUuid(location: string): string | undefined {
+    let pathname: string
+    try {
+      pathname = new URL(location, mediaLocationBase).pathname
+    } catch {
+      return undefined
+    }
+    return mediaFilePath.exec(pathname)?.[1]
   }
 
   private async resolveBlocksLinkType(): Promise<string> {
