@@ -151,6 +151,7 @@ describe('ticket command', () => {
     const tracker = makeTracker()
     vi.mocked(tracker.getTicket).mockResolvedValue({
       ...mockTicket,
+      issueType: 'Bug',
       body: '## Symptom\n\nBroken.\n\n## Fixed When\n\n- [ ] it works\n- [x] test added\n',
     })
     const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
@@ -174,6 +175,7 @@ describe('ticket command', () => {
     const tracker = makeTracker()
     vi.mocked(tracker.getTicket).mockResolvedValue({
       ...mockTicket,
+      issueType: 'Bug',
       body: '## Symptom\n\nBroken.\n\n## Fixed When\n\n- [ ] it works\n',
     })
     const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
@@ -183,6 +185,49 @@ describe('ticket command', () => {
         id: '7',
         section: 'acceptance-criteria',
         format: 'bug-report',
+        markdown: null,
+        items: [],
+      }) + '\n',
+    )
+    output.mockRestore()
+  })
+
+  it('detects a Jira Bug with no metadata and no recognizable headings as bug-report', async () => {
+    const tracker = makeTracker()
+    vi.mocked(tracker.getTicket).mockResolvedValue({
+      ...mockTicket,
+      issueType: 'Bug',
+      metadata: {},
+      body: 'Plain description with no level-2 headings at all.\n',
+    })
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(tracker, ['get', '7', '--section', 'symptom'])
+    expect(output).toHaveBeenCalledWith(
+      JSON.stringify({
+        id: '7',
+        section: 'symptom',
+        format: 'bug-report',
+        markdown: null,
+      }) + '\n',
+    )
+    output.mockRestore()
+  })
+
+  it('lets metadata.kind override a contradictory heading for "get --section"', async () => {
+    const tracker = makeTracker()
+    vi.mocked(tracker.getTicket).mockResolvedValue({
+      ...mockTicket,
+      issueType: 'Bug',
+      metadata: { kind: 'story' },
+      body: '## Symptom\n\nLooks like a bug body.\n',
+    })
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(tracker, ['get', '7', '--section', 'acceptance-criteria'])
+    expect(output).toHaveBeenCalledWith(
+      JSON.stringify({
+        id: '7',
+        section: 'acceptance-criteria',
+        format: 'layered-body',
         markdown: null,
         items: [],
       }) + '\n',
