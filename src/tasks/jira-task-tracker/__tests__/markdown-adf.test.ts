@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { markdownAdfConverter } from '../markdown-adf.js'
+import { markdownAdfConverter, type MediaLookup } from '../markdown-adf.js'
 import type { AdfNode } from '../adf.js'
 
 const roundTrip = (markdown: string): string => markdownAdfConverter.toMarkdown(markdownAdfConverter.toAdf(markdown).content)
@@ -257,6 +257,149 @@ describe('markdown ⇄ ADF round-trip', () => {
     ].join('\n')
 
     expect(roundTrip(body)).toBe(body)
+  })
+})
+
+describe('markdownAdfConverter inline media', () => {
+  const media: MediaLookup = { 'before.png': { mediaUuid: 'u', collection: '', width: 1200, height: 800 } }
+  const sized = (markdown: string): AdfNode | undefined => markdownAdfConverter.toAdf(markdown, media).content[0]
+
+  it('emits a single-image paragraph as mediaSingle wrapping media', () => {
+    expect(sized('![BEFORE](./before.png)')).toEqual({
+      type: 'mediaSingle',
+      attrs: { layout: 'center' },
+      content: [
+        { type: 'media', attrs: { type: 'file', id: 'u', collection: '', alt: 'BEFORE', width: 1200, height: 800 } },
+      ],
+    })
+  })
+
+  it('omits width and height when the lookup has none', () => {
+    const withoutSize: MediaLookup = { 'before.png': { mediaUuid: 'u', collection: '' } }
+    expect(markdownAdfConverter.toAdf('![BEFORE](./before.png)', withoutSize).content[0]).toEqual({
+      type: 'mediaSingle',
+      attrs: { layout: 'center' },
+      content: [{ type: 'media', attrs: { type: 'file', id: 'u', collection: '', alt: 'BEFORE' } }],
+    })
+  })
+
+  it('resolves a target that matches a media UUID', () => {
+    expect(sized('![BEFORE](attachment:u)')?.type).toBe('mediaSingle')
+  })
+
+  it('keeps an unresolved image literal', () => {
+    expect(sized('![X](./missing.png)')).toEqual({
+      type: 'paragraph',
+      content: [{ type: 'text', text: '![X](./missing.png)' }],
+    })
+  })
+
+  it('keeps an image mid-sentence literal', () => {
+    const paragraph = sized('inline ![a](./before.png) image')
+    expect(paragraph?.type).toBe('paragraph')
+    expect((paragraph?.content ?? []).map((node) => node.text ?? '').join('')).toBe('inline ![a](./before.png) image')
+  })
+
+  it('reads a media node back to an attachment reference via the lookup', () => {
+    const node = sized('![BEFORE](./before.png)')
+    expect(node).toBeDefined()
+    expect(markdownAdfConverter.toMarkdown(node === undefined ? [] : [node], media)).toBe('![BEFORE](attachment:before.png)')
+  })
+
+  it('degrades to the media UUID without a lookup', () => {
+    const node = sized('![BEFORE](./before.png)')
+    expect(markdownAdfConverter.toMarkdown(node === undefined ? [] : [node])).toBe('![BEFORE](attachment:u)')
+  })
+
+  it('reads an external media node back to its url', () => {
+    const nodes: AdfNode[] = [
+      {
+        type: 'mediaSingle',
+        attrs: { layout: 'center' },
+        content: [{ type: 'media', attrs: { type: 'external', url: 'https://x.dev/d.png', alt: 'diagram' } }],
+      },
+    ]
+    expect(markdownAdfConverter.toMarkdown(nodes)).toBe('![diagram](https://x.dev/d.png)')
+  })
+
+  it('reads a mediaInline node back inline in its paragraph', () => {
+    const nodes: AdfNode[] = [
+      {
+        type: 'paragraph',
+        content: [
+          { type: 'text', text: 'see ' },
+          { type: 'mediaInline', attrs: { type: 'file', id: 'u' } },
+          { type: 'text', text: ' here' },
+        ],
+      },
+    ]
+    expect(markdownAdfConverter.toMarkdown(nodes, media)).toBe('see ![](attachment:before.png) here')
+  })
+
+  it('round-trips the attachment reference byte-identically with a lookup', () => {
+    const markdown = '![BEFORE](attachment:before.png)'
+    expect(markdownAdfConverter.toMarkdown(markdownAdfConverter.toAdf(markdown, media).content, media)).toBe(markdown)
+  })
+
+  it('normalizes a local image path to the attachment reference', () => {
+    expect(
+      markdownAdfConverter.toMarkdown(markdownAdfConverter.toAdf('![BEFORE](./before.png)', media).content, media),
+    ).toBe('![BEFORE](attachment:before.png)')
+  })
+
+  it('never resolves an inherited object property to id-less media', () => {
+    for (const key of ['constructor', 'toString', '__proto__']) {
+      expect(sized(`![x](attachment:${key})`)).toEqual({
+        type: 'paragraph',
+        content: [{ type: 'text', text: `![x](attachment:${key})` }],
+      })
+    }
+  })
+
+  it('keeps a resolving image literal inside a panel and a list item', () => {
+    const contains = (node: AdfNode, type: string): boolean =>
+      node.type === type || (node.content ?? []).some((child) => contains(child, type))
+    const panel = markdownAdfConverter.toAdf('> [!NOTE]\n> ![BEFORE](./before.png)', media).content
+    const list = markdownAdfConverter.toAdf('- ![BEFORE](./before.png)', media).content
+    for (const node of [...panel, ...list]) {
+      expect(contains(node, 'mediaSingle')).toBe(false)
+      expect(contains(node, 'media')).toBe(false)
+    }
+  })
+
+  it('leaves an external image literal even when its basename collides with a lookup entry', () => {
+    const markdown = '![x](https://example.com/before.png)'
+    expect(sized(markdown)).toEqual({ type: 'paragraph', content: [{ type: 'text', text: markdown }] })
+    expect(markdownAdfConverter.toMarkdown(markdownAdfConverter.toAdf(markdown, media).content, media)).toBe(markdown)
+  })
+
+  it('round-trips an attachment whose filename and alt need escaping', () => {
+    const tricky: MediaLookup = { 'screen shot.png': { mediaUuid: 's', collection: '' } }
+    const nodes: AdfNode[] = [
+      {
+        type: 'mediaSingle',
+        attrs: { layout: 'center' },
+        content: [{ type: 'media', attrs: { type: 'file', id: 's', collection: '', alt: 'a] b (c) \\ &copy;' } }],
+      },
+    ]
+    const markdown = markdownAdfConverter.toMarkdown(nodes, tricky)
+    expect(markdownAdfConverter.toAdf(markdown, tricky).content).toEqual(nodes)
+    expect(markdownAdfConverter.toMarkdown(markdownAdfConverter.toAdf(markdown, tricky).content, tricky)).toBe(markdown)
+  })
+
+  it('escapes an external destination containing a space and parentheses', () => {
+    const nodes: AdfNode[] = [
+      {
+        type: 'mediaSingle',
+        attrs: { layout: 'center' },
+        content: [{ type: 'media', attrs: { type: 'external', url: 'https://x.dev/a (b).png', alt: 'x' } }],
+      },
+    ]
+    const markdown = markdownAdfConverter.toMarkdown(nodes)
+    expect(markdown).toBe('![x](<https://x.dev/a (b).png>)')
+    // An external URL is never written back as media, so it re-reads as its own literal markdown, byte-stably.
+    expect(roundTrip(markdown)).toBe(markdown)
+    expect(roundTrip(roundTrip(markdown))).toBe(markdown)
   })
 })
 

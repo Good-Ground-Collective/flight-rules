@@ -77,6 +77,24 @@ export interface AdfBlockquoteNode {
   content: AdfNode[]
 }
 
+/**
+ * An uploaded attachment rendered inline. `attrs.id` is the media-services UUID
+ * (not the numeric REST attachment id), and `collection` is the empty string for
+ * a Jira issue. `alt` appears in Atlassian's own example though the documented
+ * attrs table omits it; `width`/`height` are supplied when known so the media
+ * renders. A `media` always sits inside a `mediaSingle` or `mediaGroup`.
+ */
+export interface AdfMediaNode {
+  type: 'media'
+  attrs: { type: 'file'; id: string; collection: string; alt?: string; width?: number; height?: number }
+}
+
+export interface AdfMediaSingleNode {
+  type: 'mediaSingle'
+  attrs: { layout: string }
+  content: AdfMediaNode[]
+}
+
 export type AdfPanelType = 'info' | 'note' | 'success' | 'warning' | 'error'
 
 export interface AdfPanelNode {

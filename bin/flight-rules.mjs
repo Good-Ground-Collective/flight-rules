@@ -38943,6 +38943,15 @@ function gfm(options) {
 }
 
 // src/tasks/jira-task-tracker/markdown-adf.ts
+var MediaRefSchema = external_exports.object({
+  mediaUuid: external_exports.string().min(1),
+  collection: external_exports.string().default(""),
+  width: external_exports.number().int().positive().optional(),
+  height: external_exports.number().int().positive().optional()
+});
+var MediaLookupSchema = external_exports.record(external_exports.string(), MediaRefSchema);
+var attachmentPrefix = /^attachment:/;
+var externalTarget = /^[a-zA-Z][a-zA-Z0-9+.-]*:|^\/\//;
 var detailsOpen = /^<details>/;
 var detailsClose = /^<\/details>/;
 var summaryTag = /<summary>([\s\S]*?)<\/summary>/;
@@ -38961,13 +38970,17 @@ var headingLine = /^#{1,6} \S/;
 var quoteContent = /* @__PURE__ */ new Set(["paragraph", "bulletList", "orderedList", "codeBlock"]);
 var panelContent = /* @__PURE__ */ new Set(["paragraph", "heading", "bulletList", "orderedList"]);
 var LayeredBodyAdfConverter = class {
-  toAdf(markdown) {
+  toAdf(markdown, media = {}) {
     const source = markdown.replace(/\r\n/g, "\n");
     const tree = this.parse(source);
-    return { version: 1, type: "doc", content: this.blocks(tree.children, source) };
+    return { version: 1, type: "doc", content: this.blocks(tree.children, source, void 0, media, true) };
   }
-  toMarkdown(nodes) {
-    return nodes.map((node2) => this.blockToMarkdown(node2)).filter((block) => block.length > 0).join("\n\n");
+  toMarkdown(nodes, media = {}) {
+    const names = new Map(Object.entries(media).map(([filename, ref]) => [ref.mediaUuid, filename]));
+    return this.render(nodes, names);
+  }
+  render(nodes, names) {
+    return nodes.map((node2) => this.blockToMarkdown(node2, names)).filter((block) => block.length > 0).join("\n\n");
   }
   parse(markdown) {
     return fromMarkdown(markdown, { extensions: [gfm()], mdastExtensions: [gfmFromMarkdown()] });
@@ -38976,9 +38989,12 @@ var LayeredBodyAdfConverter = class {
    * Maps a run of sibling mdast blocks to ADF. `allowed`, when a container passes
    * it, restricts the output to that container's content model: a node whose ADF
    * type falls outside the set degrades to literal paragraph text rather than an
-   * invalid child.
+   * invalid child. `media` only reaches the block mapper at the document level
+   * (`allowMedia`): a `mediaSingle` is valid ADF as a top-level block but not
+   * inside a panel, blockquote, list item, or table cell, so nested runs resolve
+   * no attachments and an image there stays literal.
    */
-  blocks(nodes, source, allowed) {
+  blocks(nodes, source, allowed, media = {}, allowMedia = false) {
     const out = [];
     let i = 0;
     while (i < nodes.length) {
@@ -39008,17 +39024,17 @@ var LayeredBodyAdfConverter = class {
         i++;
         continue;
       }
-      out.push(this.blockNode(node2, source));
+      out.push(this.blockNode(node2, source, allowMedia ? media : {}));
       i++;
     }
     return out;
   }
-  blockNode(node2, source) {
+  blockNode(node2, source, media) {
     switch (node2.type) {
       case "heading":
         return { type: "heading", attrs: { level: node2.depth }, content: this.inline(node2.children, source) };
       case "paragraph":
-        return { type: "paragraph", content: this.inline(node2.children, source) };
+        return this.mediaSingle(node2, media) ?? { type: "paragraph", content: this.inline(node2.children, source) };
       case "code": {
         const lang = node2.lang;
         const hasLang = lang !== null && lang !== void 0 && lang !== "";
@@ -39037,6 +39053,61 @@ var LayeredBodyAdfConverter = class {
       default:
         return this.literalBlock(node2, source);
     }
+  }
+  /**
+   * A paragraph that holds a single image becomes an inline `mediaSingle > media`
+   * node when its target resolves in the lookup, so an uploaded attachment renders
+   * where the reader is looking. Returns undefined for anything else — an image
+   * mid-sentence, or an unresolved target — leaving the paragraph to map its image
+   * to literal text. `layout` is required by ADF; `alt` is emitted for Jira's own
+   * example even though it is undocumented, and `width`/`height` only when known.
+   */
+  mediaSingle(node2, media) {
+    const [only, ...rest] = node2.children;
+    if (only === void 0 || only.type !== "image" || rest.length > 0) return void 0;
+    const ref = this.resolveMedia(only.url, media);
+    if (ref === void 0) return void 0;
+    return {
+      type: "mediaSingle",
+      attrs: { layout: "center" },
+      content: [
+        {
+          type: "media",
+          attrs: {
+            type: "file",
+            id: ref.mediaUuid,
+            collection: ref.collection,
+            alt: only.alt ?? "",
+            ...ref.width !== void 0 ? { width: ref.width } : {},
+            ...ref.height !== void 0 ? { height: ref.height } : {}
+          }
+        }
+      ]
+    };
+  }
+  /**
+   * Resolves an image target to an uploaded attachment, or undefined to leave the
+   * image literal. An `attachment:` marker addresses an attachment directly — by
+   * exact media UUID first, then by filename — and is never treated as external.
+   * Any other URL scheme (or a protocol-relative `//`) is a genuine external image
+   * and resolves to nothing, so a lookup keyed by filename cannot hijack
+   * `https://host/before.png`. A bare local path resolves by basename.
+   */
+  resolveMedia(target, media) {
+    if (attachmentPrefix.test(target)) {
+      const rest = target.replace(attachmentPrefix, "");
+      return this.mediaByUuid(rest, media) ?? this.mediaByName(rest, media);
+    }
+    if (externalTarget.test(target)) return void 0;
+    return this.mediaByName(target, media);
+  }
+  mediaByUuid(value, media) {
+    return Object.values(media).find((ref) => ref.mediaUuid === value);
+  }
+  /** Looks up a target's basename as an OWN entry, so inherited names (`constructor`, `__proto__`) never resolve. */
+  mediaByName(target, media) {
+    const basename3 = target.slice(target.lastIndexOf("/") + 1);
+    return Object.hasOwn(media, basename3) ? media[basename3] : void 0;
   }
   /** The ADF block type an mdast node maps to, or `''` when it only degrades to literal text. */
   adfType(node2) {
@@ -39329,14 +39400,14 @@ var LayeredBodyAdfConverter = class {
   literal(node2, source) {
     return source.slice(node2.position?.start.offset ?? 0, node2.position?.end.offset ?? 0);
   }
-  blockToMarkdown(node2) {
+  blockToMarkdown(node2, names) {
     switch (node2.type) {
       case "heading": {
         const level = typeof node2.attrs?.["level"] === "number" ? node2.attrs["level"] : 1;
-        return `${"#".repeat(level)} ${this.inlineToMarkdown(node2.content ?? [])}`;
+        return `${"#".repeat(level)} ${this.inlineToMarkdown(node2.content ?? [], names)}`;
       }
       case "paragraph":
-        return this.inlineToMarkdown(node2.content ?? []);
+        return this.inlineToMarkdown(node2.content ?? [], names);
       case "codeBlock": {
         const language = typeof node2.attrs?.["language"] === "string" ? node2.attrs["language"] : "";
         const text4 = (node2.content ?? []).map((child) => child.text ?? "").join("");
@@ -39345,32 +39416,64 @@ ${text4}
 \`\`\``;
       }
       case "taskList":
-        return (node2.content ?? []).map((item) => `- [${item.attrs?.["state"] === "DONE" ? "x" : " "}] ${this.inlineToMarkdown(item.content ?? [])}`).join("\n");
+        return (node2.content ?? []).map(
+          (item) => `- [${item.attrs?.["state"] === "DONE" ? "x" : " "}] ${this.inlineToMarkdown(item.content ?? [], names)}`
+        ).join("\n");
       case "bulletList":
-        return (node2.content ?? []).map((item) => this.listItemToMarkdown(item, "- ")).join("\n");
+        return (node2.content ?? []).map((item) => this.listItemToMarkdown(item, "- ", names)).join("\n");
       case "orderedList": {
         const order = typeof node2.attrs?.["order"] === "number" ? node2.attrs["order"] : 1;
-        return (node2.content ?? []).map((item, index2) => this.listItemToMarkdown(item, `${order + index2}. `)).join("\n");
+        return (node2.content ?? []).map((item, index2) => this.listItemToMarkdown(item, `${order + index2}. `, names)).join("\n");
       }
       case "expand": {
         const title = typeof node2.attrs?.["title"] === "string" ? node2.attrs["title"] : "";
         return `<details><summary>${title}</summary>
 
-${this.toMarkdown(node2.content ?? [])}
+${this.render(node2.content ?? [], names)}
 
 </details>`;
       }
       case "rule":
         return "---";
       case "table":
-        return this.tableToMarkdown(node2);
+        return this.tableToMarkdown(node2, names);
       case "blockquote":
-        return this.quoteToMarkdown(this.containerBody(node2.content ?? []));
+        return this.quoteToMarkdown(this.containerBody(node2.content ?? [], names));
       case "panel":
-        return this.panelToMarkdown(node2);
+        return this.panelToMarkdown(node2, names);
+      // A media node lands here directly (inside a mediaSingle) or standalone; both read back as a reference.
+      case "mediaSingle":
+      case "mediaGroup":
+        return (node2.content ?? []).map((child) => this.blockToMarkdown(child, names)).join("\n\n");
+      case "media":
+        return this.mediaReference(node2, names);
       default:
-        return node2.text ?? this.toMarkdown(node2.content ?? []);
+        return node2.text ?? this.render(node2.content ?? [], names);
     }
+  }
+  /**
+   * Recovers an image reference from a `media` (or `mediaInline`) node, escaping
+   * the alt text and the destination exactly as a link's are so a filename with a
+   * space or bracket (a screenshot named `screen shot.png`) survives the round
+   * trip. A `type: 'external'` node carries a `url` and reads back as
+   * `![alt](url)`; otherwise the filename comes from the inverted lookup and
+   * degrades to the media UUID, never to `alt`, which Jira does not always preserve.
+   */
+  mediaReference(node2, names) {
+    const alt = typeof node2.attrs?.["alt"] === "string" ? node2.attrs["alt"] : "";
+    const url2 = node2.attrs?.["url"];
+    const id = typeof node2.attrs?.["id"] === "string" ? node2.attrs["id"] : "";
+    const destination = typeof url2 === "string" ? url2 : `attachment:${names.get(id) ?? id}`;
+    return `![${this.encodeAlt(alt)}](${this.encodeDestination(destination)})`;
+  }
+  /**
+   * Escapes image alt text so `![alt](dest)` re-parses to the same alt: the `]`
+   * that would close the description early, `\` itself, the markdown delimiters
+   * that would reinterpret the name, and `&` (which would otherwise decode as an
+   * entity) each gain a backslash that mdast strips on the way back.
+   */
+  encodeAlt(alt) {
+    return alt.replace(/[\\[\]*`~_&]/g, (ch) => `\\${ch}`);
   }
   /**
    * Joins a container's child blocks. A markdown heading is self-delimiting, so
@@ -39378,10 +39481,10 @@ ${this.toMarkdown(node2.content ?? [])}
    * blank line. That reproduces `> ## x` then `> body` (a heading demoted to
    * literal text inside a quote) and a panel heading followed by a paragraph.
    */
-  containerBody(nodes) {
+  containerBody(nodes, names) {
     let out = "";
     for (const node2 of nodes) {
-      const rendered = this.blockToMarkdown(node2);
+      const rendered = this.blockToMarkdown(node2, names);
       if (rendered.length === 0) continue;
       if (out.length === 0) {
         out = rendered;
@@ -39399,10 +39502,10 @@ ${this.toMarkdown(node2.content ?? [])}
    * Emits an admonition as `> [!TYPE]` over the quoted body. An unknown panelType
    * has no marker to restore, so it degrades to a plain blockquote.
    */
-  panelToMarkdown(node2) {
+  panelToMarkdown(node2, names) {
     const panelType = typeof node2.attrs?.["panelType"] === "string" ? node2.attrs["panelType"] : "";
     const marker = alertMarkers[panelType];
-    const body = this.containerBody(node2.content ?? []);
+    const body = this.containerBody(node2.content ?? [], names);
     if (marker === void 0) return this.quoteToMarkdown(body);
     return body.length === 0 ? `> [!${marker}]` : `> [!${marker}]
 ${this.quoteToMarkdown(body)}`;
@@ -39412,10 +39515,10 @@ ${this.quoteToMarkdown(body)}`;
    * representable in ADF and is dropped), then the body. The first row is always
    * the header even when its cells read back as `tableCell`.
    */
-  tableToMarkdown(node2) {
+  tableToMarkdown(node2, names) {
     const lines = [];
     (node2.content ?? []).forEach((row, index2) => {
-      const cells = (row.content ?? []).map((cell) => this.cellToMarkdown(cell));
+      const cells = (row.content ?? []).map((cell) => this.cellToMarkdown(cell, names));
       lines.push(`| ${cells.join(" | ")} |`);
       if (index2 === 0) lines.push(`| ${cells.map(() => "---").join(" | ")} |`);
     });
@@ -39426,8 +39529,8 @@ ${this.quoteToMarkdown(body)}`;
    * cell's internal newlines collapse to spaces, and a literal `|` re-escapes so
    * it survives GFM's cell parse (which unescapes `\|`) instead of splitting the row.
    */
-  cellToMarkdown(cell) {
-    return (cell.content ?? []).map((block) => this.blockToMarkdown(block)).join(" ").replace(/\n/g, " ").replace(/\|/g, "\\|");
+  cellToMarkdown(cell, names) {
+    return (cell.content ?? []).map((block) => this.blockToMarkdown(block, names)).join(" ").replace(/\n/g, " ").replace(/\|/g, "\\|");
   }
   /**
    * Emits one list item and its nested blocks. ADF holds a nested list as a
@@ -39436,10 +39539,10 @@ ${this.quoteToMarkdown(body)}`;
    * lines then indent by the marker width, nesting `- ` at two spaces, `1. ` at
    * three, and `10. ` at four.
    */
-  listItemToMarkdown(item, marker) {
+  listItemToMarkdown(item, marker, names) {
     let body = "";
     for (const block of item.content ?? []) {
-      const rendered = this.blockToMarkdown(block);
+      const rendered = this.blockToMarkdown(block, names);
       if (rendered.length === 0) continue;
       const nestedList = block.type === "bulletList" || block.type === "orderedList" || block.type === "taskList";
       body = body.length === 0 ? rendered : `${body}${nestedList ? "\n" : "\n\n"}${rendered}`;
@@ -39458,7 +39561,7 @@ ${indent2}`)}`;
    * verbatim; all other text is escaped so decoded literals (`literal *x*`)
    * don't re-parse as syntax.
    */
-  inlineToMarkdown(nodes) {
+  inlineToMarkdown(nodes, names) {
     let out = "";
     const open = [];
     const closeFrom = (from) => {
@@ -39468,6 +39571,10 @@ ${indent2}`)}`;
       }
     };
     for (const node2 of nodes) {
+      if (node2.type === "mediaInline") {
+        out += this.mediaReference(node2, names);
+        continue;
+      }
       if (node2.type === "mention") {
         const codeDepth = open.findIndex((mark) => mark.type === "code");
         if (codeDepth !== -1) closeFrom(codeDepth);
@@ -39481,7 +39588,7 @@ ${indent2}`)}`;
       }
       if (node2.text === void 0) {
         closeFrom(0);
-        const inner = node2.content !== void 0 ? this.inlineToMarkdown(node2.content) : "";
+        const inner = node2.content !== void 0 ? this.inlineToMarkdown(node2.content, names) : "";
         out += [...node2.marks ?? []].reverse().reduce((text5, mark) => this.applyMark(text5, mark), inner);
         continue;
       }
@@ -40179,9 +40286,13 @@ var JiraTaskTracker = class {
     const description = issue2.fields.description;
     return description === null || description === void 0 ? {} : this.metadata.parse(description);
   }
-  extractBody(description) {
+  /** @param media filenames to uploaded media UUIDs, empty until the read path can resolve an issue's attachments. */
+  extractBody(description, media = {}) {
     if (description === null || description === void 0) return "";
-    return this.bodyFormat.toMarkdown(description.content.filter((node2) => !this.isMetadataNode(node2)));
+    return this.bodyFormat.toMarkdown(
+      description.content.filter((node2) => !this.isMetadataNode(node2)),
+      media
+    );
   }
   isMetadataNode(node2) {
     return node2.type === "expand" && node2.attrs?.["title"] === metadataExpandTitle;
