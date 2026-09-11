@@ -69,7 +69,9 @@ verify the work, not a data dump.>
 - **`otsMaterials`** — optional. A raw markdown/JSON blob the CLI wraps in the
   `<details>` block verbatim. Image *hosting* is the caller's job: pass already-
   hosted image markdown, or text/JSON that needs no hosting. The renderer does
-  not upload anything.
+  not upload anything. `flight-rules pr create --attach <path>#<caption>` is the
+  upload path: it uploads each local file and rewrites the matching
+  `![caption](<path>)` reference in this block to the hosted asset.
 - **`ticketId` / `ticketUrl`** — when both are present the section renders a
   markdown link; with only an id it renders the bare id; with neither the whole
   section is omitted.
@@ -80,8 +82,9 @@ verify the work, not a data dump.>
   a PR body and pass it as one blob — route the authored fields through
   `pr create` so the structure and length budget stay enforced.
 - **OTS Materials is passthrough.** The CLI never fetches, uploads, or renders an
-  image; it wraps whatever string it is handed. What goes in is an upstream
-  decision (see `skills/execute-work/SKILL.md`).
+  image; it wraps whatever string it is handed. Uploading is `--attach`'s job,
+  one flag per file, and the paths in the block must match the flags. What goes in
+  is an upstream decision (see `skills/execute-work/SKILL.md`).
 - **The body is byte-deterministic.** The same template always renders the same
   body, so a re-run of `pr create` after a config fix produces an identical PR.
 - **Diagrams are just fenced blocks in the prose.** ` ```mermaid ` and ` ```diff `

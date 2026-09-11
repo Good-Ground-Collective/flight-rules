@@ -292,7 +292,8 @@ The format is `${CLAUDE_PLUGIN_ROOT}/docs/pr-body-format.md`. Hand the agent:
 
 - **The ticket's Problem Statement and Solution** — the grounding for "Why Was It Changed."
 - **A summary of the diff** — `git diff --stat <default-branch>..<branch>` and `git log <default-branch>..<branch> --format='%s'`, both read-only, so it describes what actually shipped rather than what the ticket wished for.
-- **The verifier's per-criterion evidence** — the raw material for "What Was Changed" and, absent screenshots, for the OTS Materials block.
+- **The verifier's per-criterion evidence** — the raw material for "What Was Changed."
+- **The evidence manifest from the capture step, or its `No visual evidence: <reason>` line.** The manifest's `path` and `caption` fields are what the agent references in OTS Materials; hand them over exactly as the capture step returned them.
 - **The audience** — "a reviewer deciding whether to merge, and a QA/PM confirming the ask was built."
 
 It returns YAML with `whatWasChanged` (1-5 bullets), `whyWasItChanged` (prose,
@@ -314,14 +315,15 @@ branch `git checkout` printed in step 4. Pass each `whatWasChanged` bullet as it
 own repeated `--what`:
 
 ```bash
-flight-rules pr create --type <type> --scope <id> --description "<description>" --why "<whyWasItChanged>" --what "<bullet>" --what "<bullet>" --ticket-id <id> --ticket-url <url> --base <default-branch> --head <branch>
+flight-rules pr create --type <type> --scope <id> --description "<description>" --why "<whyWasItChanged>" --what "<bullet>" --what "<bullet>" --ots "<otsMaterials>" --ticket-id <id> --ticket-url <url> --attach <path>#<caption> --attach <path>#<caption> --base <default-branch> --head <branch>
 ```
 
 - `--description` — the same prose phrase as the commit, since it becomes the PR title. Not the kebab branch slug.
 - `--why` — the agent's `whyWasItChanged` prose, verbatim. Grounded in the ticket, phrased for a human.
 - `--what` — one per `whatWasChanged` bullet, repeated. The schema caps these at five bullets of 256 characters; if the agent somehow overran, it re-runs, you do not truncate by hand.
-- `--ots` — the agent's `otsMaterials`, when present. Omit the flag entirely when it isn't.
+- `--ots` — the agent's `otsMaterials`, verbatim. It carries the evidence references or the no-evidence line, so it is present on every run this pipeline produces.
 - `--ticket-url` — the link the reviewer follows back to the ticket.
+- `--attach` — one per evidence manifest item, as `<path>#<caption>`, using the manifest's `path` exactly. The command uploads each file and rewrites the matching `![caption](<path>)` reference in the OTS Materials block to the hosted asset; a file the block does not reference is appended at the end. So the paths in `--ots` and the paths in `--attach` must be the same strings, or the body ships a dead link and an orphaned image below it. When the capture step produced `No visual evidence: <reason>`, pass no `--attach` at all; the agent has put that line in `otsMaterials`.
 
 **Move the ticket:**
 
@@ -381,7 +383,8 @@ Give the user, in this order:
 - **Either agent returns `openQuestions`** → surface them unanswered, alongside whatever else that iteration produced.
 - **Third consecutive FAIL** → stop. Present the itemized evidence from the final verification, state that three iterations were used, and **leave the branch intact** with the work in place so a human can pick it up. Do not commit, do not push, do not open a PR, and do not move the ticket to in-review. Leave it in the in-progress status — that is now true.
 - **`git push` rejected** → stop and report. There is no force flag, and inventing one with raw git is not the fix.
-- **`pr create` fails on `repo`** — either `repo (owner/repo) is required in config to create pull requests` or `Invalid repo format …`. This is a config error, not a work error, and by the time you see it **the commit has landed and the branch is pushed**. So: fix `repo` in `.claude/flight-rules.local.md` (confirm the value with the user first) and re-run **only** the `pr create` command, then carry on to the in-review transition. Do **not** redo the implement/verify loop, do not re-commit, and do **not** fall back to raw `gh pr create` — that bypasses the PR template, so the body would lose the authored What/Why sections, the OTS Materials block and the ticket link, which is the whole point of routing through the CLI. Re-run `pr create` with the same authored fields the tech-writer produced — don't re-summon the agent and don't hand-write a body. If the user can't supply a valid `owner/repo`, stop and report the branch name and commit sha so the PR can be opened by hand.
+- **`pr create` fails on `repo`** — either `repo (owner/repo) is required in config to create pull requests` or `Invalid repo format …`. This is a config error, not a work error, and by the time you see it **the commit has landed and the branch is pushed**. So: fix `repo` in `.claude/flight-rules.local.md` (confirm the value with the user first) and re-run **only** the `pr create` command, then carry on to the in-review transition. Do **not** redo the implement/verify loop, do not re-commit, and do **not** fall back to raw `gh pr create` — that bypasses the PR template, so the body would lose the authored What/Why sections, the OTS Materials block and the ticket link, which is the whole point of routing through the CLI. Re-run `pr create` with the same authored fields the tech-writer produced and the same `--attach` set — don't re-summon the agent and don't hand-write a body. If the user can't supply a valid `owner/repo`, stop and report the branch name and commit sha so the PR can be opened by hand.
+- **`pr create` exits non-zero but printed a PR URL** → a partial attachment upload. The PR exists, with the files that did upload. Do **not** run `pr create` again — that opens a duplicate. Record the URL, note which attachments failed for the step 9 report, and carry on to the in-review transition. The missing images can be attached to the PR later by hand.
 - **`autonomous-code-review` fails to post** → report it in step 9 and finish the run. By this point the PR is open, the work is verified and the ticket has moved, so the review is the only thing missing and it can be re-run against the PR at any time. Do not retry the implement/verify loop, do not roll the ticket status back, and do not withhold the run summary.
 
 ## What Good Looks Like
@@ -392,7 +395,7 @@ A reviewer can grade a run against this list:
 - Every commit message is CLI-generated, correctly typed and scoped to the ticket id.
 - The commit contains exactly the union of the paths the implementer reported across all iterations: nothing unrelated rode along, and nothing the verifier passed was left behind. The working tree is clean afterwards.
 - A visible change produced evidence under `.claude/evidence/<ticket>/`, or the run recorded `No visual evidence: <reason>`; nothing from that directory was committed.
-- The PR body matches `docs/pr-body-format.md`: tech-writer-authored What/Why sections, the ticket linked, and — when present — an OTS Materials block carrying the verifier's evidence or real output.
+- The PR body matches `docs/pr-body-format.md`: tech-writer-authored What/Why sections, the ticket linked, and — when present — an OTS Materials block whose images and video render from GitHub-hosted assets, not relative paths, or which states `No visual evidence: <reason>`.
 - The ticket's status trail reads to-do → in-progress → in-review, with the in-review transition happening *after* the PR exists.
 - No contract item — acceptance criterion or Fixed When item — shipped without a PASS verdict backed by evidence, and no checkbox was ticked.
 - The run summary states the iteration count, and every `charterConcerns` and `openQuestions` entry reached the user.

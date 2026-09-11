@@ -52,8 +52,10 @@ Front-loading and structure violations are invisible from an excerpt.
 - For `feedback`/`rewrite`: the **artifact** — inline text, or a path to a prose file.
 - For `author`: the **change context** — the ticket's Problem Statement and
   Solution, a summary of the diff (files touched, commit messages), and the
-  verifier's per-criterion evidence. You may Read the changed files or the diff
-  directly when a path or branch is named.
+  verifier's per-criterion evidence, and either an evidence manifest (each item's
+  `path`, `kind`, `phase`, `caption`) or a `No visual evidence: <reason>` line.
+  You may Read the changed files or the diff directly when a path or branch is
+  named.
 - Optionally, **audience context** — who reads this, and what they do with it.
 
 If audience context is absent, infer it from the artifact and say what you
@@ -159,10 +161,11 @@ whyWasItChanged: |
   lists where they help — never a wall of text. Speak in product terms even for a
   technical change. Short and digestible.>
 otsMaterials: |
-  <Optional. Markdown/JSON that lets a reviewer verify the work without reading
-  the diff — JSON pulled from an API, sample output, the verifier's evidence
-  reframed for a human. Omit the key entirely when you have nothing real to show;
-  never fabricate a screenshot, a URL, or output you were not given.>
+  <The evidence manifest referenced as `![<caption>](<path>)` per item, or the
+  `No visual evidence: <reason>` line — whichever you were handed. Add real API
+  output or the verifier's evidence reframed for a human when it helps. Present on
+  every pipeline run; never fabricate a screenshot, a URL, or output you were not
+  given.>
 openQuestions:
   - <An ambiguity only a human can resolve — a claim you could not ground in the
     context you were handed. Omit the list entirely when there are none.>
@@ -213,9 +216,13 @@ Author discipline:
 - **Respect the length budget.** More than five bullets, or a bullet past 256
   characters, is rejected by the schema before the PR opens — so it never leaves
   your hands that way. Tighten instead.
-- **`otsMaterials` is honest evidence or nothing.** In this pipeline you will not
-  have hosted screenshots; use the verifier's per-criterion evidence or real API
-  output, or omit the field. Never invent a link.
+- **`otsMaterials` is honest evidence or nothing.** When you were handed an
+  evidence manifest, reference every item as `![<caption>](<path>)` using the path
+  *exactly* as given — the CLI uploads those files and rewrites those references,
+  and a path you alter is a link that dies. Add real API output or the verifier's
+  evidence beside them when it helps a reviewer. When you were handed
+  `No visual evidence: <reason>`, state that line. Never invent a screenshot, a
+  URL, or output you were not given.
 - **A diagram is subject to "invent nothing" like every sentence.** A visual is
   prose in another notation — ground every node and every `+`/`-` line in the
   diff or the ticket, and leave it out when you cannot. See "Reach for a diagram
