@@ -25,6 +25,9 @@ const issue = (
     status?: string
     labels?: string[]
     assignee?: string | null
+    reporter?: string
+    issuetype?: string
+    attachment?: unknown[]
     description?: AdfDocNode
     parent?: string
     issuelinks?: unknown[]
@@ -40,6 +43,9 @@ const issue = (
     description: fields.description ?? null,
     updated: '2026-07-10T00:00:00.000Z',
     ...(fields.parent !== undefined ? { parent: { key: fields.parent } } : {}),
+    ...(fields.reporter !== undefined ? { reporter: { accountId: fields.reporter } } : {}),
+    ...(fields.issuetype !== undefined ? { issuetype: { name: fields.issuetype } } : {}),
+    ...(fields.attachment !== undefined ? { attachment: fields.attachment } : {}),
     issuelinks: fields.issuelinks ?? [],
   },
 })
@@ -390,6 +396,35 @@ describe('JiraTaskTracker.getEpic', () => {
     expect(c?.status).toBe('In Progress')
     expect(c?.blockedBy).toEqual(['PROJ-9'])
   })
+
+  it('carries attachments, reporter, and issueType on children while the epic request stays lean', async () => {
+    const child = issue('PROJ-3', {
+      reporter: 'acct-42',
+      issuetype: 'Story',
+      attachment: [{ id: '200', filename: 'log.txt', mimeType: 'text/plain' }],
+    })
+    request.mockImplementation((method: string, path: string, _body?: unknown, params?: Record<string, unknown>) => {
+      if (method === 'GET' && path === '/issueLinkType') return Promise.resolve(blocksLinkTypes)
+      if (method === 'GET' && path === '/issue/PROJ-1')
+        return Promise.resolve(issue('PROJ-1', { summary: 'Epic', description: descriptionWith('body', {}) }))
+      if (method === 'GET' && path === '/search/jql') {
+        expect(params?.['fields']).toContain('attachment,reporter,issuetype')
+        return Promise.resolve({ issues: [child], total: 1, startAt: 0, maxResults: 100 })
+      }
+      throw new Error(`unexpected ${method} ${path}`)
+    })
+
+    const epic = await makeTracker().getEpic('PROJ-1')
+
+    const [c] = epic.childIssues
+    expect(c?.reporter).toBe('acct-42')
+    expect(c?.issueType).toBe('Story')
+    expect(c?.attachments).toEqual([{ id: '200', filename: 'log.txt', mimeType: 'text/plain' }])
+
+    const epicGet = request.mock.calls.find(([method, path]) => method === 'GET' && path === '/issue/PROJ-1')
+    const epicParams = epicGet?.[3] as { fields: string }
+    expect(epicParams.fields).not.toContain('attachment')
+  })
 })
 
 describe('JiraTaskTracker.getTicket', () => {
@@ -424,6 +459,51 @@ describe('JiraTaskTracker.getTicket', () => {
     expect(ticket.assignee).toBe('acct-7')
     expect(ticket.blockedBy).toEqual(['PROJ-8'])
     expect(ticket.blocking).toEqual(['PROJ-9'])
+  })
+
+  it('maps attachments, reporter accountId, and issue type name, and requests the extra fields', async () => {
+    request.mockImplementation((method: string, path: string) => {
+      if (method === 'GET' && path === '/issueLinkType') return Promise.resolve(blocksLinkTypes)
+      if (method === 'GET' && path === '/issue/PROJ-2')
+        return Promise.resolve(
+          issue('PROJ-2', {
+            reporter: 'acct-42',
+            issuetype: 'Bug',
+            attachment: [
+              { id: '100', filename: 'shot.png', mimeType: 'image/png', size: 2048 },
+              { id: '101' },
+            ],
+          }),
+        )
+      throw new Error(`unexpected ${method} ${path}`)
+    })
+
+    const ticket = await makeTracker().getTicket('PROJ-2')
+
+    expect(ticket.reporter).toBe('acct-42')
+    expect(ticket.issueType).toBe('Bug')
+    expect(ticket.attachments).toEqual([
+      { id: '100', filename: 'shot.png', mimeType: 'image/png', size: 2048 },
+      { id: '101', filename: '', mimeType: 'application/octet-stream' },
+    ])
+
+    const get = request.mock.calls.find(([method, path]) => method === 'GET' && path === '/issue/PROJ-2')
+    const params = get?.[3] as { fields: string }
+    expect(params.fields).toContain('attachment,reporter,issuetype')
+  })
+
+  it('defaults reporter to null and issueType to "unknown" when the fields are absent', async () => {
+    request.mockImplementation((method: string, path: string) => {
+      if (method === 'GET' && path === '/issueLinkType') return Promise.resolve(blocksLinkTypes)
+      if (method === 'GET' && path === '/issue/PROJ-2') return Promise.resolve(issue('PROJ-2', {}))
+      throw new Error(`unexpected ${method} ${path}`)
+    })
+
+    const ticket = await makeTracker().getTicket('PROJ-2')
+
+    expect(ticket.reporter).toBeNull()
+    expect(ticket.issueType).toBe('unknown')
+    expect(ticket.attachments).toEqual([])
   })
 })
 

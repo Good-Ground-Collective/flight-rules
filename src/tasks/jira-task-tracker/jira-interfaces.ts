@@ -31,6 +31,14 @@ export interface JiraIssueLink {
   outwardIssue?: { key: string }
 }
 
+export interface JiraAttachment {
+  id: string
+  filename?: string
+  mimeType?: string
+  size?: number
+  content?: string
+}
+
 export interface JiraLinkType {
   id: string
   name: string
@@ -60,6 +68,9 @@ export interface JiraIssue {
     status?: { name: string }
     labels?: string[]
     assignee?: { accountId: string } | null
+    reporter?: { accountId: string; displayName?: string } | null
+    issuetype?: { name: string; id?: string }
+    attachment?: JiraAttachment[]
     description?: AdfDocNode | null
     updated?: string
     parent?: { key: string }

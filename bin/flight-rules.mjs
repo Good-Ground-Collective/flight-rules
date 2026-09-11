@@ -29203,6 +29203,13 @@ var CommentSchema = external_exports.object({
   createdAt: external_exports.string(),
   updatedAt: external_exports.string()
 });
+var AttachmentSchema = external_exports.object({
+  id: external_exports.string(),
+  filename: external_exports.string(),
+  mimeType: external_exports.string(),
+  size: external_exports.number().optional(),
+  mediaUuid: external_exports.string().optional()
+});
 var TechnicalDesignSchema = external_exports.object({
   id: external_exports.string(),
   epicId: external_exports.string(),
@@ -29221,6 +29228,9 @@ var TicketSchema = external_exports.object({
   body: external_exports.string(),
   comments: external_exports.array(CommentSchema),
   assignee: external_exports.string().nullable(),
+  attachments: external_exports.array(AttachmentSchema).default([]),
+  reporter: external_exports.string().nullable().default(null),
+  issueType: external_exports.string().default("unknown"),
   blockedBy: external_exports.array(external_exports.string()).default([]),
   blocking: external_exports.array(external_exports.string()).default([]),
   metadata: EntityMetadataSchema.default({}),
@@ -29841,6 +29851,9 @@ var GitHubTaskTracker = class {
       body: issue2.body ?? "",
       comments: comments.map((c) => this.mapComment(c)),
       assignee: issue2.assignee?.login ?? null,
+      attachments: [],
+      reporter: issue2.user?.login ?? null,
+      issueType: issue2.type?.name ?? "Issue",
       blockedBy,
       blocking,
       metadata,
@@ -29868,6 +29881,8 @@ var JiraApiError = class extends Error {
 var maxRetries = 4;
 var defaultRetryAfterSeconds = 2;
 var maxBackoffMs = 3e4;
+var attachmentXsrfHeader = "no-check";
+var redirectStatuses = /* @__PURE__ */ new Set([301, 302, 303, 307, 308]);
 var JiraErrorBodySchema = external_exports.object({
   errorMessages: external_exports.array(external_exports.string()).optional(),
   // Caught per-field so an off-contract `errors` map cannot discard a valid sibling `errorMessages`.
@@ -29893,6 +29908,47 @@ var JiraClient = class {
     const text = await res.text();
     const data = text.length > 0 ? JSON.parse(text) : void 0;
     return data;
+  }
+  /**
+   * Uploads files as a multipart attachment. Jira's attachment endpoint demands the
+   * `X-Atlassian-Token: no-check` XSRF opt-out, and `Content-Type` is left unset so undici
+   * writes the multipart boundary itself — setting it by hand would drop the boundary.
+   */
+  async upload(path2, files) {
+    const form = new FormData();
+    files.forEach((file2) => form.append("file", file2, file2.name));
+    const res = await this.fetchWithRetry(`${this.baseUrl}${path2}`, {
+      method: "POST",
+      headers: {
+        Authorization: this.authHeader,
+        Accept: "application/json",
+        "X-Atlassian-Token": attachmentXsrfHeader
+      },
+      body: form
+    });
+    if (!res.ok) await this.throwApiError(res);
+    const text = await res.text();
+    const data = text.length > 0 ? JSON.parse(text) : void 0;
+    return data;
+  }
+  /**
+   * Resolves the `Location` a Jira redirect points at without following it. undici surfaces the
+   * real 3xx (not an opaque redirect) under `redirect: 'manual'`, so the status and header are
+   * readable; a 3xx leaves `res.ok` false, hence the explicit redirect-status allowance.
+   */
+  async locationFor(path2) {
+    const res = await this.fetchWithRetry(`${this.baseUrl}${path2}`, {
+      method: "GET",
+      headers: { Authorization: this.authHeader },
+      redirect: "manual"
+    });
+    if (!res.ok && !redirectStatuses.has(res.status)) await this.throwApiError(res);
+    const location = res.headers.get("location");
+    await res.body?.cancel();
+    if (location === null) {
+      throw new JiraApiError(res.status, [`Jira returned no Location header for ${path2}`], {});
+    }
+    return location;
   }
   async fetchWithRetry(url2, init, attempt = 0) {
     const res = await fetch(url2, init);
@@ -30232,6 +30288,7 @@ var jiraAdfMetadataService = new JiraAdfMetadataService();
 // src/tasks/jira-task-tracker/jira-task-tracker.ts
 var metadataExpandTitle = "LLM Context";
 var issueFields = "summary,status,labels,assignee,description,issuelinks,updated";
+var ticketFields = `${issueFields},attachment,reporter,issuetype`;
 var ideaIssueType = "Idea";
 var jpdProjectType = "product_discovery";
 var deliveryLinkOutward = "implements";
@@ -30304,7 +30361,7 @@ var JiraTaskTracker = class {
   }
   async getTicket(id) {
     const [issue2, blocksLinkType] = await Promise.all([
-      this.client.request("GET", `/issue/${id}`, void 0, { fields: issueFields }),
+      this.client.request("GET", `/issue/${id}`, void 0, { fields: ticketFields }),
       this.resolveBlocksLinkType()
     ]);
     return this.mapTicket(issue2, blocksLinkType);
@@ -30495,7 +30552,7 @@ var JiraTaskTracker = class {
     const [page, blocksLinkType] = await Promise.all([
       this.client.request("GET", "/search/jql", void 0, {
         jql: `parent = ${epicKey}`,
-        fields: issueFields,
+        fields: ticketFields,
         maxResults: 100
       }),
       this.resolveBlocksLinkType()
@@ -30513,11 +30570,22 @@ var JiraTaskTracker = class {
       body: this.extractBody(issue2.fields.description),
       comments: [],
       assignee: issue2.fields.assignee?.accountId ?? null,
+      attachments: this.mapAttachments(issue2.fields.attachment ?? []),
+      reporter: issue2.fields.reporter?.accountId ?? null,
+      issueType: issue2.fields.issuetype?.name ?? "unknown",
       blockedBy,
       blocking,
       metadata: this.parseMetadata(issue2),
       updatedAt: issue2.fields.updated ?? ""
     };
+  }
+  mapAttachments(attachments) {
+    return attachments.map((attachment) => ({
+      id: attachment.id,
+      filename: attachment.filename ?? "",
+      mimeType: attachment.mimeType ?? "application/octet-stream",
+      ...attachment.size !== void 0 ? { size: attachment.size } : {}
+    }));
   }
   blockingLinks(links, blocksLinkType) {
     const blockedBy = [];
@@ -31694,7 +31762,7 @@ var NodeToolProbe = class {
 var nodeToolProbe = new NodeToolProbe();
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.34.0";
+var appVersion = false ? "0.0.0-dev" : "1.37.0";
 
 // src/cli/cli.ts
 function buildTracker(overrideTracker) {
