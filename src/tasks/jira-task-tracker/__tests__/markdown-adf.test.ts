@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { markdownAdfConverter, type MediaLookup } from '../markdown-adf.js'
 import type { AdfNode } from '../adf.js'
+import { roundTripCases } from './round-trip-cases.js'
 
 const roundTrip = (markdown: string): string => markdownAdfConverter.toMarkdown(markdownAdfConverter.toAdf(markdown).content)
 
@@ -155,75 +156,16 @@ describe('markdownAdfConverter.toAdf', () => {
 })
 
 describe('markdown ⇄ ADF round-trip', () => {
-  const cases: Array<[string, string]> = [
-    ['heading', '## Solution'],
-    ['paragraph with marks', 'Ship **now** via `npm run build` today'],
-    ['inline link', 'Read the [changelog](https://example.com/CHANGELOG.md) first'],
-    ['link at end of line', 'Full diff: [PR #42](https://github.com/o/r/pull/42)'],
-    ['bold link label', 'Merged in [**#42**](https://github.com/o/r/pull/42) yesterday'],
-    ['code block with language', '```ts\nconst x = 1\nexport { x }\n```'],
-    ['code block without language', '```\nplain text\n```'],
-    ['task list', '- [ ] verifiable condition\n- [x] already done'],
-    ['bullet list', '- first\n- second'],
-    ['ordered list', '1. first\n2. second'],
-    ['ordered list with a start offset', '3. third\n4. fourth'],
-    ['loose bullet list', '- first\n\n- second'],
-    ['loose ordered list keeps numbering', '1. first\n\n2. second'],
-    ['rule', '---'],
-    ['mention mid-sentence', 'Ping @{5b10|Ada Lovelace} now'],
-    ['multi-line paragraph', 'line one\nline two'],
-    ['emphasis', 'Ship *now* today'],
-    ['bold italic', 'Ship ***now*** today'],
-    ['strikethrough', 'Drop ~~this~~ instead'],
-    ['code then emphasis', 'Run `npm test` then *retry*'],
-    ['marks inside a code span stay literal', 'Use `a *b* ~~c~~ **d**` verbatim'],
-    ['link', 'See [the docs](https://x.dev) first'],
-    ['link with title', 'See [the docs](https://x.dev "Docs") first'],
-    ['bold link text', 'See [**the docs**](https://x.dev)'],
-    ['bold around a link', 'See **[the docs](https://x.dev)**'],
-    ['code link text', 'See [`flight-rules check`](https://x.dev)'],
-    ['strike around bold', 'Was ~~**required**~~ now optional'],
-    ['heading with marks', '## Ship *it* **now**'],
-    ['intraword underscore stays literal', 'the max_retry_count field'],
-    ['nested bullets', '- outer\n  - inner\n- second outer'],
-    ['deeply nested bullets', '- a\n  - b\n    - c'],
-    ['bullet with a nested ordered list', '- outer\n  1. one\n  2. two'],
-    ['ordered with a nested bullet list', '1. outer\n   - inner'],
-    ['nested bullet carrying marks', '- outer\n  - inner **bold** and `code`'],
-    [
-      'bullet list nested inside a details block',
-      '<details><summary>Guided Walkthrough</summary>\n\n- outer\n  - inner\n\n</details>',
-    ],
-    ['literal image', '![a](https://x.dev/a.png)'],
-    ['table', '| Field | Value |\n| --- | --- |\n| a | b |'],
-    ['table with an escaped pipe in a cell', '| Field | Value |\n| --- | --- |\n| `id` | the `a\\|b` key |'],
-    ['table with an empty cell', '| A | B |\n| --- | --- |\n| a |  |'],
-    ['table with a marked header cell', '| **Field** | Value |\n| --- | --- |\n| a | b |'],
-    ['blockquote', '> quoted line\n> second line'],
-    ['blockquote wrapping a list', '> intro\n>\n> - one\n> - two'],
-    ['blockquote wrapping a code fence', '> Run:\n>\n> ```sh\n> npm test\n> ```'],
-    ['blockquote keeping a heading literal', '> ## Not a heading in ADF\n> body'],
-    ['blockquote keeping a nested quote literal', '> outer\n>\n> > inner'],
-    ['note admonition', '> [!NOTE]\n> Useful information.'],
-    ['warning admonition with a list', '> [!WARNING]\n> Do not run this in prod.\n>\n> - drops the table\n> - no backup'],
-    ['caution admonition with a heading', '> [!CAUTION]\n> ### Risk\n> Data loss.'],
-    ['note admonition falling back to a quote on a code fence', '> [!NOTE]\n> Run:\n>\n> ```sh\n> npm test\n> ```'],
-    ['tip admonition followed by prose', '> [!TIP]\n> Fast path.\n\nBack to prose.'],
-    ['a pipe in prose stays literal', 'Use a | pipe in normal prose'],
-    ['a single pipe line is not a table', '| this is not a table'],
-    ['table inside a details block', '<details><summary>Guided Walkthrough</summary>\n\n| A |\n| --- |\n| 1 |\n\n</details>'],
-    ['details block', '<details><summary>Guided Walkthrough</summary>\n\nDo the thing.\n\n</details>'],
-    [
-      'details containing a fenced code block',
-      '<details><summary>Guided Walkthrough</summary>\n\nRun this:\n\n```sh\nnpm test\n```\n\n</details>',
-    ],
-    [
-      'nested details',
-      '<details><summary>Outer</summary>\n\n<details><summary>Inner</summary>\n\ndeep\n\n</details>\n\n</details>',
-    ],
-  ]
+  it.each(roundTripCases)('round-trips a %s byte-equivalently', (_name, markdown) => {
+    expect(roundTrip(markdown)).toBe(markdown)
+  })
 
-  it.each(cases)('round-trips a %s byte-equivalently', (_name, markdown) => {
+  it('round-trips nested details byte-equivalently', () => {
+    // Kept out of the shared, schema-validated corpus: nested <details> emits an
+    // `expand` inside an `expand`, which the ADF schema rejects, but the bytes
+    // still round-trip.
+    const markdown =
+      '<details><summary>Outer</summary>\n\n<details><summary>Inner</summary>\n\ndeep\n\n</details>\n\n</details>'
     expect(roundTrip(markdown)).toBe(markdown)
   })
 

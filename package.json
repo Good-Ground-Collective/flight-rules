@@ -57,6 +57,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@atlaskit/adf-utils": "^20.9.15",
     "@eslint/js": "^10.0.1",
     "@good-ground-collective/preflight": "^0.2.2",
     "@semantic-release/commit-analyzer": "^13.0.1",
