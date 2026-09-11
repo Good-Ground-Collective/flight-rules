@@ -101,13 +101,39 @@ Mapped constructs:
 - **Thematic breaks** (`---`) → `rule`.
 - **`<details>`/`<summary>` pairs** → `expand`, the summary as `attrs.title`;
   nested details nest.
+- **GFM tables** → `table` of `tableRow`s; the first row's cells are
+  `tableHeader`, the rest `tableCell`, and every cell holds one `paragraph`.
+- **Blockquotes** → `blockquote`, holding paragraphs, lists, and code blocks.
+- **GitHub admonitions** — a blockquote whose first line is a `[!TYPE]` marker →
+  `panel`, by this map:
+
+  | Markdown | ADF `panelType` |
+  | --- | --- |
+  | `> [!NOTE]` | `info` |
+  | `> [!TIP]` | `success` |
+  | `> [!IMPORTANT]` | `note` |
+  | `> [!WARNING]` | `warning` |
+  | `> [!CAUTION]` | `error` |
+
+  `IMPORTANT` shares the `note` panel with no dedicated Atlassian equivalent.
 
 Degradation and normalizations:
 
-- **Literal-text degradation.** Images, tables, blockquotes, and stray HTML are
-  kept as literal text sliced from their markdown source, so they round-trip
-  byte-identically until their own node-family ticket claims them. An unclosed
-  `<details>` degrades to literal paragraph text rather than looping.
+- **Literal-text degradation.** Images and stray HTML are kept as literal text
+  sliced from their markdown source, so they round-trip byte-identically until
+  their own node-family ticket claims them. An unclosed `<details>` degrades to
+  literal paragraph text rather than looping.
+- **Demotions on tables, quotes, and panels.** ADF's content models are narrower
+  than GFM's, so some detail is a documented one-way loss:
+  - **Column alignment is lost.** ADF paragraphs inside cells carry no alignment,
+    so `| :--- | ---: |` normalizes to `| --- | --- |`.
+  - **Headings and nested quotes stay literal inside a blockquote.** A `blockquote`
+    admits only paragraphs, lists, and code blocks, so `> ## Title` and a nested
+    `> >` re-emit verbatim as literal quoted text rather than structured nodes.
+  - **A code fence forces the blockquote fallback for alerts.** A `panel` cannot
+    hold a code block, so an admonition containing one degrades to a plain
+    `blockquote` that keeps its `[!TYPE]` marker as literal first-paragraph text.
+  - **Tables do not render on Jira mobile**, which shows their ADF as bare text.
 - **Mark normalizations.** `_x_` → `*x*`; a link whose text equals its href
   collapses to the bare url; `` **`x`** `` drops the bold from the code span;
   `underline`, `textColor`, `subsup`, and `border` marks emit their text

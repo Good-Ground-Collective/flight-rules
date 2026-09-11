@@ -195,8 +195,23 @@ describe('markdown ⇄ ADF round-trip', () => {
       '<details><summary>Guided Walkthrough</summary>\n\n- outer\n  - inner\n\n</details>',
     ],
     ['literal image', '![a](https://x.dev/a.png)'],
-    ['literal table', '| A |\n| --- |\n| 1 |'],
-    ['literal blockquote', '> quoted line'],
+    ['table', '| Field | Value |\n| --- | --- |\n| a | b |'],
+    ['table with an escaped pipe in a cell', '| Field | Value |\n| --- | --- |\n| `id` | the `a\\|b` key |'],
+    ['table with an empty cell', '| A | B |\n| --- | --- |\n| a |  |'],
+    ['table with a marked header cell', '| **Field** | Value |\n| --- | --- |\n| a | b |'],
+    ['blockquote', '> quoted line\n> second line'],
+    ['blockquote wrapping a list', '> intro\n>\n> - one\n> - two'],
+    ['blockquote wrapping a code fence', '> Run:\n>\n> ```sh\n> npm test\n> ```'],
+    ['blockquote keeping a heading literal', '> ## Not a heading in ADF\n> body'],
+    ['blockquote keeping a nested quote literal', '> outer\n>\n> > inner'],
+    ['note admonition', '> [!NOTE]\n> Useful information.'],
+    ['warning admonition with a list', '> [!WARNING]\n> Do not run this in prod.\n>\n> - drops the table\n> - no backup'],
+    ['caution admonition with a heading', '> [!CAUTION]\n> ### Risk\n> Data loss.'],
+    ['note admonition falling back to a quote on a code fence', '> [!NOTE]\n> Run:\n>\n> ```sh\n> npm test\n> ```'],
+    ['tip admonition followed by prose', '> [!TIP]\n> Fast path.\n\nBack to prose.'],
+    ['a pipe in prose stays literal', 'Use a | pipe in normal prose'],
+    ['a single pipe line is not a table', '| this is not a table'],
+    ['table inside a details block', '<details><summary>Guided Walkthrough</summary>\n\n| A |\n| --- |\n| 1 |\n\n</details>'],
     ['details block', '<details><summary>Guided Walkthrough</summary>\n\nDo the thing.\n\n</details>'],
     [
       'details containing a fenced code block',
@@ -442,12 +457,161 @@ describe('markdownAdfConverter.toAdf <details> resilience (KAN-38)', () => {
   })
 })
 
+describe('markdownAdfConverter.toAdf tables, blockquotes, and admonitions', () => {
+  // ADF content models: a blockquote never holds a heading or a nested quote, and
+  // a panel never holds a code block, table, panel, or quote. Both require at least
+  // one child. This walks a whole toAdf result and fails on any illegal child or
+  // empty container.
+  const assertContentModel = (node: AdfNode): void => {
+    if (node.type === 'blockquote' || node.type === 'panel') expect((node.content ?? []).length).toBeGreaterThan(0)
+    for (const child of node.content ?? []) {
+      if (node.type === 'blockquote') expect(['heading', 'blockquote']).not.toContain(child.type)
+      if (node.type === 'panel') expect(['codeBlock', 'table', 'panel', 'blockquote']).not.toContain(child.type)
+      assertContentModel(child)
+    }
+  }
+
+  const bodies = [
+    '> [!NOTE]\n> body',
+    '> [!TIP]\n> body',
+    '> [!IMPORTANT]\n> body',
+    '> [!WARNING]\n> body',
+    '> [!CAUTION]\n> body',
+    '> ## heading\n> body',
+    '> outer\n>\n> > inner',
+    '> [!NOTE]\n> Run:\n>\n> ```sh\n> npm test\n> ```',
+    '| Field | Value |\n| --- | --- |\n| a | b |',
+    '> [!NOTE]',
+    '>',
+    '> > one\n> > two',
+    '> | A | B |\n> | --- | --- |\n> | a | b |',
+    '> - [ ] one\n> - [x] two',
+  ]
+
+  it.each(bodies)('emits schema-valid container content for %#', (markdown) => {
+    for (const node of markdownAdfConverter.toAdf(markdown).content) assertContentModel(node)
+  })
+
+  const repeated: Array<[string, string]> = [
+    ['a multiline nested quote', '> > one\n> > two'],
+    ['a quoted table', '> | A | B |\n> | --- | --- |\n> | a | b |'],
+    ['a quoted task list', '> - [ ] one\n> - [x] two'],
+  ]
+
+  it.each(repeated)('stays stable across two round trips for %s', (_name, markdown) => {
+    const first = roundTrip(markdown)
+    const second = roundTrip(first)
+    expect(second).toBe(first)
+    // A demoted child must not accrete an outer quote prefix on each pass.
+    expect(first).toBe(markdown)
+  })
+
+  it('gives a marker-only alert a single empty paragraph, never an empty panel', () => {
+    const [panel] = markdownAdfConverter.toAdf('> [!NOTE]').content
+    expect(panel?.type).toBe('panel')
+    expect(panel?.content).toEqual([{ type: 'paragraph', content: [] }])
+    expect(roundTrip('> [!NOTE]')).toBe('> [!NOTE]')
+  })
+
+  it('gives a bare quote a single empty paragraph, never an empty blockquote', () => {
+    const [quote] = markdownAdfConverter.toAdf('>').content
+    expect(quote?.type).toBe('blockquote')
+    expect(quote?.content).toEqual([{ type: 'paragraph', content: [] }])
+    expect(roundTrip('>')).toBe('>')
+  })
+
+  const markerPanels: Array<[string, string]> = [
+    ['NOTE', 'info'],
+    ['TIP', 'success'],
+    ['IMPORTANT', 'note'],
+    ['WARNING', 'warning'],
+    ['CAUTION', 'error'],
+  ]
+
+  it.each(markerPanels)('maps a [!%s] admonition to a %s panel', (marker, panelType) => {
+    const [panel] = markdownAdfConverter.toAdf(`> [!${marker}]\n> body`).content
+    expect(panel?.type).toBe('panel')
+    expect(panel?.attrs).toEqual({ panelType })
+  })
+
+  it('falls an alert with a code fence back to a blockquote keeping the marker literal', () => {
+    const [quote] = markdownAdfConverter.toAdf('> [!NOTE]\n>\n> ```sh\n> npm test\n> ```').content
+    expect(quote?.type).toBe('blockquote')
+    expect(quote?.content?.[0]).toEqual({ type: 'paragraph', content: [{ type: 'text', text: '[!NOTE]' }] })
+    expect(quote?.content?.[1]?.type).toBe('codeBlock')
+  })
+
+  it('uses tableHeader for the first row and tableCell after, with no alignment attribute', () => {
+    const [table] = markdownAdfConverter.toAdf('| A | B |\n| :--- | ---: |\n| a | b |').content
+    expect(table?.content?.[0]?.content?.map((cell) => cell.type)).toEqual(['tableHeader', 'tableHeader'])
+    expect(table?.content?.[1]?.content?.map((cell) => cell.type)).toEqual(['tableCell', 'tableCell'])
+    expect(JSON.stringify(table)).not.toContain('align')
+  })
+
+  it('gives an empty cell an empty paragraph so every cell has block content', () => {
+    const [table] = markdownAdfConverter.toAdf('| A | B |\n| --- | --- |\n| a |  |').content
+    expect(table?.content?.[1]?.content?.[1]?.content).toEqual([{ type: 'paragraph', content: [] }])
+  })
+})
+
+describe('markdownAdfConverter table and quote normalizations', () => {
+  const emit = (nodes: AdfNode[]): string => markdownAdfConverter.toMarkdown(nodes)
+
+  it('drops column alignment to a plain --- delimiter', () => {
+    expect(roundTrip('| A | B |\n| :--- | ---: |\n| 1 | 2 |')).toBe('| A | B |\n| --- | --- |\n| 1 | 2 |')
+  })
+
+  it('joins a multi-paragraph cell into one space-separated line', () => {
+    const table: AdfNode[] = [
+      {
+        type: 'table',
+        content: [
+          {
+            type: 'tableRow',
+            content: [
+              {
+                type: 'tableHeader',
+                attrs: {},
+                content: [
+                  { type: 'paragraph', content: [{ type: 'text', text: 'one' }] },
+                  { type: 'paragraph', content: [{ type: 'text', text: 'two' }] },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ]
+    expect(emit(table)).toBe('| one two |\n| --- |')
+  })
+
+  it('reads a first row of tableCell back as the GFM header', () => {
+    const table: AdfNode[] = [
+      {
+        type: 'table',
+        attrs: { isNumberColumnEnabled: true },
+        content: [
+          { type: 'tableRow', content: [{ type: 'tableCell', attrs: {}, content: [{ type: 'paragraph', content: [{ type: 'text', text: 'H' }] }] }] },
+          { type: 'tableRow', content: [{ type: 'tableCell', attrs: {}, content: [{ type: 'paragraph', content: [{ type: 'text', text: 'b' }] }] }] },
+        ],
+      },
+    ]
+    expect(emit(table)).toBe('| H |\n| --- |\n| b |')
+  })
+
+  it('renders an unknown panelType as a plain blockquote', () => {
+    const nodes: AdfNode[] = [
+      { type: 'panel', attrs: { panelType: 'custom' }, content: [{ type: 'paragraph', content: [{ type: 'text', text: 'hi' }] }] },
+    ]
+    expect(emit(nodes)).toBe('> hi')
+  })
+})
+
 describe('markdownAdfConverter.toMarkdown graceful degradation', () => {
   it('flattens unknown block nodes to their text content', () => {
     const nodes: AdfNode[] = [
       {
-        type: 'panel',
-        attrs: { panelType: 'info' },
+        type: 'layoutSection',
         content: [{ type: 'paragraph', content: [{ type: 'text', text: 'from the UI' }] }],
       },
     ]

@@ -38946,6 +38946,20 @@ function gfm(options) {
 var detailsOpen = /^<details>/;
 var detailsClose = /^<\/details>/;
 var summaryTag = /<summary>([\s\S]*?)<\/summary>/;
+var panelTypes = {
+  NOTE: "info",
+  TIP: "success",
+  IMPORTANT: "note",
+  WARNING: "warning",
+  CAUTION: "error"
+};
+var alertMarkers = Object.fromEntries(
+  Object.entries(panelTypes).map(([marker, panelType]) => [panelType, marker])
+);
+var alertMarker = /^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\][ \t]*(?:\n|$)/;
+var headingLine = /^#{1,6} \S/;
+var quoteContent = /* @__PURE__ */ new Set(["paragraph", "bulletList", "orderedList", "codeBlock"]);
+var panelContent = /* @__PURE__ */ new Set(["paragraph", "heading", "bulletList", "orderedList"]);
 var LayeredBodyAdfConverter = class {
   toAdf(markdown) {
     const source = markdown.replace(/\r\n/g, "\n");
@@ -38958,12 +38972,23 @@ var LayeredBodyAdfConverter = class {
   parse(markdown) {
     return fromMarkdown(markdown, { extensions: [gfm()], mdastExtensions: [gfmFromMarkdown()] });
   }
-  blocks(nodes, source) {
+  /**
+   * Maps a run of sibling mdast blocks to ADF. `allowed`, when a container passes
+   * it, restricts the output to that container's content model: a node whose ADF
+   * type falls outside the set degrades to literal paragraph text rather than an
+   * invalid child.
+   */
+  blocks(nodes, source, allowed) {
     const out = [];
     let i = 0;
     while (i < nodes.length) {
       const node2 = nodes[i];
       if (node2 === void 0) {
+        i++;
+        continue;
+      }
+      if (allowed !== void 0 && !allowed.has(this.adfType(node2))) {
+        out.push(this.literalBlock(node2, source, true));
         i++;
         continue;
       }
@@ -39005,9 +39030,105 @@ var LayeredBodyAdfConverter = class {
       }
       case "thematicBreak":
         return { type: "rule" };
+      case "blockquote":
+        return this.quoteOrPanel(node2, source);
+      case "table":
+        return this.table(node2, source);
       default:
         return this.literalBlock(node2, source);
     }
+  }
+  /** The ADF block type an mdast node maps to, or `''` when it only degrades to literal text. */
+  adfType(node2) {
+    switch (node2.type) {
+      case "heading":
+        return "heading";
+      case "paragraph":
+        return "paragraph";
+      case "code":
+        return "codeBlock";
+      case "thematicBreak":
+        return "rule";
+      case "blockquote":
+        return "blockquote";
+      case "table":
+        return "table";
+      case "list":
+        return this.listAdfType(node2);
+      default:
+        return "";
+    }
+  }
+  listAdfType(node2) {
+    if (node2.children.some((item) => item.checked === true || item.checked === false)) return "taskList";
+    return node2.ordered === true ? "orderedList" : "bulletList";
+  }
+  /**
+   * A blockquote whose first paragraph opens with a `[!TYPE]` marker is a GitHub
+   * admonition and maps to an ADF `panel` — but only when its remaining blocks all
+   * fit the panel content model. A code fence (or anything else a panel rejects)
+   * forces the plain-`blockquote` fallback, which keeps the marker as literal text
+   * in the first paragraph. A blockquote with no marker maps straight to
+   * `blockquote`, its own disallowed children (headings, nested quotes) degrading.
+   */
+  quoteOrPanel(node2, source) {
+    const marker = this.alertType(node2);
+    const panelType = marker === void 0 ? void 0 : panelTypes[marker];
+    if (marker !== void 0 && panelType !== void 0) {
+      const rest = this.stripAlertMarker(node2.children);
+      if (rest.every((child) => panelContent.has(this.adfType(child)))) {
+        return { type: "panel", attrs: { panelType }, content: this.withBlockContent(this.blocks(rest, source, panelContent)) };
+      }
+    }
+    return { type: "blockquote", content: this.withBlockContent(this.blocks(node2.children, source, quoteContent)) };
+  }
+  /**
+   * ADF's `panel` and `blockquote` content models require at least one child, so a
+   * marker-only alert or a bare `>` (which leave no body) get an empty paragraph
+   * rather than an empty, schema-invalid container.
+   */
+  withBlockContent(nodes) {
+    return nodes.length === 0 ? [{ type: "paragraph", content: [] }] : nodes;
+  }
+  alertType(node2) {
+    const first = node2.children[0];
+    if (first === void 0 || first.type !== "paragraph") return void 0;
+    const text4 = first.children[0];
+    if (text4 === void 0 || text4.type !== "text") return void 0;
+    return alertMarker.exec(text4.value)?.[1];
+  }
+  /**
+   * Returns the blockquote's children with the admonition marker (and its trailing
+   * newline) removed from the first paragraph, dropping that paragraph when nothing
+   * but the marker remained. mdast keeps the marker and the first body line in one
+   * text node when no blank `>` line separates them, so only the leading text is rewritten.
+   */
+  stripAlertMarker(children) {
+    const [first, ...rest] = children;
+    if (first === void 0 || first.type !== "paragraph") return children;
+    const [text4, ...moreInline] = first.children;
+    if (text4 === void 0 || text4.type !== "text") return children;
+    const stripped = text4.value.replace(alertMarker, "");
+    const inline = stripped === "" ? moreInline : [{ ...text4, value: stripped }, ...moreInline];
+    if (inline.length === 0) return rest;
+    return [{ ...first, children: inline }, ...rest];
+  }
+  /**
+   * mdast tables carry phrasing cells and per-column alignment; ADF cells hold
+   * block content and cannot express alignment, so each cell becomes a single
+   * paragraph, the first row's cells become `tableHeader`, and `node.align` is
+   * dropped. An empty cell keeps an empty paragraph so every cell has block content.
+   */
+  table(node2, source) {
+    const rows = node2.children.map((row, index2) => ({
+      type: "tableRow",
+      content: row.children.map((cell) => ({
+        type: index2 === 0 ? "tableHeader" : "tableCell",
+        attrs: {},
+        content: [{ type: "paragraph", content: this.inline(cell.children, source) }]
+      }))
+    }));
+    return { type: "table", content: rows };
   }
   /**
    * Re-pairs a `<details>`/`</details>` run of sibling blocks into a single
@@ -39085,9 +39206,12 @@ var LayeredBodyAdfConverter = class {
     const out = [];
     for (const node2 of nodes) {
       switch (node2.type) {
-        case "text":
-          out.push(...this.mentionSegments(this.literal(node2, source), marks));
+        case "text": {
+          const segments = this.mentionSegments(this.literal(node2, source), marks);
+          const hasMention = segments.some((segment) => segment.type === "mention");
+          out.push(...hasMention ? segments : this.textSegments(node2.value, marks));
           break;
+        }
         case "emphasis":
           out.push(...this.inline(node2.children, source, [...marks, { type: "em" }]));
           break;
@@ -39186,8 +39310,21 @@ var LayeredBodyAdfConverter = class {
   mentionToken() {
     return /@\{([^|{}\n]+)\|((?:\\[^\n]|[^{}\\\n])*)\}/g;
   }
-  literalBlock(node2, source) {
-    return { type: "paragraph", content: this.textSegments(this.literal(node2, source), []) };
+  /**
+   * Degrades an unmappable block to a literal paragraph of its source text. When
+   * demoted into a container that re-quotes its body (a blockquote), the outer
+   * `> ` on each continuation line belongs to the enclosing quote, not the child —
+   * mdast strips it from the first line only — so `stripEnclosingQuote` removes one
+   * quote level from the rest. Otherwise a nested quote, quoted table, or quoted
+   * task list would accrete a `>` on every round trip.
+   */
+  literalBlock(node2, source, stripEnclosingQuote = false) {
+    const text4 = this.literal(node2, source);
+    const inner = stripEnclosingQuote ? this.stripEnclosingQuote(text4) : text4;
+    return { type: "paragraph", content: this.textSegments(inner, []) };
+  }
+  stripEnclosingQuote(text4) {
+    return text4.split("\n").map((line, index2) => index2 === 0 ? line : line.replace(/^> ?/, "")).join("\n");
   }
   literal(node2, source) {
     return source.slice(node2.position?.start.offset ?? 0, node2.position?.end.offset ?? 0);
@@ -39225,9 +39362,72 @@ ${this.toMarkdown(node2.content ?? [])}
       }
       case "rule":
         return "---";
+      case "table":
+        return this.tableToMarkdown(node2);
+      case "blockquote":
+        return this.quoteToMarkdown(this.containerBody(node2.content ?? []));
+      case "panel":
+        return this.panelToMarkdown(node2);
       default:
         return node2.text ?? this.toMarkdown(node2.content ?? []);
     }
+  }
+  /**
+   * Joins a container's child blocks. A markdown heading is self-delimiting, so
+   * the block after one needs no blank line; every other block gets the usual
+   * blank line. That reproduces `> ## x` then `> body` (a heading demoted to
+   * literal text inside a quote) and a panel heading followed by a paragraph.
+   */
+  containerBody(nodes) {
+    let out = "";
+    for (const node2 of nodes) {
+      const rendered = this.blockToMarkdown(node2);
+      if (rendered.length === 0) continue;
+      if (out.length === 0) {
+        out = rendered;
+        continue;
+      }
+      const previousLine = out.slice(out.lastIndexOf("\n") + 1);
+      out = `${out}${headingLine.test(previousLine) ? "\n" : "\n\n"}${rendered}`;
+    }
+    return out;
+  }
+  quoteToMarkdown(body) {
+    return body.split("\n").map((line) => line.length === 0 ? ">" : `> ${line}`).join("\n");
+  }
+  /**
+   * Emits an admonition as `> [!TYPE]` over the quoted body. An unknown panelType
+   * has no marker to restore, so it degrades to a plain blockquote.
+   */
+  panelToMarkdown(node2) {
+    const panelType = typeof node2.attrs?.["panelType"] === "string" ? node2.attrs["panelType"] : "";
+    const marker = alertMarkers[panelType];
+    const body = this.containerBody(node2.content ?? []);
+    if (marker === void 0) return this.quoteToMarkdown(body);
+    return body.length === 0 ? `> [!${marker}]` : `> [!${marker}]
+${this.quoteToMarkdown(body)}`;
+  }
+  /**
+   * Emits a GFM table: a header row, a `---` delimiter (alignment is not
+   * representable in ADF and is dropped), then the body. The first row is always
+   * the header even when its cells read back as `tableCell`.
+   */
+  tableToMarkdown(node2) {
+    const lines = [];
+    (node2.content ?? []).forEach((row, index2) => {
+      const cells = (row.content ?? []).map((cell) => this.cellToMarkdown(cell));
+      lines.push(`| ${cells.join(" | ")} |`);
+      if (index2 === 0) lines.push(`| ${cells.map(() => "---").join(" | ")} |`);
+    });
+    return lines.join("\n");
+  }
+  /**
+   * Flattens a cell's block content to one line: blocks join with a space, a UI
+   * cell's internal newlines collapse to spaces, and a literal `|` re-escapes so
+   * it survives GFM's cell parse (which unescapes `\|`) instead of splitting the row.
+   */
+  cellToMarkdown(cell) {
+    return (cell.content ?? []).map((block) => this.blockToMarkdown(block)).join(" ").replace(/\n/g, " ").replace(/\|/g, "\\|");
   }
   /**
    * Emits one list item and its nested blocks. ADF holds a nested list as a
@@ -40176,7 +40376,7 @@ function createInitiativeCommand(getTracker) {
 }
 
 // src/tasks/body-sections/body-sections.ts
-var headingLine = /^##\s+(.+?)\s*$/;
+var headingLine2 = /^##\s+(.+?)\s*$/;
 var detailsOpen2 = /^<details/;
 var detailsClose2 = /^<\/details>/;
 var checklistItem = /^-\s+\[( |x|X)\]\s+(.*)$/;
@@ -40221,7 +40421,7 @@ var BlobSectionSource = class {
     let i = 0;
     while (i < lines.length) {
       const line = lines[i] ?? "";
-      const heading = line.match(headingLine);
+      const heading = line.match(headingLine2);
       if (heading?.[1] !== void 0) {
         current = headingKeys[heading[1]];
         if (current !== void 0) raw[current] = [];
@@ -40287,7 +40487,7 @@ var BlobSectionSource = class {
         i = this.consumeDetails(lines, i).next;
         continue;
       }
-      const heading = line.match(headingLine);
+      const heading = line.match(headingLine2);
       if (heading?.[1] !== void 0) return heading[1] === "Symptom" ? "bug-report" : "layered-body";
       i++;
     }

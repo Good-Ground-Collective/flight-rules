@@ -56,6 +56,35 @@ export interface AdfExpandNode {
   content: AdfNode[]
 }
 
+export interface AdfTableCellNode {
+  type: 'tableHeader' | 'tableCell'
+  attrs: Record<string, never>
+  content: AdfNode[]
+}
+
+export interface AdfTableRowNode {
+  type: 'tableRow'
+  content: AdfTableCellNode[]
+}
+
+export interface AdfTableNode {
+  type: 'table'
+  content: AdfTableRowNode[]
+}
+
+export interface AdfBlockquoteNode {
+  type: 'blockquote'
+  content: AdfNode[]
+}
+
+export type AdfPanelType = 'info' | 'note' | 'success' | 'warning' | 'error'
+
+export interface AdfPanelNode {
+  type: 'panel'
+  attrs: { panelType: AdfPanelType }
+  content: AdfNode[]
+}
+
 export interface AdfBuilder {
   doc(text: string): AdfDocNode
   codeBlock(text: string, language?: string): AdfCodeBlockNode
