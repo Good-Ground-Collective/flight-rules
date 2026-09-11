@@ -331,6 +331,14 @@ flight-rules pr create --type <type> --scope <id> --description "<description>" 
 flight-rules ticket status <id> --to "<inReviewStatus>"
 ```
 
+**Post the evidence to the ticket.** The board now says in-review; give whoever reads the ticket the same picture the reviewer gets. Write a short body to a temp file: the PR URL on the first line, one or two sentences taken from the tech-writer's `whatWasChanged`, and then each evidence item as `![<caption>](<path>)` using the manifest's `path` exactly — or the `No visual evidence: <reason>` line when that is what the capture step produced. Then post it:
+
+```bash
+flight-rules ticket comment <id> --body-file <path> --attach <path>#<caption> --attach <path>#<caption>
+```
+
+One `--attach` per manifest item, the same `<path>#<caption>` pairs you passed to `pr create`, referenced in the body as `![<caption>](<path>)` with that same path. The command uploads each file to the ticket and rewrites the matching reference in the body so it renders inline; a file the body does not reference is appended at the end. Pass no `--attach` when the capture step recorded `No visual evidence: <reason>`; the PR URL goes in the body either way. This comes *after* the transition for the same reason step 8's review does: it is commentary on a state that already exists.
+
 Then **stop.** Do not merge. Do not approve your own PR.
 
 ### 8. Review the PR
@@ -356,7 +364,7 @@ Give the user, in this order:
 - **Iterations used** — 1, 2, or 3. Say it plainly; it is the honest signal of how hard this was.
 - **Per-criterion verdicts** — every criterion with its verdict and the verifier's evidence, including any `UNVERIFIABLE`.
 - **The PR URL**, and the branch name.
-- **Evidence** — each manifest item's caption and path, or the `No visual evidence: <reason>` line.
+- **Evidence** — each manifest item's caption and path, the PR's OTS Materials, and the ticket comment that carries them; or the `No visual evidence: <reason>` line.
 - **The review verdict** — `ESCALATE` or `CLEAR`, its reasons, and the finding counts. Say plainly whether a human still needs to run `guided-code-review`.
 - **Every `charterConcerns` entry** the verifier raised, verbatim. These didn't block the PR — so don't quietly drop them, even where the review picked them up.
 - **Any `openQuestions`** from either agent, still unanswered.
@@ -385,6 +393,7 @@ Give the user, in this order:
 - **`git push` rejected** → stop and report. There is no force flag, and inventing one with raw git is not the fix.
 - **`pr create` fails on `repo`** — either `repo (owner/repo) is required in config to create pull requests` or `Invalid repo format …`. This is a config error, not a work error, and by the time you see it **the commit has landed and the branch is pushed**. So: fix `repo` in `.claude/flight-rules.local.md` (confirm the value with the user first) and re-run **only** the `pr create` command, then carry on to the in-review transition. Do **not** redo the implement/verify loop, do not re-commit, and do **not** fall back to raw `gh pr create` — that bypasses the PR template, so the body would lose the authored What/Why sections, the OTS Materials block and the ticket link, which is the whole point of routing through the CLI. Re-run `pr create` with the same authored fields the tech-writer produced and the same `--attach` set — don't re-summon the agent and don't hand-write a body. If the user can't supply a valid `owner/repo`, stop and report the branch name and commit sha so the PR can be opened by hand.
 - **`pr create` exits non-zero but printed a PR URL** → a partial attachment upload. The PR exists, with the files that did upload. Do **not** run `pr create` again — that opens a duplicate. Record the URL, note which attachments failed for the step 9 report, and carry on to the in-review transition. The missing images can be attached to the PR later by hand.
+- **`ticket comment` fails** → report it in step 9 and finish the run. The PR is open, the work is verified, and the ticket has moved; the comment is the only thing missing, and it can be posted by hand from the manifest. Do not roll the ticket status back and do not retry the loop.
 - **`autonomous-code-review` fails to post** → report it in step 9 and finish the run. By this point the PR is open, the work is verified and the ticket has moved, so the review is the only thing missing and it can be re-run against the PR at any time. Do not retry the implement/verify loop, do not roll the ticket status back, and do not withhold the run summary.
 
 ## What Good Looks Like
@@ -395,6 +404,7 @@ A reviewer can grade a run against this list:
 - Every commit message is CLI-generated, correctly typed and scoped to the ticket id.
 - The commit contains exactly the union of the paths the implementer reported across all iterations: nothing unrelated rode along, and nothing the verifier passed was left behind. The working tree is clean afterwards.
 - A visible change produced evidence under `.claude/evidence/<ticket>/`, or the run recorded `No visual evidence: <reason>`; nothing from that directory was committed.
+- The ticket carries a comment linking the PR and, for a visible change, the same evidence the PR shows; it was posted after the in-review transition.
 - The PR body matches `docs/pr-body-format.md`: tech-writer-authored What/Why sections, the ticket linked, and — when present — an OTS Materials block whose images and video render from GitHub-hosted assets, not relative paths, or which states `No visual evidence: <reason>`.
 - The ticket's status trail reads to-do → in-progress → in-review, with the in-review transition happening *after* the PR exists.
 - No contract item — acceptance criterion or Fixed When item — shipped without a PASS verdict backed by evidence, and no checkbox was ticked.
