@@ -123,6 +123,103 @@ describe('JiraClient.request', () => {
   }, 10000)
 })
 
+describe('JiraClient.upload', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.unstubAllGlobals()
+  })
+
+  it('posts a multipart FormData with the XSRF header and no Content-Type', async () => {
+    const client = makeClient()
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse([{ id: '10001', filename: 'shot.png' }]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await client.upload<{ id: string }[]>('/issue/FOO-1/attachments', [
+      new File([Buffer.from('png-bytes')], 'shot.png', { type: 'image/png' }),
+    ])
+
+    expect(result).toEqual([{ id: '10001', filename: 'shot.png' }])
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('https://acme.atlassian.net/rest/api/3/issue/FOO-1/attachments')
+    expect(init.method).toBe('POST')
+    const headers = init.headers as Record<string, string>
+    expect(headers['X-Atlassian-Token']).toBe('no-check')
+    expect(headers['Content-Type']).toBeUndefined()
+    expect(headers['Authorization']).toBe(`Basic ${Buffer.from('me@acme.com:tok').toString('base64')}`)
+    expect(init.body).toBeInstanceOf(FormData)
+    const form = init.body as FormData
+    const filePart = form.get('file')
+    expect(filePart).toBeInstanceOf(File)
+    expect((filePart as File).name).toBe('shot.png')
+    expect((filePart as File).type).toBe('image/png')
+  })
+
+  it('returns undefined on a 204 No Content response', async () => {
+    const client = makeClient()
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(null, { status: 204 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await client.upload('/issue/FOO-1/attachments', [])
+
+    expect(result).toBeUndefined()
+  })
+
+  it('throws a JiraApiError through the existing error path on a non-2xx response', async () => {
+    const client = makeClient()
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({ errorMessages: ['too big'] }, { status: 413 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const err = await client.upload('/issue/FOO-1/attachments', []).then(
+      () => undefined,
+      (e: unknown) => e,
+    )
+
+    expect(err).toBeInstanceOf(JiraApiError)
+    const apiErr = err as JiraApiError
+    expect(apiErr.status).toBe(413)
+    expect(apiErr.messages).toEqual(['too big'])
+  })
+})
+
+describe('JiraClient.locationFor', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.unstubAllGlobals()
+  })
+
+  it('reads the Location of a 303 with redirect: manual without following it', async () => {
+    const client = makeClient()
+    const mediaUrl = 'https://media.atlassian.net/file/abc-123'
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(null, { status: 303, headers: { Location: mediaUrl } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await client.locationFor('/attachment/content/10001')
+
+    expect(result).toBe(mediaUrl)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('https://acme.atlassian.net/rest/api/3/attachment/content/10001')
+    expect(init.method).toBe('GET')
+    expect(init.redirect).toBe('manual')
+  })
+
+  it('throws a JiraApiError carrying the status when there is no Location header', async () => {
+    const client = makeClient()
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(null, { status: 404 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const err = await client.locationFor('/attachment/content/missing').then(
+      () => undefined,
+      (e: unknown) => e,
+    )
+
+    expect(err).toBeInstanceOf(JiraApiError)
+    const apiErr = err as JiraApiError
+    expect(apiErr.status).toBe(404)
+  })
+})
+
 describe('AdfBuilder', () => {
   it('doc builds a doc/paragraph node from plain text', () => {
     expect(adfBuilder.doc('hello world')).toEqual({
