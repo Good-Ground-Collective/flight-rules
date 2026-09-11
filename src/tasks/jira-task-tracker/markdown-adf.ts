@@ -1,12 +1,43 @@
 import { fromMarkdown } from 'mdast-util-from-markdown'
 import { gfmFromMarkdown } from 'mdast-util-gfm'
 import { gfm } from 'micromark-extension-gfm'
-import type { List, ListItem, PhrasingContent, Root, RootContent } from 'mdast'
+import type { Blockquote, List, ListItem, PhrasingContent, Root, RootContent, Table } from 'mdast'
 import type { AdfDocNode, AdfMark, AdfNode } from './adf.js'
 
 const detailsOpen = /^<details>/
 const detailsClose = /^<\/details>/
 const summaryTag = /<summary>([\s\S]*?)<\/summary>/
+
+/**
+ * GitHub admonition markers, in source order, keyed to the ADF `panel` panelType
+ * that renders them. IMPORTANT collapses onto `note` because Atlassian offers no
+ * distinct panel for it and both read as a purple callout — that visual judgement
+ * lives only here so the inverse (`alertMarkers`) stays exact. See
+ * docs/bug-report-format.md, whose Trap-for-QA CAUTION relies on the error panel.
+ */
+const panelTypes: Record<string, string> = {
+  NOTE: 'info',
+  TIP: 'success',
+  IMPORTANT: 'note',
+  WARNING: 'warning',
+  CAUTION: 'error',
+}
+
+const alertMarkers: Record<string, string> = Object.fromEntries(
+  Object.entries(panelTypes).map(([marker, panelType]) => [panelType, marker]),
+)
+
+const alertMarker = /^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\][ \t]*(?:\n|$)/
+
+const headingLine = /^#{1,6} \S/
+
+/**
+ * The ADF node types each container admits. ADF's content models are narrower
+ * than GFM's, so anything outside these degrades to literal paragraph text on the
+ * way in, which keeps the emitted ADF schema-valid and the markdown round-tripping.
+ */
+const quoteContent: ReadonlySet<string> = new Set(['paragraph', 'bulletList', 'orderedList', 'codeBlock'])
+const panelContent: ReadonlySet<string> = new Set(['paragraph', 'heading', 'bulletList', 'orderedList'])
 
 export interface MarkdownAdfConverter {
   toAdf(markdown: string): AdfDocNode
@@ -26,10 +57,13 @@ export interface MarkdownAdfConverter {
  * into shared spans — opening a delimiter when a mark first applies across
  * adjacent nodes and closing it only once it stops — which keeps a link inside
  * or outside a bold consistent with how it was authored and avoids re-opening a
- * span per node. Anything outside the mapped subset (images, tables,
- * blockquotes) degrades to literal text sliced from the node's source position
- * on write, so it round-trips unchanged until its own node-family ticket claims
- * it; unknown ADF nodes flatten to their text on read.
+ * span per node. GFM tables, blockquotes, and GitHub admonitions map to ADF
+ * `table`, `blockquote`, and `panel`; because those content models are narrower
+ * than GFM's (a blockquote rejects headings and nested quotes, a panel rejects
+ * code blocks, a cell holds one paragraph), disallowed children degrade to
+ * literal paragraph text sliced from source so the ADF stays schema-valid and the
+ * markdown round-trips. Anything still outside the mapped subset (images) degrades
+ * the same way; unknown ADF nodes flatten to their text on read.
  */
 export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
   toAdf(markdown: string): AdfDocNode {
@@ -49,12 +83,23 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
     return fromMarkdown(markdown, { extensions: [gfm()], mdastExtensions: [gfmFromMarkdown()] })
   }
 
-  private blocks(nodes: RootContent[], source: string): AdfNode[] {
+  /**
+   * Maps a run of sibling mdast blocks to ADF. `allowed`, when a container passes
+   * it, restricts the output to that container's content model: a node whose ADF
+   * type falls outside the set degrades to literal paragraph text rather than an
+   * invalid child.
+   */
+  private blocks(nodes: RootContent[], source: string, allowed?: ReadonlySet<string>): AdfNode[] {
     const out: AdfNode[] = []
     let i = 0
     while (i < nodes.length) {
       const node = nodes[i]
       if (node === undefined) {
+        i++
+        continue
+      }
+      if (allowed !== undefined && !allowed.has(this.adfType(node))) {
+        out.push(this.literalBlock(node, source))
         i++
         continue
       }
@@ -98,9 +143,104 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
       }
       case 'thematicBreak':
         return { type: 'rule' }
+      case 'blockquote':
+        return this.quoteOrPanel(node, source)
+      case 'table':
+        return this.table(node, source)
       default:
         return this.literalBlock(node, source)
     }
+  }
+
+  /** The ADF block type an mdast node maps to, or `''` when it only degrades to literal text. */
+  private adfType(node: RootContent): string {
+    switch (node.type) {
+      case 'heading':
+        return 'heading'
+      case 'paragraph':
+        return 'paragraph'
+      case 'code':
+        return 'codeBlock'
+      case 'thematicBreak':
+        return 'rule'
+      case 'blockquote':
+        return 'blockquote'
+      case 'table':
+        return 'table'
+      case 'list':
+        return this.listAdfType(node)
+      default:
+        return ''
+    }
+  }
+
+  private listAdfType(node: List): string {
+    if (node.children.some((item) => item.checked === true || item.checked === false)) return 'taskList'
+    return node.ordered === true ? 'orderedList' : 'bulletList'
+  }
+
+  /**
+   * A blockquote whose first paragraph opens with a `[!TYPE]` marker is a GitHub
+   * admonition and maps to an ADF `panel` — but only when its remaining blocks all
+   * fit the panel content model. A code fence (or anything else a panel rejects)
+   * forces the plain-`blockquote` fallback, which keeps the marker as literal text
+   * in the first paragraph. A blockquote with no marker maps straight to
+   * `blockquote`, its own disallowed children (headings, nested quotes) degrading.
+   */
+  private quoteOrPanel(node: Blockquote, source: string): AdfNode {
+    const marker = this.alertType(node)
+    const panelType = marker === undefined ? undefined : panelTypes[marker]
+    if (marker !== undefined && panelType !== undefined) {
+      const rest = this.stripAlertMarker(node.children)
+      if (rest.every((child) => panelContent.has(this.adfType(child)))) {
+        return { type: 'panel', attrs: { panelType }, content: this.blocks(rest, source, panelContent) }
+      }
+    }
+    return { type: 'blockquote', content: this.blocks(node.children, source, quoteContent) }
+  }
+
+  private alertType(node: Blockquote): string | undefined {
+    const first = node.children[0]
+    if (first === undefined || first.type !== 'paragraph') return undefined
+    const text = first.children[0]
+    if (text === undefined || text.type !== 'text') return undefined
+    return alertMarker.exec(text.value)?.[1]
+  }
+
+  /**
+   * Returns the blockquote's children with the admonition marker (and its trailing
+   * newline) removed from the first paragraph, dropping that paragraph when nothing
+   * but the marker remained. mdast keeps the marker and the first body line in one
+   * text node when no blank `>` line separates them, so only the leading text is rewritten.
+   */
+  private stripAlertMarker(children: Blockquote['children']): Blockquote['children'] {
+    const [first, ...rest] = children
+    if (first === undefined || first.type !== 'paragraph') return children
+    const [text, ...moreInline] = first.children
+    if (text === undefined || text.type !== 'text') return children
+
+    const stripped = text.value.replace(alertMarker, '')
+    const inline: PhrasingContent[] = stripped === '' ? moreInline : [{ ...text, value: stripped }, ...moreInline]
+    if (inline.length === 0) return rest
+    return [{ ...first, children: inline }, ...rest]
+  }
+
+  /**
+   * mdast tables carry phrasing cells and per-column alignment; ADF cells hold
+   * block content and cannot express alignment, so each cell becomes a single
+   * paragraph, the first row's cells become `tableHeader`, and `node.align` is
+   * dropped. An empty cell keeps an empty paragraph so every cell has block content.
+   */
+  private table(node: Table, source: string): AdfNode {
+    const rows = node.children.map((row, index) => ({
+      type: 'tableRow',
+      content: row.children.map((cell) => ({
+        type: index === 0 ? 'tableHeader' : 'tableCell',
+        attrs: {},
+        content: [{ type: 'paragraph', content: this.inline(cell.children, source) }],
+      })),
+    }))
+    return { type: 'table', content: rows }
   }
 
   /**
@@ -285,10 +425,84 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
       }
       case 'rule':
         return '---'
+      case 'table':
+        return this.tableToMarkdown(node)
+      case 'blockquote':
+        return this.quoteToMarkdown(this.containerBody(node.content ?? []))
+      case 'panel':
+        return this.panelToMarkdown(node)
       default:
-        // unknown blocks (table, panel, media, …) flatten so UI-authored content never throws
+        // unknown blocks (media, layoutSection, …) flatten so UI-authored content never throws
         return node.text ?? this.toMarkdown(node.content ?? [])
     }
+  }
+
+  /**
+   * Joins a container's child blocks. A markdown heading is self-delimiting, so
+   * the block after one needs no blank line; every other block gets the usual
+   * blank line. That reproduces `> ## x` then `> body` (a heading demoted to
+   * literal text inside a quote) and a panel heading followed by a paragraph.
+   */
+  private containerBody(nodes: AdfNode[]): string {
+    let out = ''
+    for (const node of nodes) {
+      const rendered = this.blockToMarkdown(node)
+      if (rendered.length === 0) continue
+      if (out.length === 0) {
+        out = rendered
+        continue
+      }
+      const previousLine = out.slice(out.lastIndexOf('\n') + 1)
+      out = `${out}${headingLine.test(previousLine) ? '\n' : '\n\n'}${rendered}`
+    }
+    return out
+  }
+
+  private quoteToMarkdown(body: string): string {
+    return body
+      .split('\n')
+      .map((line) => (line.length === 0 ? '>' : `> ${line}`))
+      .join('\n')
+  }
+
+  /**
+   * Emits an admonition as `> [!TYPE]` over the quoted body. An unknown panelType
+   * has no marker to restore, so it degrades to a plain blockquote.
+   */
+  private panelToMarkdown(node: AdfNode): string {
+    const panelType = typeof node.attrs?.['panelType'] === 'string' ? node.attrs['panelType'] : ''
+    const marker = alertMarkers[panelType]
+    const body = this.containerBody(node.content ?? [])
+    if (marker === undefined) return this.quoteToMarkdown(body)
+    return body.length === 0 ? `> [!${marker}]` : `> [!${marker}]\n${this.quoteToMarkdown(body)}`
+  }
+
+  /**
+   * Emits a GFM table: a header row, a `---` delimiter (alignment is not
+   * representable in ADF and is dropped), then the body. The first row is always
+   * the header even when its cells read back as `tableCell`.
+   */
+  private tableToMarkdown(node: AdfNode): string {
+    const lines: string[] = []
+    ;(node.content ?? []).forEach((row, index) => {
+      const cells = (row.content ?? []).map((cell) => this.cellToMarkdown(cell))
+      lines.push(`| ${cells.join(' | ')} |`)
+      if (index === 0) lines.push(`| ${cells.map(() => '---').join(' | ')} |`)
+    })
+    return lines.join('\n')
+  }
+
+  /**
+   * Flattens a cell's block content to one line: blocks join with a space, a UI
+   * cell's internal newlines collapse to spaces, and a literal `|` re-escapes so
+   * it survives GFM's cell parse (which unescapes `\|`) instead of splitting the row.
+   */
+  private cellToMarkdown(cell: AdfNode): string {
+    return (cell.content ?? [])
+      .map((block) => this.blockToMarkdown(block))
+      .join(' ')
+      .replace(/\n/g, ' ')
+      .replace(/\|/g, '\\|')
   }
 
   /**
