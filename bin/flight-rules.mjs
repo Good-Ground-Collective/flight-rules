@@ -39040,7 +39040,7 @@ var LayeredBodyAdfConverter = class {
   }
   listNodes(node2, source) {
     if (node2.children.some((item) => item.checked === true || item.checked === false)) {
-      return [this.taskList(node2, source)];
+      return this.taskList(node2, source);
     }
     const ordered = node2.ordered === true;
     const start = typeof node2.start === "number" ? node2.start : 1;
@@ -39055,13 +39055,27 @@ var LayeredBodyAdfConverter = class {
     if (!ordered) return { type: "bulletList", content: content3 };
     return { type: "orderedList", ...order === 1 ? {} : { attrs: { order } }, content: content3 };
   }
+  /**
+   * ADF's `taskItem` is inline-only, so each item takes just the inline content
+   * of its leading paragraph. A task item's remaining blocks (a nested list or a
+   * continuation paragraph) can't live inside the taskItem or nest a list within
+   * it — both are invalid ADF — so they spill out as sibling blocks after the
+   * taskList, preserving the content without corrupting the flat-checklist case
+   * that gets posted to Jira. Round-trip stays valid; the rare nested case flattens.
+   */
   taskList(node2, source) {
-    const content3 = node2.children.map((item, index2) => ({
-      type: "taskItem",
-      attrs: { localId: `task-${index2 + 1}`, state: item.checked === true ? "DONE" : "TODO" },
-      content: this.blocks(item.children, source)
-    }));
-    return { type: "taskList", attrs: { localId: "task-list" }, content: content3 };
+    const overflow = [];
+    const content3 = node2.children.map((item, index2) => {
+      const first = item.children[0];
+      const leadsWithParagraph = first !== void 0 && first.type === "paragraph";
+      overflow.push(...this.blocks(leadsWithParagraph ? item.children.slice(1) : item.children, source));
+      return {
+        type: "taskItem",
+        attrs: { localId: `task-${index2 + 1}`, state: item.checked === true ? "DONE" : "TODO" },
+        content: leadsWithParagraph ? this.inline(first.children, source) : []
+      };
+    });
+    return [{ type: "taskList", attrs: { localId: "task-list" }, content: content3 }, ...overflow];
   }
   inline(nodes, source, marks = []) {
     const out = [];
@@ -39138,7 +39152,7 @@ ${text4}
 \`\`\``;
       }
       case "taskList":
-        return (node2.content ?? []).map((item) => this.renderItem(item, `- [${item.attrs?.["state"] === "DONE" ? "x" : " "}] `, 2)).join("\n");
+        return (node2.content ?? []).map((item) => `- [${item.attrs?.["state"] === "DONE" ? "x" : " "}] ${this.inlineToMarkdown(item.content ?? [])}`).join("\n");
       case "bulletList":
         return (node2.content ?? []).map((item) => this.listItemToMarkdown(item, "- ")).join("\n");
       case "orderedList": {
@@ -39167,14 +39181,6 @@ ${this.toMarkdown(node2.content ?? [])}
    * three, and `10. ` at four.
    */
   listItemToMarkdown(item, marker) {
-    return this.renderItem(item, marker, marker.length);
-  }
-  /**
-   * Renders a list/task item's block content behind `prefix`, indenting every
-   * continuation line by `indentWidth` spaces. A nested list joins onto the item
-   * with a single newline; any other block joins with a blank line.
-   */
-  renderItem(item, prefix, indentWidth) {
     let body = "";
     for (const block of item.content ?? []) {
       const rendered = this.blockToMarkdown(block);
@@ -39182,8 +39188,8 @@ ${this.toMarkdown(node2.content ?? [])}
       const nestedList = block.type === "bulletList" || block.type === "orderedList" || block.type === "taskList";
       body = body.length === 0 ? rendered : `${body}${nestedList ? "\n" : "\n\n"}${rendered}`;
     }
-    const indent2 = " ".repeat(indentWidth);
-    return `${prefix}${body.replace(/\n/g, `
+    const indent2 = " ".repeat(marker.length);
+    return `${marker}${body.replace(/\n/g, `
 ${indent2}`)}`;
   }
   /**

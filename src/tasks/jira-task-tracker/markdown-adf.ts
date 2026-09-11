@@ -147,7 +147,7 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
 
   private listNodes(node: List, source: string): AdfNode[] {
     if (node.children.some((item) => item.checked === true || item.checked === false)) {
-      return [this.taskList(node, source)]
+      return this.taskList(node, source)
     }
 
     const ordered = node.ordered === true
@@ -169,16 +169,27 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
     return { type: 'orderedList', ...(order === 1 ? {} : { attrs: { order } }), content }
   }
 
-  private taskList(node: List, source: string): AdfNode {
-    // Map every block of the item (leading paragraph, nested lists, continuation
-    // blocks) into the taskItem, mirroring how `singleList` fills a listItem, so
-    // nested children and follow-on blocks survive instead of being dropped.
-    const content = node.children.map((item, index) => ({
-      type: 'taskItem',
-      attrs: { localId: `task-${index + 1}`, state: item.checked === true ? 'DONE' : 'TODO' },
-      content: this.blocks(item.children, source),
-    }))
-    return { type: 'taskList', attrs: { localId: 'task-list' }, content }
+  /**
+   * ADF's `taskItem` is inline-only, so each item takes just the inline content
+   * of its leading paragraph. A task item's remaining blocks (a nested list or a
+   * continuation paragraph) can't live inside the taskItem or nest a list within
+   * it — both are invalid ADF — so they spill out as sibling blocks after the
+   * taskList, preserving the content without corrupting the flat-checklist case
+   * that gets posted to Jira. Round-trip stays valid; the rare nested case flattens.
+   */
+  private taskList(node: List, source: string): AdfNode[] {
+    const overflow: AdfNode[] = []
+    const content = node.children.map((item, index) => {
+      const first = item.children[0]
+      const leadsWithParagraph = first !== undefined && first.type === 'paragraph'
+      overflow.push(...this.blocks(leadsWithParagraph ? item.children.slice(1) : item.children, source))
+      return {
+        type: 'taskItem',
+        attrs: { localId: `task-${index + 1}`, state: item.checked === true ? 'DONE' : 'TODO' },
+        content: leadsWithParagraph ? this.inline(first.children, source) : [],
+      }
+    })
+    return [{ type: 'taskList', attrs: { localId: 'task-list' }, content }, ...overflow]
   }
 
   private inline(nodes: PhrasingContent[], source: string, marks: AdfMark[] = []): AdfNode[] {
@@ -258,9 +269,9 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
         return `\`\`\`${language}\n${text}\n\`\`\``
       }
       case 'taskList':
-        // Indent by the bullet marker width (two): the GFM `[ ]`/`[x]` checkbox lives inside the item's paragraph, not the marker.
+        // A taskItem is inline-only, so it renders as a single checklist line.
         return (node.content ?? [])
-          .map((item) => this.renderItem(item, `- [${item.attrs?.['state'] === 'DONE' ? 'x' : ' '}] `, 2))
+          .map((item) => `- [${item.attrs?.['state'] === 'DONE' ? 'x' : ' '}] ${this.inlineToMarkdown(item.content ?? [])}`)
           .join('\n')
       case 'bulletList':
         return (node.content ?? []).map((item) => this.listItemToMarkdown(item, '- ')).join('\n')
@@ -288,15 +299,6 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
    * three, and `10. ` at four.
    */
   private listItemToMarkdown(item: AdfNode, marker: string): string {
-    return this.renderItem(item, marker, marker.length)
-  }
-
-  /**
-   * Renders a list/task item's block content behind `prefix`, indenting every
-   * continuation line by `indentWidth` spaces. A nested list joins onto the item
-   * with a single newline; any other block joins with a blank line.
-   */
-  private renderItem(item: AdfNode, prefix: string, indentWidth: number): string {
     let body = ''
     for (const block of item.content ?? []) {
       const rendered = this.blockToMarkdown(block)
@@ -304,8 +306,8 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
       const nestedList = block.type === 'bulletList' || block.type === 'orderedList' || block.type === 'taskList'
       body = body.length === 0 ? rendered : `${body}${nestedList ? '\n' : '\n\n'}${rendered}`
     }
-    const indent = ' '.repeat(indentWidth)
-    return `${prefix}${body.replace(/\n/g, `\n${indent}`)}`
+    const indent = ' '.repeat(marker.length)
+    return `${marker}${body.replace(/\n/g, `\n${indent}`)}`
   }
 
   /**

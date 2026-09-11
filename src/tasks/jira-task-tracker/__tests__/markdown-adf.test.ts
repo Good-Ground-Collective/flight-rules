@@ -68,9 +68,8 @@ describe('markdownAdfConverter.toAdf', () => {
     const [taskList] = doc.content
     expect(taskList?.type).toBe('taskList')
     expect(taskList?.content?.map((item) => item.attrs?.['state'])).toEqual(['TODO', 'DONE'])
-    // A taskItem now holds block content (paragraph + any nested/continuation
-    // blocks) so nested list children survive the round trip; see FINDING 2.
-    expect(taskList?.content?.[0]?.content).toEqual([{ type: 'paragraph', content: [{ type: 'text', text: 'first' }] }])
+    // ADF taskItem is inline-only, so it holds the paragraph's inline text directly (see FINDING 2).
+    expect(taskList?.content?.[0]?.content).toEqual([{ type: 'text', text: 'first' }])
   })
 
   it('converts bullets to a bulletList of listItem paragraphs', () => {
@@ -309,16 +308,46 @@ describe('markdownAdfConverter round-trip fidelity (adversarial review)', () => 
     })
   })
 
-  describe('FINDING 2 — list item children beyond the first survive', () => {
-    it('preserves a nested child list under a task item', () => {
-      const markdown = '- [ ] parent\n  - child'
+  describe('FINDING 2 — taskItem is inline-only; list-item children survive', () => {
+    const holdsBlock = (node: AdfNode | undefined): boolean =>
+      (node?.content ?? []).some((child) =>
+        ['paragraph', 'bulletList', 'orderedList', 'taskList'].includes(child.type),
+      )
+
+    it('emits a flat task list as inline-only taskItems that round-trip', () => {
+      const markdown = '- [ ] first\n- [x] second'
       const doc = markdownAdfConverter.toAdf(markdown)
-      const taskItem = doc.content[0]?.content?.[0]
-      expect(taskItem?.content?.map((child) => child.type)).toEqual(['paragraph', 'bulletList'])
-      expect(markdownAdfConverter.toAdf(markdownAdfConverter.toMarkdown(doc.content)).content).toEqual(doc.content)
+      const [taskList] = doc.content
+      expect(taskList?.type).toBe('taskList')
+      expect(taskList?.content?.[0]?.content).toEqual([{ type: 'text', text: 'first' }])
+      expect(taskList?.content?.[1]?.content).toEqual([{ type: 'text', text: 'second' }])
+      // No taskItem carries a paragraph or nested list — that would be invalid Jira ADF.
+      expect((taskList?.content ?? []).some(holdsBlock)).toBe(false)
+      expect(markdownAdfConverter.toMarkdown(doc.content)).toBe(markdown)
     })
 
-    it('preserves both paragraphs of a two-paragraph list item', () => {
+    it('keeps a task item with a mark inline and valid', () => {
+      const doc = markdownAdfConverter.toAdf('- [ ] ship **now**')
+      const taskItem = doc.content[0]?.content?.[0]
+      expect(taskItem?.content).toEqual([
+        { type: 'text', text: 'ship ' },
+        { type: 'text', text: 'now', marks: [{ type: 'strong' }] },
+      ])
+      expect(holdsBlock(taskItem)).toBe(false)
+    })
+
+    it('preserves a nested child list without putting a block inside the taskItem', () => {
+      const doc = markdownAdfConverter.toAdf('- [ ] parent\n  - child')
+      const [taskList, sibling] = doc.content
+      expect(taskList?.type).toBe('taskList')
+      // The taskItem stays inline; the nested child spills to a sibling block.
+      expect(taskList?.content?.[0]?.content).toEqual([{ type: 'text', text: 'parent' }])
+      expect((taskList?.content ?? []).some(holdsBlock)).toBe(false)
+      expect(sibling?.type).toBe('bulletList')
+      expect(JSON.stringify(sibling)).toContain('child')
+    })
+
+    it('preserves both paragraphs of a two-paragraph bullet list item (listItem is block content)', () => {
       const markdown = '- first para\n\n  second para'
       const doc = markdownAdfConverter.toAdf(markdown)
       const listItem = doc.content[0]?.content?.[0]
