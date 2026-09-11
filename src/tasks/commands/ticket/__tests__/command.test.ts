@@ -1,7 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { CommanderError } from 'commander'
-import type { TaskTracker, Ticket } from '../../../task-tracker/task-tracker.js'
+import type { Comment, TaskTracker, Ticket } from '../../../task-tracker/task-tracker.js'
 import { createTicketCommand } from '../command.js'
+
+vi.mock('node:fs', () => ({
+  readFileSync: vi.fn(),
+}))
+
+import { readFileSync } from 'node:fs'
 
 const mockTicket: Ticket = {
   id: '7',
@@ -12,6 +18,9 @@ const mockTicket: Ticket = {
   body: 'Details',
   comments: [],
   assignee: null,
+  attachments: [],
+  reporter: null,
+  issueType: 'Story',
   blockedBy: [],
   blocking: [],
   metadata: {},
@@ -42,6 +51,7 @@ const makeTracker = (): TaskTracker => ({
   linkEpicToInitiative: vi.fn(),
   getTechnicalDesign: vi.fn(),
   addComment: vi.fn(),
+  addAttachment: vi.fn(),
   getUsers: vi.fn(),
   ping: vi.fn(),
 })
@@ -113,6 +123,26 @@ describe('ticket command', () => {
     expect(tracker.updateTicketDescription).not.toHaveBeenCalled()
   })
 
+  it('uploads each --attach before the edit write and rewrites the body', async () => {
+    const tracker = makeTracker()
+    const calls: string[] = []
+    vi.mocked(tracker.addAttachment).mockImplementation(async (_id: string, path: string) => {
+      calls.push('attach')
+      return { id: '1', filename: path.split('/').pop() ?? path, mimeType: 'image/png' }
+    })
+    vi.mocked(tracker.updateTicketDescription).mockImplementation(async () => {
+      calls.push('edit')
+      return mockTicket
+    })
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(tracker, ['edit', '7', '--body', '![shot](./before.png)', '--attach', './before.png'])
+    expect(calls).toEqual(['attach', 'edit'])
+    expect(tracker.updateTicketDescription).toHaveBeenCalledWith('7', {
+      body: '![shot](attachment:before.png)',
+    })
+    output.mockRestore()
+  })
+
   it('calls getTicket and prints JSON for "get"', async () => {
     const tracker = makeTracker()
     const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
@@ -133,6 +163,7 @@ describe('ticket command', () => {
       JSON.stringify({
         id: '7',
         section: 'acceptance-criteria',
+        format: 'layered-body',
         markdown: '- [ ] ship it\n- [x] done',
         items: [
           { text: 'ship it', done: false },
@@ -143,9 +174,129 @@ describe('ticket command', () => {
     output.mockRestore()
   })
 
-  it('rejects "get --section" with an unknown section name', async () => {
+  it('returns fixed-when items and the bug-report format for "get --section fixed-when"', async () => {
+    const tracker = makeTracker()
+    vi.mocked(tracker.getTicket).mockResolvedValue({
+      ...mockTicket,
+      issueType: 'Bug',
+      body: '## Symptom\n\nBroken.\n\n## Fixed When\n\n- [ ] it works\n- [x] test added\n',
+    })
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(tracker, ['get', '7', '--section', 'fixed-when'])
+    expect(output).toHaveBeenCalledWith(
+      JSON.stringify({
+        id: '7',
+        section: 'fixed-when',
+        format: 'bug-report',
+        markdown: '- [ ] it works\n- [x] test added',
+        items: [
+          { text: 'it works', done: false },
+          { text: 'test added', done: true },
+        ],
+      }) + '\n',
+    )
+    output.mockRestore()
+  })
+
+  // Regression for the placeholder-issueType integration bug: an untyped GitHub
+  // issue reaches the command with issueType 'Issue' (what the GitHub adapter
+  // yields for `issue.type?.name ?? 'Issue'`) and no metadata.kind. Before the
+  // fix the detector treated 'Issue' as an authoritative non-bug type, forced
+  // layered-body, and `get --section fixed-when` returned markdown:null/items:[]
+  // — silently hiding the bug's verification requirements.
+  it('treats a GitHub-untyped ticket (issueType "Issue") with a Symptom body as a bug-report for "get --section fixed-when"', async () => {
+    const tracker = makeTracker()
+    vi.mocked(tracker.getTicket).mockResolvedValue({
+      ...mockTicket,
+      issueType: 'Issue',
+      metadata: {},
+      body: '## Symptom\n\nCrashes on save.\n\n## Fixed When\n\n- [ ] no crash\n- [x] regression test added\n',
+    })
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(tracker, ['get', '7', '--section', 'fixed-when'])
+    expect(output).toHaveBeenCalledWith(
+      JSON.stringify({
+        id: '7',
+        section: 'fixed-when',
+        format: 'bug-report',
+        markdown: '- [ ] no crash\n- [x] regression test added',
+        items: [
+          { text: 'no crash', done: false },
+          { text: 'regression test added', done: true },
+        ],
+      }) + '\n',
+    )
+    output.mockRestore()
+  })
+
+  it('returns markdown null and empty items for acceptance-criteria on a bug-report body', async () => {
+    const tracker = makeTracker()
+    vi.mocked(tracker.getTicket).mockResolvedValue({
+      ...mockTicket,
+      issueType: 'Bug',
+      body: '## Symptom\n\nBroken.\n\n## Fixed When\n\n- [ ] it works\n',
+    })
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(tracker, ['get', '7', '--section', 'acceptance-criteria'])
+    expect(output).toHaveBeenCalledWith(
+      JSON.stringify({
+        id: '7',
+        section: 'acceptance-criteria',
+        format: 'bug-report',
+        markdown: null,
+        items: [],
+      }) + '\n',
+    )
+    output.mockRestore()
+  })
+
+  it('detects a Jira Bug with no metadata and no recognizable headings as bug-report', async () => {
+    const tracker = makeTracker()
+    vi.mocked(tracker.getTicket).mockResolvedValue({
+      ...mockTicket,
+      issueType: 'Bug',
+      metadata: {},
+      body: 'Plain description with no level-2 headings at all.\n',
+    })
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(tracker, ['get', '7', '--section', 'symptom'])
+    expect(output).toHaveBeenCalledWith(
+      JSON.stringify({
+        id: '7',
+        section: 'symptom',
+        format: 'bug-report',
+        markdown: null,
+      }) + '\n',
+    )
+    output.mockRestore()
+  })
+
+  it('lets metadata.kind override a contradictory heading for "get --section"', async () => {
+    const tracker = makeTracker()
+    vi.mocked(tracker.getTicket).mockResolvedValue({
+      ...mockTicket,
+      issueType: 'Bug',
+      metadata: { kind: 'story' },
+      body: '## Symptom\n\nLooks like a bug body.\n',
+    })
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(tracker, ['get', '7', '--section', 'acceptance-criteria'])
+    expect(output).toHaveBeenCalledWith(
+      JSON.stringify({
+        id: '7',
+        section: 'acceptance-criteria',
+        format: 'layered-body',
+        markdown: null,
+        items: [],
+      }) + '\n',
+    )
+    output.mockRestore()
+  })
+
+  it('rejects "get --section" with an unknown section name listing every valid slug', async () => {
     const tracker = makeTracker()
     await expect(run(tracker, ['get', '7', '--section', 'bogus'])).rejects.toThrow(/unknown section/)
+    await expect(run(tracker, ['get', '7', '--section', 'bogus'])).rejects.toThrow(/reproduction-notes/)
   })
 
   it('creates a standalone ticket when --epic-id is omitted', async () => {
@@ -216,6 +367,96 @@ describe('ticket transitions command', () => {
     await createTicketCommand(() => tracker).parseAsync(['transitions', '7'], { from: 'user' })
     expect(write).toHaveBeenCalledWith(JSON.stringify({ id: '7', transitions: [] }) + '\n')
     write.mockRestore()
+  })
+})
+
+describe('ticket comment command', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  const mockComment: Comment = {
+    id: 'c1',
+    body: 'hello',
+    author: 'SethAngell',
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z',
+  }
+
+  it('calls addComment with the inline --body and prints the comment JSON', async () => {
+    const tracker = makeTracker()
+    vi.mocked(tracker.addComment).mockResolvedValue(mockComment)
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(tracker, ['comment', 'PROJ-1', '--body', 'hello'])
+    expect(tracker.addComment).toHaveBeenCalledWith('PROJ-1', 'hello')
+    expect(output).toHaveBeenCalledWith(JSON.stringify(mockComment) + '\n')
+    expect(vi.mocked(readFileSync)).not.toHaveBeenCalled()
+    output.mockRestore()
+  })
+
+  it('reads --body-file and posts its contents', async () => {
+    const tracker = makeTracker()
+    vi.mocked(tracker.addComment).mockResolvedValue(mockComment)
+    vi.mocked(readFileSync).mockReturnValue('from file')
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(tracker, ['comment', 'PROJ-1', '--body-file', '/tmp/c.md'])
+    expect(vi.mocked(readFileSync)).toHaveBeenCalledWith('/tmp/c.md', 'utf8')
+    expect(tracker.addComment).toHaveBeenCalledWith('PROJ-1', 'from file')
+    output.mockRestore()
+  })
+
+  it('prefers --body-file over --body when both are given', async () => {
+    const tracker = makeTracker()
+    vi.mocked(tracker.addComment).mockResolvedValue(mockComment)
+    vi.mocked(readFileSync).mockReturnValue('from file')
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(tracker, ['comment', 'PROJ-1', '--body', 'inline', '--body-file', '/tmp/c.md'])
+    expect(tracker.addComment).toHaveBeenCalledWith('PROJ-1', 'from file')
+    output.mockRestore()
+  })
+
+  it('rejects when neither --body nor --body-file is given', async () => {
+    const tracker = makeTracker()
+    await expect(run(tracker, ['comment', 'PROJ-1'])).rejects.toThrow('one of --body or --body-file')
+    expect(tracker.addComment).not.toHaveBeenCalled()
+  })
+
+  it('uploads each --attach before addComment and posts the rewritten body', async () => {
+    const tracker = makeTracker()
+    const calls: string[] = []
+    vi.mocked(tracker.addAttachment).mockImplementation(async (_id: string, path: string) => {
+      calls.push('attach')
+      return { id: '1', filename: path.split('/').pop() ?? path, mimeType: 'image/png' }
+    })
+    vi.mocked(tracker.addComment).mockImplementation(async () => {
+      calls.push('comment')
+      return mockComment
+    })
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(tracker, [
+      'comment',
+      'PROJ-1',
+      '--body',
+      '![Login](./before.png)',
+      '--attach',
+      './before.png#Before',
+      '--attach',
+      './after.png',
+    ])
+    expect(calls).toEqual(['attach', 'attach', 'comment'])
+    expect(tracker.addComment).toHaveBeenCalledWith(
+      'PROJ-1',
+      '![Login](attachment:before.png)\n\n![after.png](attachment:after.png)',
+    )
+    output.mockRestore()
+  })
+
+  it('does not upload anything when no --attach is given', async () => {
+    const tracker = makeTracker()
+    vi.mocked(tracker.addComment).mockResolvedValue(mockComment)
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(tracker, ['comment', 'PROJ-1', '--body', 'plain'])
+    expect(tracker.addAttachment).not.toHaveBeenCalled()
+    expect(tracker.addComment).toHaveBeenCalledWith('PROJ-1', 'plain')
+    output.mockRestore()
   })
 })
 

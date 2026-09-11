@@ -10862,12 +10862,9 @@ function useColor() {
 // node_modules/commander/index.js
 var program = new Command();
 
-// src/cli/cli.ts
-import { join as join5 } from "node:path";
-
 // src/shared/config.ts
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 
 // node_modules/zod/v4/classic/external.js
 var external_exports = {};
@@ -25420,6 +25417,9 @@ var ConfigSchema = external_exports.object({
   defaultLabels: external_exports.array(external_exports.string()).default([]),
   rfcStorage: external_exports.enum(["local", "global"]).default("local"),
   rfcStoragePath: external_exports.string().optional(),
+  qaRecipe: external_exports.string().optional().describe(
+    "Path to the per-repo QA recipe; relative paths resolve against the directory holding this config file; defaults to flight-rules.qa.md beside it"
+  ),
   competencies: external_exports.array(external_exports.string()).default([...seedCompetencies])
 }).superRefine((cfg, ctx) => {
   if (cfg.tracker === "github" && cfg.repo === void 0) {
@@ -25518,6 +25518,14 @@ function getRfcDir(config2, cwd) {
     return config2.rfcStoragePath;
   }
   return join(cwd, "rfcs");
+}
+function resolveConfigPath(cwd, override) {
+  return override ?? join(cwd, ".claude", "flight-rules.local.md");
+}
+function getQaRecipePath(config2, configPath) {
+  const recipe = config2.qaRecipe ?? "flight-rules.qa.md";
+  if (isAbsolute(recipe)) return recipe;
+  return resolve(dirname(configPath), recipe);
 }
 
 // src/shared/env.ts
@@ -29186,7 +29194,9 @@ var import_yaml = __toESM(require_dist2(), 1);
 var EntityMetadataSchema = external_exports.object({
   tddId: external_exports.number().optional(),
   epicId: external_exports.number().optional(),
-  notes: external_exports.string().optional()
+  notes: external_exports.string().optional(),
+  /** Explicit body-format override read first by BodyFormatDetector (docs/bug-report-format.md). */
+  kind: external_exports.enum(["bug", "story"]).optional()
 }).passthrough();
 var CommentSchema = external_exports.object({
   id: external_exports.string(),
@@ -29194,6 +29204,13 @@ var CommentSchema = external_exports.object({
   author: external_exports.string(),
   createdAt: external_exports.string(),
   updatedAt: external_exports.string()
+});
+var AttachmentSchema = external_exports.object({
+  id: external_exports.string(),
+  filename: external_exports.string(),
+  mimeType: external_exports.string(),
+  size: external_exports.number().optional(),
+  mediaUuid: external_exports.string().optional()
 });
 var TechnicalDesignSchema = external_exports.object({
   id: external_exports.string(),
@@ -29213,6 +29230,9 @@ var TicketSchema = external_exports.object({
   body: external_exports.string(),
   comments: external_exports.array(CommentSchema),
   assignee: external_exports.string().nullable(),
+  attachments: external_exports.array(AttachmentSchema).default([]),
+  reporter: external_exports.string().nullable().default(null),
+  issueType: external_exports.string().default("unknown"),
   blockedBy: external_exports.array(external_exports.string()).default([]),
   blocking: external_exports.array(external_exports.string()).default([]),
   metadata: EntityMetadataSchema.default({}),
@@ -29746,6 +29766,14 @@ var GitHubTaskTracker = class {
       updatedAt: data.updated_at
     };
   }
+  // eslint-disable-next-line preflight/no-throw-helpers -- a capability stub's whole body is the throw
+  async addAttachment(ticketId, filePath) {
+    throw new UnsupportedTrackerOperationError({
+      tracker: "GitHub",
+      operation: `attaching ${filePath} to issue #${ticketId}`,
+      remedy: "GitHub issues have no attachment API; use --tracker jira, or gh --attach for pull requests"
+    });
+  }
   async getUsers() {
     const { data } = await this.octokit.rest.orgs.listMembers({
       org: this.owner,
@@ -29833,6 +29861,9 @@ var GitHubTaskTracker = class {
       body: issue2.body ?? "",
       comments: comments.map((c) => this.mapComment(c)),
       assignee: issue2.assignee?.login ?? null,
+      attachments: [],
+      reporter: issue2.user?.login ?? null,
+      issueType: issue2.type?.name ?? "Issue",
       blockedBy,
       blocking,
       metadata,
@@ -29840,6 +29871,10 @@ var GitHubTaskTracker = class {
     };
   }
 };
+
+// src/tasks/jira-task-tracker/jira-task-tracker.ts
+import { readFileSync as readFileSync2 } from "node:fs";
+import { basename } from "node:path";
 
 // src/tasks/jira-task-tracker/jira-api-error.ts
 var JiraApiError = class extends Error {
@@ -29937,7 +29972,7 @@ var JiraClient = class {
       const retryAfterSeconds = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : defaultRetryAfterSeconds;
       const jitter = 0.7 + Math.random() * 0.6;
       const delayMs = Math.min(retryAfterSeconds * 1e3 * jitter, maxBackoffMs);
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      await new Promise((resolve2) => setTimeout(resolve2, delayMs));
       return this.fetchWithRetry(url2, init, attempt + 1);
     }
     return res;
@@ -29989,7 +30024,7 @@ var ConfluenceClient = class {
       const retryAfterSeconds = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : defaultRetryAfterSeconds2;
       const jitter = 0.7 + Math.random() * 0.6;
       const delayMs = Math.min(retryAfterSeconds * 1e3 * jitter, maxBackoffMs2);
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      await new Promise((resolve2) => setTimeout(resolve2, delayMs));
       return this.fetchWithRetry(url2, init, attempt + 1);
     }
     return res;
@@ -30001,6 +30036,28 @@ var ConfluenceClient = class {
     throw new Error(`Confluence API ${res.status}${detail ? `: ${detail}` : ""}`);
   }
 };
+
+// src/tasks/mime-types/mime-types.ts
+import { extname } from "node:path";
+var mimeTypesByExtension = {
+  gif: "image/gif",
+  jpeg: "image/jpeg",
+  jpg: "image/jpeg",
+  mov: "video/quicktime",
+  mp4: "video/mp4",
+  png: "image/png",
+  svg: "image/svg+xml",
+  webm: "video/webm",
+  webp: "image/webp"
+};
+var fallbackMimeType = "application/octet-stream";
+var ExtensionMimeTypeResolver = class {
+  forFilename(filename) {
+    const extension2 = extname(filename).slice(1).toLowerCase();
+    return mimeTypesByExtension[extension2] ?? fallbackMimeType;
+  }
+};
+var extensionMimeTypeResolver = new ExtensionMimeTypeResolver();
 
 // node_modules/mdast-util-to-string/lib/index.js
 var emptyOptions = {};
@@ -32572,10 +32629,10 @@ function resolveAll(constructs2, events, context) {
   const called = [];
   let index2 = -1;
   while (++index2 < constructs2.length) {
-    const resolve = constructs2[index2].resolveAll;
-    if (resolve && !called.includes(resolve)) {
-      events = resolve(events, context);
-      called.push(resolve);
+    const resolve2 = constructs2[index2].resolveAll;
+    if (resolve2 && !called.includes(resolve2)) {
+      events = resolve2(events, context);
+      called.push(resolve2);
     }
   }
   return events;
@@ -39178,10 +39235,20 @@ var jiraAdfMetadataService = new JiraAdfMetadataService();
 // src/tasks/jira-task-tracker/jira-task-tracker.ts
 var metadataExpandTitle = "LLM Context";
 var issueFields = "summary,status,labels,assignee,description,issuelinks,updated";
+var ticketFields = `${issueFields},attachment,reporter,issuetype`;
 var ideaIssueType = "Idea";
 var jpdProjectType = "product_discovery";
 var deliveryLinkOutward = "implements";
 var tddMetadataPropertyKey = "flight-rules-metadata";
+var mediaFilePath = /^\/file\/([0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12})\/binary$/;
+var mediaLocationBase = "https://media.invalid/";
+var JiraUploadedAttachmentSchema = external_exports.object({
+  id: external_exports.union([external_exports.string(), external_exports.number()]).transform(String),
+  filename: external_exports.string(),
+  mimeType: external_exports.string(),
+  size: external_exports.number().optional()
+});
+var JiraUploadedAttachmentsSchema = external_exports.array(JiraUploadedAttachmentSchema);
 var JiraTaskTracker = class {
   client;
   confluence;
@@ -39190,6 +39257,7 @@ var JiraTaskTracker = class {
   confluenceSpaceKey;
   metadata = new JiraAdfMetadataService();
   bodyFormat = markdownAdfConverter;
+  mimeTypes = new ExtensionMimeTypeResolver();
   issueTypeNames;
   blocksLinkType;
   deliveryLinkType;
@@ -39250,7 +39318,7 @@ var JiraTaskTracker = class {
   }
   async getTicket(id) {
     const [issue2, blocksLinkType] = await Promise.all([
-      this.client.request("GET", `/issue/${id}`, void 0, { fields: issueFields }),
+      this.client.request("GET", `/issue/${id}`, void 0, { fields: ticketFields }),
       this.resolveBlocksLinkType()
     ]);
     return this.mapTicket(issue2, blocksLinkType);
@@ -39427,6 +39495,23 @@ var JiraTaskTracker = class {
       updatedAt: comment.updated
     };
   }
+  /**
+   * Uploads a file as a native Jira attachment and resolves the media UUID that
+   * inline ADF media nodes address it by; Jira only reveals that UUID in the
+   * redirect it issues for the attachment's content URL.
+   */
+  async addAttachment(ticketId, filePath) {
+    const filename = basename(filePath);
+    const file2 = new File([readFileSync2(filePath)], filename, { type: this.mimeTypes.forFilename(filename) });
+    const uploaded = JiraUploadedAttachmentsSchema.parse(
+      await this.client.upload(`/issue/${ticketId}/attachments`, [file2])
+    );
+    const attachment = uploaded[0];
+    if (attachment === void 0) {
+      throw new Error(`Jira accepted the upload of ${filename} to ${ticketId} but returned no attachment`);
+    }
+    return this.mapAttachment(attachment, await this.resolveMediaUuid(attachment.id));
+  }
   async getUsers() {
     const users = await this.client.request("GET", "/user/assignable/search", void 0, {
       project: this.project,
@@ -39441,7 +39526,7 @@ var JiraTaskTracker = class {
     const [page, blocksLinkType] = await Promise.all([
       this.client.request("GET", "/search/jql", void 0, {
         jql: `parent = ${epicKey}`,
-        fields: issueFields,
+        fields: ticketFields,
         maxResults: 100
       }),
       this.resolveBlocksLinkType()
@@ -39459,11 +39544,31 @@ var JiraTaskTracker = class {
       body: this.extractBody(issue2.fields.description),
       comments: [],
       assignee: issue2.fields.assignee?.accountId ?? null,
+      attachments: this.mapAttachments(issue2.fields.attachment ?? []),
+      reporter: issue2.fields.reporter?.accountId ?? null,
+      issueType: issue2.fields.issuetype?.name ?? "unknown",
       blockedBy,
       blocking,
       metadata: this.parseMetadata(issue2),
       updatedAt: issue2.fields.updated ?? ""
     };
+  }
+  mapAttachment(uploaded, mediaUuid) {
+    return {
+      id: uploaded.id,
+      filename: uploaded.filename,
+      mimeType: uploaded.mimeType,
+      ...uploaded.size !== void 0 ? { size: uploaded.size } : {},
+      mediaUuid
+    };
+  }
+  mapAttachments(attachments) {
+    return attachments.map((attachment) => ({
+      id: attachment.id,
+      filename: attachment.filename ?? "",
+      mimeType: attachment.mimeType ?? "application/octet-stream",
+      ...attachment.size !== void 0 ? { size: attachment.size } : {}
+    }));
   }
   blockingLinks(links, blocksLinkType) {
     const blockedBy = [];
@@ -39521,6 +39626,29 @@ var JiraTaskTracker = class {
   }
   async fetchTransitions(ticketId) {
     return this.client.request("GET", `/issue/${ticketId}/transitions`);
+  }
+  async resolveMediaUuid(attachmentId) {
+    const location = await this.client.locationFor(`/attachment/content/${attachmentId}`);
+    const uuid3 = this.extractMediaUuid(location);
+    if (uuid3 === void 0) {
+      throw new Error(
+        `Jira did not redirect attachment ${attachmentId} to a media file URL, so it cannot be embedded inline (location: ${location})`
+      );
+    }
+    return uuid3;
+  }
+  // Extracts the media UUID only from a well-formed `/file/<uuid>/binary` pathname.
+  // Parses the Location as a URL (absolute media URLs keep their origin; a relative
+  // Location resolves against a base), then matches the anchored pathname — so an
+  // unparseable Location or any other path yields undefined and is rejected by the caller.
+  extractMediaUuid(location) {
+    let pathname;
+    try {
+      pathname = new URL(location, mediaLocationBase).pathname;
+    } catch {
+      return void 0;
+    }
+    return mediaFilePath.exec(pathname)?.[1];
   }
   async resolveBlocksLinkType() {
     if (this.blocksLinkType === void 0) {
@@ -39618,9 +39746,9 @@ var JiraTaskTracker = class {
 };
 
 // src/tasks/commands/resolve-body.ts
-import { readFileSync as readFileSync2 } from "node:fs";
+import { readFileSync as readFileSync3 } from "node:fs";
 function resolveBody(opts) {
-  if (opts.bodyFile !== void 0) return readFileSync2(opts.bodyFile, "utf8");
+  if (opts.bodyFile !== void 0) return readFileSync3(opts.bodyFile, "utf8");
   if (opts.body !== void 0) return opts.body;
   throw new Error("one of --body or --body-file is required");
 }
@@ -39753,15 +39881,42 @@ var headingLine = /^##\s+(.+?)\s*$/;
 var detailsOpen2 = /^<details/;
 var detailsClose2 = /^<\/details>/;
 var checklistItem = /^-\s+\[( |x|X)\]\s+(.*)$/;
-var headingKeys = {
+var fenceLine = /^(`{3,}|~{3,})/;
+var layeredHeadingKeys = {
   "Problem Statement": "problemStatement",
   Solution: "solution",
   "Acceptance Criteria": "acceptanceCriteria",
   "High-level technical writeup": "technicalWriteup"
 };
-var LayeredBodySectionsParser = class {
-  parse(body) {
-    const lines = body.replace(/\r\n/g, "\n").split("\n");
+var bugReportHeadingKeys = {
+  Symptom: "symptom",
+  Environment: "environment",
+  "Steps To Reproduce": "stepsToReproduce",
+  "Expected vs Actual": "expectedVsActual",
+  "Root Cause": "rootCause",
+  "Fixed When": "fixedWhen",
+  Evidence: "evidence"
+};
+var stringSectionKeys = [
+  "problemStatement",
+  "solution",
+  "acceptanceCriteria",
+  "technicalWriteup",
+  "guidedWalkthrough",
+  "symptom",
+  "environment",
+  "stepsToReproduce",
+  "expectedVsActual",
+  "rootCause",
+  "fixedWhen",
+  "evidence",
+  "reproductionNotes"
+];
+var BlobSectionSource = class {
+  read(input) {
+    const lines = input.body.replace(/\r\n/g, "\n").split("\n");
+    const format = input.format ?? this.sniff(lines);
+    const headingKeys = format === "bug-report" ? bugReportHeadingKeys : layeredHeadingKeys;
     const raw = {};
     let current;
     let i = 0;
@@ -39778,6 +39933,8 @@ var LayeredBodySectionsParser = class {
         const block = this.consumeDetails(lines, i);
         if (/guided walkthrough/i.test(block.title)) {
           raw.guidedWalkthrough = block.inner.split("\n");
+        } else if (/reproduction notes/i.test(block.title)) {
+          raw.reproductionNotes = block.inner.split("\n");
         }
         current = void 0;
         i = block.next;
@@ -39786,24 +39943,59 @@ var LayeredBodySectionsParser = class {
       if (current !== void 0) raw[current]?.push(line);
       i++;
     }
-    const items = (raw.acceptanceCriteria ?? []).map((item) => item.match(checklistItem)).filter((match) => match !== null).map((match) => ({ text: (match[2] ?? "").trim(), done: match[1]?.toLowerCase() === "x" }));
     const text4 = (key) => {
       const joined = (raw[key] ?? []).join("\n").trim();
       return joined.length > 0 ? joined : void 0;
     };
-    const problemStatement = text4("problemStatement");
-    const solution = text4("solution");
-    const acceptanceCriteria = text4("acceptanceCriteria");
-    const technicalWriteup = text4("technicalWriteup");
-    const guidedWalkthrough = text4("guidedWalkthrough");
-    return {
-      ...problemStatement !== void 0 ? { problemStatement } : {},
-      ...solution !== void 0 ? { solution } : {},
-      ...acceptanceCriteria !== void 0 ? { acceptanceCriteria } : {},
-      ...technicalWriteup !== void 0 ? { technicalWriteup } : {},
-      ...guidedWalkthrough !== void 0 ? { guidedWalkthrough } : {},
-      acceptanceCriteriaItems: items
+    const sections = {
+      format,
+      acceptanceCriteriaItems: this.checklistItems(raw.acceptanceCriteria),
+      fixedWhenItems: this.checklistItems(raw.fixedWhen)
     };
+    for (const key of stringSectionKeys) {
+      const value = text4(key);
+      if (value !== void 0) sections[key] = value;
+    }
+    return sections;
+  }
+  /**
+   * Classifies the body from its FIRST top-level `##` heading, not from any
+   * occurrence anywhere: a bug report leads with `## Symptom`, a layered body
+   * with `## Problem Statement`. A `## Symptom` buried inside a fenced code
+   * block or a `<details>` block (e.g. the Guided Walkthrough) must not flip a
+   * layered body to `bug-report`, so both are skipped exactly as the section
+   * parser skips them — details via `consumeDetails`, fences by tracking the
+   * open marker.
+   */
+  sniff(lines) {
+    let i = 0;
+    let openFence;
+    while (i < lines.length) {
+      const line = lines[i] ?? "";
+      const trimmed = line.trim();
+      if (openFence !== void 0) {
+        if (trimmed.startsWith(openFence)) openFence = void 0;
+        i++;
+        continue;
+      }
+      const fence = trimmed.match(fenceLine);
+      if (fence?.[1] !== void 0) {
+        openFence = fence[1];
+        i++;
+        continue;
+      }
+      if (detailsOpen2.test(trimmed)) {
+        i = this.consumeDetails(lines, i).next;
+        continue;
+      }
+      const heading = line.match(headingLine);
+      if (heading?.[1] !== void 0) return heading[1] === "Symptom" ? "bug-report" : "layered-body";
+      i++;
+    }
+    return "layered-body";
+  }
+  checklistItems(lines) {
+    return (lines ?? []).map((item) => item.match(checklistItem)).filter((match) => match !== null).map((match) => ({ text: (match[2] ?? "").trim(), done: match[1]?.toLowerCase() === "x" }));
   }
   consumeDetails(lines, start) {
     let depth = 0;
@@ -39826,31 +40018,191 @@ var LayeredBodySectionsParser = class {
     return { title, inner, next: end + 1 };
   }
 };
-var bodySectionsParser = new LayeredBodySectionsParser();
-
-// src/tasks/commands/ticket/command.ts
-function collect(value, previous3) {
-  return [...previous3, value];
-}
+var blobSectionSource = new BlobSectionSource();
 var sectionFields = {
   "problem-statement": "problemStatement",
   solution: "solution",
   "acceptance-criteria": "acceptanceCriteria",
   "technical-writeup": "technicalWriteup",
-  "guided-walkthrough": "guidedWalkthrough"
+  "guided-walkthrough": "guidedWalkthrough",
+  symptom: "symptom",
+  environment: "environment",
+  "steps-to-reproduce": "stepsToReproduce",
+  "expected-vs-actual": "expectedVsActual",
+  "root-cause": "rootCause",
+  "fixed-when": "fixedWhen",
+  evidence: "evidence",
+  "reproduction-notes": "reproductionNotes"
 };
-function selectSection(id, sections, name) {
-  const field = sectionFields[name];
-  if (field === void 0) {
-    throw new Error(`unknown section "${name}" \u2014 expected one of: ${Object.keys(sectionFields).join(", ")}`);
+var BodySectionSelector = class {
+  select(id, sections, slug) {
+    const field = sectionFields[slug];
+    if (field === void 0) {
+      throw new Error(`unknown section "${slug}" \u2014 expected one of: ${Object.keys(sectionFields).join(", ")}`);
+    }
+    return {
+      id,
+      section: slug,
+      format: sections.format,
+      markdown: sections[field] ?? null,
+      ...field === "acceptanceCriteria" ? { items: sections.acceptanceCriteriaItems } : {},
+      ...field === "fixedWhen" ? { items: sections.fixedWhenItems } : {}
+    };
   }
-  return {
-    id,
-    section: name,
-    markdown: sections[field] ?? null,
-    ...field === "acceptanceCriteria" ? { items: sections.acceptanceCriteriaItems } : {}
-  };
+};
+var sectionSelector = new BodySectionSelector();
+
+// src/tasks/body-sections/body-format-detector.ts
+var placeholderIssueTypes = ["unknown", "issue"];
+var PrecedenceBodyFormatDetector = class {
+  detect(input) {
+    const { body, metadata, issueType } = input;
+    if (metadata.kind === "bug") return "bug-report";
+    if (metadata.kind === "story") return "layered-body";
+    const explicitType = this.explicitIssueType(issueType);
+    if (explicitType === "bug") return "bug-report";
+    if (explicitType !== void 0) return "layered-body";
+    return blobSectionSource.read({ body }).format;
+  }
+  /** The lower-cased issue type, or `undefined` when absent or a tracker placeholder. */
+  explicitIssueType(issueType) {
+    if (issueType === void 0) return void 0;
+    const lowered = issueType.toLowerCase();
+    return placeholderIssueTypes.includes(lowered) ? void 0 : lowered;
+  }
+};
+var bodyFormatDetector = new PrecedenceBodyFormatDetector();
+
+// src/shared/collect.ts
+function collect(value, previous3) {
+  return [...previous3, value];
 }
+
+// src/tasks/evidence/evidence.ts
+import { basename as basename2 } from "node:path/posix";
+var mediaReference = /(!?)\[([^\]]*)\]\(\s*<?([^\s()<>]+)>?(?:\s+"[^"]*")?\s*\)/g;
+var absoluteTarget = /^[a-zA-Z][a-zA-Z0-9+.-]*:|^\/\/|^#/;
+var localPrefix = /^(?:\.\/)+/;
+var fenceRun = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+var AttachmentSpecSchema = external_exports.string().min(1).transform((spec) => {
+  const hash2 = spec.lastIndexOf("#");
+  const path3 = hash2 > 0 ? spec.slice(0, hash2) : spec;
+  const caption = hash2 > 0 ? spec.slice(hash2 + 1).trim() : "";
+  return { path: path3, caption: caption.length > 0 ? caption : basename2(path3) };
+});
+var DuplicateEvidenceNameError = class extends Error {
+  name = "DuplicateEvidenceNameError";
+  constructor(props) {
+    super(`Two attachments share the filename "${props.filename}": ${props.paths.join(", ")}`);
+  }
+};
+var TrackerEvidenceService = class {
+  tracker;
+  constructor(props) {
+    this.tracker = props.tracker;
+  }
+  async attach(input) {
+    const specs = input.specs.map((spec) => AttachmentSpecSchema.parse(spec));
+    this.rejectDuplicateNames(specs);
+    const attachments = await Promise.all(
+      specs.map(async (spec) => {
+        const uploaded = await this.tracker.addAttachment(input.ticketId, spec.path);
+        return { ...uploaded, path: spec.path, caption: spec.caption, referenced: false };
+      })
+    );
+    const byName = /* @__PURE__ */ new Map();
+    for (const attachment of attachments) byName.set(basename2(attachment.path), attachment);
+    const rewritten = this.rewriteReferences(input.body, byName);
+    return { body: this.appendUnreferenced(rewritten, attachments), attachments };
+  }
+  rejectDuplicateNames(specs) {
+    const paths = /* @__PURE__ */ new Map();
+    for (const spec of specs) {
+      const name = basename2(spec.path);
+      paths.set(name, [...paths.get(name) ?? [], spec.path]);
+    }
+    for (const [filename, group] of paths) {
+      if (group.length > 1) throw new DuplicateEvidenceNameError({ filename, paths: group });
+    }
+  }
+  rewriteReferences(body, byName) {
+    let fence;
+    return body.split("\n").map((line) => {
+      if (fence === void 0) {
+        const opened = this.openingFence(line);
+        if (opened !== void 0) {
+          fence = opened;
+          return line;
+        }
+        return this.rewriteLine(line, byName);
+      }
+      if (this.closesFence(line, fence)) fence = void 0;
+      return line;
+    }).join("\n");
+  }
+  /**
+   * A line opens a fence when it is a run of >=3 backticks or tildes; a backtick
+   * fence's info string may not itself contain a backtick, which keeps inline
+   * code from being read as a fence.
+   */
+  openingFence(line) {
+    const match = fenceRun.exec(line);
+    if (match === null) return void 0;
+    const run2 = match[1];
+    const rest = match[2];
+    if (run2 === void 0 || rest === void 0) return void 0;
+    if (run2.charAt(0) === "`" && rest.includes("`")) return void 0;
+    return { char: run2.charAt(0), length: run2.length };
+  }
+  /**
+   * A line closes an open fence only when it is a run of the SAME character, at
+   * least as long as the opening run, with nothing but whitespace after it.
+   */
+  closesFence(line, fence) {
+    const match = fenceRun.exec(line);
+    if (match === null) return false;
+    const run2 = match[1];
+    const rest = match[2];
+    if (run2 === void 0 || rest === void 0) return false;
+    return run2.charAt(0) === fence.char && run2.length >= fence.length && rest.trim().length === 0;
+  }
+  rewriteLine(line, byName) {
+    let result = "";
+    let last = 0;
+    mediaReference.lastIndex = 0;
+    for (let match = mediaReference.exec(line); match !== null; match = mediaReference.exec(line)) {
+      const whole = match[0];
+      const bang = match[1];
+      const label = match[2];
+      const target = match[3];
+      result += line.slice(last, match.index);
+      const attachment = bang !== void 0 && label !== void 0 && target !== void 0 ? this.resolve(target, byName) : void 0;
+      if (attachment === void 0 || bang === void 0 || label === void 0) {
+        result += whole;
+      } else {
+        attachment.referenced = true;
+        result += `${bang}[${label}](attachment:${attachment.filename})`;
+      }
+      last = match.index + whole.length;
+    }
+    return result + line.slice(last);
+  }
+  resolve(target, byName) {
+    if (absoluteTarget.test(target)) return void 0;
+    return byName.get(basename2(target.replace(localPrefix, "")));
+  }
+  appendUnreferenced(body, attachments) {
+    let result = body;
+    for (const attachment of attachments) {
+      if (!attachment.referenced) result += `
+
+![${attachment.caption}](attachment:${attachment.filename})`;
+    }
+    return result;
+  }
+};
+
+// src/tasks/commands/ticket/command.ts
 function createTicketCommand(getTracker) {
   const ticket = new Command("ticket");
   ticket.command("create").exitOverride().requiredOption("--title <title>", "ticket title").option("--body <body>", "ticket body (or use --body-file)").option("--body-file <path>", "read the ticket body from a file").option("--epic-id <id>", "parent epic id; omit to create a standalone ticket").option("--labels <labels>", "comma-separated labels").option("--assignee <user>", "assignee login").action(async (opts) => {
@@ -39864,9 +40216,12 @@ function createTicketCommand(getTracker) {
     const result = await getTracker().createTicket(input);
     process.stdout.write(JSON.stringify(result) + "\n");
   });
-  ticket.command("edit").exitOverride().argument("<id>", "ticket id").option("--body <body>", "new ticket body (or use --body-file)").option("--body-file <path>", "read the new ticket body from a file").option("--title <title>", "new ticket title (unchanged if omitted)").option("--labels <labels>", "comma-separated labels replacing existing free-form labels").action(async (id, opts) => {
-    const result = await getTracker().updateTicketDescription(id, {
-      body: resolveBody({ body: opts.body, bodyFile: opts.bodyFile }),
+  ticket.command("edit").exitOverride().argument("<id>", "ticket id").option("--body <body>", "new ticket body (or use --body-file)").option("--body-file <path>", "read the new ticket body from a file").option("--title <title>", "new ticket title (unchanged if omitted)").option("--labels <labels>", "comma-separated labels replacing existing free-form labels").option("--attach <spec>", "file to attach, as <path>#<caption> (repeatable)", collect, []).action(async (id, opts) => {
+    const tracker = getTracker();
+    const raw = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
+    const body = opts.attach.length === 0 ? raw : (await new TrackerEvidenceService({ tracker }).attach({ ticketId: id, body: raw, specs: opts.attach })).body;
+    const result = await tracker.updateTicketDescription(id, {
+      body,
       ...opts.title !== void 0 ? { title: opts.title } : {},
       ...opts.labels !== void 0 ? { labels: opts.labels.split(",") } : {}
     });
@@ -39878,8 +40233,13 @@ function createTicketCommand(getTracker) {
       process.stdout.write(JSON.stringify(result) + "\n");
       return;
     }
-    const sections = bodySectionsParser.parse(result.body);
-    process.stdout.write(JSON.stringify(selectSection(id, sections, opts.section)) + "\n");
+    const format = bodyFormatDetector.detect({
+      body: result.body,
+      metadata: result.metadata,
+      issueType: result.issueType
+    });
+    const sections = blobSectionSource.read({ body: result.body, format });
+    process.stdout.write(JSON.stringify(sectionSelector.select(id, sections, opts.section)) + "\n");
   });
   ticket.command("block").exitOverride().argument("<id>", "ticket id to block").requiredOption("--by <blockerId>", "id of the ticket that must close first").action(async (id, opts) => {
     await getTracker().blockTicket(id, opts.by);
@@ -39894,6 +40254,13 @@ function createTicketCommand(getTracker) {
   ticket.command("transitions").exitOverride().argument("<id>", "ticket id").action(async (id) => {
     const transitions = await getTracker().listTransitions(id);
     process.stdout.write(JSON.stringify({ id, transitions }) + "\n");
+  });
+  ticket.command("comment").exitOverride().argument("<id>", "ticket id").option("--body <body>", "comment body (or use --body-file)").option("--body-file <path>", "read the comment body from a file").option("--attach <spec>", "file to attach, as <path>#<caption> (repeatable)", collect, []).action(async (id, opts) => {
+    const tracker = getTracker();
+    const raw = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
+    const body = opts.attach.length === 0 ? raw : (await new TrackerEvidenceService({ tracker }).attach({ ticketId: id, body: raw, specs: opts.attach })).body;
+    const comment = await tracker.addComment(id, body);
+    process.stdout.write(JSON.stringify(comment) + "\n");
   });
   ticket.command("label").exitOverride().argument("<id>", "ticket id").option("--add <label>", "label to add (repeatable)", collect, []).option("--remove <label>", "label to remove (repeatable)", collect, []).action(async (id, opts) => {
     if (opts.add.length === 0 && opts.remove.length === 0) {
@@ -39962,6 +40329,34 @@ function createRfcCommand(getConfig, getCwd = () => process.cwd()) {
   return rfc;
 }
 
+// src/tasks/commands/qa/command.ts
+import { existsSync, statSync } from "node:fs";
+function createQaCommand(getConfig, getConfigPath) {
+  const qa = new Command("qa");
+  qa.command("recipe").exitOverride().action(() => {
+    const config2 = getConfig();
+    if (config2.qaRecipe !== void 0 && config2.qaRecipe.trim() === "") {
+      throw new Error(
+        "qaRecipe is set to a blank value \u2014 give it a path to the QA recipe file, or remove the key to fall back to the default beside the config"
+      );
+    }
+    const path3 = getQaRecipePath(config2, getConfigPath());
+    if (!existsSync(path3)) {
+      throw new Error(
+        `QA recipe not found at ${path3} \u2014 run /flight-rules:setup to scaffold it, or set qaRecipe in the config`
+      );
+    }
+    if (!statSync(path3).isFile()) {
+      throw new Error(
+        `QA recipe at ${path3} is not a regular file \u2014 set qaRecipe to the recipe file's path`
+      );
+    }
+    process.stdout.write(`${path3}
+`);
+  });
+  return qa;
+}
+
 // src/tasks/commands/competencies/command.ts
 function createCompetenciesCommand(getConfig) {
   const competencies = new Command("competencies");
@@ -39972,7 +40367,6 @@ function createCompetenciesCommand(getConfig) {
 }
 
 // src/tasks/commands/check/command.ts
-import { dirname, join as join2 } from "node:path";
 function credentialFor(tracker, env) {
   if (tracker === "github")
     return { name: "GITHUB_TOKEN", value: env.githubToken };
@@ -40032,7 +40426,7 @@ function createCheckCommand(getConfig, getTracker, getConfigPath, getProbe) {
     }
     const tools = await getProbe().probe({
       repo: config2.repo,
-      recipePath: join2(dirname(getConfigPath()), "flight-rules.qa.md"),
+      recipePath: getQaRecipePath(config2, getConfigPath()),
       env: process.env
     });
     checks.push(...tools);
@@ -40132,8 +40526,8 @@ var NodeGitExecutor = class {
 };
 
 // src/git/commit-message-builder/commit-message-builder.ts
-import { readFileSync as readFileSync3 } from "node:fs";
-import { dirname as dirname2, join as join3 } from "node:path";
+import { readFileSync as readFileSync4 } from "node:fs";
+import { dirname as dirname2, join as join2 } from "node:path";
 
 // src/git/commit-message-builder/commit-message.schema.ts
 var CommitMessageInputSchema = external_exports.object({
@@ -40189,8 +40583,8 @@ var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
   }
   static readPluginVersion(binPath) {
     try {
-      const pkgPath = join3(dirname2(binPath), "..", "package.json");
-      const parsed = JSON.parse(readFileSync3(pkgPath, "utf-8"));
+      const pkgPath = join2(dirname2(binPath), "..", "package.json");
+      const parsed = JSON.parse(readFileSync4(pkgPath, "utf-8"));
       if (typeof parsed === "object" && parsed !== null && "version" in parsed && typeof parsed.version === "string") {
         return parsed.version;
       }
@@ -40268,7 +40662,7 @@ function createGitCommand(getExecutor) {
 import { execFile as execFile2 } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join as join4 } from "node:path";
+import { join as join3 } from "node:path";
 import { promisify as promisify2 } from "node:util";
 
 // src/git/pr-template/pr-template.ts
@@ -40427,8 +40821,8 @@ var GhPullRequestHost = class {
     return { number: Number(match[1]), url: url2 };
   }
   async withBodyFile(body, run2) {
-    const dir = await mkdtemp(join4(tmpdir(), "flight-rules-"));
-    const bodyFile = join4(dir, "body.md");
+    const dir = await mkdtemp(join3(tmpdir(), "flight-rules-"));
+    const bodyFile = join3(dir, "body.md");
     try {
       await writeFile(bodyFile, body, "utf8");
       return await run2(bodyFile);
@@ -40444,15 +40838,10 @@ var GhPullRequestHost = class {
   }
 };
 
-// src/shared/collect.ts
-function collect3(value, previous3) {
-  return [...previous3, value];
-}
-
 // src/pr/commands/pr/command.ts
 function createPrCommand(getHost) {
   const pr = new Command("pr");
-  pr.command("create").exitOverride().requiredOption("--type <type>", "conventional commit type").requiredOption("--scope <scope>", "conventional commit scope").requiredOption("--description <description>", "PR title description").requiredOption("--why <why>", 'the "Why Was It Changed" prose section').requiredOption("--what <what>", 'a "What Was Changed" bullet (repeatable, 1-5)', collect3, []).requiredOption("--base <base>", "base branch to merge into").requiredOption("--head <head>", "head branch to merge from").option("--ots <markdown>", 'the "OTS Materials" block (raw markdown/JSON)').option("--ticket-id <id>", "tracker ticket id").option("--ticket-url <url>", "tracker ticket url").option("--reviewer <reviewer>", "reviewer to request (repeatable)", collect3, []).option("--label <label>", "label to apply (repeatable)", collect3, []).option("--attach <spec>", "file to attach, as <path>#<caption> (repeatable)", collect3, []).action(async (opts) => {
+  pr.command("create").exitOverride().requiredOption("--type <type>", "conventional commit type").requiredOption("--scope <scope>", "conventional commit scope").requiredOption("--description <description>", "PR title description").requiredOption("--why <why>", 'the "Why Was It Changed" prose section').requiredOption("--what <what>", 'a "What Was Changed" bullet (repeatable, 1-5)', collect, []).requiredOption("--base <base>", "base branch to merge into").requiredOption("--head <head>", "head branch to merge from").option("--ots <markdown>", 'the "OTS Materials" block (raw markdown/JSON)').option("--ticket-id <id>", "tracker ticket id").option("--ticket-url <url>", "tracker ticket url").option("--reviewer <reviewer>", "reviewer to request (repeatable)", collect, []).option("--label <label>", "label to apply (repeatable)", collect, []).option("--attach <spec>", "file to attach, as <path>#<caption> (repeatable)", collect, []).action(async (opts) => {
     const template = PullRequestTemplateSchema.parse({
       type: opts.type,
       scope: opts.scope,
@@ -40470,7 +40859,7 @@ function createPrCommand(getHost) {
     const created = await getHost().createPullRequest(template, { attach: opts.attach });
     process.stdout.write(JSON.stringify(created) + "\n");
   });
-  pr.command("comment").exitOverride().argument("<number>", "pull request number").option("--body <body>", "comment body (or use --body-file)").option("--body-file <path>", "read the comment body from a file").option("--attach <spec>", "file to attach, as <path>#<caption> (repeatable)", collect3, []).action(async (number4, opts) => {
+  pr.command("comment").exitOverride().argument("<number>", "pull request number").option("--body <body>", "comment body (or use --body-file)").option("--body-file <path>", "read the comment body from a file").option("--attach <spec>", "file to attach, as <path>#<caption> (repeatable)", collect, []).action(async (number4, opts) => {
     const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
     const result = await getHost().commentOnPullRequest(Number(number4), body, { attach: opts.attach });
     process.stdout.write(JSON.stringify(result) + "\n");
@@ -40480,7 +40869,7 @@ function createPrCommand(getHost) {
 
 // src/tasks/tool-probe/tool-probe.ts
 import { execFile as execFile3 } from "node:child_process";
-import { existsSync, readFileSync as readFileSync4 } from "node:fs";
+import { existsSync as existsSync2, readFileSync as readFileSync5 } from "node:fs";
 import { promisify as promisify3 } from "node:util";
 var minimumGhVersion = [2, 99, 0];
 var ghVersionLine = /gh version (\d+)\.(\d+)\.(\d+)/;
@@ -40491,7 +40880,7 @@ var NodeToolProbe = class {
     this.execFile = props.execFileFn ?? ((file2, args) => promisified(file2, [...args]));
   }
   async probe(input) {
-    const recipe = existsSync(input.recipePath) ? readFileSync4(input.recipePath, "utf8") : void 0;
+    const recipe = existsSync2(input.recipePath) ? readFileSync5(input.recipePath, "utf8") : void 0;
     const qaRequired = recipe !== void 0;
     const opRequired = qaRequired && recipe.includes("op://");
     const ghRequired = input.repo !== void 0;
@@ -40613,7 +41002,7 @@ var NodeToolProbe = class {
 var nodeToolProbe = new NodeToolProbe();
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.36.0";
+var appVersion = false ? "0.0.0-dev" : "1.46.0";
 
 // src/cli/cli.ts
 function buildTracker(overrideTracker) {
@@ -40651,18 +41040,16 @@ function buildPrHost(overrideTracker) {
   }
   return new GhPullRequestHost({ repo: config2.repo });
 }
-function resolveConfigPath() {
-  return process.env["FLIGHT_RULES_CONFIG"] ?? join5(process.cwd(), ".claude", "flight-rules.local.md");
-}
 function getConfigFromEnv(overrideTracker) {
-  const config2 = readConfig(resolveConfigPath());
+  const configPath = resolveConfigPath(process.cwd(), process.env["FLIGHT_RULES_CONFIG"]);
+  const config2 = readConfig(configPath);
   if (overrideTracker === void 0) return config2;
   if (overrideTracker !== "github" && overrideTracker !== "jira") {
     throw new Error(`Invalid --tracker "${overrideTracker}" \u2014 expected "github" or "jira"`);
   }
   return { ...config2, tracker: overrideTracker };
 }
-function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = resolveConfigPath) {
+function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = () => resolveConfigPath(process.cwd(), process.env["FLIGHT_RULES_CONFIG"])) {
   const program2 = new Command("flight-rules");
   program2.version(appVersion);
   program2.exitOverride();
@@ -40683,13 +41070,19 @@ function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = resolveC
   program2.addCommand(createPrCommand(prHost));
   program2.addCommand(createUsersCommand(tracker));
   program2.addCommand(createRfcCommand(config2));
+  program2.addCommand(createQaCommand(config2, getConfigPath));
   program2.addCommand(createCompetenciesCommand(config2));
   const probe = () => new NodeToolProbe();
   program2.addCommand(createCheckCommand(config2, tracker, getConfigPath, probe));
   return program2;
 }
 async function run(argv) {
-  await buildProgram(buildTracker, getConfigFromEnv, buildPrHost, resolveConfigPath).parseAsync(argv, {
+  await buildProgram(
+    buildTracker,
+    getConfigFromEnv,
+    buildPrHost,
+    () => resolveConfigPath(process.cwd(), process.env["FLIGHT_RULES_CONFIG"])
+  ).parseAsync(argv, {
     from: "user"
   });
 }

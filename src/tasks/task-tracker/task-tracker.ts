@@ -8,6 +8,8 @@ export const EntityMetadataSchema = z
     tddId: z.number().optional(),
     epicId: z.number().optional(),
     notes: z.string().optional(),
+    /** Explicit body-format override read first by BodyFormatDetector (docs/bug-report-format.md). */
+    kind: z.enum(['bug', 'story']).optional(),
   })
   .passthrough()
 
@@ -19,6 +21,14 @@ export const CommentSchema = z.object({
   author: z.string(),
   createdAt: z.string(),
   updatedAt: z.string(),
+})
+
+export const AttachmentSchema = z.object({
+  id: z.string(),
+  filename: z.string(),
+  mimeType: z.string(),
+  size: z.number().optional(),
+  mediaUuid: z.string().optional(),
 })
 
 export const TechnicalDesignSchema = z.object({
@@ -40,6 +50,9 @@ export const TicketSchema = z.object({
   body: z.string(),
   comments: z.array(CommentSchema),
   assignee: z.string().nullable(),
+  attachments: z.array(AttachmentSchema).default([]),
+  reporter: z.string().nullable().default(null),
+  issueType: z.string().default('unknown'),
   blockedBy: z.array(z.string()).default([]),
   blocking: z.array(z.string()).default([]),
   metadata: EntityMetadataSchema.default({}),
@@ -121,6 +134,7 @@ export const CreateInitiativeInputSchema = z.object({
 })
 
 export type Comment = z.infer<typeof CommentSchema>
+export type Attachment = z.infer<typeof AttachmentSchema>
 export type TechnicalDesign = z.infer<typeof TechnicalDesignSchema>
 export type Ticket = z.infer<typeof TicketSchema>
 export type Epic = z.infer<typeof EpicSchema>
@@ -157,6 +171,7 @@ export interface TaskTracker {
   createTechnicalDesign(input: CreateTechnicalDesignInput): Promise<TechnicalDesign>
   getTechnicalDesign(id: string): Promise<TechnicalDesign>
   addComment(entityId: string, body: string): Promise<Comment>
+  addAttachment(ticketId: string, filePath: string): Promise<Attachment>
   getUsers(): Promise<string[]>
   ping(): Promise<void>
 }

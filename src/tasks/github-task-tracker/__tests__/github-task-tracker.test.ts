@@ -134,6 +134,8 @@ describe('GitHubTracker.getTicket', () => {
         body: 'Details',
         updated_at: '2026-01-01T00:00:00Z',
         assignee: null,
+        user: { login: 'alice' },
+        type: { name: 'Bug' },
       },
     } as never)
     mockListComments.mockResolvedValueOnce({ data: [] } as never)
@@ -147,6 +149,9 @@ describe('GitHubTracker.getTicket', () => {
 
     expect(ticket.blockedBy).toEqual(['3'])
     expect(ticket.blocking).toEqual(['9'])
+    expect(ticket.reporter).toBe('alice')
+    expect(ticket.issueType).toBe('Bug')
+    expect(ticket.attachments).toEqual([])
   })
 })
 
@@ -361,13 +366,24 @@ describe('GitHubTracker.getTicket metadata', () => {
     const body =
       'Ticket body\n\n<details>\n<summary>LLM Context</summary>\n<!-- flight-rules:metadata -->\n\n```yaml\nepicId: 10\n```\n\n</details>'
     mockGet.mockResolvedValueOnce({
-      data: { number: 7, state: 'open', labels: [], title: 'Fix login', body, updated_at: '2026-01-01T00:00:00Z', assignee: null },
+      data: {
+        number: 7,
+        state: 'open',
+        labels: [],
+        title: 'Fix login',
+        body,
+        updated_at: '2026-01-01T00:00:00Z',
+        assignee: null,
+        user: { login: 'bob' },
+      },
     } as never)
     mockListComments.mockResolvedValueOnce({ data: [] } as never)
     mockRequest.mockResolvedValue({ data: [] } as never)
 
     const ticket = await tracker.getTicket('7')
     expect(ticket.metadata.epicId).toBe(10)
+    expect(ticket.reporter).toBe('bob')
+    expect(ticket.issueType).toBe('Issue')
   })
 })
 
@@ -886,5 +902,12 @@ describe('GitHubTracker throws for unsupported label writes', () => {
 
     await expect(tracker.removeLabel('7', 'qa')).rejects.toBeInstanceOf(UnsupportedTrackerOperationError)
     await expect(tracker.removeLabel('7', 'qa')).rejects.toThrow(/--tracker jira/)
+  })
+
+  it('rejects addAttachment with UnsupportedTrackerOperationError naming the remedy', async () => {
+    const tracker = makeTracker()
+
+    await expect(tracker.addAttachment('7', '/tmp/a.png')).rejects.toBeInstanceOf(UnsupportedTrackerOperationError)
+    await expect(tracker.addAttachment('7', '/tmp/a.png')).rejects.toThrow(/--tracker jira/)
   })
 })

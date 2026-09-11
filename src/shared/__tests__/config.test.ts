@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { readConfig, getRfcDir, seedCompetencies } from "../config.js";
+import {
+  readConfig,
+  getRfcDir,
+  getQaRecipePath,
+  resolveConfigPath,
+  seedCompetencies,
+} from "../config.js";
 import { writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -116,6 +122,27 @@ tracker: github
 `);
     expect(() => readConfig(filePath)).toThrow();
   });
+
+  it("parses a qaRecipe path when present", () => {
+    const filePath = setupFixture(`---
+tracker: github
+repo: acme/my-project
+qaRecipe: docs/flight-rules.qa.md
+---
+`);
+    const config = readConfig(filePath);
+    expect(config.qaRecipe).toBe("docs/flight-rules.qa.md");
+  });
+
+  it("leaves qaRecipe undefined when absent", () => {
+    const filePath = setupFixture(`---
+tracker: github
+repo: acme/my-project
+---
+`);
+    const config = readConfig(filePath);
+    expect(config.qaRecipe).toBeUndefined();
+  });
 });
 
 const base: Config = {
@@ -145,6 +172,40 @@ describe("getRfcDir", () => {
     expect(() => getRfcDir(config, "/workspace")).toThrow(
       "rfcStoragePath is required",
     );
+  });
+});
+
+describe("resolveConfigPath", () => {
+  it("defaults to <cwd>/.claude/flight-rules.local.md when no override", () => {
+    expect(resolveConfigPath("/repo", undefined)).toBe(
+      "/repo/.claude/flight-rules.local.md",
+    );
+  });
+
+  it("returns the override unchanged when provided", () => {
+    expect(resolveConfigPath("/repo", "/elsewhere/cfg.md")).toBe(
+      "/elsewhere/cfg.md",
+    );
+  });
+});
+
+describe("getQaRecipePath", () => {
+  const configPath = "/repo/.claude/flight-rules.local.md";
+
+  it("defaults to flight-rules.qa.md beside the config when qaRecipe is unset", () => {
+    expect(getQaRecipePath(base, configPath)).toBe(
+      "/repo/.claude/flight-rules.qa.md",
+    );
+  });
+
+  it("resolves a relative qaRecipe against the config directory", () => {
+    const config: Config = { ...base, qaRecipe: "../docs/x.md" };
+    expect(getQaRecipePath(config, configPath)).toBe("/repo/docs/x.md");
+  });
+
+  it("leaves an absolute qaRecipe unchanged", () => {
+    const config: Config = { ...base, qaRecipe: "/abs/x.md" };
+    expect(getQaRecipePath(config, configPath)).toBe("/abs/x.md");
   });
 });
 
