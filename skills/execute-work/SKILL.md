@@ -222,6 +222,16 @@ Three iterations is a **hard ceiling**, not a target. Do not restart the count, 
 
 Only once `verified: true`.
 
+**Capture the evidence.** Decide whether this change has a visible surface. Read the ticket's Solution, its contract items, and its Guided Walkthrough or Reproduction Notes, and look at the union of `filesChanged[].path`: client or UI paths, or a contract item that names something a user sees, mean yes. A backend change still counts when its consequence renders somewhere — an endpoint that now returns a differently formatted string has a visible surface on the page that shows it, so that page is what you capture. Write two or three lines of **capture directions**: which screen, what to do, and whether the take is before-and-after (a bug) or after-only (a story).
+
+When there is a visible surface, invoke the `capture-evidence` skill with the directions and the ticket id. It drives the app, writes screenshots and video under `.claude/evidence/<ticket>/`, and returns an evidence manifest: one entry per file with `path`, `kind` (`image` or `video`), `phase` (`before` or `after`), and `caption`. Keep the manifest; step 7 hands it to the PR body and the ticket comment, and step 9 reports it.
+
+When there is no visible surface, write one line instead: `No visual evidence: <reason>` — for example `No visual evidence: API-only change with no UI consequence.` That line travels everywhere the manifest would have.
+
+When capture fails on a visible change, write `No visual evidence: capture failed — <reason>` and carry on. The verifier already passed this tree; a missing picture is a missing signal, not a failed run. Do not re-run the loop and do not stop the ship.
+
+`.claude/` is gitignored, so nothing under `.claude/evidence/` shows in `git status --porcelain` and nothing from it ever goes in the `--file` set below.
+
 **Commit.** Stage by explicit path. Passing any `--file` scopes the commit to exactly those paths, so an unrelated stray edit cannot ride along; **omitting `--file` entirely commits the whole index**, which is why you always pass it. Repeat `--file` once per path:
 
 ```bash
@@ -326,6 +336,7 @@ Give the user, in this order:
 - **Iterations used** — 1, 2, or 3. Say it plainly; it is the honest signal of how hard this was.
 - **Per-criterion verdicts** — every criterion with its verdict and the verifier's evidence, including any `UNVERIFIABLE`.
 - **The PR URL**, and the branch name.
+- **Evidence** — each manifest item's caption and path, or the `No visual evidence: <reason>` line.
 - **The review verdict** — `ESCALATE` or `CLEAR`, its reasons, and the finding counts. Say plainly whether a human still needs to run `guided-code-review`.
 - **Every `charterConcerns` entry** the verifier raised, verbatim. These didn't block the PR — so don't quietly drop them, even where the review picked them up.
 - **Any `openQuestions`** from either agent, still unanswered.
@@ -362,6 +373,7 @@ A reviewer can grade a run against this list:
 - The branch name follows the convention `flight-rules git checkout` produces — no hand-cut branches in the history.
 - Every commit message is CLI-generated, correctly typed and scoped to the ticket id.
 - The commit contains exactly the union of the paths the implementer reported across all iterations: nothing unrelated rode along, and nothing the verifier passed was left behind. The working tree is clean afterwards.
+- A visible change produced evidence under `.claude/evidence/<ticket>/`, or the run recorded `No visual evidence: <reason>`; nothing from that directory was committed.
 - The PR body matches `docs/pr-body-format.md`: tech-writer-authored What/Why sections, the ticket linked, and — when present — an OTS Materials block carrying the verifier's evidence or real output.
 - The ticket's status trail reads to-do → in-progress → in-review, with the in-review transition happening *after* the PR exists.
 - No acceptance criterion shipped without a PASS verdict backed by evidence, and no acceptance-criteria checkbox was ticked.
