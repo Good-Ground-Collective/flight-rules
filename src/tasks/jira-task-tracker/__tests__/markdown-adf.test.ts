@@ -48,9 +48,9 @@ describe('markdownAdfConverter.toAdf', () => {
       {
         type: 'paragraph',
         content: [
-          { type: 'text', text: 'bold', marks: [{ type: 'strong' }, { type: 'link', attrs: { href: 'https://a.dev' } }] },
+          { type: 'text', text: 'bold', marks: [{ type: 'link', attrs: { href: 'https://a.dev' } }, { type: 'strong' }] },
           { type: 'text', text: ' and ' },
-          { type: 'text', text: 'code', marks: [{ type: 'code' }, { type: 'link', attrs: { href: 'https://b.dev' } }] },
+          { type: 'text', text: 'code', marks: [{ type: 'link', attrs: { href: 'https://b.dev' } }, { type: 'code' }] },
         ],
       },
     ])
@@ -170,9 +170,28 @@ describe('markdown ⇄ ADF round-trip', () => {
     ['loose ordered list keeps numbering', '1. first\n\n2. second'],
     ['rule', '---'],
     ['multi-line paragraph', 'line one\nline two'],
-    ['literal emphasis', 'Ship *now* today'],
-    ['literal strikethrough', 'Drop ~~this~~ instead'],
-    ['literal link stays byte-stable', 'See [docs](https://x.dev) first'],
+    ['emphasis', 'Ship *now* today'],
+    ['bold italic', 'Ship ***now*** today'],
+    ['strikethrough', 'Drop ~~this~~ instead'],
+    ['code then emphasis', 'Run `npm test` then *retry*'],
+    ['marks inside a code span stay literal', 'Use `a *b* ~~c~~ **d**` verbatim'],
+    ['link', 'See [the docs](https://x.dev) first'],
+    ['link with title', 'See [the docs](https://x.dev "Docs") first'],
+    ['bold link text', 'See [**the docs**](https://x.dev)'],
+    ['bold around a link', 'See **[the docs](https://x.dev)**'],
+    ['code link text', 'See [`flight-rules check`](https://x.dev)'],
+    ['strike around bold', 'Was ~~**required**~~ now optional'],
+    ['heading with marks', '## Ship *it* **now**'],
+    ['intraword underscore stays literal', 'the max_retry_count field'],
+    ['nested bullets', '- outer\n  - inner\n- second outer'],
+    ['deeply nested bullets', '- a\n  - b\n    - c'],
+    ['bullet with a nested ordered list', '- outer\n  1. one\n  2. two'],
+    ['ordered with a nested bullet list', '1. outer\n   - inner'],
+    ['nested bullet carrying marks', '- outer\n  - inner **bold** and `code`'],
+    [
+      'bullet list nested inside a details block',
+      '<details><summary>Guided Walkthrough</summary>\n\n- outer\n  - inner\n\n</details>',
+    ],
     ['literal image', '![a](https://x.dev/a.png)'],
     ['literal table', '| A |\n| --- |\n| 1 |'],
     ['literal blockquote', '> quoted line'],
@@ -221,6 +240,70 @@ describe('markdown ⇄ ADF round-trip', () => {
     ].join('\n')
 
     expect(roundTrip(body)).toBe(body)
+  })
+})
+
+describe('markdownAdfConverter.toAdf mark and nesting shapes', () => {
+  const firstText = (markdown: string): AdfNode | undefined =>
+    markdownAdfConverter.toAdf(markdown).content[0]?.content?.[0]
+
+  const markTypes = (node: AdfNode | undefined): string[] => (node?.marks ?? []).map((mark) => mark.type).sort()
+
+  it('flattens ~~***x***~~ onto one text node carrying strike, em, and strong', () => {
+    const paragraph = markdownAdfConverter.toAdf('~~***x***~~').content[0]
+    expect(paragraph?.content).toHaveLength(1)
+    const [text] = paragraph?.content ?? []
+    expect(text?.text).toBe('x')
+    expect(markTypes(text)).toEqual(['em', 'strike', 'strong'])
+  })
+
+  it('carries strong and link with an href on a bold link label', () => {
+    const text = firstText('[**x**](https://u)')
+    expect(markTypes(text)).toEqual(['link', 'strong'])
+    const link = text?.marks?.find((mark) => mark.type === 'link')
+    expect(link?.attrs).toEqual({ href: 'https://u' })
+  })
+
+  it('records href and title on a titled link', () => {
+    const text = firstText('[x](https://u "T")')
+    const link = text?.marks?.find((mark) => mark.type === 'link')
+    expect(link?.attrs).toEqual({ href: 'https://u', title: 'T' })
+  })
+
+  it('maps a nested bullet to a listItem holding [paragraph, bulletList]', () => {
+    const [bulletList] = markdownAdfConverter.toAdf('- outer\n  - inner').content
+    const [listItem] = bulletList?.content ?? []
+    expect(listItem?.type).toBe('listItem')
+    expect(listItem?.content?.map((child) => child.type)).toEqual(['paragraph', 'bulletList'])
+  })
+})
+
+describe('markdownAdfConverter normalizations', () => {
+  it('rewrites underscore emphasis to asterisks', () => {
+    expect(roundTrip('Ship _now_ today')).toBe('Ship *now* today')
+  })
+
+  it('collapses four-space nesting to the marker width', () => {
+    expect(roundTrip('- a\n    - b')).toBe('- a\n  - b')
+  })
+
+  it('renumbers an ordered list from its start', () => {
+    expect(roundTrip('1. a\n1. b')).toBe('1. a\n2. b')
+  })
+
+  it('drops bold from a code span', () => {
+    expect(roundTrip('Use **`x`** here')).toBe('Use `x` here')
+  })
+
+  it('normalizes a star bullet to a dash', () => {
+    expect(roundTrip('* star bullet')).toBe('- star bullet')
+  })
+
+  it('emits a text node carrying an underline mark as plain text', () => {
+    const nodes: AdfNode[] = [
+      { type: 'paragraph', content: [{ type: 'text', text: 'plain', marks: [{ type: 'underline' }] }] },
+    ]
+    expect(markdownAdfConverter.toMarkdown(nodes)).toBe('plain')
   })
 })
 
@@ -277,6 +360,16 @@ describe('markdownAdfConverter.toMarkdown graceful degradation', () => {
       },
     ]
     expect(markdownAdfConverter.toMarkdown(nodes)).toBe('[docs](https://x.dev)')
+  })
+
+  it('collapses a link whose text equals its href to a bare url', () => {
+    const nodes: AdfNode[] = [
+      {
+        type: 'paragraph',
+        content: [{ type: 'text', text: 'https://x.dev', marks: [{ type: 'link', attrs: { href: 'https://x.dev' } }] }],
+      },
+    ]
+    expect(markdownAdfConverter.toMarkdown(nodes)).toBe('https://x.dev')
   })
 
   it('renders ordered lists with numeric markers', () => {

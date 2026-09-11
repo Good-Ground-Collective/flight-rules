@@ -15,16 +15,19 @@ export interface MarkdownAdfConverter {
 
 /**
  * Bidirectional markdown ⇄ ADF conversion for the layered-body subset
- * (docs/layered-body-format.md): headings, paragraphs with bold / code / link
- * marks, fenced code blocks, task lists, bullet and ordered lists, thematic
- * breaks, and `<details>` blocks (mapped to ADF expands). The write direction
- * parses with `mdast-util-from-markdown` plus the GFM extensions and maps mdast
- * nodes to ADF in a `switch` on `node.type`; the read direction is a
- * hand-written emitter, kept off mdast so `*`/`_` are never over-escaped and
- * the round-trip stays byte-stable. Anything outside the mapped subset degrades
- * to literal text sliced from the node's source position on write, so it
- * round-trips unchanged until its own node-family ticket claims it; unknown ADF
- * nodes flatten to their text on read.
+ * (docs/layered-body-format.md): headings, paragraphs with emphasis / strong /
+ * strikethrough / code / link marks, fenced code blocks, task lists, nested
+ * bullet and ordered lists, thematic breaks, and `<details>` blocks (mapped to
+ * ADF expands). The write direction parses with `mdast-util-from-markdown` plus
+ * the GFM extensions and maps mdast nodes to ADF in a `switch` on `node.type`;
+ * the read direction is a hand-written emitter, kept off mdast so `*`/`_` are
+ * never over-escaped. mdast nests marks where ADF flattens them onto one text
+ * node, so the emitter reapplies a text node's marks innermost-first following
+ * their stored order, which keeps a link inside or outside a bold consistent
+ * with how it was authored. Anything outside the mapped subset (images, tables,
+ * blockquotes) degrades to literal text sliced from the node's source position
+ * on write, so it round-trips unchanged until its own node-family ticket claims
+ * it; unknown ADF nodes flatten to their text on read.
  */
 export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
   toAdf(markdown: string): AdfDocNode {
@@ -183,21 +186,31 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
         case 'text':
           out.push(...this.textSegments(node.value, marks))
           break
+        case 'emphasis':
+          out.push(...this.inline(node.children, source, [...marks, { type: 'em' }]))
+          break
         case 'strong':
           out.push(...this.inline(node.children, source, [...marks, { type: 'strong' }]))
           break
-        // ADF's code mark excludes fontStyle marks, so any inherited strong is dropped.
+        case 'delete':
+          out.push(...this.inline(node.children, source, [...marks, { type: 'strike' }]))
+          break
+        // ADF's code mark excludes fontStyle marks (so inherited emphasis/strong drop) but keeps an enclosing link.
         case 'inlineCode':
-          out.push({ type: 'text', text: node.value, marks: [{ type: 'code' }] })
+          out.push({
+            type: 'text',
+            text: node.value,
+            marks: [...marks.filter((mark) => mark.type === 'link'), { type: 'code' }],
+          })
           break
         case 'break':
           out.push({ type: 'hardBreak' })
           break
         case 'link': {
-          const href = node.url
-          for (const child of this.inline(node.children, source, marks)) {
-            out.push({ ...child, marks: [...(child.marks ?? []), { type: 'link', attrs: { href } }] })
-          }
+          const hasTitle = typeof node.title === 'string' && node.title !== ''
+          const attrs = hasTitle ? { href: node.url, title: node.title } : { href: node.url }
+          const link: AdfMark = { type: 'link', attrs }
+          out.push(...this.inline(node.children, source, [...marks.filter((mark) => mark.type !== 'link'), link]))
           break
         }
         default:
@@ -250,14 +263,10 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
           )
           .join('\n')
       case 'bulletList':
-        return (node.content ?? [])
-          .map((item) => `- ${this.toMarkdown(item.content ?? []).replace(/\n/g, '\n  ')}`)
-          .join('\n')
+        return (node.content ?? []).map((item) => this.listItemToMarkdown(item, '- ')).join('\n')
       case 'orderedList': {
         const order = typeof node.attrs?.['order'] === 'number' ? node.attrs['order'] : 1
-        return (node.content ?? [])
-          .map((item, index) => `${order + index}. ${this.toMarkdown(item.content ?? []).replace(/\n/g, '\n   ')}`)
-          .join('\n')
+        return (node.content ?? []).map((item, index) => this.listItemToMarkdown(item, `${order + index}. `)).join('\n')
       }
       case 'expand': {
         const title = typeof node.attrs?.['title'] === 'string' ? node.attrs['title'] : ''
@@ -271,20 +280,66 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
     }
   }
 
+  /**
+   * Emits one list item and its nested blocks. ADF holds a nested list as a
+   * sibling of the item's paragraph, so a nested list joins onto the item with a
+   * single newline while any other block joins with a blank line; continuation
+   * lines then indent by the marker width, nesting `- ` at two spaces, `1. ` at
+   * three, and `10. ` at four.
+   */
+  private listItemToMarkdown(item: AdfNode, marker: string): string {
+    let body = ''
+    for (const block of item.content ?? []) {
+      const rendered = this.blockToMarkdown(block)
+      if (rendered.length === 0) continue
+      const nestedList = block.type === 'bulletList' || block.type === 'orderedList' || block.type === 'taskList'
+      body = body.length === 0 ? rendered : `${body}${nestedList ? '\n' : '\n\n'}${rendered}`
+    }
+    const indent = ' '.repeat(marker.length)
+    return `${marker}${body.replace(/\n/g, `\n${indent}`)}`
+  }
+
   private inlineToMarkdown(nodes: AdfNode[]): string {
     return nodes
       .map((node) => {
         if (node.type === 'hardBreak') return '\n'
-        let text = node.text ?? (node.content !== undefined ? this.inlineToMarkdown(node.content) : '')
-        const marks = node.marks ?? []
-        if (marks.some((mark) => mark.type === 'code')) text = `\`${text}\``
-        if (marks.some((mark) => mark.type === 'strong')) text = `**${text}**`
-        const link = marks.find((mark) => mark.type === 'link')
-        const href = link?.attrs?.['href']
-        if (typeof href === 'string') text = `[${text}](${href})`
-        return text
+        const inner = node.text ?? (node.content !== undefined ? this.inlineToMarkdown(node.content) : '')
+        return [...(node.marks ?? [])].reverse().reduce((text, mark) => this.applyMark(text, mark), inner)
       })
       .join('')
+  }
+
+  /**
+   * Wraps text in the markdown for one mark, called innermost-first so a text
+   * node's marks reproduce their stored nesting: `[**x**](u)` keeps the link
+   * outside the bold, `**[x](u)**` keeps it inside. A link whose text already
+   * equals its href collapses to the bare url; marks with no markdown syntax
+   * (underline, textColor, subsup, border) emit their text unchanged.
+   */
+  private applyMark(text: string, mark: AdfMark): string {
+    switch (mark.type) {
+      case 'code':
+        return `\`${text}\``
+      case 'em':
+        return `*${text}*`
+      case 'strong':
+        return `**${text}**`
+      case 'strike':
+        return `~~${text}~~`
+      case 'link':
+        return this.linkToMarkdown(text, mark)
+      default:
+        return text
+    }
+  }
+
+  private linkToMarkdown(text: string, mark: AdfMark): string {
+    const href = mark.attrs?.['href']
+    if (typeof href !== 'string') return text
+
+    const title = mark.attrs?.['title']
+    const suffix = typeof title === 'string' ? ` "${title}"` : ''
+    return text === href && suffix === '' ? href : `[${text}](${href}${suffix})`
   }
 }
 

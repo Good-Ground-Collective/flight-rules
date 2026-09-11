@@ -39073,21 +39073,31 @@ var LayeredBodyAdfConverter = class {
         case "text":
           out.push(...this.textSegments(node2.value, marks));
           break;
+        case "emphasis":
+          out.push(...this.inline(node2.children, source, [...marks, { type: "em" }]));
+          break;
         case "strong":
           out.push(...this.inline(node2.children, source, [...marks, { type: "strong" }]));
           break;
-        // ADF's code mark excludes fontStyle marks, so any inherited strong is dropped.
+        case "delete":
+          out.push(...this.inline(node2.children, source, [...marks, { type: "strike" }]));
+          break;
+        // ADF's code mark excludes fontStyle marks (so inherited emphasis/strong drop) but keeps an enclosing link.
         case "inlineCode":
-          out.push({ type: "text", text: node2.value, marks: [{ type: "code" }] });
+          out.push({
+            type: "text",
+            text: node2.value,
+            marks: [...marks.filter((mark) => mark.type === "link"), { type: "code" }]
+          });
           break;
         case "break":
           out.push({ type: "hardBreak" });
           break;
         case "link": {
-          const href = node2.url;
-          for (const child of this.inline(node2.children, source, marks)) {
-            out.push({ ...child, marks: [...child.marks ?? [], { type: "link", attrs: { href } }] });
-          }
+          const hasTitle = typeof node2.title === "string" && node2.title !== "";
+          const attrs = hasTitle ? { href: node2.url, title: node2.title } : { href: node2.url };
+          const link = { type: "link", attrs };
+          out.push(...this.inline(node2.children, source, [...marks.filter((mark) => mark.type !== "link"), link]));
           break;
         }
         default:
@@ -39135,10 +39145,10 @@ ${text4}
           (item) => `- [${item.attrs?.["state"] === "DONE" ? "x" : " "}] ${this.inlineToMarkdown(item.content ?? [])}`
         ).join("\n");
       case "bulletList":
-        return (node2.content ?? []).map((item) => `- ${this.toMarkdown(item.content ?? []).replace(/\n/g, "\n  ")}`).join("\n");
+        return (node2.content ?? []).map((item) => this.listItemToMarkdown(item, "- ")).join("\n");
       case "orderedList": {
         const order = typeof node2.attrs?.["order"] === "number" ? node2.attrs["order"] : 1;
-        return (node2.content ?? []).map((item, index2) => `${order + index2}. ${this.toMarkdown(item.content ?? []).replace(/\n/g, "\n   ")}`).join("\n");
+        return (node2.content ?? []).map((item, index2) => this.listItemToMarkdown(item, `${order + index2}. `)).join("\n");
       }
       case "expand": {
         const title = typeof node2.attrs?.["title"] === "string" ? node2.attrs["title"] : "";
@@ -39154,18 +39164,61 @@ ${this.toMarkdown(node2.content ?? [])}
         return node2.text ?? this.toMarkdown(node2.content ?? []);
     }
   }
+  /**
+   * Emits one list item and its nested blocks. ADF holds a nested list as a
+   * sibling of the item's paragraph, so a nested list joins onto the item with a
+   * single newline while any other block joins with a blank line; continuation
+   * lines then indent by the marker width, nesting `- ` at two spaces, `1. ` at
+   * three, and `10. ` at four.
+   */
+  listItemToMarkdown(item, marker) {
+    let body = "";
+    for (const block of item.content ?? []) {
+      const rendered = this.blockToMarkdown(block);
+      if (rendered.length === 0) continue;
+      const nestedList = block.type === "bulletList" || block.type === "orderedList" || block.type === "taskList";
+      body = body.length === 0 ? rendered : `${body}${nestedList ? "\n" : "\n\n"}${rendered}`;
+    }
+    const indent2 = " ".repeat(marker.length);
+    return `${marker}${body.replace(/\n/g, `
+${indent2}`)}`;
+  }
   inlineToMarkdown(nodes) {
     return nodes.map((node2) => {
       if (node2.type === "hardBreak") return "\n";
-      let text4 = node2.text ?? (node2.content !== void 0 ? this.inlineToMarkdown(node2.content) : "");
-      const marks = node2.marks ?? [];
-      if (marks.some((mark) => mark.type === "code")) text4 = `\`${text4}\``;
-      if (marks.some((mark) => mark.type === "strong")) text4 = `**${text4}**`;
-      const link = marks.find((mark) => mark.type === "link");
-      const href = link?.attrs?.["href"];
-      if (typeof href === "string") text4 = `[${text4}](${href})`;
-      return text4;
+      const inner = node2.text ?? (node2.content !== void 0 ? this.inlineToMarkdown(node2.content) : "");
+      return [...node2.marks ?? []].reverse().reduce((text4, mark) => this.applyMark(text4, mark), inner);
     }).join("");
+  }
+  /**
+   * Wraps text in the markdown for one mark, called innermost-first so a text
+   * node's marks reproduce their stored nesting: `[**x**](u)` keeps the link
+   * outside the bold, `**[x](u)**` keeps it inside. A link whose text already
+   * equals its href collapses to the bare url; marks with no markdown syntax
+   * (underline, textColor, subsup, border) emit their text unchanged.
+   */
+  applyMark(text4, mark) {
+    switch (mark.type) {
+      case "code":
+        return `\`${text4}\``;
+      case "em":
+        return `*${text4}*`;
+      case "strong":
+        return `**${text4}**`;
+      case "strike":
+        return `~~${text4}~~`;
+      case "link":
+        return this.linkToMarkdown(text4, mark);
+      default:
+        return text4;
+    }
+  }
+  linkToMarkdown(text4, mark) {
+    const href = mark.attrs?.["href"];
+    if (typeof href !== "string") return text4;
+    const title = mark.attrs?.["title"];
+    const suffix = typeof title === "string" ? ` "${title}"` : "";
+    return text4 === href && suffix === "" ? href : `[${text4}](${href}${suffix})`;
   }
 };
 var markdownAdfConverter = new LayeredBodyAdfConverter();
