@@ -218,6 +218,21 @@ describe('JiraClient.locationFor', () => {
     const apiErr = err as JiraApiError
     expect(apiErr.status).toBe(404)
   })
+
+  it('throws a JiraApiError with the redirect status when a 3xx carries no Location header', async () => {
+    const client = makeClient()
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(null, { status: 303 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const err = await client.locationFor('/attachment/content/no-location').then(
+      () => undefined,
+      (e: unknown) => e,
+    )
+
+    expect(err).toBeInstanceOf(JiraApiError)
+    const apiErr = err as JiraApiError
+    expect(apiErr.status).toBe(303)
+  })
 })
 
 describe('AdfBuilder', () => {

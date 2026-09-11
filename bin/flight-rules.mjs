@@ -29859,6 +29859,7 @@ var JiraClient = class {
     });
     if (!res.ok && !redirectStatuses.has(res.status)) await this.throwApiError(res);
     const location = res.headers.get("location");
+    await res.body?.cancel();
     if (location === null) {
       throw new JiraApiError(res.status, [`Jira returned no Location header for ${path2}`], {});
     }
