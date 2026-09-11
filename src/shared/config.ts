@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { z } from "zod";
 import { JiraHostSchema } from "../tasks/jira-task-tracker/jira-host.js";
 
@@ -59,6 +59,12 @@ const ConfigSchema = z
     defaultLabels: z.array(z.string()).default([]),
     rfcStorage: z.enum(["local", "global"]).default("local"),
     rfcStoragePath: z.string().optional(),
+    qaRecipe: z
+      .string()
+      .optional()
+      .describe(
+        "Path to the per-repo QA recipe; relative paths resolve against the directory holding this config file; defaults to flight-rules.qa.md beside it",
+      ),
     competencies: z.array(z.string()).default([...seedCompetencies]),
   })
   .superRefine((cfg, ctx) => {
@@ -185,4 +191,19 @@ export function getRfcDir(config: Config, cwd: string): string {
     return config.rfcStoragePath;
   }
   return join(cwd, "rfcs");
+}
+
+// eslint-disable-next-line preflight/no-loose-functions -- resolveConfigPath is module-level behaviour awaiting a home on a service; tracked in KAN-39
+export function resolveConfigPath(
+  cwd: string,
+  override: string | undefined,
+): string {
+  return override ?? join(cwd, ".claude", "flight-rules.local.md");
+}
+
+// eslint-disable-next-line preflight/no-loose-functions -- getQaRecipePath is module-level behaviour awaiting a home on a service; tracked in KAN-39
+export function getQaRecipePath(config: Config, configPath: string): string {
+  const recipe = config.qaRecipe ?? "flight-rules.qa.md";
+  if (isAbsolute(recipe)) return recipe;
+  return resolve(dirname(configPath), recipe);
 }
