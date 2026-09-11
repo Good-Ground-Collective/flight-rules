@@ -1,0 +1,29 @@
+name: relock
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  relock:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Regenerate lockfile on Linux
+        run: |
+          rm -f package-lock.json
+          npm install --no-audit --no-fund
+      - name: Sanity-check npm ci with the new lock
+        run: |
+          rm -rf node_modules
+          npm ci
+      - name: Push regenerated lockfile to a fix branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B fix/ci-lockfile-linux
+          git add package-lock.json
+          git commit -m "fix(build): regenerate package-lock on linux so npm ci is consistent" || echo "no change"
+          git push -f origin fix/ci-lockfile-linux
