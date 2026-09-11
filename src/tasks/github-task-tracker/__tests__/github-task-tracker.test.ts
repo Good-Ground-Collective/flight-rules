@@ -903,4 +903,11 @@ describe('GitHubTracker throws for unsupported label writes', () => {
     await expect(tracker.removeLabel('7', 'qa')).rejects.toBeInstanceOf(UnsupportedTrackerOperationError)
     await expect(tracker.removeLabel('7', 'qa')).rejects.toThrow(/--tracker jira/)
   })
+
+  it('rejects addAttachment with UnsupportedTrackerOperationError naming the remedy', async () => {
+    const tracker = makeTracker()
+
+    await expect(tracker.addAttachment('7', '/tmp/a.png')).rejects.toBeInstanceOf(UnsupportedTrackerOperationError)
+    await expect(tracker.addAttachment('7', '/tmp/a.png')).rejects.toThrow(/--tracker jira/)
+  })
 })
