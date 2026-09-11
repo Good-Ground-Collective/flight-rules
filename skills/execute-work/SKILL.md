@@ -33,7 +33,7 @@ flight-rules ticket get <id>
 From the returned layered body, extract:
 
 - **Problem Statement** — the why. Context for the implementer, not a contract.
-- **Solution** — the intended shape. This also becomes the PR summary.
+- **Solution** — the intended shape. This grounds the PR body's "Why Was It Changed" section in step 7.
 - **Acceptance Criteria** — the contract. This is what the verifier checks and the only definition of done.
 - **Guided Walkthrough** — files, patterns, and test approach, when the ticket has one.
 
@@ -258,22 +258,42 @@ flight-rules git push
 
 There is no force flag. If the push is rejected, stop and tell the user — do not reach for raw git to get around it.
 
+**Write the PR body — dispatch the `tech-writer` agent in `author` mode.** The
+body is not yours to hand-write; a human reads it, so a human's editor writes it.
+The format is `${CLAUDE_PLUGIN_ROOT}/docs/pr-body-format.md`. Hand the agent:
+
+- **The ticket's Problem Statement and Solution** — the grounding for "Why Was It Changed."
+- **A summary of the diff** — `git diff --stat <default-branch>..<branch>` and `git log <default-branch>..<branch> --format='%s'`, both read-only, so it describes what actually shipped rather than what the ticket wished for.
+- **The verifier's per-criterion evidence** — the raw material for "What Was Changed" and, absent screenshots, for the OTS Materials block.
+- **The audience** — "a reviewer deciding whether to merge, and a QA/PM confirming the ask was built."
+
+It returns YAML with `whatWasChanged` (1-5 bullets), `whyWasItChanged` (prose,
+which may embed a Mermaid or `diff`-fenced diagram when the change has a shape),
+and optionally `otsMaterials`. Pass the `whyWasItChanged` value through `--why`
+verbatim — fences and all; GitHub renders them in the PR body. Surface any
+`openQuestions` it raises to the user with the run summary; do not answer them on
+its behalf.
+
 **Open the PR.** The base is the repository's default branch — read it read-only, and ask for the bare string rather than a nested object:
 
 ```bash
 gh repo view --json defaultBranchRef --jq .defaultBranchRef.name
 ```
 
-The head is the branch `git checkout` printed in step 4:
+Build the **ticket URL** from config: Jira is `https://<jiraHost>/browse/<id>`; a
+GitHub-tracked repo is `https://github.com/<repo>/issues/<id>`. The head is the
+branch `git checkout` printed in step 4. Pass each `whatWasChanged` bullet as its
+own repeated `--what`:
 
 ```bash
-flight-rules pr create --type <type> --scope <id> --description "<description>" --summary "<from the ticket's Solution>" --ticket-id <id> --test-notes "<the verifier's per-criterion evidence>" --base <default-branch> --head <branch>
+flight-rules pr create --type <type> --scope <id> --description "<description>" --why "<whyWasItChanged>" --what "<bullet>" --what "<bullet>" --ticket-id <id> --ticket-url <url> --base <default-branch> --head <branch>
 ```
 
 - `--description` — the same prose phrase as the commit, since it becomes the PR title. Not the kebab branch slug.
-- `--summary` — drawn from the ticket's **Solution** section, not from the implementer's `summary`. The PR describes the intended change.
-- `--test-notes` — the verifier's evidence. This is the artifact that makes the PR reviewable: the human reviewer sees which criteria were checked and how.
-- `--change` is available and repeatable if the change list is worth spelling out.
+- `--why` — the agent's `whyWasItChanged` prose, verbatim. Grounded in the ticket, phrased for a human.
+- `--what` — one per `whatWasChanged` bullet, repeated. The schema caps these at five bullets of 256 characters; if the agent somehow overran, it re-runs, you do not truncate by hand.
+- `--ots` — the agent's `otsMaterials`, when present. Omit the flag entirely when it isn't.
+- `--ticket-url` — the link the reviewer follows back to the ticket.
 
 **Move the ticket:**
 
@@ -332,7 +352,7 @@ Give the user, in this order:
 - **Either agent returns `openQuestions`** → surface them unanswered, alongside whatever else that iteration produced.
 - **Third consecutive FAIL** → stop. Present the itemized evidence from the final verification, state that three iterations were used, and **leave the branch intact** with the work in place so a human can pick it up. Do not commit, do not push, do not open a PR, and do not move the ticket to in-review. Leave it in the in-progress status — that is now true.
 - **`git push` rejected** → stop and report. There is no force flag, and inventing one with raw git is not the fix.
-- **`pr create` fails on `repo`** — either `repo (owner/repo) is required in config to create pull requests` or `Invalid repo format …`. This is a config error, not a work error, and by the time you see it **the commit has landed and the branch is pushed**. So: fix `repo` in `.claude/flight-rules.local.md` (confirm the value with the user first) and re-run **only** the `pr create` command, then carry on to the in-review transition. Do **not** redo the implement/verify loop, do not re-commit, and do **not** fall back to raw `gh pr create` — that bypasses the PR template, so the body would lose the summary, the ticket link and the verifier's test notes, which is the whole point of routing through the CLI. If the user can't supply a valid `owner/repo`, stop and report the branch name and commit sha so the PR can be opened by hand.
+- **`pr create` fails on `repo`** — either `repo (owner/repo) is required in config to create pull requests` or `Invalid repo format …`. This is a config error, not a work error, and by the time you see it **the commit has landed and the branch is pushed**. So: fix `repo` in `.claude/flight-rules.local.md` (confirm the value with the user first) and re-run **only** the `pr create` command, then carry on to the in-review transition. Do **not** redo the implement/verify loop, do not re-commit, and do **not** fall back to raw `gh pr create` — that bypasses the PR template, so the body would lose the authored What/Why sections, the OTS Materials block and the ticket link, which is the whole point of routing through the CLI. Re-run `pr create` with the same authored fields the tech-writer produced — don't re-summon the agent and don't hand-write a body. If the user can't supply a valid `owner/repo`, stop and report the branch name and commit sha so the PR can be opened by hand.
 - **`autonomous-code-review` fails to post** → report it in step 9 and finish the run. By this point the PR is open, the work is verified and the ticket has moved, so the review is the only thing missing and it can be re-run against the PR at any time. Do not retry the implement/verify loop, do not roll the ticket status back, and do not withhold the run summary.
 
 ## What Good Looks Like
@@ -342,8 +362,8 @@ A reviewer can grade a run against this list:
 - The branch name follows the convention `flight-rules git checkout` produces — no hand-cut branches in the history.
 - Every commit message is CLI-generated, correctly typed and scoped to the ticket id.
 - The commit contains exactly the union of the paths the implementer reported across all iterations: nothing unrelated rode along, and nothing the verifier passed was left behind. The working tree is clean afterwards.
-- The PR body matches the template: summary from the ticket's Solution, the ticket id linked, and test notes carrying the verifier's per-criterion evidence.
-- The ticket's status trail reads to-do → in-progress → in-review, with the in-review transition happening _after_ the PR exists.
+- The PR body matches `docs/pr-body-format.md`: tech-writer-authored What/Why sections, the ticket linked, and — when present — an OTS Materials block carrying the verifier's evidence or real output.
+- The ticket's status trail reads to-do → in-progress → in-review, with the in-review transition happening *after* the PR exists.
 - No acceptance criterion shipped without a PASS verdict backed by evidence, and no acceptance-criteria checkbox was ticked.
 - The run summary states the iteration count, and every `charterConcerns` and `openQuestions` entry reached the user.
 - Iterations 1 and 2 ran the implementer at its default tier; opus appears only if a third iteration was reached, and never on the verifier.
