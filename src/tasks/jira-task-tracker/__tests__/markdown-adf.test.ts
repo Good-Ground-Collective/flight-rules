@@ -68,7 +68,9 @@ describe('markdownAdfConverter.toAdf', () => {
     const [taskList] = doc.content
     expect(taskList?.type).toBe('taskList')
     expect(taskList?.content?.map((item) => item.attrs?.['state'])).toEqual(['TODO', 'DONE'])
-    expect(taskList?.content?.[0]?.content).toEqual([{ type: 'text', text: 'first' }])
+    // A taskItem now holds block content (paragraph + any nested/continuation
+    // blocks) so nested list children survive the round trip; see FINDING 2.
+    expect(taskList?.content?.[0]?.content).toEqual([{ type: 'paragraph', content: [{ type: 'text', text: 'first' }] }])
   })
 
   it('converts bullets to a bulletList of listItem paragraphs', () => {
@@ -275,6 +277,76 @@ describe('markdownAdfConverter.toAdf mark and nesting shapes', () => {
     const [listItem] = bulletList?.content ?? []
     expect(listItem?.type).toBe('listItem')
     expect(listItem?.content?.map((child) => child.type)).toEqual(['paragraph', 'bulletList'])
+  })
+})
+
+describe('markdownAdfConverter round-trip fidelity (adversarial review)', () => {
+  // toAdf → toMarkdown → toAdf must be stable: re-parsing the emitted markdown
+  // yields the same ADF, so no content is lost or corrupted on a round trip.
+  const adfStable = (nodes: AdfNode[]): void => {
+    const markdown = markdownAdfConverter.toMarkdown(nodes)
+    expect(markdownAdfConverter.toAdf(markdown).content).toEqual(nodes)
+  }
+  const linkPara = (text: string, attrs: Record<string, unknown>): AdfNode[] => [
+    { type: 'paragraph', content: [{ type: 'text', text, marks: [{ type: 'link', attrs }] }] },
+  ]
+
+  describe('FINDING 1 — link destination and title are escaped', () => {
+    it('keeps a literal ampersand entity in an href from re-decoding', () => {
+      adfStable(linkPara('x', { href: 'https://u/?q=&copy;' }))
+    })
+
+    it('keeps a bare ampersand in an href intact', () => {
+      adfStable(linkPara('x', { href: 'https://u/?a=1&b=2' }))
+    })
+
+    it('escapes a double quote inside a link title', () => {
+      adfStable(linkPara('x', { href: 'https://u', title: 'say "hi"' }))
+    })
+
+    it('wraps a destination containing a space in angle brackets', () => {
+      adfStable(linkPara('x', { href: 'https://u/a b' }))
+    })
+  })
+
+  describe('FINDING 2 — list item children beyond the first survive', () => {
+    it('preserves a nested child list under a task item', () => {
+      const markdown = '- [ ] parent\n  - child'
+      const doc = markdownAdfConverter.toAdf(markdown)
+      const taskItem = doc.content[0]?.content?.[0]
+      expect(taskItem?.content?.map((child) => child.type)).toEqual(['paragraph', 'bulletList'])
+      expect(markdownAdfConverter.toAdf(markdownAdfConverter.toMarkdown(doc.content)).content).toEqual(doc.content)
+    })
+
+    it('preserves both paragraphs of a two-paragraph list item', () => {
+      const markdown = '- first para\n\n  second para'
+      const doc = markdownAdfConverter.toAdf(markdown)
+      const listItem = doc.content[0]?.content?.[0]
+      expect(listItem?.content?.map((child) => child.type)).toEqual(['paragraph', 'paragraph'])
+      expect(markdownAdfConverter.toAdf(markdownAdfConverter.toMarkdown(doc.content)).content).toEqual(doc.content)
+    })
+  })
+
+  describe('FINDING 3 — shared marks coalesce across adjacent text nodes', () => {
+    const stableFromMarkdown = (markdown: string): void => {
+      const adf = markdownAdfConverter.toAdf(markdown)
+      const reparsed = markdownAdfConverter.toAdf(markdownAdfConverter.toMarkdown(adf.content))
+      expect(reparsed.content).toEqual(adf.content)
+    }
+
+    it('keeps a bold span wrapping a link as a single strong mark', () => {
+      stableFromMarkdown('**before [x](https://u) after**')
+    })
+
+    it('does not duplicate a strong mark nested inside emphasis', () => {
+      stableFromMarkdown('*before **bold** after*')
+    })
+  })
+
+  describe('FINDING 4 — literal text is escaped so it does not re-parse as syntax', () => {
+    it('keeps decoded emphasis markers literal', () => {
+      adfStable([{ type: 'paragraph', content: [{ type: 'text', text: 'literal *x*' }] }])
+    })
   })
 })
 

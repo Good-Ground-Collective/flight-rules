@@ -39056,14 +39056,11 @@ var LayeredBodyAdfConverter = class {
     return { type: "orderedList", ...order === 1 ? {} : { attrs: { order } }, content: content3 };
   }
   taskList(node2, source) {
-    const content3 = node2.children.map((item, index2) => {
-      const first = item.children[0];
-      return {
-        type: "taskItem",
-        attrs: { localId: `task-${index2 + 1}`, state: item.checked === true ? "DONE" : "TODO" },
-        content: first !== void 0 && first.type === "paragraph" ? this.inline(first.children, source) : []
-      };
-    });
+    const content3 = node2.children.map((item, index2) => ({
+      type: "taskItem",
+      attrs: { localId: `task-${index2 + 1}`, state: item.checked === true ? "DONE" : "TODO" },
+      content: this.blocks(item.children, source)
+    }));
     return { type: "taskList", attrs: { localId: "task-list" }, content: content3 };
   }
   inline(nodes, source, marks = []) {
@@ -39141,9 +39138,7 @@ ${text4}
 \`\`\``;
       }
       case "taskList":
-        return (node2.content ?? []).map(
-          (item) => `- [${item.attrs?.["state"] === "DONE" ? "x" : " "}] ${this.inlineToMarkdown(item.content ?? [])}`
-        ).join("\n");
+        return (node2.content ?? []).map((item) => this.renderItem(item, `- [${item.attrs?.["state"] === "DONE" ? "x" : " "}] `, 2)).join("\n");
       case "bulletList":
         return (node2.content ?? []).map((item) => this.listItemToMarkdown(item, "- ")).join("\n");
       case "orderedList": {
@@ -39172,6 +39167,14 @@ ${this.toMarkdown(node2.content ?? [])}
    * three, and `10. ` at four.
    */
   listItemToMarkdown(item, marker) {
+    return this.renderItem(item, marker, marker.length);
+  }
+  /**
+   * Renders a list/task item's block content behind `prefix`, indenting every
+   * continuation line by `indentWidth` spaces. A nested list joins onto the item
+   * with a single newline; any other block joins with a blank line.
+   */
+  renderItem(item, prefix, indentWidth) {
     let body = "";
     for (const block of item.content ?? []) {
       const rendered = this.blockToMarkdown(block);
@@ -39179,23 +39182,72 @@ ${this.toMarkdown(node2.content ?? [])}
       const nestedList = block.type === "bulletList" || block.type === "orderedList" || block.type === "taskList";
       body = body.length === 0 ? rendered : `${body}${nestedList ? "\n" : "\n\n"}${rendered}`;
     }
-    const indent2 = " ".repeat(marker.length);
-    return `${marker}${body.replace(/\n/g, `
+    const indent2 = " ".repeat(indentWidth);
+    return `${prefix}${body.replace(/\n/g, `
 ${indent2}`)}`;
   }
+  /**
+   * Serializes a text node's marks as coalesced spans rather than wrapping each
+   * node independently. Marks are stored outermost-first, so a delimiter opens
+   * when a mark first appears across adjacent nodes and closes only once it stops
+   * applying to the next node. That keeps a mark spanning several text nodes as a
+   * single span (`**before [x](u) after**`) instead of re-opening it per node,
+   * which would re-parse to duplicate marks. Text inside a code span is emitted
+   * verbatim; all other text is escaped so decoded literals (`literal *x*`)
+   * don't re-parse as syntax.
+   */
   inlineToMarkdown(nodes) {
-    return nodes.map((node2) => {
-      if (node2.type === "hardBreak") return "\n";
-      const inner = node2.text ?? (node2.content !== void 0 ? this.inlineToMarkdown(node2.content) : "");
-      return [...node2.marks ?? []].reverse().reduce((text4, mark) => this.applyMark(text4, mark), inner);
-    }).join("");
+    let out = "";
+    const open = [];
+    const closeFrom = (from) => {
+      while (open.length > from) {
+        const mark = open.pop();
+        if (mark !== void 0) out += this.markClose(mark);
+      }
+    };
+    for (const node2 of nodes) {
+      if (node2.type === "hardBreak") {
+        closeFrom(0);
+        out += "\n";
+        continue;
+      }
+      if (node2.text === void 0) {
+        closeFrom(0);
+        const inner = node2.content !== void 0 ? this.inlineToMarkdown(node2.content) : "";
+        out += [...node2.marks ?? []].reverse().reduce((text4, mark) => this.applyMark(text4, mark), inner);
+        continue;
+      }
+      const marks = node2.marks ?? [];
+      const solo = marks[0];
+      if (marks.length === 1 && open.length === 0 && solo !== void 0) {
+        const bare = this.tryBareUrl(node2.text, solo);
+        if (bare !== void 0) {
+          out += bare;
+          continue;
+        }
+      }
+      let common = 0;
+      while (common < open.length && common < marks.length) {
+        const opened = open[common];
+        const wanted = marks[common];
+        if (opened === void 0 || wanted === void 0 || !this.marksEqual(opened, wanted)) break;
+        common++;
+      }
+      closeFrom(common);
+      for (let k = common; k < marks.length; k++) {
+        const mark = marks[k];
+        if (mark === void 0) continue;
+        out += this.markOpen(mark);
+        open.push(mark);
+      }
+      out += this.escapeText(node2.text, open.some((mark) => mark.type === "code"));
+    }
+    closeFrom(0);
+    return out;
   }
   /**
-   * Wraps text in the markdown for one mark, called innermost-first so a text
-   * node's marks reproduce their stored nesting: `[**x**](u)` keeps the link
-   * outside the bold, `**[x](u)**` keeps it inside. A link whose text already
-   * equals its href collapses to the bare url; marks with no markdown syntax
-   * (underline, textColor, subsup, border) emit their text unchanged.
+   * Wraps text in the markdown for one mark, innermost-first. Only used for the
+   * rare content-bearing inline node; the main text path coalesces marks instead.
    */
   applyMark(text4, mark) {
     switch (mark.type) {
@@ -39213,12 +39265,102 @@ ${indent2}`)}`;
         return text4;
     }
   }
+  markOpen(mark) {
+    switch (mark.type) {
+      case "code":
+        return "`";
+      case "em":
+        return "*";
+      case "strong":
+        return "**";
+      case "strike":
+        return "~~";
+      case "link":
+        return typeof mark.attrs?.["href"] === "string" ? "[" : "";
+      default:
+        return "";
+    }
+  }
+  markClose(mark) {
+    switch (mark.type) {
+      case "code":
+        return "`";
+      case "em":
+        return "*";
+      case "strong":
+        return "**";
+      case "strike":
+        return "~~";
+      case "link":
+        return this.linkClose(mark);
+      default:
+        return "";
+    }
+  }
+  linkClose(mark) {
+    const href = mark.attrs?.["href"];
+    if (typeof href !== "string") return "";
+    const title = mark.attrs?.["title"];
+    const suffix = typeof title === "string" ? ` "${this.encodeTitle(title)}"` : "";
+    return `](${this.encodeDestination(href)}${suffix})`;
+  }
+  marksEqual(a, b) {
+    if (a.type !== b.type) return false;
+    if (a.type === "link") return a.attrs?.["href"] === b.attrs?.["href"] && a.attrs?.["title"] === b.attrs?.["title"];
+    return true;
+  }
+  /**
+   * Collapses a link whose visible text equals its destination to the bare url,
+   * but only when the destination needs no escaping and there's no title — so the
+   * autolink re-parses to the same href. Otherwise the caller emits `[text](dest)`.
+   */
+  tryBareUrl(text4, mark) {
+    if (mark.type !== "link") return void 0;
+    const href = mark.attrs?.["href"];
+    if (typeof href !== "string") return void 0;
+    if (typeof mark.attrs?.["title"] === "string") return void 0;
+    if (text4 !== href || this.encodeDestination(href) !== href) return void 0;
+    return href;
+  }
   linkToMarkdown(text4, mark) {
     const href = mark.attrs?.["href"];
     if (typeof href !== "string") return text4;
+    const bare = this.tryBareUrl(text4, mark);
+    if (bare !== void 0) return bare;
     const title = mark.attrs?.["title"];
-    const suffix = typeof title === "string" ? ` "${title}"` : "";
-    return text4 === href && suffix === "" ? href : `[${text4}](${href}${suffix})`;
+    const suffix = typeof title === "string" ? ` "${this.encodeTitle(title)}"` : "";
+    return `[${text4}](${this.encodeDestination(href)}${suffix})`;
+  }
+  /**
+   * Escapes a link destination so it re-parses to the same string: literal `\`
+   * and `&` are backslash-escaped (mdast otherwise reads `&copy;` as an entity),
+   * and a destination carrying spaces, control chars, or parens is wrapped in
+   * `<...>` with its `<`/`>` escaped.
+   */
+  encodeDestination(url2) {
+    const escaped = url2.replace(/[\\&]/g, (ch) => `\\${ch}`);
+    if (/[ \t -()]/.test(url2)) return `<${escaped.replace(/[<>]/g, (ch) => `\\${ch}`)}>`;
+    return escaped;
+  }
+  /**
+   * Escapes a link title emitted inside `"..."`: `\`, `&`, and the `"` delimiter
+   * are backslash-escaped so the title re-parses unchanged instead of breaking
+   * the link or being read as an entity.
+   */
+  encodeTitle(title) {
+    return title.replace(/[\\&"]/g, (ch) => `\\${ch}`);
+  }
+  /**
+   * Escapes literal text so mdast-decoded content doesn't re-parse as syntax:
+   * `\`, `*`, and `` ` `` are the markers that would otherwise reinterpret plain
+   * text as emphasis or code. Text inside a code span is left verbatim, and
+   * characters that only matter at block scope (`[`, `|`, `>`, `!`) stay
+   * unescaped so degraded literal blocks round-trip byte-for-byte. Marks like
+   * emphasis are emitted via their own delimiters, not through this.
+   */
+  escapeText(text4, insideCode) {
+    if (insideCode) return text4;
+    return text4.replace(/[\\*`]/g, (ch) => `\\${ch}`);
   }
 };
 var markdownAdfConverter = new LayeredBodyAdfConverter();
