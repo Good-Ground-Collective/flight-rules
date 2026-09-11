@@ -8,6 +8,7 @@
     "./agents/research-agent.md",
     "./agents/code-implementation.md",
     "./agents/code-verifier.md",
-    "./agents/tech-writer.md"
+    "./agents/tech-writer.md",
+    "./agents/qa-engineer.md"
   ]
 }
