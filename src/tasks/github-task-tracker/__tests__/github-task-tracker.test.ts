@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { GitHubTaskTracker } from '../github-task-tracker.js'
 import { BodyMetadataService } from '../../body-metadata/body-metadata.js'
+import { UnsupportedTrackerOperationError } from '../../task-tracker/unsupported-tracker-operation-error.js'
 
 vi.mock('@octokit/rest', () => ({
   Octokit: vi.fn().mockImplementation(function () {
@@ -867,5 +868,23 @@ describe('GitHubTracker.listTransitions', () => {
     await expect(tracker.listTransitions()).resolves.toHaveLength(150)
     // @ts-expect-error — accessing private field for the assertion
     expect(tracker.octokit.paginate).toHaveBeenCalled()
+  })
+})
+
+describe('GitHubTracker throws for unsupported label writes', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('rejects addLabel with UnsupportedTrackerOperationError naming the remedy', async () => {
+    const tracker = makeTracker()
+
+    await expect(tracker.addLabel('7', 'qa')).rejects.toBeInstanceOf(UnsupportedTrackerOperationError)
+    await expect(tracker.addLabel('7', 'qa')).rejects.toThrow(/--tracker jira/)
+  })
+
+  it('rejects removeLabel with UnsupportedTrackerOperationError naming the remedy', async () => {
+    const tracker = makeTracker()
+
+    await expect(tracker.removeLabel('7', 'qa')).rejects.toBeInstanceOf(UnsupportedTrackerOperationError)
+    await expect(tracker.removeLabel('7', 'qa')).rejects.toThrow(/--tracker jira/)
   })
 })

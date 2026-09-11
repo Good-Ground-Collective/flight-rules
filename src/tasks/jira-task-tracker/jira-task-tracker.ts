@@ -194,6 +194,18 @@ export class JiraTaskTracker implements TaskTracker {
     return response.transitions.map((transition) => transition.to.name)
   }
 
+  /**
+   * Jira's `add`/`remove` label verbs are set operations, so the write is
+   * atomic against whatever labels the issue already has — no read first.
+   */
+  async addLabel(ticketId: string, label: string): Promise<void> {
+    await this.client.request('PUT', `/issue/${ticketId}`, { update: { labels: [{ add: label }] } })
+  }
+
+  async removeLabel(ticketId: string, label: string): Promise<void> {
+    await this.client.request('PUT', `/issue/${ticketId}`, { update: { labels: [{ remove: label }] } })
+  }
+
   async updateEpicMetadata(epicId: string, patch: Partial<EntityMetadata>): Promise<void> {
     await this.spliceDescriptionMetadata(epicId, patch)
   }
