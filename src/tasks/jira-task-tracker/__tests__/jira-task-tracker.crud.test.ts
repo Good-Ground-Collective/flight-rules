@@ -239,6 +239,128 @@ describe('JiraTaskTracker markdown ⇄ ADF descriptions', () => {
   })
 })
 
+describe('JiraTaskTracker.updateTicketDescription', () => {
+  beforeEach(() => {
+    request.mockReset()
+  })
+
+  it('rewrites the body, preserves the existing metadata, and sets summary + labels', async () => {
+    let stored = descriptionWith('old body', { tddId: 5 })
+    request.mockImplementation((method: string, path: string, body?: unknown) => {
+      if (method === 'GET' && path === '/issueLinkType') return Promise.resolve(blocksLinkTypes)
+      if (method === 'GET' && path === '/issue/PROJ-2')
+        return Promise.resolve(issue('PROJ-2', { summary: 'New Title', description: stored, labels: ['x'] }))
+      if (method === 'PUT' && path === '/issue/PROJ-2') {
+        stored = (body as { fields: { description: AdfDocNode } }).fields.description
+        return Promise.resolve(undefined)
+      }
+      throw new Error(`unexpected ${method} ${path}`)
+    })
+
+    const ticket = await makeTracker().updateTicketDescription('PROJ-2', {
+      body: 'new body',
+      title: 'New Title',
+      labels: ['x'],
+    })
+
+    const put = request.mock.calls.find(([method, path]) => method === 'PUT' && path === '/issue/PROJ-2')
+    const fields = (put?.[2] as { fields: Record<string, unknown> }).fields
+    expect(fields['summary']).toBe('New Title')
+    expect(fields['labels']).toEqual(['x'])
+    expect(jiraAdfMetadataService.parse(fields['description'] as AdfDocNode)).toEqual({ tddId: 5 })
+    expect(ticket.body).toBe('new body')
+    expect(ticket.metadata).toEqual({ tddId: 5 })
+  })
+
+  it('omits summary and labels from the update when title/labels are not supplied', async () => {
+    let stored = descriptionWith('old body', { tddId: 5 })
+    request.mockImplementation((method: string, path: string, body?: unknown) => {
+      if (method === 'GET' && path === '/issueLinkType') return Promise.resolve(blocksLinkTypes)
+      if (method === 'GET' && path === '/issue/PROJ-2') return Promise.resolve(issue('PROJ-2', { description: stored }))
+      if (method === 'PUT' && path === '/issue/PROJ-2') {
+        stored = (body as { fields: { description: AdfDocNode } }).fields.description
+        return Promise.resolve(undefined)
+      }
+      throw new Error(`unexpected ${method} ${path}`)
+    })
+
+    await makeTracker().updateTicketDescription('PROJ-2', { body: 'new body' })
+
+    const put = request.mock.calls.find(([method, path]) => method === 'PUT' && path === '/issue/PROJ-2')
+    const fields = (put?.[2] as { fields: Record<string, unknown> }).fields
+    expect(fields).not.toHaveProperty('summary')
+    expect(fields).not.toHaveProperty('labels')
+  })
+})
+
+describe('JiraTaskTracker.updateEpicDescription', () => {
+  beforeEach(() => {
+    request.mockReset()
+  })
+
+  it('rewrites the epic body while preserving its metadata block', async () => {
+    let stored = descriptionWith('old body', { notes: 'keep me' })
+    request.mockImplementation((method: string, path: string, body?: unknown) => {
+      if (method === 'GET' && path === '/issueLinkType') return Promise.resolve(blocksLinkTypes)
+      if (method === 'GET' && path === '/issue/PROJ-1')
+        return Promise.resolve(issue('PROJ-1', { summary: 'Epic', description: stored }))
+      if (method === 'GET' && path === '/search/jql') return Promise.resolve({ issues: [] })
+      if (method === 'PUT' && path === '/issue/PROJ-1') {
+        stored = (body as { fields: { description: AdfDocNode } }).fields.description
+        return Promise.resolve(undefined)
+      }
+      throw new Error(`unexpected ${method} ${path}`)
+    })
+
+    const epic = await makeTracker().updateEpicDescription('PROJ-1', { body: 'brand new epic body' })
+
+    const put = request.mock.calls.find(([method, path]) => method === 'PUT' && path === '/issue/PROJ-1')
+    const fields = (put?.[2] as { fields: Record<string, unknown> }).fields
+    expect(jiraAdfMetadataService.parse(fields['description'] as AdfDocNode)).toEqual({ notes: 'keep me' })
+    expect(epic.body).toBe('brand new epic body')
+    expect(epic.metadata).toEqual({ notes: 'keep me' })
+  })
+})
+
+describe('JiraTaskTracker.updateInitiativeDescription', () => {
+  beforeEach(() => {
+    request.mockReset()
+  })
+
+  const linkTypes = {
+    issueLinkTypes: [
+      { id: '1', name: 'Blocks', inward: 'is blocked by', outward: 'blocks' },
+      { id: '2', name: 'Polaris issue link', inward: 'is implemented by', outward: 'implements' },
+    ],
+  }
+
+  it('writes the body straight through (no metadata block) and sets the summary', async () => {
+    let stored = jiraAdfMetadataService.splice(adfBuilder.doc('old idea'), {})
+    request.mockImplementation((method: string, path: string, body?: unknown) => {
+      if (method === 'GET' && path === '/issueLinkType') return Promise.resolve(linkTypes)
+      if (method === 'GET' && path === '/issue/PROJ-7')
+        return Promise.resolve({ ...issue('PROJ-7', { summary: 'Idea', description: stored }) })
+      if (method === 'PUT' && path === '/issue/PROJ-7') {
+        stored = (body as { fields: { description: AdfDocNode } }).fields.description
+        return Promise.resolve(undefined)
+      }
+      throw new Error(`unexpected ${method} ${path}`)
+    })
+
+    const initiative = await makeTracker().updateInitiativeDescription('PROJ-7', {
+      body: 'new idea body',
+      title: 'New Idea',
+    })
+
+    const put = request.mock.calls.find(([method, path]) => method === 'PUT' && path === '/issue/PROJ-7')
+    const fields = (put?.[2] as { fields: Record<string, unknown> }).fields
+    expect(fields['summary']).toBe('New Idea')
+    const description = fields['description'] as AdfDocNode
+    expect(description.content.some((node) => node.type === 'expand')).toBe(false)
+    expect(initiative.body).toBe('new idea body')
+  })
+})
+
 describe('JiraTaskTracker.getEpic', () => {
   beforeEach(() => {
     request.mockReset()

@@ -15,6 +15,9 @@ import type {
   TaskTracker,
   TechnicalDesign,
   Ticket,
+  UpdateEpicInput,
+  UpdateInitiativeInput,
+  UpdateTicketInput,
 } from '../task-tracker/task-tracker.js'
 
 interface GitHubTrackerConfig {
@@ -332,6 +335,28 @@ export class GitHubTaskTracker implements TaskTracker {
     })
   }
 
+  async updateEpicDescription(epicId: string, input: UpdateEpicInput): Promise<Epic> {
+    await this.replaceIssueBody(epicId, 'epic', input)
+    return this.getEpic(epicId)
+  }
+
+  async updateTicketDescription(ticketId: string, input: UpdateTicketInput): Promise<Ticket> {
+    await this.replaceIssueBody(ticketId, 'ticket', input)
+    return this.getTicket(ticketId)
+  }
+
+  async updateInitiativeDescription(initiativeId: string, input: UpdateInitiativeInput): Promise<Initiative> {
+    // Initiatives are milestones: a title and description, no labels or metadata.
+    await this.octokit.rest.issues.updateMilestone({
+      owner: this.owner,
+      repo: this.repo,
+      milestone_number: parseInt(initiativeId, 10),
+      description: input.body,
+      ...(input.title !== undefined ? { title: input.title } : {}),
+    })
+    return this.getInitiative(initiativeId)
+  }
+
   async updateTddMetadata(tddId: string, patch: Partial<EntityMetadata>): Promise<void> {
     const fetchData = await this.gql<{
       repository: { discussion: { id: string; body: string } | null }
@@ -488,6 +513,46 @@ export class GitHubTaskTracker implements TaskTracker {
 
   async ping(): Promise<void> {
     await this.octokit.rest.repos.get({ owner: this.owner, repo: this.repo })
+  }
+
+  private async replaceIssueBody(
+    id: string,
+    role: string,
+    input: { body: string; title?: string | undefined; labels?: string[] | undefined },
+  ): Promise<void> {
+    const issueNumber = parseInt(id, 10)
+    const { data } = await this.octokit.rest.issues.get({
+      owner: this.owner,
+      repo: this.repo,
+      issue_number: issueNumber,
+    })
+    // Preserve the entity-metadata block: re-splice the metadata carried on the
+    // existing body into the new body via the same path create uses.
+    const body = this.bodyMetadata.splice(input.body, this.bodyMetadata.parse(data.body ?? ''))
+    await this.octokit.rest.issues.update({
+      owner: this.owner,
+      repo: this.repo,
+      issue_number: issueNumber,
+      body,
+      ...(input.title !== undefined ? { title: input.title } : {}),
+      ...(input.labels !== undefined ? { labels: this.mergeLabels(data.labels, role, input.labels) } : {}),
+    })
+  }
+
+  /**
+   * The label set to write on an edit: the caller's labels plus the role
+   * (`epic`/`ticket`) and any `status:` label the issue already carries, so a
+   * `--labels` edit replaces the free-form labels without dropping the ones the
+   * factory manages.
+   */
+  private mergeLabels(current: OctokitIssueData['labels'], role: string, next: string[]): string[] {
+    const preserved = new Set<string>([role])
+    for (const label of current) {
+      const name = this.labelName(label)
+      if (name.startsWith('status:')) preserved.add(name)
+    }
+    for (const name of next) preserved.add(name)
+    return [...preserved]
   }
 
   private async resolveIssueId(issueNumber: number): Promise<number> {

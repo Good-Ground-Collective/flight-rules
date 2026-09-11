@@ -39,12 +39,16 @@ const child = (id: string, blockedBy: string[] = [], status = "open"): Ticket =>
   updatedAt: "2026-01-01T00:00:00Z",
 });
 
-type InitiativeTracker = Pick<TaskTracker, "createInitiative" | "getInitiative" | "getEpic">;
+type InitiativeTracker = Pick<
+  TaskTracker,
+  "createInitiative" | "getInitiative" | "getEpic" | "updateInitiativeDescription"
+>;
 
 const makeTracker = (): InitiativeTracker => ({
   createInitiative: vi.fn().mockResolvedValue(mockInitiative),
   getInitiative: vi.fn().mockResolvedValue(mockInitiative),
   getEpic: vi.fn().mockResolvedValue(epicWith("19", [])),
+  updateInitiativeDescription: vi.fn().mockResolvedValue(mockInitiative),
 });
 
 const run = (tracker: InitiativeTracker, args: string[]) =>
@@ -75,6 +79,24 @@ describe("initiative command", () => {
     expect(output).toHaveBeenCalledWith(JSON.stringify(mockInitiative) + "\n");
     output.mockRestore();
   });
+
+  it('calls updateInitiativeDescription and prints JSON for "edit"', async () => {
+    const tracker = makeTracker()
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(tracker, ['edit', '7', '--body', 'Rewritten body', '--title', 'New Title'])
+    expect(tracker.updateInitiativeDescription).toHaveBeenCalledWith('7', {
+      body: 'Rewritten body',
+      title: 'New Title',
+    })
+    expect(output).toHaveBeenCalledWith(JSON.stringify(mockInitiative) + '\n')
+    output.mockRestore()
+  })
+
+  it('rejects "edit" when neither --body nor --body-file is given', async () => {
+    const tracker = makeTracker()
+    await expect(run(tracker, ['edit', '7'])).rejects.toThrow('one of --body or --body-file')
+    expect(tracker.updateInitiativeDescription).not.toHaveBeenCalled()
+  })
 
   it('rejects "create" when --title is missing', async () => {
     const tracker = makeTracker();

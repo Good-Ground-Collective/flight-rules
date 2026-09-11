@@ -29252,6 +29252,20 @@ var CreateTechnicalDesignInputSchema = external_exports.object({
   epicId: external_exports.string(),
   metadata: EntityMetadataSchema.partial().optional()
 });
+var UpdateEpicInputSchema = external_exports.object({
+  body: external_exports.string(),
+  title: external_exports.string().optional(),
+  labels: external_exports.array(external_exports.string()).optional()
+});
+var UpdateTicketInputSchema = external_exports.object({
+  body: external_exports.string(),
+  title: external_exports.string().optional(),
+  labels: external_exports.array(external_exports.string()).optional()
+});
+var UpdateInitiativeInputSchema = external_exports.object({
+  body: external_exports.string(),
+  title: external_exports.string().optional()
+});
 var InitiativeSchema = external_exports.object({
   id: external_exports.string(),
   size: external_exports.literal("initiative"),
@@ -29604,6 +29618,24 @@ var GitHubTaskTracker = class {
       body: this.bodyMetadata.splice(data.body ?? "", patch)
     });
   }
+  async updateEpicDescription(epicId, input) {
+    await this.replaceIssueBody(epicId, "epic", input);
+    return this.getEpic(epicId);
+  }
+  async updateTicketDescription(ticketId, input) {
+    await this.replaceIssueBody(ticketId, "ticket", input);
+    return this.getTicket(ticketId);
+  }
+  async updateInitiativeDescription(initiativeId, input) {
+    await this.octokit.rest.issues.updateMilestone({
+      owner: this.owner,
+      repo: this.repo,
+      milestone_number: parseInt(initiativeId, 10),
+      description: input.body,
+      ...input.title !== void 0 ? { title: input.title } : {}
+    });
+    return this.getInitiative(initiativeId);
+  }
   async updateTddMetadata(tddId, patch) {
     const fetchData = await this.gql(
       `query GetDiscussionForUpdate($owner: String!, $repo: String!, $number: Int!) {
@@ -29723,6 +29755,38 @@ var GitHubTaskTracker = class {
   }
   async ping() {
     await this.octokit.rest.repos.get({ owner: this.owner, repo: this.repo });
+  }
+  async replaceIssueBody(id, role, input) {
+    const issueNumber = parseInt(id, 10);
+    const { data } = await this.octokit.rest.issues.get({
+      owner: this.owner,
+      repo: this.repo,
+      issue_number: issueNumber
+    });
+    const body = this.bodyMetadata.splice(input.body, this.bodyMetadata.parse(data.body ?? ""));
+    await this.octokit.rest.issues.update({
+      owner: this.owner,
+      repo: this.repo,
+      issue_number: issueNumber,
+      body,
+      ...input.title !== void 0 ? { title: input.title } : {},
+      ...input.labels !== void 0 ? { labels: this.mergeLabels(data.labels, role, input.labels) } : {}
+    });
+  }
+  /**
+   * The label set to write on an edit: the caller's labels plus the role
+   * (`epic`/`ticket`) and any `status:` label the issue already carries, so a
+   * `--labels` edit replaces the free-form labels without dropping the ones the
+   * factory manages.
+   */
+  mergeLabels(current, role, next) {
+    const preserved = /* @__PURE__ */ new Set([role]);
+    for (const label of current) {
+      const name = this.labelName(label);
+      if (name.startsWith("status:")) preserved.add(name);
+    }
+    for (const name of next) preserved.add(name);
+    return [...preserved];
   }
   async resolveIssueId(issueNumber) {
     const { data } = await this.octokit.rest.issues.get({
@@ -30315,6 +30379,20 @@ var JiraTaskTracker = class {
       version: { number: (existing.version?.number ?? 1) + 1 }
     });
   }
+  async updateEpicDescription(epicId, input) {
+    await this.replaceIssueBody(epicId, input);
+    return this.getEpic(epicId);
+  }
+  async updateTicketDescription(ticketId, input) {
+    await this.replaceIssueBody(ticketId, input);
+    return this.getTicket(ticketId);
+  }
+  async updateInitiativeDescription(initiativeId, input) {
+    const fields = { description: this.bodyFormat.toAdf(input.body) };
+    if (input.title !== void 0) fields["summary"] = input.title;
+    await this.client.request("PUT", `/issue/${initiativeId}`, { fields });
+    return this.getInitiative(initiativeId);
+  }
   async createInitiative(input) {
     const projectKey = await this.ensureJpdProject();
     const created = await this.client.request("POST", "/issue", {
@@ -30442,6 +30520,14 @@ var JiraTaskTracker = class {
       if (link.inwardIssue !== void 0) blocking.push(link.inwardIssue.key);
     });
     return { blockedBy, blocking };
+  }
+  async replaceIssueBody(key, input) {
+    const issue2 = await this.client.request("GET", `/issue/${key}`, void 0, { fields: "description" });
+    const description = this.metadata.splice(this.bodyFormat.toAdf(input.body), this.parseMetadata(issue2));
+    const fields = { description };
+    if (input.title !== void 0) fields["summary"] = input.title;
+    if (input.labels !== void 0) fields["labels"] = input.labels;
+    await this.client.request("PUT", `/issue/${key}`, { fields });
   }
   async spliceDescriptionMetadata(key, patch) {
     const issue2 = await this.client.request("GET", `/issue/${key}`, void 0, { fields: "description" });
@@ -30634,6 +30720,14 @@ function createEpicCommand(getTracker) {
     });
     process.stdout.write(JSON.stringify(result) + "\n");
   });
+  epic.command("edit").exitOverride().argument("<id>", "epic id").option("--body <body>", "new epic body (or use --body-file)").option("--body-file <path>", "read the new epic body from a file").option("--title <title>", "new epic title (unchanged if omitted)").option("--labels <labels>", "comma-separated labels replacing existing free-form labels").action(async (id, opts) => {
+    const result = await getTracker().updateEpicDescription(id, {
+      body: resolveBody({ body: opts.body, bodyFile: opts.bodyFile }),
+      ...opts.title !== void 0 ? { title: opts.title } : {},
+      ...opts.labels !== void 0 ? { labels: opts.labels.split(",") } : {}
+    });
+    process.stdout.write(JSON.stringify(result) + "\n");
+  });
   epic.command("get").exitOverride().argument("<id>", "epic id").action(async (id) => {
     const result = await getTracker().getEpic(id);
     process.stdout.write(JSON.stringify(result) + "\n");
@@ -30666,6 +30760,13 @@ function createInitiativeCommand(getTracker) {
     const result = await getTracker().createInitiative({
       title: opts.title,
       body: resolveBody({ body: opts.body, bodyFile: opts.bodyFile })
+    });
+    process.stdout.write(JSON.stringify(result) + "\n");
+  });
+  initiative.command("edit").exitOverride().argument("<id>", "initiative id").option("--body <body>", "new initiative body (or use --body-file)").option("--body-file <path>", "read the new initiative body from a file").option("--title <title>", "new initiative title (unchanged if omitted)").action(async (id, opts) => {
+    const result = await getTracker().updateInitiativeDescription(id, {
+      body: resolveBody({ body: opts.body, bodyFile: opts.bodyFile }),
+      ...opts.title !== void 0 ? { title: opts.title } : {}
     });
     process.stdout.write(JSON.stringify(result) + "\n");
   });
@@ -30807,6 +30908,14 @@ function createTicketCommand(getTracker) {
       ...opts.assignee !== void 0 ? { assignee: opts.assignee } : {}
     };
     const result = await getTracker().createTicket(input);
+    process.stdout.write(JSON.stringify(result) + "\n");
+  });
+  ticket.command("edit").exitOverride().argument("<id>", "ticket id").option("--body <body>", "new ticket body (or use --body-file)").option("--body-file <path>", "read the new ticket body from a file").option("--title <title>", "new ticket title (unchanged if omitted)").option("--labels <labels>", "comma-separated labels replacing existing free-form labels").action(async (id, opts) => {
+    const result = await getTracker().updateTicketDescription(id, {
+      body: resolveBody({ body: opts.body, bodyFile: opts.bodyFile }),
+      ...opts.title !== void 0 ? { title: opts.title } : {},
+      ...opts.labels !== void 0 ? { labels: opts.labels.split(",") } : {}
+    });
     process.stdout.write(JSON.stringify(result) + "\n");
   });
   ticket.command("get").exitOverride().argument("<id>", "ticket id").option("--section <name>", "extract a single body section (e.g. acceptance-criteria)").action(async (id, opts) => {
