@@ -30,16 +30,28 @@ You MUST create a todo per step and complete them in order.
 flight-rules ticket get <id>
 ```
 
-From the returned layered body, extract:
+First settle which format the ticket is in. Read `issueType` from the returned JSON: `Bug` is a bug report, anything else is a layered body. `metadata.kind` overrides that when present (`bug` or `layered-body`). If neither is set, sniff the first level-2 heading: `## Symptom` is a bug report, `## Problem Statement` is a layered body. Say which format you settled on; every later step keys off it.
+
+**Layered body** — extract:
 
 - **Problem Statement** — the why. Context for the implementer, not a contract.
 - **Solution** — the intended shape. This grounds the PR body's "Why Was It Changed" section in step 7.
 - **Acceptance Criteria** — the contract. This is what the verifier checks and the only definition of done.
 - **Guided Walkthrough** — files, patterns, and test approach, when the ticket has one.
 
+**Bug report** — extract:
+
+- **Symptom** — the why; context, not a contract.
+- **Environment** — the host, build, account, and browser the bug was seen on.
+- **Steps To Reproduce** — what the reproduction did; the implementer re-runs it to see the bug.
+- **Expected vs Actual** — the gap, stated plainly.
+- **Root Cause** — where the reproduction points; trust the code over it on conflict.
+- **Fixed When** — the contract. This is what the verifier checks and the only definition of done.
+- **Reproduction Notes** — the collapsed agent-facing block: the API calls that carry the symptom, the selectors, the data setup. It plays the Guided Walkthrough's role for the implementer.
+
 Also note the ticket's title (for the branch slug), its labels, and its `metadata` — `metadata.epicId` is how you find the parent epic in step 5.
 
-**If the Acceptance Criteria section is missing or empty, stop and ask the user.** Never infer the contract from the Problem Statement, and never write criteria yourself — a fabricated contract makes the verifier's PASS meaningless. A ticket with no criteria isn't ready; say so and stop.
+**If the contract section for this format is missing or empty — Acceptance Criteria on a layered body, Fixed When on a bug report — stop and ask the user.** Never infer the contract from the Problem Statement or the Symptom, and never write criteria yourself — a fabricated contract makes the verifier's PASS meaningless. A ticket with no contract isn't ready; say so and stop.
 
 If the ticket carries the `sharpen-the-saw` label, stop and point the user at `/sharpen-the-saw` instead. That work is reserved for a human.
 
@@ -132,7 +144,7 @@ The command prints `{"branch":"…","from":null}`. Keep that branch name — the
 
 Build the brief you will hand `code-implementation`. It gets exactly:
 
-- **The ticket's full layered body** — Problem Statement, Solution, Acceptance Criteria, and the Guided Walkthrough when present. Don't summarize it; the agent is a lower-tier model and paraphrase loses the contract.
+- **The ticket's full body, in whichever format step 1 settled** — every section, including the Guided Walkthrough on a layered body or the Reproduction Notes on a bug report. Don't summarize it; the agent is a lower-tier model and paraphrase loses the contract.
 - **A pointer to the coding charter**: `${CLAUDE_PLUGIN_ROOT}/docs/coding-charter.md`. Pass the path, not your précis of it — the agent is required to read it in full.
 - **Parent RFC / TDD content, when the ticket links one.** Read the parent epic for the technical writeup, using the `metadata.epicId` you noted in step 1:
 
@@ -187,13 +199,19 @@ openQuestions:
 
 Keep `filesChanged[].path` — the commit step stages and commits exactly that set, and the implementer leaves its edits unstaged, so a path it forgot to report is a path that does not ship. If `openQuestions` is present, see Error handling: it goes to the user, unanswered.
 
-**b. Dispatch `code-verifier`** with the acceptance criteria, fetched fresh and structured:
+**b. Dispatch `code-verifier`** with the contract, fetched fresh and structured. Fetch the contract section for the ticket's format:
 
 ```bash
 flight-rules ticket get <id> --section acceptance-criteria
 ```
 
-That returns `{id, section, markdown, items:[{text,done}]}`. Hand it the criteria and nothing that could bias it — **not** the implementer's `summary`, `approach`, or `testsRun`. Its contract permits `filesChanged` as a map of _where to look_; never pass it as a claim that the work is done. A verifier that has read the implementer's victory lap is not an independent check.
+for a layered body, or
+
+```bash
+flight-rules ticket get <id> --section fixed-when
+```
+
+for a bug report. Either returns `{id, section, markdown, items:[{text,done}]}`. Hand the verifier the items as its criteria and nothing that could bias it — **not** the implementer's `summary`, `approach`, or `testsRun`. Its contract permits `filesChanged` as a map of _where to look_; never pass it as a claim that the work is done. A verifier that has read the implementer's victory lap is not an independent check.
 
 It returns:
 
@@ -348,7 +366,7 @@ Give the user, in this order:
 - **Never merge.** This skill opens a PR and stops. Merging is a human decision.
 - **Never let an unverified change reach a PR.** `verified: true` is the only key that unlocks step 7.
 - **The autonomous review's verdict gates nothing.** `ESCALATE` does not reopen the implement/verify loop, `CLEAR` does not approve anything, and neither changes where this skill stops. Acting on a review finding here would put an unverified edit on the branch after the verifier signed off.
-- **Never tick acceptance-criteria checkboxes.** The `items[].done` flags are read-only to this skill; the verifier's itemized verdict is the record of what passed. A ticked box in a tracker is a claim nobody checked.
+- **Never tick contract checkboxes.** The `items[].done` flags are read-only to this skill; the verifier's itemized verdict is the record of what passed. A ticked box in a tracker is a claim nobody checked.
 - **All git and tracker mutations go through `flight-rules`.** Never hand-rolled `git commit`/`checkout`/`push`, never Claude Code auto-generated commits, never native tracker APIs (`gh issue edit`, the Jira REST API) for state changes. Read-only inspection with plain `git` or `gh` is fine.
 - **`openQuestions` and `UNVERIFIABLE` always reach the user, unanswered.** The agents ask when they are genuinely unsure. Answering on their behalf converts a flagged unknown into a silent guess — which is the exact failure the loop exists to prevent.
 - **Never overrule the verifier.** A FAIL you disagree with is still a FAIL. Feed it back to the implementer or stop.
@@ -356,7 +374,7 @@ Give the user, in this order:
 ## Error handling
 
 - **Dirty working tree** → stop before mutating anything. Report the dirty paths and ask the user to commit or stash. No branch, no transition, no dispatch.
-- **Missing or empty Acceptance Criteria** → stop and ask. Never invent the contract.
+- **Missing or empty contract section** (Acceptance Criteria, or Fixed When on a bug report) → stop and ask. Never invent the contract.
 - **`flight-rules check` fails** → stop and show the report. Fix config or credentials before running.
 - **`ticket status` reports the transition is unreachable** → the CLI's error carries an `available:` list. Show it to the user, ask which status they meant, then **write the corrected value back** into `.claude/flight-rules.local.md` so the next run doesn't repeat the mistake. Don't retry blind.
 - **Verifier returns `UNVERIFIABLE`** → do not treat it as PASS and do not treat it as FAIL, and **do not iterate**. Stop before spending another iteration, surface the criterion and the verifier's question to the user, and ask how to proceed. An untestable criterion is usually a ticket bug, not a code bug — another implementation pass cannot fix it. This takes precedence over any FAIL in the same result.
@@ -376,7 +394,7 @@ A reviewer can grade a run against this list:
 - A visible change produced evidence under `.claude/evidence/<ticket>/`, or the run recorded `No visual evidence: <reason>`; nothing from that directory was committed.
 - The PR body matches `docs/pr-body-format.md`: tech-writer-authored What/Why sections, the ticket linked, and — when present — an OTS Materials block carrying the verifier's evidence or real output.
 - The ticket's status trail reads to-do → in-progress → in-review, with the in-review transition happening *after* the PR exists.
-- No acceptance criterion shipped without a PASS verdict backed by evidence, and no acceptance-criteria checkbox was ticked.
+- No contract item — acceptance criterion or Fixed When item — shipped without a PASS verdict backed by evidence, and no checkbox was ticked.
 - The run summary states the iteration count, and every `charterConcerns` and `openQuestions` entry reached the user.
 - Iterations 1 and 2 ran the implementer at its default tier; opus appears only if a third iteration was reached, and never on the verifier.
 - The PR carries a submitted `COMMENT` review from `autonomous-code-review`, posted after the in-review transition, and the run summary states its verdict.
