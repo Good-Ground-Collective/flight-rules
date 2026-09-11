@@ -15,10 +15,11 @@ type Row = {
 }
 
 // The full precedence truth table from docs/bug-report-format.md: metadata.kind
-// wins first, then a Bug issue type (any other defined type means layered),
-// then the leading `## Symptom` heading, defaulting to layered body. Each row
-// that also carries a contradicting lower-precedence signal proves the order of
-// authority, not just the happy path.
+// wins first, then a Bug issue type (any other *real* type means layered), then
+// the leading `## Symptom` heading, defaulting to layered body. Tracker
+// placeholder types ('unknown' from Jira, 'Issue' from GitHub) count as no type,
+// so the heading fallback still runs. Each row that also carries a contradicting
+// lower-precedence signal proves the order of authority, not just the happy path.
 const rows: Row[] = [
   { name: 'kind=bug overrides a Story issue type and a layered body', metadata: { kind: 'bug' }, issueType: 'Story', body: layeredBody, expected: 'bug-report' },
   { name: 'kind=bug overrides a Symptom heading is moot but stays bug', metadata: { kind: 'bug' }, body: symptomBody, expected: 'bug-report' },
@@ -28,7 +29,13 @@ const rows: Row[] = [
   { name: 'issueType bug (lowercase) with no kind', metadata: {}, issueType: 'bug', body: layeredBody, expected: 'bug-report' },
   { name: 'issueType BUG (uppercase) with no kind', metadata: {}, issueType: 'BUG', body: layeredBody, expected: 'bug-report' },
   { name: 'issueType Story overrides a contradictory Symptom heading', metadata: {}, issueType: 'Story', body: symptomBody, expected: 'layered-body' },
-  { name: 'unknown issue type is still a defined type: layered', metadata: {}, issueType: 'unknown', body: symptomBody, expected: 'layered-body' },
+  { name: 'issueType Task (a real non-bug type) is layered', metadata: {}, issueType: 'Task', body: symptomBody, expected: 'layered-body' },
+  { name: "Jira placeholder 'unknown' is not authoritative: sniffs a Symptom heading to bug", metadata: {}, issueType: 'unknown', body: symptomBody, expected: 'bug-report' },
+  { name: "Jira placeholder 'unknown' with a layered body still sniffs to layered", metadata: {}, issueType: 'unknown', body: layeredBody, expected: 'layered-body' },
+  { name: "GitHub placeholder 'Issue' is not authoritative: sniffs a Symptom heading to bug", metadata: {}, issueType: 'Issue', body: symptomBody, expected: 'bug-report' },
+  { name: "GitHub placeholder 'issue' (lowercase) is not authoritative either", metadata: {}, issueType: 'issue', body: symptomBody, expected: 'bug-report' },
+  { name: "GitHub placeholder 'Issue' with a layered body sniffs to layered", metadata: {}, issueType: 'Issue', body: layeredBody, expected: 'layered-body' },
+  { name: "kind=story still overrides the 'unknown' placeholder and a Symptom heading", metadata: { kind: 'story' }, issueType: 'unknown', body: symptomBody, expected: 'layered-body' },
   { name: 'no kind, no issueType, Symptom heading falls back to bug', metadata: {}, body: symptomBody, expected: 'bug-report' },
   { name: 'no kind, no issueType, Problem Statement heading is layered', metadata: {}, body: layeredBody, expected: 'layered-body' },
   { name: 'no signal at all defaults to layered', metadata: {}, body: '', expected: 'layered-body' },

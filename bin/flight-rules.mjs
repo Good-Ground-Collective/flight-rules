@@ -31049,14 +31049,22 @@ var BodySectionSelector = class {
 var sectionSelector = new BodySectionSelector();
 
 // src/tasks/body-sections/body-format-detector.ts
+var placeholderIssueTypes = ["unknown", "issue"];
 var PrecedenceBodyFormatDetector = class {
   detect(input) {
     const { body, metadata, issueType } = input;
     if (metadata.kind === "bug") return "bug-report";
     if (metadata.kind === "story") return "layered-body";
-    if (issueType !== void 0 && issueType.toLowerCase() === "bug") return "bug-report";
-    if (issueType !== void 0) return "layered-body";
+    const explicitType = this.explicitIssueType(issueType);
+    if (explicitType === "bug") return "bug-report";
+    if (explicitType !== void 0) return "layered-body";
     return blobSectionSource.read({ body }).format;
+  }
+  /** The lower-cased issue type, or `undefined` when absent or a tracker placeholder. */
+  explicitIssueType(issueType) {
+    if (issueType === void 0) return void 0;
+    const lowered = issueType.toLowerCase();
+    return placeholderIssueTypes.includes(lowered) ? void 0 : lowered;
   }
 };
 var bodyFormatDetector = new PrecedenceBodyFormatDetector();
