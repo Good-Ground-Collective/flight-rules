@@ -5,6 +5,7 @@ import { markdownAdfConverter, type MarkdownAdfConverter } from './markdown-adf.
 import { JiraAdfMetadataService, type AdfMetadataService } from './adf-metadata.js'
 import type {
   JiraAssignableUser,
+  JiraAttachment,
   JiraComment,
   JiraCreatedIssue,
   JiraIssue,
@@ -24,6 +25,7 @@ import type {
 } from './confluence-interfaces.js'
 import { EntityMetadataSchema } from '../task-tracker/task-tracker.js'
 import type {
+  Attachment,
   Comment,
   CreateEpicInput,
   CreateInitiativeInput,
@@ -42,6 +44,7 @@ import type {
 
 const metadataExpandTitle = 'LLM Context'
 const issueFields = 'summary,status,labels,assignee,description,issuelinks,updated'
+const ticketFields = `${issueFields},attachment,reporter,issuetype`
 const ideaIssueType = 'Idea'
 const jpdProjectType = 'product_discovery'
 const deliveryLinkOutward = 'implements'
@@ -136,7 +139,7 @@ export class JiraTaskTracker implements TaskTracker {
 
   async getTicket(id: string): Promise<Ticket> {
     const [issue, blocksLinkType] = await Promise.all([
-      this.client.request<JiraIssue>('GET', `/issue/${id}`, undefined, { fields: issueFields }),
+      this.client.request<JiraIssue>('GET', `/issue/${id}`, undefined, { fields: ticketFields }),
       this.resolveBlocksLinkType(),
     ])
     return this.mapTicket(issue, blocksLinkType)
@@ -370,7 +373,7 @@ export class JiraTaskTracker implements TaskTracker {
     const [page, blocksLinkType] = await Promise.all([
       this.client.request<JiraSearchResponse>('GET', '/search/jql', undefined, {
         jql: `parent = ${epicKey}`,
-        fields: issueFields,
+        fields: ticketFields,
         maxResults: 100,
       }),
       this.resolveBlocksLinkType(),
@@ -389,11 +392,23 @@ export class JiraTaskTracker implements TaskTracker {
       body: this.extractBody(issue.fields.description),
       comments: [],
       assignee: issue.fields.assignee?.accountId ?? null,
+      attachments: this.mapAttachments(issue.fields.attachment ?? []),
+      reporter: issue.fields.reporter?.accountId ?? null,
+      issueType: issue.fields.issuetype?.name ?? 'unknown',
       blockedBy,
       blocking,
       metadata: this.parseMetadata(issue),
       updatedAt: issue.fields.updated ?? '',
     }
+  }
+
+  private mapAttachments(attachments: JiraAttachment[]): Attachment[] {
+    return attachments.map((attachment) => ({
+      id: attachment.id,
+      filename: attachment.filename ?? '',
+      mimeType: attachment.mimeType ?? 'application/octet-stream',
+      ...(attachment.size !== undefined ? { size: attachment.size } : {}),
+    }))
   }
 
   private blockingLinks(

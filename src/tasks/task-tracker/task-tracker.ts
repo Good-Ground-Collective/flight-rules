@@ -21,6 +21,14 @@ export const CommentSchema = z.object({
   updatedAt: z.string(),
 })
 
+export const AttachmentSchema = z.object({
+  id: z.string(),
+  filename: z.string(),
+  mimeType: z.string(),
+  size: z.number().optional(),
+  mediaUuid: z.string().optional(),
+})
+
 export const TechnicalDesignSchema = z.object({
   id: z.string(),
   epicId: z.string(),
@@ -40,6 +48,9 @@ export const TicketSchema = z.object({
   body: z.string(),
   comments: z.array(CommentSchema),
   assignee: z.string().nullable(),
+  attachments: z.array(AttachmentSchema).default([]),
+  reporter: z.string().nullable().default(null),
+  issueType: z.string().default('unknown'),
   blockedBy: z.array(z.string()).default([]),
   blocking: z.array(z.string()).default([]),
   metadata: EntityMetadataSchema.default({}),
@@ -121,6 +132,7 @@ export const CreateInitiativeInputSchema = z.object({
 })
 
 export type Comment = z.infer<typeof CommentSchema>
+export type Attachment = z.infer<typeof AttachmentSchema>
 export type TechnicalDesign = z.infer<typeof TechnicalDesignSchema>
 export type Ticket = z.infer<typeof TicketSchema>
 export type Epic = z.infer<typeof EpicSchema>
