@@ -16,6 +16,7 @@ import type {
   TaskTracker,
   TechnicalDesign,
   Ticket,
+  TrackerUser,
   UpdateEpicInput,
   UpdateInitiativeInput,
   UpdateTicketInput,
@@ -513,12 +514,12 @@ export class GitHubTaskTracker implements TaskTracker {
     })
   }
 
-  async getUsers(): Promise<string[]> {
+  async getUsers(): Promise<TrackerUser[]> {
     const { data } = await this.octokit.rest.orgs.listMembers({
       org: this.owner,
       per_page: 100,
     })
-    return data.map((member) => member.login)
+    return data.map((member) => ({ accountId: member.login, displayName: member.login }))
   }
 
   async ping(): Promise<void> {

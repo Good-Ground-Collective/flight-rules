@@ -634,7 +634,7 @@ describe('GitHubTracker.getTechnicalDesign metadata', () => {
 describe('GitHubTracker.getUsers', () => {
   beforeEach(() => vi.clearAllMocks())
 
-  it('returns login strings for all org members', async () => {
+  it('returns accountId/displayName pairs for all org members', async () => {
     const tracker = makeTracker()
     // @ts-expect-error — accessing private field for test setup
     const mockListMembers = vi.mocked(tracker.octokit.rest.orgs.listMembers)
@@ -642,7 +642,10 @@ describe('GitHubTracker.getUsers', () => {
       data: [{ login: 'alice' }, { login: 'bob' }],
     } as never)
     const result = await tracker.getUsers()
-    expect(result).toEqual(['alice', 'bob'])
+    expect(result).toEqual([
+      { accountId: 'alice', displayName: 'alice' },
+      { accountId: 'bob', displayName: 'bob' },
+    ])
     expect(mockListMembers).toHaveBeenCalledWith({ org: 'acme', per_page: 100 })
   })
 

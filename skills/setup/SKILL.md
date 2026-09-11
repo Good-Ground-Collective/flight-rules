@@ -126,6 +126,8 @@ Run:
 flight-rules users get
 ```
 
+The command prints a JSON array of `{ accountId, displayName }` pairs — the `accountId` addresses a user in a mention, the `displayName` is what a human reads.
+
 - If it returns a JSON array (even empty): setup is complete. Tell the user:
   > "Setup complete. `flight-rules` is configured for `<repo>`. Try `/draft-request-for-comments` to author your first RFC."
 - If it returns an error: show the error and explain likely causes:

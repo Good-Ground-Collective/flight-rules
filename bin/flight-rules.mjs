@@ -29191,6 +29191,10 @@ var Octokit2 = Octokit.plugin(requestLog, legacyRestEndpointMethods, paginateRes
 var import_yaml = __toESM(require_dist2(), 1);
 
 // src/tasks/task-tracker/task-tracker.ts
+var TrackerUserSchema = external_exports.object({
+  accountId: external_exports.string(),
+  displayName: external_exports.string()
+});
 var EntityMetadataSchema = external_exports.object({
   tddId: external_exports.number().optional(),
   epicId: external_exports.number().optional(),
@@ -29779,7 +29783,7 @@ var GitHubTaskTracker = class {
       org: this.owner,
       per_page: 100
     });
-    return data.map((member) => member.login);
+    return data.map((member) => ({ accountId: member.login, displayName: member.login }));
   }
   async ping() {
     await this.octokit.rest.repos.get({ owner: this.owner, repo: this.repo });
@@ -39082,7 +39086,7 @@ var LayeredBodyAdfConverter = class {
     for (const node2 of nodes) {
       switch (node2.type) {
         case "text":
-          out.push(...this.textSegments(node2.value, marks));
+          out.push(...this.mentionSegments(node2.value, this.literal(node2, source), marks));
           break;
         case "emphasis":
           out.push(...this.inline(node2.children, source, [...marks, { type: "em" }]));
@@ -39129,6 +39133,69 @@ var LayeredBodyAdfConverter = class {
       out.push({ type: "text", text: segment, ...marks.length > 0 ? { marks } : {} });
     });
     return out;
+  }
+  /**
+   * Splits `@{accountId|Display Name}` tokens out of a text value into inline
+   * `mention` nodes, emitting the surrounding text (and soft breaks) as before.
+   * mdast strips a leading backslash, so `\@{…}` and `@{…}` decode to the same
+   * value; escape is recovered from the raw source, where the k-th token pairs
+   * positionally with the k-th decoded match. A token without a pipe (`@{Name}`)
+   * or an escaped one stays literal text. Mentions never carry marks.
+   */
+  mentionSegments(value, raw, marks) {
+    const escaped = this.escapedTokenFlags(raw);
+    const out = [];
+    const regex = this.mentionToken();
+    let buffer = "";
+    let cursor = 0;
+    let token = 0;
+    let match;
+    while ((match = regex.exec(value)) !== null) {
+      const isMention = escaped[token] !== true && match[2] !== void 0;
+      token++;
+      buffer += value.slice(cursor, match.index);
+      cursor = match.index + match[0].length;
+      if (!isMention) {
+        buffer += match[0];
+        continue;
+      }
+      if (buffer.length > 0) {
+        out.push(...this.textSegments(buffer, marks));
+        buffer = "";
+      }
+      out.push(this.mention(match[1] ?? "", match[2] ?? ""));
+    }
+    buffer += value.slice(cursor);
+    if (buffer.length > 0 || out.length === 0) out.push(...this.textSegments(buffer, marks));
+    return out;
+  }
+  /**
+   * Flags each mention token in the raw source as escaped when an odd run of
+   * backslashes precedes it, so `\@{…}` is literal but `\\@{…}` is a real
+   * mention behind an escaped backslash. Tokens keep source order, pairing with
+   * the decoded matches one-for-one.
+   */
+  escapedTokenFlags(raw) {
+    const regex = this.mentionToken();
+    const flags = [];
+    let match;
+    while ((match = regex.exec(raw)) !== null) {
+      let backslashes = 0;
+      for (let i = match.index - 1; i >= 0 && raw[i] === "\\"; i--) backslashes++;
+      flags.push(backslashes % 2 === 1);
+    }
+    return flags;
+  }
+  mention(id, display) {
+    return { type: "mention", attrs: { id, ...display !== "" ? { text: `@${display}` } : {} } };
+  }
+  /**
+   * The canonical mention token `@{accountId|Display Name}`, its pipe and display
+   * optional so a literal `@{Name}` is still recognized. Built fresh per call
+   * because the `g` flag carries `lastIndex` and the inline walk recurses.
+   */
+  mentionToken() {
+    return /@\{([^|{}]+)(?:\|([^{}]*))?\}/g;
   }
   literalBlock(node2, source) {
     return { type: "paragraph", content: this.textSegments(this.literal(node2, source), []) };
@@ -39212,6 +39279,10 @@ ${indent2}`)}`;
       }
     };
     for (const node2 of nodes) {
+      if (node2.type === "mention") {
+        out += this.mentionToMarkdown(node2);
+        continue;
+      }
       if (node2.type === "hardBreak") {
         closeFrom(0);
         out += "\n";
@@ -39250,6 +39321,17 @@ ${indent2}`)}`;
     }
     closeFrom(0);
     return out;
+  }
+  /**
+   * Emits a `mention` node as `@{id|display}`, dropping the leading `@` from
+   * `attrs.text`, and `@{id|}` when `attrs.text` is absent so the read is Jira's
+   * to re-resolve from the id.
+   */
+  mentionToMarkdown(node2) {
+    const id = typeof node2.attrs?.["id"] === "string" ? node2.attrs["id"] : "";
+    const text4 = node2.attrs?.["text"];
+    const display = typeof text4 === "string" ? text4.startsWith("@") ? text4.slice(1) : text4 : "";
+    return `@{${id}|${display}}`;
   }
   /**
    * Wraps text in the markdown for one mark, innermost-first. Only used for the
@@ -39362,11 +39444,14 @@ ${indent2}`)}`;
    * text as emphasis or code. Text inside a code span is left verbatim, and
    * characters that only matter at block scope (`[`, `|`, `>`, `!`) stay
    * unescaped so degraded literal blocks round-trip byte-for-byte. Marks like
-   * emphasis are emitted via their own delimiters, not through this.
+   * emphasis are emitted via their own delimiters, not through this. A literal
+   * text node that itself reads as a mention token (`@{id|name}`) is escaped to
+   * `\@{…}` so it re-parses as text rather than a mention.
    */
   escapeText(text4, insideCode) {
     if (insideCode) return text4;
-    return text4.replace(/[\\*`]/g, (ch) => `\\${ch}`);
+    const escaped = text4.replace(/[\\*`]/g, (ch) => `\\${ch}`);
+    return escaped.replace(this.mentionToken(), (full, _id, display) => display !== void 0 ? `\\${full}` : full);
   }
 };
 var markdownAdfConverter = new LayeredBodyAdfConverter();
@@ -39718,7 +39803,7 @@ var JiraTaskTracker = class {
       project: this.project,
       maxResults: 100
     });
-    return users.map((user) => user.displayName);
+    return users.map((user) => ({ accountId: user.accountId, displayName: user.displayName }));
   }
   async ping() {
     await this.client.request("GET", "/myself");

@@ -29,7 +29,9 @@ export interface MarkdownAdfConverter {
  * span per node. Anything outside the mapped subset (images, tables,
  * blockquotes) degrades to literal text sliced from the node's source position
  * on write, so it round-trips unchanged until its own node-family ticket claims
- * it; unknown ADF nodes flatten to their text on read.
+ * it; unknown ADF nodes flatten to their text on read. A `@{accountId|Display
+ * Name}` token in inline text becomes an ADF `mention` node and back; identity
+ * is resolved outside the converter, so the display written is only a hint.
  */
 export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
   toAdf(markdown: string): AdfDocNode {
@@ -197,7 +199,7 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
     for (const node of nodes) {
       switch (node.type) {
         case 'text':
-          out.push(...this.textSegments(node.value, marks))
+          out.push(...this.mentionSegments(node.value, this.literal(node, source), marks))
           break
         case 'emphasis':
           out.push(...this.inline(node.children, source, [...marks, { type: 'em' }]))
@@ -245,6 +247,73 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
       out.push({ type: 'text', text: segment, ...(marks.length > 0 ? { marks } : {}) })
     })
     return out
+  }
+
+  /**
+   * Splits `@{accountId|Display Name}` tokens out of a text value into inline
+   * `mention` nodes, emitting the surrounding text (and soft breaks) as before.
+   * mdast strips a leading backslash, so `\@{…}` and `@{…}` decode to the same
+   * value; escape is recovered from the raw source, where the k-th token pairs
+   * positionally with the k-th decoded match. A token without a pipe (`@{Name}`)
+   * or an escaped one stays literal text. Mentions never carry marks.
+   */
+  private mentionSegments(value: string, raw: string, marks: AdfMark[]): AdfNode[] {
+    const escaped = this.escapedTokenFlags(raw)
+    const out: AdfNode[] = []
+    const regex = this.mentionToken()
+    let buffer = ''
+    let cursor = 0
+    let token = 0
+    let match: RegExpExecArray | null
+    while ((match = regex.exec(value)) !== null) {
+      const isMention = escaped[token] !== true && match[2] !== undefined
+      token++
+      buffer += value.slice(cursor, match.index)
+      cursor = match.index + match[0].length
+      if (!isMention) {
+        buffer += match[0]
+        continue
+      }
+      if (buffer.length > 0) {
+        out.push(...this.textSegments(buffer, marks))
+        buffer = ''
+      }
+      out.push(this.mention(match[1] ?? '', match[2] ?? ''))
+    }
+    buffer += value.slice(cursor)
+    if (buffer.length > 0 || out.length === 0) out.push(...this.textSegments(buffer, marks))
+    return out
+  }
+
+  /**
+   * Flags each mention token in the raw source as escaped when an odd run of
+   * backslashes precedes it, so `\@{…}` is literal but `\\@{…}` is a real
+   * mention behind an escaped backslash. Tokens keep source order, pairing with
+   * the decoded matches one-for-one.
+   */
+  private escapedTokenFlags(raw: string): boolean[] {
+    const regex = this.mentionToken()
+    const flags: boolean[] = []
+    let match: RegExpExecArray | null
+    while ((match = regex.exec(raw)) !== null) {
+      let backslashes = 0
+      for (let i = match.index - 1; i >= 0 && raw[i] === '\\'; i--) backslashes++
+      flags.push(backslashes % 2 === 1)
+    }
+    return flags
+  }
+
+  private mention(id: string, display: string): AdfNode {
+    return { type: 'mention', attrs: { id, ...(display !== '' ? { text: `@${display}` } : {}) } }
+  }
+
+  /**
+   * The canonical mention token `@{accountId|Display Name}`, its pipe and display
+   * optional so a literal `@{Name}` is still recognized. Built fresh per call
+   * because the `g` flag carries `lastIndex` and the inline walk recurses.
+   */
+  private mentionToken(): RegExp {
+    return /@\{([^|{}]+)(?:\|([^{}]*))?\}/g
   }
 
   private literalBlock(node: RootContent, source: string): AdfNode {
@@ -330,6 +399,11 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
       }
     }
     for (const node of nodes) {
+      if (node.type === 'mention') {
+        // A mention carries no marks, so it emits without disturbing the open span.
+        out += this.mentionToMarkdown(node)
+        continue
+      }
       if (node.type === 'hardBreak') {
         closeFrom(0)
         out += '\n'
@@ -369,6 +443,18 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
     }
     closeFrom(0)
     return out
+  }
+
+  /**
+   * Emits a `mention` node as `@{id|display}`, dropping the leading `@` from
+   * `attrs.text`, and `@{id|}` when `attrs.text` is absent so the read is Jira's
+   * to re-resolve from the id.
+   */
+  private mentionToMarkdown(node: AdfNode): string {
+    const id = typeof node.attrs?.['id'] === 'string' ? node.attrs['id'] : ''
+    const text = node.attrs?.['text']
+    const display = typeof text === 'string' ? (text.startsWith('@') ? text.slice(1) : text) : ''
+    return `@{${id}|${display}}`
   }
 
   /**
@@ -492,11 +578,14 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
    * text as emphasis or code. Text inside a code span is left verbatim, and
    * characters that only matter at block scope (`[`, `|`, `>`, `!`) stay
    * unescaped so degraded literal blocks round-trip byte-for-byte. Marks like
-   * emphasis are emitted via their own delimiters, not through this.
+   * emphasis are emitted via their own delimiters, not through this. A literal
+   * text node that itself reads as a mention token (`@{id|name}`) is escaped to
+   * `\@{…}` so it re-parses as text rather than a mention.
    */
   private escapeText(text: string, insideCode: boolean): string {
     if (insideCode) return text
-    return text.replace(/[\\*`]/g, (ch) => `\\${ch}`)
+    const escaped = text.replace(/[\\*`]/g, (ch) => `\\${ch}`)
+    return escaped.replace(this.mentionToken(), (full, _id, display) => (display !== undefined ? `\\${full}` : full))
   }
 }
 
