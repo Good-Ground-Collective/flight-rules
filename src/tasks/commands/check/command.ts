@@ -1,5 +1,5 @@
-import { dirname, join } from "node:path";
 import { Command } from "commander";
+import { getQaRecipePath } from "../../../shared/config.js";
 import type { Config } from "../../../shared/config.js";
 import { EnvLoader, type Env } from "../../../shared/env.js";
 import type { TaskTracker } from "../../task-tracker/task-tracker.js";
@@ -83,7 +83,7 @@ export function createCheckCommand(
 
     const tools = await getProbe().probe({
       repo: config.repo,
-      recipePath: join(dirname(getConfigPath()), "flight-rules.qa.md"),
+      recipePath: getQaRecipePath(config, getConfigPath()),
       env: process.env,
     });
     checks.push(...tools);
