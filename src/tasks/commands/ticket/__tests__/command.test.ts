@@ -136,6 +136,7 @@ describe('ticket command', () => {
       JSON.stringify({
         id: '7',
         section: 'acceptance-criteria',
+        format: 'layered-body',
         markdown: '- [ ] ship it\n- [x] done',
         items: [
           { text: 'ship it', done: false },
@@ -146,9 +147,53 @@ describe('ticket command', () => {
     output.mockRestore()
   })
 
-  it('rejects "get --section" with an unknown section name', async () => {
+  it('returns fixed-when items and the bug-report format for "get --section fixed-when"', async () => {
+    const tracker = makeTracker()
+    vi.mocked(tracker.getTicket).mockResolvedValue({
+      ...mockTicket,
+      body: '## Symptom\n\nBroken.\n\n## Fixed When\n\n- [ ] it works\n- [x] test added\n',
+    })
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(tracker, ['get', '7', '--section', 'fixed-when'])
+    expect(output).toHaveBeenCalledWith(
+      JSON.stringify({
+        id: '7',
+        section: 'fixed-when',
+        format: 'bug-report',
+        markdown: '- [ ] it works\n- [x] test added',
+        items: [
+          { text: 'it works', done: false },
+          { text: 'test added', done: true },
+        ],
+      }) + '\n',
+    )
+    output.mockRestore()
+  })
+
+  it('returns markdown null and empty items for acceptance-criteria on a bug-report body', async () => {
+    const tracker = makeTracker()
+    vi.mocked(tracker.getTicket).mockResolvedValue({
+      ...mockTicket,
+      body: '## Symptom\n\nBroken.\n\n## Fixed When\n\n- [ ] it works\n',
+    })
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(tracker, ['get', '7', '--section', 'acceptance-criteria'])
+    expect(output).toHaveBeenCalledWith(
+      JSON.stringify({
+        id: '7',
+        section: 'acceptance-criteria',
+        format: 'bug-report',
+        markdown: null,
+        items: [],
+      }) + '\n',
+    )
+    output.mockRestore()
+  })
+
+  it('rejects "get --section" with an unknown section name listing every valid slug', async () => {
     const tracker = makeTracker()
     await expect(run(tracker, ['get', '7', '--section', 'bogus'])).rejects.toThrow(/unknown section/)
+    await expect(run(tracker, ['get', '7', '--section', 'bogus'])).rejects.toThrow(/reproduction-notes/)
   })
 
   it('creates a standalone ticket when --epic-id is omitted', async () => {
