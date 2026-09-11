@@ -4,13 +4,19 @@ The body shape every decomposed node (epic, ticket) emitted by `break-down-work`
 must follow. It serves three readers from one document:
 
 1. **A human skimming product intent** — reads only the prose sections at the top.
-2. **An implementer (human or a "dumber" execution model like Sonnet)** — expands
+2. **An implementer (human or a less capable execution model like Sonnet)** — expands
    the *Guided Walkthrough* for a dense, step-by-step walkthrough.
 3. **Machines** — read the structured YAML in the *LLM Context* block.
 
-The prose is written directly by the skill — there is **no** prose serializer or
-parser. Only the YAML is structured, and it round-trips through
-`BodyMetadataService.parse` / `splice` (see `src/tasks/body-metadata/body-metadata.ts`).
+The skill writes the prose directly. `src/tasks/body-sections/body-sections.ts`
+reads it back, splitting the body into its named sections and the Acceptance
+Criteria checklist for `ticket get --section`. The YAML round-trips separately
+through `BodyMetadataService.parse` / `splice` (see
+`src/tasks/body-metadata/body-metadata.ts`).
+
+A ticket whose Jira issue type is `Bug` uses
+[the bug report format](./bug-report-format.md) instead, with the same
+three-reader shape.
 
 ## Template
 
@@ -57,7 +63,7 @@ size: ticket
 
 ## Rules
 
-- **The Guided Walkthrough is a separate `<details>` block, NOT inside the YAML.**
+- **The Guided Walkthrough is a separate `<details>` block, not inside the YAML.**
   A nested ` ``` ` code fence in the walkthrough would prematurely close the outer
   ` ```yaml ` fence in the LLM Context block. Keep them apart.
 - **Only the LLM Context YAML is managed by `BodyMetadataService`.** It keys off the
@@ -68,3 +74,5 @@ size: ticket
   (`'ticket' | 'epic' | 'initiative'`). Set it to the node's altitude.
 - **Acceptance Criteria are `- [ ]` checkboxes** — verifiable by a human or a bot,
   on epics *and* tickets.
+- **A `Bug` ticket uses [the bug report format](./bug-report-format.md) instead of
+  this one**, selected by the Jira issue type.
