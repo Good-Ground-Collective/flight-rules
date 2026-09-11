@@ -596,4 +596,77 @@ describe('markdownAdfConverter @mentions', () => {
     expect(markdownAdfConverter.toMarkdown(nodes)).toBe('\\@{a|b}')
     expect(markdownAdfConverter.toAdf(markdownAdfConverter.toMarkdown(nodes)).content).toEqual(nodes)
   })
+
+  describe('escape decisions come from source position, not match order', () => {
+    it('keeps an escaped mention literal even when an entity precedes it', () => {
+      // `&#64;` decodes to `@`, so the decoded value gains a match with no source
+      // counterpart; an ordinal pairing would hand its escape flag to the wrong
+      // token and @-mention a user the author escaped.
+      expect(firstParagraph('&#64;{a|Ada} \\@{b|Bob}')).toEqual([{ type: 'text', text: '@{a|Ada} @{b|Bob}' }])
+    })
+
+    it('never emits a mention when both tokens are literal', () => {
+      const content = firstParagraph('&#64;{a|Ada} \\@{b|Bob}')
+      expect(content.some((node) => node.type === 'mention')).toBe(false)
+    })
+
+    it('decodes an entity inside a real mention display', () => {
+      expect(firstParagraph('@{a|Ada &amp; Co}')).toEqual([{ type: 'mention', attrs: { id: 'a', text: '@Ada & Co' } }])
+    })
+  })
+
+  describe('a mention is a boundary that open marks close at', () => {
+    const adfStable = (nodes: AdfNode[]): void => {
+      const markdown = markdownAdfConverter.toMarkdown(nodes)
+      expect(markdownAdfConverter.toAdf(markdown).content).toEqual(nodes)
+    }
+    const para = (content: AdfNode[]): AdfNode[] => [{ type: 'paragraph', content }]
+    const strong = (text: string): AdfNode => ({ type: 'text', text, marks: [{ type: 'strong' }] })
+    const em = (text: string): AdfNode => ({ type: 'text', text, marks: [{ type: 'em' }] })
+    const mention: AdfNode = { type: 'mention', attrs: { id: 'a', text: '@Ada' } }
+
+    it('closes a code span before a following mention', () => {
+      const nodes = para([{ type: 'text', text: 'code', marks: [{ type: 'code' }] }, mention])
+      expect(markdownAdfConverter.toMarkdown(nodes)).toBe('`code`@{a|Ada}')
+      adfStable(nodes)
+    })
+
+    it('round-trips a mention immediately at the start of a bold span', () => {
+      adfStable(para([mention, strong('after')]))
+    })
+
+    it('keeps the bold when a mention starts a span whose text has a leading space', () => {
+      // `** after**` is invalid CommonMark, so the space migrates outside the
+      // delimiters; the bold survives on "there" instead of being lost.
+      const md = markdownAdfConverter.toMarkdown(markdownAdfConverter.toAdf('**@{a|Ada} there**').content)
+      expect(md).toBe('@{a|Ada} **there**')
+      expect(markdownAdfConverter.toMarkdown(markdownAdfConverter.toAdf(md).content)).toBe(md)
+    })
+
+    it('round-trips a mention in the middle of a bold span', () => {
+      adfStable(para([strong('before '), mention, strong(' after')]))
+    })
+
+    it('round-trips a mention at the end of a bold span', () => {
+      adfStable(para([strong('before '), mention]))
+    })
+
+    it('round-trips a mention in the middle of an emphasis span', () => {
+      adfStable(para([em('before '), mention, em(' after')]))
+    })
+  })
+
+  describe('display names are escaped so the token stays atomic', () => {
+    const stable = (text: string): void => {
+      const nodes: AdfNode[] = [{ type: 'paragraph', content: [{ type: 'mention', attrs: { id: 'a', text } }] }]
+      expect(markdownAdfConverter.toAdf(markdownAdfConverter.toMarkdown(nodes)).content).toEqual(nodes)
+    }
+
+    it('round-trips a display with markdown emphasis markers', () => stable('@Ada *Dev*'))
+    it('round-trips a display with braces', () => stable('@Ada {Dev}'))
+    it('round-trips a display with a backslash', () => stable('@Ada \\ Dev'))
+    it('round-trips a display with an entity-like sequence', () => stable('@Ada &copy;'))
+    it('round-trips a display with a code delimiter', () => stable('@Ada `x`'))
+    it('round-trips a display with a link bracket', () => stable('@Ada [x]'))
+  })
 })

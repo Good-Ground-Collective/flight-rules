@@ -1,6 +1,7 @@
 import { fromMarkdown } from 'mdast-util-from-markdown'
 import { gfmFromMarkdown } from 'mdast-util-gfm'
 import { gfm } from 'micromark-extension-gfm'
+import { decodeString } from 'micromark-util-decode-string'
 import type { List, ListItem, PhrasingContent, Root, RootContent } from 'mdast'
 import type { AdfDocNode, AdfMark, AdfNode } from './adf.js'
 
@@ -199,7 +200,7 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
     for (const node of nodes) {
       switch (node.type) {
         case 'text':
-          out.push(...this.mentionSegments(node.value, this.literal(node, source), marks))
+          out.push(...this.mentionSegments(this.literal(node, source), marks))
           break
         case 'emphasis':
           out.push(...this.inline(node.children, source, [...marks, { type: 'em' }]))
@@ -250,57 +251,44 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
   }
 
   /**
-   * Splits `@{accountId|Display Name}` tokens out of a text value into inline
+   * Splits `@{accountId|Display Name}` tokens out of an inline text node into
    * `mention` nodes, emitting the surrounding text (and soft breaks) as before.
-   * mdast strips a leading backslash, so `\@{…}` and `@{…}` decode to the same
-   * value; escape is recovered from the raw source, where the k-th token pairs
-   * positionally with the k-th decoded match. A token without a pipe (`@{Name}`)
-   * or an escaped one stays literal text. Mentions never carry marks.
+   * Tokenizing runs over the raw source slice, not the decoded value, because
+   * mdast collapses `\@{…}`, `@{…}`, and `&#64;{…}` to the same value; only the
+   * source still tells an escaped token from a real one. The account id and
+   * display are then decoded on their own, so an entity or escape inside the
+   * display survives. An escaped token, or a pipe-less `@{Name}`, stays literal
+   * text; the id resolves identity, and mentions never carry marks.
    */
-  private mentionSegments(value: string, raw: string, marks: AdfMark[]): AdfNode[] {
-    const escaped = this.escapedTokenFlags(raw)
+  private mentionSegments(raw: string, marks: AdfMark[]): AdfNode[] {
     const out: AdfNode[] = []
     const regex = this.mentionToken()
     let buffer = ''
     let cursor = 0
-    let token = 0
     let match: RegExpExecArray | null
-    while ((match = regex.exec(value)) !== null) {
-      const isMention = escaped[token] !== true && match[2] !== undefined
-      token++
-      buffer += value.slice(cursor, match.index)
+    while ((match = regex.exec(raw)) !== null) {
+      buffer += raw.slice(cursor, match.index)
       cursor = match.index + match[0].length
-      if (!isMention) {
+      if (this.isEscaped(raw, match.index)) {
         buffer += match[0]
         continue
       }
       if (buffer.length > 0) {
-        out.push(...this.textSegments(buffer, marks))
+        out.push(...this.textSegments(decodeString(buffer), marks))
         buffer = ''
       }
-      out.push(this.mention(match[1] ?? '', match[2] ?? ''))
+      out.push(this.mention(decodeString(match[1] ?? ''), decodeString(match[2] ?? '')))
     }
-    buffer += value.slice(cursor)
-    if (buffer.length > 0 || out.length === 0) out.push(...this.textSegments(buffer, marks))
+    buffer += raw.slice(cursor)
+    if (buffer.length > 0 || out.length === 0) out.push(...this.textSegments(decodeString(buffer), marks))
     return out
   }
 
-  /**
-   * Flags each mention token in the raw source as escaped when an odd run of
-   * backslashes precedes it, so `\@{…}` is literal but `\\@{…}` is a real
-   * mention behind an escaped backslash. Tokens keep source order, pairing with
-   * the decoded matches one-for-one.
-   */
-  private escapedTokenFlags(raw: string): boolean[] {
-    const regex = this.mentionToken()
-    const flags: boolean[] = []
-    let match: RegExpExecArray | null
-    while ((match = regex.exec(raw)) !== null) {
-      let backslashes = 0
-      for (let i = match.index - 1; i >= 0 && raw[i] === '\\'; i--) backslashes++
-      flags.push(backslashes % 2 === 1)
-    }
-    return flags
+  /** A token is escaped when an odd run of backslashes precedes its `@`. */
+  private isEscaped(raw: string, index: number): boolean {
+    let backslashes = 0
+    for (let i = index - 1; i >= 0 && raw[i] === '\\'; i--) backslashes++
+    return backslashes % 2 === 1
   }
 
   private mention(id: string, display: string): AdfNode {
@@ -308,12 +296,14 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
   }
 
   /**
-   * The canonical mention token `@{accountId|Display Name}`, its pipe and display
-   * optional so a literal `@{Name}` is still recognized. Built fresh per call
-   * because the `g` flag carries `lastIndex` and the inline walk recurses.
+   * The canonical mention token `@{accountId|Display Name}`. The pipe is
+   * required so a literal `@{Name}` stays text, and the display admits `\`
+   * escapes so a display carrying a brace or markdown delimiter round-trips.
+   * Built fresh per call because the `g` flag carries `lastIndex` and the inline
+   * walk recurses.
    */
   private mentionToken(): RegExp {
-    return /@\{([^|{}]+)(?:\|([^{}]*))?\}/g
+    return /@\{([^|{}\n]+)\|((?:\\[^\n]|[^{}\\\n])*)\}/g
   }
 
   private literalBlock(node: RootContent, source: string): AdfNode {
@@ -400,7 +390,12 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
     }
     for (const node of nodes) {
       if (node.type === 'mention') {
-        // A mention carries no marks, so it emits without disturbing the open span.
+        // A code span swallows a following mention into its literal text, so it
+        // closes here (the next text reopens it); other marks wrap the mention
+        // harmlessly, and closing them after a space would be an invalid
+        // delimiter, so they stay open.
+        const codeDepth = open.findIndex((mark) => mark.type === 'code')
+        if (codeDepth !== -1) closeFrom(codeDepth)
         out += this.mentionToMarkdown(node)
         continue
       }
@@ -433,28 +428,55 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
         common++
       }
       closeFrom(common)
+
+      const opening = marks.slice(common)
+      let text = node.text
+      // An emphasis delimiter can't abut whitespace, so a fresh span's leading space moves out.
+      if (common === 0 && opening.length > 0 && opening.every((mark) => this.isEmphasis(mark))) {
+        const lead = /^\s+/.exec(text)?.[0]
+        if (lead !== undefined && lead.length < text.length) {
+          out += lead
+          text = text.slice(lead.length)
+        }
+      }
+
       for (let k = common; k < marks.length; k++) {
         const mark = marks[k]
         if (mark === undefined) continue
         out += this.markOpen(mark)
         open.push(mark)
       }
-      out += this.escapeText(node.text, open.some((mark) => mark.type === 'code'))
+      out += this.escapeText(text, open.some((mark) => mark.type === 'code'))
     }
     closeFrom(0)
     return out
   }
 
+  private isEmphasis(mark: AdfMark): boolean {
+    return mark.type === 'em' || mark.type === 'strong' || mark.type === 'strike'
+  }
+
   /**
    * Emits a `mention` node as `@{id|display}`, dropping the leading `@` from
    * `attrs.text`, and `@{id|}` when `attrs.text` is absent so the read is Jira's
-   * to re-resolve from the id.
+   * to re-resolve from the id. The display is escaped so the token re-parses
+   * atomically instead of losing the mention to markdown inside the name.
    */
   private mentionToMarkdown(node: AdfNode): string {
     const id = typeof node.attrs?.['id'] === 'string' ? node.attrs['id'] : ''
     const text = node.attrs?.['text']
     const display = typeof text === 'string' ? (text.startsWith('@') ? text.slice(1) : text) : ''
-    return `@{${id}|${display}}`
+    return `@{${id}|${this.escapeMentionDisplay(display)}}`
+  }
+
+  /**
+   * Escapes a display name so `@{id|display}` re-parses as one mention: the
+   * `}` terminator, `\` itself, the markdown delimiters that would re-interpret
+   * the name, and `&` (which would otherwise decode as an entity) each gain a
+   * backslash that `decodeString` strips on the way back.
+   */
+  private escapeMentionDisplay(display: string): string {
+    return display.replace(/[\\{}*_`[\]&]/g, (ch) => `\\${ch}`)
   }
 
   /**
@@ -585,7 +607,7 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
   private escapeText(text: string, insideCode: boolean): string {
     if (insideCode) return text
     const escaped = text.replace(/[\\*`]/g, (ch) => `\\${ch}`)
-    return escaped.replace(this.mentionToken(), (full, _id, display) => (display !== undefined ? `\\${full}` : full))
+    return escaped.replace(this.mentionToken(), (full) => `\\${full}`)
   }
 }
 
