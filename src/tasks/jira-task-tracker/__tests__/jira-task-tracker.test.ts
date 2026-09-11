@@ -40,13 +40,16 @@ describe('JiraTaskTracker.getUsers', () => {
     request.mockReset()
   })
 
-  it('returns assignable users for the project as display-name strings', async () => {
+  it('returns assignable users as accountId/displayName pairs', async () => {
     request.mockResolvedValueOnce([
       { accountId: 'a1', displayName: 'Ada Lovelace' },
       { accountId: 'a2', displayName: 'Alan Turing' },
     ])
     const users = await makeTracker().getUsers()
-    expect(users).toEqual(['Ada Lovelace', 'Alan Turing'])
+    expect(users).toEqual([
+      { accountId: 'a1', displayName: 'Ada Lovelace' },
+      { accountId: 'a2', displayName: 'Alan Turing' },
+    ])
     expect(request).toHaveBeenCalledWith('GET', '/user/assignable/search', undefined, {
       project: 'PROJ',
       maxResults: 100,

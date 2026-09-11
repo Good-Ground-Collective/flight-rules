@@ -92,6 +92,12 @@ Mapped constructs:
   inside an ordered list or the reverse. **Task lists** (`- [ ]` / `- [x]`) →
   `taskList` with `TODO`/`DONE` task items (top level only — task items hold
   inline content, not nested lists).
+- **@mentions** (`@{accountId|Display Name}`) → an inline `mention` node
+  (`attrs.id` the account id, `attrs.text` the `@Display Name` hint). The
+  canonical form always carries the pipe; `@{Name}` without one stays literal
+  text, and `\@{…}` is an escape that reads back as literal `@{…}`. Only the id
+  is required — Jira may re-resolve the display name from it on render, so a
+  mention with no display reads back as `@{id|}`.
 - **Thematic breaks** (`---`) → `rule`.
 - **`<details>`/`<summary>` pairs** → `expand`, the summary as `attrs.title`;
   nested details nest.

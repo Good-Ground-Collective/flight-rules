@@ -3,6 +3,13 @@ import { z } from 'zod'
 export const entitySizes = ['ticket', 'epic', 'initiative'] as const
 export type EntitySize = (typeof entitySizes)[number]
 
+export const TrackerUserSchema = z.object({
+  accountId: z.string(),
+  displayName: z.string(),
+})
+
+export type TrackerUser = z.infer<typeof TrackerUserSchema>
+
 export const EntityMetadataSchema = z
   .object({
     tddId: z.number().optional(),
@@ -172,6 +179,6 @@ export interface TaskTracker {
   getTechnicalDesign(id: string): Promise<TechnicalDesign>
   addComment(entityId: string, body: string): Promise<Comment>
   addAttachment(ticketId: string, filePath: string): Promise<Attachment>
-  getUsers(): Promise<string[]>
+  getUsers(): Promise<TrackerUser[]>
   ping(): Promise<void>
 }

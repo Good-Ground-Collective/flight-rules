@@ -41,6 +41,7 @@ import type {
   TaskTracker,
   TechnicalDesign,
   Ticket,
+  TrackerUser,
   UpdateEpicInput,
   UpdateInitiativeInput,
   UpdateTicketInput,
@@ -399,12 +400,12 @@ export class JiraTaskTracker implements TaskTracker {
     return this.mapAttachment(attachment, await this.resolveMediaUuid(attachment.id))
   }
 
-  async getUsers(): Promise<string[]> {
+  async getUsers(): Promise<TrackerUser[]> {
     const users = await this.client.request<JiraAssignableUser[]>('GET', '/user/assignable/search', undefined, {
       project: this.project,
       maxResults: 100,
     })
-    return users.map((user) => user.displayName)
+    return users.map((user) => ({ accountId: user.accountId, displayName: user.displayName }))
   }
 
   async ping(): Promise<void> {

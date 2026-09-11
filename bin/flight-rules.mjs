@@ -29191,6 +29191,10 @@ var Octokit2 = Octokit.plugin(requestLog, legacyRestEndpointMethods, paginateRes
 var import_yaml = __toESM(require_dist2(), 1);
 
 // src/tasks/task-tracker/task-tracker.ts
+var TrackerUserSchema = external_exports.object({
+  accountId: external_exports.string(),
+  displayName: external_exports.string()
+});
 var EntityMetadataSchema = external_exports.object({
   tddId: external_exports.number().optional(),
   epicId: external_exports.number().optional(),
@@ -29779,7 +29783,7 @@ var GitHubTaskTracker = class {
       org: this.owner,
       per_page: 100
     });
-    return data.map((member) => member.login);
+    return data.map((member) => ({ accountId: member.login, displayName: member.login }));
   }
   async ping() {
     await this.octokit.rest.repos.get({ owner: this.owner, repo: this.repo });
@@ -39202,9 +39206,12 @@ var LayeredBodyAdfConverter = class {
     const out = [];
     for (const node2 of nodes) {
       switch (node2.type) {
-        case "text":
-          out.push(...this.textSegments(node2.value, marks));
+        case "text": {
+          const segments = this.mentionSegments(this.literal(node2, source), marks);
+          const hasMention = segments.some((segment) => segment.type === "mention");
+          out.push(...hasMention ? segments : this.textSegments(node2.value, marks));
           break;
+        }
         case "emphasis":
           out.push(...this.inline(node2.children, source, [...marks, { type: "em" }]));
           break;
@@ -39250,6 +39257,58 @@ var LayeredBodyAdfConverter = class {
       out.push({ type: "text", text: segment, ...marks.length > 0 ? { marks } : {} });
     });
     return out;
+  }
+  /**
+   * Splits `@{accountId|Display Name}` tokens out of an inline text node into
+   * `mention` nodes, emitting the surrounding text (and soft breaks) as before.
+   * Tokenizing runs over the raw source slice, not the decoded value, because
+   * mdast collapses `\@{…}`, `@{…}`, and `&#64;{…}` to the same value; only the
+   * source still tells an escaped token from a real one. The account id and
+   * display are then decoded on their own, so an entity or escape inside the
+   * display survives. An escaped token, or a pipe-less `@{Name}`, stays literal
+   * text; the id resolves identity, and mentions never carry marks.
+   */
+  mentionSegments(raw, marks) {
+    const out = [];
+    const regex = this.mentionToken();
+    let buffer = "";
+    let cursor = 0;
+    let match;
+    while ((match = regex.exec(raw)) !== null) {
+      buffer += raw.slice(cursor, match.index);
+      cursor = match.index + match[0].length;
+      if (this.isEscaped(raw, match.index)) {
+        buffer += match[0];
+        continue;
+      }
+      if (buffer.length > 0) {
+        out.push(...this.textSegments(decodeString(buffer), marks));
+        buffer = "";
+      }
+      out.push(this.mention(decodeString(match[1] ?? ""), decodeString(match[2] ?? "")));
+    }
+    buffer += raw.slice(cursor);
+    if (buffer.length > 0 || out.length === 0) out.push(...this.textSegments(decodeString(buffer), marks));
+    return out;
+  }
+  /** A token is escaped when an odd run of backslashes precedes its `@`. */
+  isEscaped(raw, index2) {
+    let backslashes = 0;
+    for (let i = index2 - 1; i >= 0 && raw[i] === "\\"; i--) backslashes++;
+    return backslashes % 2 === 1;
+  }
+  mention(id, display) {
+    return { type: "mention", attrs: { id, ...display !== "" ? { text: `@${display}` } : {} } };
+  }
+  /**
+   * The canonical mention token `@{accountId|Display Name}`. The pipe is
+   * required so a literal `@{Name}` stays text, and the display admits `\`
+   * escapes so a display carrying a brace or markdown delimiter round-trips.
+   * Built fresh per call because the `g` flag carries `lastIndex` and the inline
+   * walk recurses.
+   */
+  mentionToken() {
+    return /@\{([^|{}\n]+)\|((?:\\[^\n]|[^{}\\\n])*)\}/g;
   }
   /**
    * Degrades an unmappable block to a literal paragraph of its source text. When
@@ -39409,6 +39468,12 @@ ${indent2}`)}`;
       }
     };
     for (const node2 of nodes) {
+      if (node2.type === "mention") {
+        const codeDepth = open.findIndex((mark) => mark.type === "code");
+        if (codeDepth !== -1) closeFrom(codeDepth);
+        out += this.mentionToMarkdown(node2);
+        continue;
+      }
       if (node2.type === "hardBreak") {
         closeFrom(0);
         out += "\n";
@@ -39417,7 +39482,7 @@ ${indent2}`)}`;
       if (node2.text === void 0) {
         closeFrom(0);
         const inner = node2.content !== void 0 ? this.inlineToMarkdown(node2.content) : "";
-        out += [...node2.marks ?? []].reverse().reduce((text4, mark) => this.applyMark(text4, mark), inner);
+        out += [...node2.marks ?? []].reverse().reduce((text5, mark) => this.applyMark(text5, mark), inner);
         continue;
       }
       const marks = node2.marks ?? [];
@@ -39437,16 +39502,49 @@ ${indent2}`)}`;
         common++;
       }
       closeFrom(common);
+      const opening = marks.slice(common);
+      let text4 = node2.text;
+      if (common === 0 && opening.length > 0 && opening.every((mark) => this.isEmphasis(mark))) {
+        const lead = /^\s+/.exec(text4)?.[0];
+        if (lead !== void 0 && lead.length < text4.length) {
+          out += lead;
+          text4 = text4.slice(lead.length);
+        }
+      }
       for (let k = common; k < marks.length; k++) {
         const mark = marks[k];
         if (mark === void 0) continue;
         out += this.markOpen(mark);
         open.push(mark);
       }
-      out += this.escapeText(node2.text, open.some((mark) => mark.type === "code"));
+      out += this.escapeText(text4, open.some((mark) => mark.type === "code"));
     }
     closeFrom(0);
     return out;
+  }
+  isEmphasis(mark) {
+    return mark.type === "em" || mark.type === "strong" || mark.type === "strike";
+  }
+  /**
+   * Emits a `mention` node as `@{id|display}`, dropping the leading `@` from
+   * `attrs.text`, and `@{id|}` when `attrs.text` is absent so the read is Jira's
+   * to re-resolve from the id. The display is escaped so the token re-parses
+   * atomically instead of losing the mention to markdown inside the name.
+   */
+  mentionToMarkdown(node2) {
+    const id = typeof node2.attrs?.["id"] === "string" ? node2.attrs["id"] : "";
+    const text4 = node2.attrs?.["text"];
+    const display = typeof text4 === "string" ? text4.startsWith("@") ? text4.slice(1) : text4 : "";
+    return `@{${id}|${this.escapeMentionDisplay(display)}}`;
+  }
+  /**
+   * Escapes a display name so `@{id|display}` re-parses as one mention: the
+   * `}` terminator, `\` itself, the markdown delimiters that would re-interpret
+   * the name, and `&` (which would otherwise decode as an entity) each gain a
+   * backslash that `decodeString` strips on the way back.
+   */
+  escapeMentionDisplay(display) {
+    return display.replace(/[\\{}*_`[\]&]/g, (ch) => `\\${ch}`);
   }
   /**
    * Wraps text in the markdown for one mark, innermost-first. Only used for the
@@ -39559,11 +39657,14 @@ ${indent2}`)}`;
    * text as emphasis or code. Text inside a code span is left verbatim, and
    * characters that only matter at block scope (`[`, `|`, `>`, `!`) stay
    * unescaped so degraded literal blocks round-trip byte-for-byte. Marks like
-   * emphasis are emitted via their own delimiters, not through this.
+   * emphasis are emitted via their own delimiters, not through this. A literal
+   * text node that itself reads as a mention token (`@{id|name}`) is escaped to
+   * `\@{…}` so it re-parses as text rather than a mention.
    */
   escapeText(text4, insideCode) {
     if (insideCode) return text4;
-    return text4.replace(/[\\*`]/g, (ch) => `\\${ch}`);
+    const escaped = text4.replace(/[\\*`]/g, (ch) => `\\${ch}`);
+    return escaped.replace(this.mentionToken(), (full) => `\\${full}`);
   }
 };
 var markdownAdfConverter = new LayeredBodyAdfConverter();
@@ -39915,7 +40016,7 @@ var JiraTaskTracker = class {
       project: this.project,
       maxResults: 100
     });
-    return users.map((user) => user.displayName);
+    return users.map((user) => ({ accountId: user.accountId, displayName: user.displayName }));
   }
   async ping() {
     await this.client.request("GET", "/myself");

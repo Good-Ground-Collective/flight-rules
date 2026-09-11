@@ -172,6 +172,8 @@ Run the following command and present the returned list to the user:
 flight-rules users get
 ```
 
+It prints a JSON array of `{ accountId, displayName }` objects. Show the human the display names and let them pick by name.
+
 > "Who should review this RFC before agents begin work? Pick from the list or add others."
 
 **4. RFC ID** — auto-generated:

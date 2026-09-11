@@ -33,6 +33,17 @@ export interface AdfCodeBlockNode {
   content: AdfTextNode[]
 }
 
+/**
+ * An inline @mention. `attrs.id` is the Atlassian account id and is the only
+ * required field; `attrs.text` (`@Display Name`) is a hint Jira may re-resolve
+ * from the id on render. A mention sits inside a paragraph's inline content
+ * beside text nodes, never as a block.
+ */
+export interface AdfMentionNode {
+  type: 'mention'
+  attrs: { id: string; text?: string }
+}
+
 export interface AdfDocNode {
   version: 1
   type: 'doc'

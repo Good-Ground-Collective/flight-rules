@@ -170,6 +170,7 @@ describe('markdown ⇄ ADF round-trip', () => {
     ['loose bullet list', '- first\n\n- second'],
     ['loose ordered list keeps numbering', '1. first\n\n2. second'],
     ['rule', '---'],
+    ['mention mid-sentence', 'Ping @{5b10|Ada Lovelace} now'],
     ['multi-line paragraph', 'line one\nline two'],
     ['emphasis', 'Ship *now* today'],
     ['bold italic', 'Ship ***now*** today'],
@@ -648,5 +649,188 @@ describe('markdownAdfConverter.toMarkdown graceful degradation', () => {
       },
     ]
     expect(markdownAdfConverter.toMarkdown(nodes)).toBe('1. one\n2. two')
+  })
+})
+
+describe('markdownAdfConverter @mentions', () => {
+  const firstParagraph = (markdown: string): AdfNode[] =>
+    markdownAdfConverter.toAdf(markdown).content[0]?.content ?? []
+
+  it('splits a leading mention from the following text', () => {
+    expect(firstParagraph('@{5b10|Ada Lovelace} please look')).toEqual([
+      { type: 'mention', attrs: { id: '5b10', text: '@Ada Lovelace' } },
+      { type: 'text', text: ' please look' },
+    ])
+  })
+
+  it('places a mention mid-sentence between two text nodes', () => {
+    expect(firstParagraph('Ping @{5b10|Ada Lovelace} today')).toEqual([
+      { type: 'text', text: 'Ping ' },
+      { type: 'mention', attrs: { id: '5b10', text: '@Ada Lovelace' } },
+      { type: 'text', text: ' today' },
+    ])
+  })
+
+  it('produces a mention inside a heading', () => {
+    const heading = markdownAdfConverter.toAdf('## Owner @{a1|Ada}').content[0]
+    expect(heading?.type).toBe('heading')
+    expect(heading?.content).toEqual([
+      { type: 'text', text: 'Owner ' },
+      { type: 'mention', attrs: { id: 'a1', text: '@Ada' } },
+    ])
+  })
+
+  it('produces a mention inside a bullet list item', () => {
+    const listItem = markdownAdfConverter.toAdf('- ping @{a1|Ada}').content[0]?.content?.[0]
+    expect(listItem?.content?.[0]).toEqual({
+      type: 'paragraph',
+      content: [
+        { type: 'text', text: 'ping ' },
+        { type: 'mention', attrs: { id: 'a1', text: '@Ada' } },
+      ],
+    })
+  })
+
+  it('keeps a mention beside a bold span as its own inline node', () => {
+    expect(firstParagraph('@{a1|Ada} **now**')).toEqual([
+      { type: 'mention', attrs: { id: 'a1', text: '@Ada' } },
+      { type: 'text', text: ' ' },
+      { type: 'text', text: 'now', marks: [{ type: 'strong' }] },
+    ])
+  })
+
+  it('carries a mention through a bold span it sits inside', () => {
+    expect(firstParagraph('**hi @{a1|Ada} there**')).toEqual([
+      { type: 'text', text: 'hi ', marks: [{ type: 'strong' }] },
+      { type: 'mention', attrs: { id: 'a1', text: '@Ada' } },
+      { type: 'text', text: ' there', marks: [{ type: 'strong' }] },
+    ])
+  })
+
+  it('omits attrs.text when the display half is empty', () => {
+    expect(firstParagraph('@{a1|}')).toEqual([{ type: 'mention', attrs: { id: 'a1' } }])
+  })
+
+  it('leaves a mention token inside a code span as literal code', () => {
+    expect(firstParagraph('`@{a|b}`')).toEqual([{ type: 'text', text: '@{a|b}', marks: [{ type: 'code' }] }])
+  })
+
+  it('leaves a mention token inside a fenced block untouched', () => {
+    expect(markdownAdfConverter.toAdf('```\n@{a|b}\n```').content).toEqual([
+      { type: 'codeBlock', attrs: {}, content: [{ type: 'text', text: '@{a|b}' }] },
+    ])
+  })
+
+  it('leaves a pipe-less @{Name} as literal text', () => {
+    expect(firstParagraph('@{Ada}')).toEqual([{ type: 'text', text: '@{Ada}' }])
+  })
+
+  it('treats an escaped \\@{a|b} as literal text', () => {
+    expect(firstParagraph('\\@{a|b}')).toEqual([{ type: 'text', text: '@{a|b}' }])
+  })
+
+  it('emits a mention node as @{id|display}', () => {
+    const nodes: AdfNode[] = [
+      { type: 'paragraph', content: [{ type: 'mention', attrs: { id: '5b10', text: '@Ada Lovelace' } }] },
+    ]
+    expect(markdownAdfConverter.toMarkdown(nodes)).toBe('@{5b10|Ada Lovelace}')
+  })
+
+  it('emits @{id|} for a mention with no display text', () => {
+    const nodes: AdfNode[] = [{ type: 'paragraph', content: [{ type: 'mention', attrs: { id: '5b10' } }] }]
+    expect(markdownAdfConverter.toMarkdown(nodes)).toBe('@{5b10|}')
+  })
+
+  it('round-trips a mention inside a bold span stably', () => {
+    const nodes: AdfNode[] = [
+      {
+        type: 'paragraph',
+        content: [
+          { type: 'text', text: 'hi ', marks: [{ type: 'strong' }] },
+          { type: 'mention', attrs: { id: 'a1', text: '@Ada' } },
+          { type: 'text', text: ' there', marks: [{ type: 'strong' }] },
+        ],
+      },
+    ]
+    expect(markdownAdfConverter.toAdf(markdownAdfConverter.toMarkdown(nodes)).content).toEqual(nodes)
+  })
+
+  it('escapes a literal text node that reads as a mention so it stays text', () => {
+    const nodes: AdfNode[] = [{ type: 'paragraph', content: [{ type: 'text', text: '@{a|b}' }] }]
+    expect(markdownAdfConverter.toMarkdown(nodes)).toBe('\\@{a|b}')
+    expect(markdownAdfConverter.toAdf(markdownAdfConverter.toMarkdown(nodes)).content).toEqual(nodes)
+  })
+
+  describe('escape decisions come from source position, not match order', () => {
+    it('keeps an escaped mention literal even when an entity precedes it', () => {
+      // `&#64;` decodes to `@`, so the decoded value gains a match with no source
+      // counterpart; an ordinal pairing would hand its escape flag to the wrong
+      // token and @-mention a user the author escaped.
+      expect(firstParagraph('&#64;{a|Ada} \\@{b|Bob}')).toEqual([{ type: 'text', text: '@{a|Ada} @{b|Bob}' }])
+    })
+
+    it('never emits a mention when both tokens are literal', () => {
+      const content = firstParagraph('&#64;{a|Ada} \\@{b|Bob}')
+      expect(content.some((node) => node.type === 'mention')).toBe(false)
+    })
+
+    it('decodes an entity inside a real mention display', () => {
+      expect(firstParagraph('@{a|Ada &amp; Co}')).toEqual([{ type: 'mention', attrs: { id: 'a', text: '@Ada & Co' } }])
+    })
+  })
+
+  describe('a mention is a boundary that open marks close at', () => {
+    const adfStable = (nodes: AdfNode[]): void => {
+      const markdown = markdownAdfConverter.toMarkdown(nodes)
+      expect(markdownAdfConverter.toAdf(markdown).content).toEqual(nodes)
+    }
+    const para = (content: AdfNode[]): AdfNode[] => [{ type: 'paragraph', content }]
+    const strong = (text: string): AdfNode => ({ type: 'text', text, marks: [{ type: 'strong' }] })
+    const em = (text: string): AdfNode => ({ type: 'text', text, marks: [{ type: 'em' }] })
+    const mention: AdfNode = { type: 'mention', attrs: { id: 'a', text: '@Ada' } }
+
+    it('closes a code span before a following mention', () => {
+      const nodes = para([{ type: 'text', text: 'code', marks: [{ type: 'code' }] }, mention])
+      expect(markdownAdfConverter.toMarkdown(nodes)).toBe('`code`@{a|Ada}')
+      adfStable(nodes)
+    })
+
+    it('round-trips a mention immediately at the start of a bold span', () => {
+      adfStable(para([mention, strong('after')]))
+    })
+
+    it('keeps the bold when a mention starts a span whose text has a leading space', () => {
+      // `** after**` is invalid CommonMark, so the space migrates outside the
+      // delimiters; the bold survives on "there" instead of being lost.
+      const md = markdownAdfConverter.toMarkdown(markdownAdfConverter.toAdf('**@{a|Ada} there**').content)
+      expect(md).toBe('@{a|Ada} **there**')
+      expect(markdownAdfConverter.toMarkdown(markdownAdfConverter.toAdf(md).content)).toBe(md)
+    })
+
+    it('round-trips a mention in the middle of a bold span', () => {
+      adfStable(para([strong('before '), mention, strong(' after')]))
+    })
+
+    it('round-trips a mention at the end of a bold span', () => {
+      adfStable(para([strong('before '), mention]))
+    })
+
+    it('round-trips a mention in the middle of an emphasis span', () => {
+      adfStable(para([em('before '), mention, em(' after')]))
+    })
+  })
+
+  describe('display names are escaped so the token stays atomic', () => {
+    const stable = (text: string): void => {
+      const nodes: AdfNode[] = [{ type: 'paragraph', content: [{ type: 'mention', attrs: { id: 'a', text } }] }]
+      expect(markdownAdfConverter.toAdf(markdownAdfConverter.toMarkdown(nodes)).content).toEqual(nodes)
+    }
+
+    it('round-trips a display with markdown emphasis markers', () => stable('@Ada *Dev*'))
+    it('round-trips a display with braces', () => stable('@Ada {Dev}'))
+    it('round-trips a display with a backslash', () => stable('@Ada \\ Dev'))
+    it('round-trips a display with an entity-like sequence', () => stable('@Ada &copy;'))
+    it('round-trips a display with a code delimiter', () => stable('@Ada `x`'))
+    it('round-trips a display with a link bracket', () => stable('@Ada [x]'))
   })
 })

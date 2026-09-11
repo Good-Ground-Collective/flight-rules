@@ -37,12 +37,17 @@ const run = (tracker: TaskTracker, args: string[]) =>
 describe('users get', () => {
   beforeEach(() => vi.clearAllMocks())
 
-  it('writes JSON array of user logins to stdout', async () => {
+  it('writes a JSON array of accountId/displayName objects to stdout', async () => {
     const tracker = makeTracker()
-    vi.mocked(tracker.getUsers).mockResolvedValue(['alice', 'bob'])
+    vi.mocked(tracker.getUsers).mockResolvedValue([
+      { accountId: 'a1', displayName: 'Ada Lovelace' },
+      { accountId: 'a2', displayName: 'Alan Turing' },
+    ])
     const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
     await run(tracker, ['get'])
-    expect(output).toHaveBeenCalledWith('["alice","bob"]\n')
+    expect(output).toHaveBeenCalledWith(
+      '[{"accountId":"a1","displayName":"Ada Lovelace"},{"accountId":"a2","displayName":"Alan Turing"}]\n',
+    )
   })
 
   it('writes empty array when org has no members', async () => {
