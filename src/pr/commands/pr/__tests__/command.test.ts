@@ -19,7 +19,8 @@ const baseArgs = [
   '--type', 'feat',
   '--scope', 'KAN-31',
   '--description', 'add pr create',
-  '--summary', 'Adds the command.',
+  '--why', 'The old PR bodies read as slop.',
+  '--what', 'Added the pr create command.',
   '--base', 'main',
   '--head', 'feat/KAN-31-pr-create-command',
 ]
@@ -30,14 +31,25 @@ describe('pr create command', () => {
   it('validates options, calls the host, and prints the created PR as JSON', async () => {
     const host = makeMockHost()
     const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
-    await run(host, [...baseArgs, '--change', 'a', '--change', 'b', '--reviewer', 'alice', '--label', 'wave-1'])
+    await run(host, [
+      ...baseArgs,
+      '--what', 'Added a second bullet.',
+      '--ots', '```json\n{}\n```',
+      '--ticket-id', 'KAN-31',
+      '--ticket-url', 'https://example.atlassian.net/browse/KAN-31',
+      '--reviewer', 'alice',
+      '--label', 'wave-1',
+    ])
     expect(vi.mocked(host.createPullRequest)).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'feat',
         scope: 'KAN-31',
         description: 'add pr create',
-        summary: 'Adds the command.',
-        changes: ['a', 'b'],
+        whatWasChanged: ['Added the pr create command.', 'Added a second bullet.'],
+        whyWasItChanged: 'The old PR bodies read as slop.',
+        otsMaterials: '```json\n{}\n```',
+        ticketId: 'KAN-31',
+        ticketUrl: 'https://example.atlassian.net/browse/KAN-31',
         baseBranch: 'main',
         headBranch: 'feat/KAN-31-pr-create-command',
         reviewers: ['alice'],

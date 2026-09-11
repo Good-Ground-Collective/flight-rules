@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createCheckCommand } from "../command.js";
 import type { Config } from "../../../../shared/config.js";
 import type { TaskTracker } from "../../../task-tracker/task-tracker.js";
+import type { ToolCheck, ToolProbe } from "../../../tool-probe/tool-probe.js";
 
 const config: Config = {
   tracker: "github",
@@ -15,8 +16,22 @@ const makeTracker = (
   ping: () => Promise<void> = vi.fn().mockResolvedValue(undefined),
 ): Pick<TaskTracker, "ping"> => ({ ping });
 
-const run = (getConfig: () => Config, tracker: Pick<TaskTracker, "ping">) =>
-  createCheckCommand(getConfig, () => tracker as TaskTracker)
+const noToolChecks: ToolCheck[] = [];
+const makeProbe = (checks: ToolCheck[] = noToolChecks): ToolProbe => ({
+  probe: vi.fn().mockResolvedValue(checks),
+});
+
+const run = (
+  getConfig: () => Config,
+  tracker: Pick<TaskTracker, "ping">,
+  probe: ToolProbe = makeProbe(),
+) =>
+  createCheckCommand(
+    getConfig,
+    () => tracker as TaskTracker,
+    () => "/tmp/does-not-exist/.claude/flight-rules.local.md",
+    () => probe,
+  )
     .exitOverride()
     .parseAsync([], { from: "user" });
 
@@ -78,6 +93,55 @@ describe("check command", () => {
     expect(parsed.checks.find((c) => c.name === "reachable")?.detail).toContain(
       "Not Found",
     );
+    output.mockRestore();
+  });
+
+  it("appends the tool probe entries to the checks", async () => {
+    vi.stubEnv("GITHUB_TOKEN", "tok");
+    const output = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+    const probe = makeProbe([
+      { name: "tools:gh", ok: true, detail: "gh 2.99.0", required: true },
+    ]);
+    await run(() => config, makeTracker(), probe);
+    const parsed = lastJson(output);
+    expect(parsed.checks.find((c) => c.name === "tools:gh")).toEqual({
+      name: "tools:gh",
+      ok: true,
+      detail: "gh 2.99.0",
+      required: true,
+    });
+    output.mockRestore();
+  });
+
+  it("does not fail check when a non-required tool probe reports not ok", async () => {
+    vi.stubEnv("GITHUB_TOKEN", "tok");
+    const output = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+    const probe = makeProbe([
+      { name: "tools:ffmpeg", ok: false, detail: "not installed", required: false },
+    ]);
+    await run(() => config, makeTracker(), probe);
+    const parsed = lastJson(output);
+    expect(parsed.ok).toBe(true);
+    output.mockRestore();
+  });
+
+  it("fails check when a required tool probe reports not ok", async () => {
+    vi.stubEnv("GITHUB_TOKEN", "tok");
+    const output = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+    const probe = makeProbe([
+      { name: "tools:gh", ok: false, detail: "gh 2.98.0 is older than required", required: true },
+    ]);
+    await expect(run(() => config, makeTracker(), probe)).rejects.toThrow(
+      "check failed",
+    );
+    const parsed = lastJson(output);
+    expect(parsed.ok).toBe(false);
     output.mockRestore();
   });
 });

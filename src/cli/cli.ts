@@ -19,6 +19,7 @@ import { createGitCommand } from '../git/commands/commit/command.js'
 import type { PullRequestHost } from '../pr/pull-request-host/pull-request-host.js'
 import { GhPullRequestHost } from '../pr/pull-request-host/gh-pull-request-host.js'
 import { createPrCommand } from '../pr/commands/pr/command.js'
+import { NodeToolProbe, type ToolProbe } from '../tasks/tool-probe/tool-probe.js'
 import { appVersion } from '../version.js'
 
 // eslint-disable-next-line preflight/no-loose-functions -- buildTracker is module-level behaviour awaiting a home on a service; tracked in KAN-39
@@ -71,11 +72,14 @@ function buildPrHost(overrideTracker?: string): PullRequestHost {
   return new GhPullRequestHost({ repo: config.repo })
 }
 
+// eslint-disable-next-line preflight/no-loose-functions -- resolveConfigPath is module-level behaviour awaiting a home on a service; tracked in KAN-39
+function resolveConfigPath(): string {
+  return process.env['FLIGHT_RULES_CONFIG'] ?? join(process.cwd(), '.claude', 'flight-rules.local.md')
+}
+
 // eslint-disable-next-line preflight/no-loose-functions -- getConfigFromEnv is module-level behaviour awaiting a home on a service; tracked in KAN-39
 function getConfigFromEnv(overrideTracker?: string): Config {
-  const configPath =
-    process.env['FLIGHT_RULES_CONFIG'] ?? join(process.cwd(), '.claude', 'flight-rules.local.md')
-  const config = readConfig(configPath)
+  const config = readConfig(resolveConfigPath())
   if (overrideTracker === undefined) return config
   if (overrideTracker !== 'github' && overrideTracker !== 'jira') {
     throw new Error(`Invalid --tracker "${overrideTracker}" — expected "github" or "jira"`)
@@ -87,6 +91,7 @@ export function buildProgram(
   getTracker: (overrideTracker?: string) => TaskTracker,
   getConfig: (overrideTracker?: string) => Config,
   getPrHost: (overrideTracker?: string) => PullRequestHost,
+  getConfigPath: () => string = resolveConfigPath,
 ): Command {
   const program = new Command('flight-rules')
   program.version(appVersion)
@@ -112,11 +117,14 @@ export function buildProgram(
   program.addCommand(createUsersCommand(tracker))
   program.addCommand(createRfcCommand(config))
   program.addCommand(createCompetenciesCommand(config))
-  program.addCommand(createCheckCommand(config, tracker))
+  const probe = (): ToolProbe => new NodeToolProbe()
+  program.addCommand(createCheckCommand(config, tracker, getConfigPath, probe))
   return program
 }
 
 // eslint-disable-next-line preflight/no-loose-functions -- run is module-level behaviour awaiting a home on a service; tracked in KAN-39
 export async function run(argv: string[]): Promise<void> {
-  await buildProgram(buildTracker, getConfigFromEnv, buildPrHost).parseAsync(argv, { from: 'user' })
+  await buildProgram(buildTracker, getConfigFromEnv, buildPrHost, resolveConfigPath).parseAsync(argv, {
+    from: 'user',
+  })
 }

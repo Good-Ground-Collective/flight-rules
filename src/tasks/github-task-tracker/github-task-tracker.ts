@@ -2,6 +2,7 @@ import { Octokit } from '@octokit/rest'
 import { graphql } from '@octokit/graphql'
 import { BodyMetadataService } from '../body-metadata/body-metadata.js'
 import { z } from 'zod'
+import { UnsupportedTrackerOperationError } from '../task-tracker/unsupported-tracker-operation-error.js'
 import type {
   Comment,
   CreateEpicInput,
@@ -273,6 +274,31 @@ export class GitHubTaskTracker implements TaskTracker {
     // The vocabulary is repo-wide, so the ticket id is irrelevant; lowercased so the value round-trips through transitionTicket to the same label.
     return (await this.statusLabelNames()).map((name) =>
       name.slice('status:'.length).replace(/-/g, ' ').toLowerCase(),
+    )
+  }
+
+  /**
+   * GitHub labels double as the tracker's type system — `epic`/`ticket` and
+   * `status:<slug>` — so a generic label write could silently change a
+   * ticket's size or status. Label lifecycle writes are Jira-only.
+   */
+  addLabel(ticketId: string, label: string): Promise<void> {
+    return Promise.reject(
+      new UnsupportedTrackerOperationError({
+        tracker: 'GitHub',
+        operation: `adding the label "${label}" to issue #${ticketId}`,
+        remedy: 'GitHub labels encode issue size and status and are owned by the tracker; use --tracker jira',
+      }),
+    )
+  }
+
+  removeLabel(ticketId: string, label: string): Promise<void> {
+    return Promise.reject(
+      new UnsupportedTrackerOperationError({
+        tracker: 'GitHub',
+        operation: `removing the label "${label}" from issue #${ticketId}`,
+        remedy: 'GitHub labels encode issue size and status and are owned by the tracker; use --tracker jira',
+      }),
     )
   }
 
