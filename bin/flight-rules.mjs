@@ -31172,7 +31172,7 @@ import { basename as basename2 } from "node:path/posix";
 var mediaReference = /(!?)\[([^\]]*)\]\(\s*<?([^\s()<>]+)>?(?:\s+"[^"]*")?\s*\)/g;
 var absoluteTarget = /^[a-zA-Z][a-zA-Z0-9+.-]*:|^\/\/|^#/;
 var localPrefix = /^(?:\.\/)+/;
-var fenceToggle = /^\s*```/;
+var fenceRun = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 var AttachmentSpecSchema = external_exports.string().min(1).transform((spec) => {
   const hash2 = spec.lastIndexOf("#");
   const path2 = hash2 > 0 ? spec.slice(0, hash2) : spec;
@@ -31215,14 +31215,45 @@ var TrackerEvidenceService = class {
     }
   }
   rewriteReferences(body, byName) {
-    let inFence = false;
+    let fence;
     return body.split("\n").map((line) => {
-      if (fenceToggle.test(line)) {
-        inFence = !inFence;
-        return line;
+      if (fence === void 0) {
+        const opened = this.openingFence(line);
+        if (opened !== void 0) {
+          fence = opened;
+          return line;
+        }
+        return this.rewriteLine(line, byName);
       }
-      return inFence ? line : this.rewriteLine(line, byName);
+      if (this.closesFence(line, fence)) fence = void 0;
+      return line;
     }).join("\n");
+  }
+  /**
+   * A line opens a fence when it is a run of >=3 backticks or tildes; a backtick
+   * fence's info string may not itself contain a backtick, which keeps inline
+   * code from being read as a fence.
+   */
+  openingFence(line) {
+    const match = fenceRun.exec(line);
+    if (match === null) return void 0;
+    const run2 = match[1];
+    const rest = match[2];
+    if (run2 === void 0 || rest === void 0) return void 0;
+    if (run2.charAt(0) === "`" && rest.includes("`")) return void 0;
+    return { char: run2.charAt(0), length: run2.length };
+  }
+  /**
+   * A line closes an open fence only when it is a run of the SAME character, at
+   * least as long as the opening run, with nothing but whitespace after it.
+   */
+  closesFence(line, fence) {
+    const match = fenceRun.exec(line);
+    if (match === null) return false;
+    const run2 = match[1];
+    const rest = match[2];
+    if (run2 === void 0 || rest === void 0) return false;
+    return run2.charAt(0) === fence.char && run2.length >= fence.length && rest.trim().length === 0;
   }
   rewriteLine(line, byName) {
     let result = "";

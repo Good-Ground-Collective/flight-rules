@@ -111,6 +111,39 @@ describe('TrackerEvidenceService', () => {
     expect(attachments[0]?.referenced).toBe(false)
   })
 
+  it('leaves a reference inside a tilde fence untouched', async () => {
+    const tracker = makeTracker()
+    const { body, attachments } = await new TrackerEvidenceService({ tracker }).attach({
+      ticketId: 'PROJ-1',
+      body: '~~~\n![x](./a.png)\n~~~',
+      specs: ['./a.png'],
+    })
+    expect(body).toBe('~~~\n![x](./a.png)\n~~~\n\n![a.png](attachment:a.png)')
+    expect(attachments[0]?.referenced).toBe(false)
+  })
+
+  it('keeps an inner ``` line from closing an outer four-backtick fence', async () => {
+    const tracker = makeTracker()
+    const { body, attachments } = await new TrackerEvidenceService({ tracker }).attach({
+      ticketId: 'PROJ-1',
+      body: '````\n```\n![x](./b.png)\n````',
+      specs: ['./b.png'],
+    })
+    expect(body).toBe('````\n```\n![x](./b.png)\n````\n\n![b.png](attachment:b.png)')
+    expect(attachments[0]?.referenced).toBe(false)
+  })
+
+  it('rewrites a reference outside any fence', async () => {
+    const tracker = makeTracker()
+    const { body, attachments } = await new TrackerEvidenceService({ tracker }).attach({
+      ticketId: 'PROJ-1',
+      body: 'Before the fence ![x](./c.png)\n~~~\ncode\n~~~',
+      specs: ['./c.png'],
+    })
+    expect(body).toBe('Before the fence ![x](attachment:c.png)\n~~~\ncode\n~~~')
+    expect(attachments[0]?.referenced).toBe(true)
+  })
+
   it('is idempotent for an already-attachment body', async () => {
     const tracker = makeTracker()
     const { body, attachments } = await new TrackerEvidenceService({ tracker }).attach({

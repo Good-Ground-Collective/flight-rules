@@ -8,7 +8,15 @@ const mediaReference = /(!?)\[([^\]]*)\]\(\s*<?([^\s()<>]+)>?(?:\s+"[^"]*")?\s*\
 /** A URL scheme (`https:`, already-`attachment:`), a protocol-relative `//`, or an in-page `#` anchor — never a local file to rewrite. */
 const absoluteTarget = /^[a-zA-Z][a-zA-Z0-9+.-]*:|^\/\/|^#/
 const localPrefix = /^(?:\.\/)+/
-const fenceToggle = /^\s*```/
+
+/** Up to three leading spaces, then a run of three or more backticks or tildes, then the rest of the line. */
+const fenceRun = /^ {0,3}(`{3,}|~{3,})(.*)$/
+
+/** The delimiter character and length of an open code fence, so its close can be matched per CommonMark. */
+interface OpenFence {
+  char: string
+  length: number
+}
 
 /**
  * `<path>#<caption>`, where the caption is used only when the file is appended
@@ -109,18 +117,51 @@ export class TrackerEvidenceService implements EvidenceService {
   }
 
   private rewriteReferences(body: string, byName: Map<string, EvidenceAttachment>): string {
-    let inFence = false
+    let fence: OpenFence | undefined
 
     return body
       .split('\n')
       .map((line) => {
-        if (fenceToggle.test(line)) {
-          inFence = !inFence
-          return line
+        if (fence === undefined) {
+          const opened = this.openingFence(line)
+          if (opened !== undefined) {
+            fence = opened
+            return line
+          }
+          return this.rewriteLine(line, byName)
         }
-        return inFence ? line : this.rewriteLine(line, byName)
+        if (this.closesFence(line, fence)) fence = undefined
+        return line
       })
       .join('\n')
+  }
+
+  /**
+   * A line opens a fence when it is a run of >=3 backticks or tildes; a backtick
+   * fence's info string may not itself contain a backtick, which keeps inline
+   * code from being read as a fence.
+   */
+  private openingFence(line: string): OpenFence | undefined {
+    const match = fenceRun.exec(line)
+    if (match === null) return undefined
+    const run = match[1]
+    const rest = match[2]
+    if (run === undefined || rest === undefined) return undefined
+    if (run.charAt(0) === '`' && rest.includes('`')) return undefined
+    return { char: run.charAt(0), length: run.length }
+  }
+
+  /**
+   * A line closes an open fence only when it is a run of the SAME character, at
+   * least as long as the opening run, with nothing but whitespace after it.
+   */
+  private closesFence(line: string, fence: OpenFence): boolean {
+    const match = fenceRun.exec(line)
+    if (match === null) return false
+    const run = match[1]
+    const rest = match[2]
+    if (run === undefined || rest === undefined) return false
+    return run.charAt(0) === fence.char && run.length >= fence.length && rest.trim().length === 0
   }
 
   private rewriteLine(line: string, byName: Map<string, EvidenceAttachment>): string {
