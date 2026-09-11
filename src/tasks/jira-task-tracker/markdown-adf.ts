@@ -66,6 +66,14 @@ const headingLine = /^#{1,6} \S/
 const quoteContent: ReadonlySet<string> = new Set(['paragraph', 'bulletList', 'orderedList', 'codeBlock'])
 const panelContent: ReadonlySet<string> = new Set(['paragraph', 'heading', 'bulletList', 'orderedList'])
 
+/**
+ * The ADF node types a `listItem` admits. Unlike the sets above, this filters
+ * emitted ADF, not mdast — a `<details>` flattened into a list item can leave a
+ * table, quote, or heading the list item's content model rejects, so those degrade
+ * after conversion (see `restrictToListItem`).
+ */
+const listItemContent: ReadonlySet<string> = new Set(['paragraph', 'codeBlock', 'bulletList', 'orderedList', 'taskList'])
+
 export interface MarkdownAdfConverter {
   toAdf(markdown: string, media?: MediaLookup): AdfDocNode
   toMarkdown(nodes: AdfNode[], media?: MediaLookup): string
@@ -137,6 +145,7 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
     allowed?: ReadonlySet<string>,
     media: MediaLookup = {},
     allowMedia = false,
+    expandDepth = 0,
   ): AdfNode[] {
     const out: AdfNode[] = []
     let i = 0
@@ -152,9 +161,9 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
         continue
       }
       if (node.type === 'html' && detailsOpen.test(node.value)) {
-        const paired = this.pairDetails(nodes, i, source)
+        const paired = this.pairDetails(nodes, i, source, expandDepth)
         if (paired !== undefined) {
-          out.push(paired.node)
+          out.push(...paired.nodes)
           i = paired.next
           continue
         }
@@ -164,17 +173,17 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
         continue
       }
       if (node.type === 'list') {
-        out.push(...this.listNodes(node, source))
+        out.push(...this.listNodes(node, source, expandDepth))
         i++
         continue
       }
-      out.push(this.blockNode(node, source, allowMedia ? media : {}))
+      out.push(this.blockNode(node, source, allowMedia ? media : {}, expandDepth))
       i++
     }
     return out
   }
 
-  private blockNode(node: RootContent, source: string, media: MediaLookup): AdfNode {
+  private blockNode(node: RootContent, source: string, media: MediaLookup, expandDepth = 0): AdfNode {
     switch (node.type) {
       case 'heading':
         return { type: 'heading', attrs: { level: node.depth }, content: this.inline(node.children, source) }
@@ -192,7 +201,7 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
       case 'thematicBreak':
         return { type: 'rule' }
       case 'blockquote':
-        return this.quoteOrPanel(node, source)
+        return this.quoteOrPanel(node, source, expandDepth)
       case 'table':
         return this.table(node, source)
       default:
@@ -294,16 +303,19 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
    * in the first paragraph. A blockquote with no marker maps straight to
    * `blockquote`, its own disallowed children (headings, nested quotes) degrading.
    */
-  private quoteOrPanel(node: Blockquote, source: string): AdfNode {
+  private quoteOrPanel(node: Blockquote, source: string, expandDepth = 0): AdfNode {
+    // A blockquote or panel is a container, so a <details> in its body (or in a
+    // list in its body) is no longer at the document top level and must flatten.
+    const depth = expandDepth + 1
     const marker = this.alertType(node)
     const panelType = marker === undefined ? undefined : panelTypes[marker]
     if (marker !== undefined && panelType !== undefined) {
       const rest = this.stripAlertMarker(node.children)
       if (rest.every((child) => panelContent.has(this.adfType(child)))) {
-        return { type: 'panel', attrs: { panelType }, content: this.withBlockContent(this.blocks(rest, source, panelContent)) }
+        return { type: 'panel', attrs: { panelType }, content: this.withBlockContent(this.blocks(rest, source, panelContent, {}, false, depth)) }
       }
     }
-    return { type: 'blockquote', content: this.withBlockContent(this.blocks(node.children, source, quoteContent)) }
+    return { type: 'blockquote', content: this.withBlockContent(this.blocks(node.children, source, quoteContent, {}, false, depth)) }
   }
 
   /**
@@ -368,12 +380,21 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
    * content after `</summary>` on the same html block instead of a blank line,
    * that remainder is parsed and prepended to the inner blocks. An unclosed run
    * returns undefined so the caller degrades the opener to literal text.
+   *
+   * `expandDepth` is 0 only when this `<details>` is a direct child of the
+   * document, because ADF allows an `expand` only at the document top level —
+   * never inside a list item, quote, panel, or another expand. So a top-level
+   * `<details>` becomes an `expand`, and any nested `<details>` flattens to a
+   * bold-titled run of its body — schema-valid content the top-level expand's
+   * broad model accepts, rather than the misplaced expand it used to emit, which
+   * Jira rejects outright.
    */
   private pairDetails(
     nodes: RootContent[],
     start: number,
     source: string,
-  ): { node: AdfNode; next: number } | undefined {
+    expandDepth = 0,
+  ): { nodes: AdfNode[]; next: number } | undefined {
     const opener = nodes[start]
     if (opener === undefined || opener.type !== 'html') return undefined
 
@@ -395,15 +416,25 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
     const title = summary?.[1]?.trim() ?? ''
     const remainder = summary === null ? '' : opener.value.slice((summary.index ?? 0) + summary[0].length)
 
-    const inner = this.blocks(nodes.slice(start + 1, end), source)
-    const leading = remainder.trim() === '' ? [] : this.blocks(this.parse(remainder).children, remainder)
+    const inner = this.blocks(nodes.slice(start + 1, end), source, undefined, {}, false, expandDepth + 1)
+    const leading =
+      remainder.trim() === ''
+        ? []
+        : this.blocks(this.parse(remainder).children, remainder, undefined, {}, false, expandDepth + 1)
+    const content = [...leading, ...inner]
 
-    return { node: { type: 'expand', attrs: { title }, content: [...leading, ...inner] }, next: end + 1 }
+    // Nested inside an expand: no collapsible is valid here, so flatten to a bold title plus the body.
+    if (expandDepth > 0) {
+      const heading: AdfNode = { type: 'paragraph', content: [{ type: 'text', text: title, marks: [{ type: 'strong' }] }] }
+      return { nodes: title === '' ? content : [heading, ...content], next: end + 1 }
+    }
+    // An expand needs at least one child, so an empty <details> gets a filler paragraph.
+    return { nodes: [{ type: 'expand', attrs: { title }, content: this.withBlockContent(content) }], next: end + 1 }
   }
 
-  private listNodes(node: List, source: string): AdfNode[] {
+  private listNodes(node: List, source: string, expandDepth = 0): AdfNode[] {
     if (node.children.some((item) => item.checked === true || item.checked === false)) {
-      return this.taskList(node, source)
+      return this.taskList(node, source, expandDepth)
     }
 
     const ordered = node.ordered === true
@@ -414,15 +445,50 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
     // `\n\n` block join reproduces the blank lines.
     const spread = node.spread === true || node.children.some((item) => item.spread === true)
     if (spread) {
-      return node.children.map((item, index) => this.singleList(ordered, start + index, [item], source))
+      return node.children.map((item, index) => this.singleList(ordered, start + index, [item], source, expandDepth))
     }
-    return [this.singleList(ordered, start, node.children, source)]
+    return [this.singleList(ordered, start, node.children, source, expandDepth)]
   }
 
-  private singleList(ordered: boolean, order: number, items: ListItem[], source: string): AdfNode {
-    const content = items.map((item) => ({ type: 'listItem', content: this.blocks(item.children, source) }))
+  private singleList(ordered: boolean, order: number, items: ListItem[], source: string, expandDepth = 0): AdfNode {
+    // A list item is never the document top level, so a <details> inside one always
+    // flattens — an expand is invalid in a listItem even with no enclosing expand.
+    const content = items.map((item) => ({
+      type: 'listItem',
+      content: this.restrictToListItem(this.blocks(item.children, source, undefined, {}, false, expandDepth + 1)),
+    }))
     if (!ordered) return { type: 'bulletList', content }
     return { type: 'orderedList', ...(order === 1 ? {} : { attrs: { order } }), content }
+  }
+
+  /**
+   * Coerces block content into a `listItem`'s content model, filling an empty item
+   * with a paragraph. See {@link coerceListItemBlock} for the per-block rule.
+   */
+  private restrictToListItem(nodes: AdfNode[]): AdfNode[] {
+    return this.withBlockContent(nodes.flatMap((node) => this.coerceListItemBlock(node)))
+  }
+
+  /**
+   * Reshapes one block into what a `listItem` may hold, preserving inline nodes —
+   * mention identity above all. A heading becomes a paragraph of its inline
+   * content; a quote, panel, or table unwraps to its own (already listItem-valid)
+   * inner blocks rather than being re-serialized to markdown, which would flatten a
+   * mention into literal `@{…}` text that later exports re-escape into corruption; a
+   * rule drops, having no list-item form. Paragraphs, code blocks, and nested lists
+   * pass straight through.
+   */
+  private coerceListItemBlock(node: AdfNode): AdfNode[] {
+    if (listItemContent.has(node.type)) return [node]
+    if (node.type === 'heading') return [{ type: 'paragraph', content: node.content ?? [] }]
+    if (node.type === 'rule') return []
+    if (node.type === 'table') {
+      return (node.content ?? [])
+        .flatMap((row) => row.content ?? [])
+        .flatMap((cell) => cell.content ?? [])
+        .flatMap((block) => this.coerceListItemBlock(block))
+    }
+    return (node.content ?? []).flatMap((child) => this.coerceListItemBlock(child))
   }
 
   /**
@@ -433,12 +499,12 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
    * taskList, preserving the content without corrupting the flat-checklist case
    * that gets posted to Jira. Round-trip stays valid; the rare nested case flattens.
    */
-  private taskList(node: List, source: string): AdfNode[] {
+  private taskList(node: List, source: string, expandDepth = 0): AdfNode[] {
     const overflow: AdfNode[] = []
     const content = node.children.map((item, index) => {
       const first = item.children[0]
       const leadsWithParagraph = first !== undefined && first.type === 'paragraph'
-      overflow.push(...this.blocks(leadsWithParagraph ? item.children.slice(1) : item.children, source))
+      overflow.push(...this.blocks(leadsWithParagraph ? item.children.slice(1) : item.children, source, undefined, {}, false, expandDepth + 1))
       return {
         type: 'taskItem',
         attrs: { localId: `task-${index + 1}`, state: item.checked === true ? 'DONE' : 'TODO' },
@@ -452,19 +518,10 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
     const out: AdfNode[] = []
     for (const node of nodes) {
       switch (node.type) {
-        case 'text': {
-          // #121 tokenizes mentions over the raw source slice, because only the
-          // source distinguishes an escaped `\@{…}` from a real `@{…}`. But #119's
-          // block nodes rely on inline text coming from mdast's decoded value:
-          // `stripAlertMarker` rewrites that value, and a blockquote/panel
-          // continuation line loses its `> ` there but keeps it in source. When no
-          // real mention is found, that decoded value is authoritative, so fall
-          // back to it rather than the marker-bearing source slice.
-          const segments = this.mentionSegments(this.literal(node, source), marks)
-          const hasMention = segments.some((segment) => segment.type === 'mention')
-          out.push(...(hasMention ? segments : this.textSegments(node.value, marks)))
+        case 'text':
+          // Detect mentions over the source slice, but emit text from the decoded value: see mentionSegments.
+          out.push(...this.mentionSegments(this.literal(node, source), node.value, marks))
           break
-        }
         case 'emphasis':
           out.push(...this.inline(node.children, source, [...marks, { type: 'em' }]))
           break
@@ -502,28 +559,90 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
   /**
    * Splits a text value on soft line breaks. mdast keeps a soft break as a `\n`
    * inside one `text` node, but today's ADF interleaves `hardBreak` nodes and
-   * the multi-line-paragraph round-trip depends on that.
+   * the multi-line-paragraph round-trip depends on that. An empty segment — from a
+   * value that leads or trails with the break, e.g. a mention starting a line —
+   * emits only its hardBreak, never an empty `text` node, which ADF rejects.
    */
   private textSegments(value: string, marks: AdfMark[]): AdfNode[] {
     const out: AdfNode[] = []
     value.split('\n').forEach((segment, index) => {
       if (index > 0) out.push({ type: 'hardBreak' })
-      out.push({ type: 'text', text: segment, ...(marks.length > 0 ? { marks } : {}) })
+      if (segment !== '') out.push({ type: 'text', text: segment, ...(marks.length > 0 ? { marks } : {}) })
     })
     return out
   }
 
   /**
    * Splits `@{accountId|Display Name}` tokens out of an inline text node into
-   * `mention` nodes, emitting the surrounding text (and soft breaks) as before.
-   * Tokenizing runs over the raw source slice, not the decoded value, because
-   * mdast collapses `\@{…}`, `@{…}`, and `&#64;{…}` to the same value; only the
-   * source still tells an escaped token from a real one. The account id and
-   * display are then decoded on their own, so an entity or escape inside the
-   * display survives. An escaped token, or a pipe-less `@{Name}`, stays literal
-   * text; the id resolves identity, and mentions never carry marks.
+   * `mention` nodes. Detection runs over the raw source slice, because only the
+   * source tells an escaped `\@{…}` (and an entity-encoded `&#64;{…}`, which never
+   * matches the literal-`@` token) from a real mention; mdast's decoded value
+   * collapses all three to `@{…}`, so pairing decoded matches to source ones by
+   * order would hand an escape flag to the wrong token. The surrounding text and
+   * the split points come from the decoded `value` instead: each real mention's
+   * decoded token (`@{id|display}`, rebuilt with the same `decodeString` mdast
+   * applied) is located in `value` in order, and the text between tokens is
+   * emitted straight from `value`, so a container marker that survives in the
+   * source slice — a blockquote's `> ` continuation, an alert's stripped
+   * `[!TYPE]` — never leaks into the text. An escaped token, or a pipe-less
+   * `@{Name}`, stays literal text; the id resolves identity, and mentions never
+   * carry marks.
    */
-  private mentionSegments(raw: string, marks: AdfMark[]): AdfNode[] {
+  private mentionSegments(raw: string, value: string, marks: AdfMark[]): AdfNode[] {
+    const regex = this.mentionToken()
+    const mentions: { token: string; node: AdfNode }[] = []
+    let match: RegExpExecArray | null
+    while ((match = regex.exec(raw)) !== null) {
+      if (this.isEscaped(raw, match.index)) continue
+      const id = decodeString(match[1] ?? '')
+      const display = decodeString(match[2] ?? '')
+      mentions.push({ token: `@{${id}|${display}}`, node: this.mention(id, display) })
+    }
+    if (mentions.length === 0) return this.textSegments(value, marks)
+
+    // Placing each mention by string search in the decoded value strips container
+    // markers, but is only sound when every real token's occurrences in `value` are
+    // exactly the real mentions. If a count is higher, an escaped `\@{…}` or an
+    // entity `&#64;{…}` produced an identical decoded literal, and the search could
+    // bind a mention to that literal — @-mentioning someone the author escaped. Fall
+    // back to the source slice there: it keeps escape, entity, and order exact.
+    const realCount = new Map<string, number>()
+    for (const { token } of mentions) realCount.set(token, (realCount.get(token) ?? 0) + 1)
+    const decodedIsSound = [...realCount].every(([token, n]) => this.countOccurrences(value, token) === n)
+    if (!decodedIsSound) return this.mentionSegmentsFromSource(raw, marks)
+
+    const out: AdfNode[] = []
+    let cursor = 0
+    for (const { token, node } of mentions) {
+      const at = value.indexOf(token, cursor)
+      if (at === -1) return this.mentionSegmentsFromSource(raw, marks)
+      if (at > cursor) out.push(...this.textSegments(value.slice(cursor, at), marks))
+      out.push(node)
+      cursor = at + token.length
+    }
+    if (cursor < value.length || out.length === 0) out.push(...this.textSegments(value.slice(cursor), marks))
+    return out
+  }
+
+  /** Non-overlapping occurrences of `needle` in `haystack`. */
+  private countOccurrences(haystack: string, needle: string): number {
+    let count = 0
+    let from = 0
+    for (let at = haystack.indexOf(needle, from); at !== -1; at = haystack.indexOf(needle, from)) {
+      count++
+      from = at + needle.length
+    }
+    return count
+  }
+
+  /**
+   * The original source-space split, kept for the rare text node where the decoded
+   * value carries a literal identical to a real mention (an escaped or entity token).
+   * It emits the surrounding text from the source slice, so a container marker there
+   * can leak — the same, pre-existing behaviour — but escape, entity, and order stay
+   * exact, which matters more than a marker in that corner.
+   */
+  private mentionSegmentsFromSource(raw: string, marks: AdfMark[]): AdfNode[] {
     const out: AdfNode[] = []
     const regex = this.mentionToken()
     let buffer = ''
@@ -623,7 +742,9 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
           .map((item, index) => this.listItemToMarkdown(item, `${order + index}. `, names))
           .join('\n')
       }
-      case 'expand': {
+      // A nestedExpand reads back to the same `<details>` as an expand; depth re-derives which to emit on write.
+      case 'expand':
+      case 'nestedExpand': {
         const title = typeof node.attrs?.['title'] === 'string' ? node.attrs['title'] : ''
         return `<details><summary>${title}</summary>\n\n${this.render(node.content ?? [], names)}\n\n</details>`
       }
