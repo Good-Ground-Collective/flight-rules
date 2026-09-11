@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import { markdownAdfConverter, type MediaLookup } from '../markdown-adf.js'
 import type { AdfNode } from '../adf.js'
+import { validator } from '@atlaskit/adf-utils/validator'
 import { roundTripCases } from './round-trip-cases.js'
+import { assertContentModel as assertValidAdf } from './content-model.js'
 
 const roundTrip = (markdown: string): string => markdownAdfConverter.toMarkdown(markdownAdfConverter.toAdf(markdown).content)
 
@@ -104,6 +106,52 @@ describe('markdownAdfConverter.toAdf', () => {
     expect(expand?.content?.some((n) => n.type === 'codeBlock')).toBe(true)
   })
 
+  it('flattens a nested <details> instead of emitting an invalid expand-in-expand', () => {
+    // ADF holds an expand only at the document top level and nests no collapsible
+    // inside it, so the inner <details> flattens: its summary becomes bold text and
+    // its body inlines beside the outer body, all inside the one top-level expand.
+    const doc = markdownAdfConverter.toAdf(
+      '<details><summary>Outer</summary>\n\nouter body\n\n<details><summary>Inner</summary>\n\ninner body\n\n</details>\n\n</details>',
+    )
+    expect(doc.content).toEqual([
+      {
+        type: 'expand',
+        attrs: { title: 'Outer' },
+        content: [
+          { type: 'paragraph', content: [{ type: 'text', text: 'outer body' }] },
+          { type: 'paragraph', content: [{ type: 'text', text: 'Inner', marks: [{ type: 'strong' }] }] },
+          { type: 'paragraph', content: [{ type: 'text', text: 'inner body' }] },
+        ],
+      },
+    ])
+    expect(() => doc.content.forEach((node) => assertValidAdf(node))).not.toThrow()
+  })
+
+  it('flattens every level of a doubly-nested <details> beside its body', () => {
+    const doc = markdownAdfConverter.toAdf(
+      '<details><summary>L1</summary>\n\n<details><summary>L2</summary>\n\n<details><summary>L3</summary>\n\ndeep\n\n</details>\n\n</details>\n\n</details>',
+    )
+    expect(doc.content).toEqual([
+      {
+        type: 'expand',
+        attrs: { title: 'L1' },
+        content: [
+          { type: 'paragraph', content: [{ type: 'text', text: 'L2', marks: [{ type: 'strong' }] }] },
+          { type: 'paragraph', content: [{ type: 'text', text: 'L3', marks: [{ type: 'strong' }] }] },
+          { type: 'paragraph', content: [{ type: 'text', text: 'deep' }] },
+        ],
+      },
+    ])
+    expect(() => doc.content.forEach((node) => assertValidAdf(node))).not.toThrow()
+  })
+
+  it('gives an empty <details> a filler paragraph so the expand is never empty', () => {
+    const doc = markdownAdfConverter.toAdf('<details><summary>Empty</summary>\n\n</details>')
+    expect(doc.content).toEqual([
+      { type: 'expand', attrs: { title: 'Empty' }, content: [{ type: 'paragraph', content: [] }] },
+    ])
+  })
+
   it('splits a soft line break into text, hardBreak, text within one paragraph', () => {
     const doc = markdownAdfConverter.toAdf('line one\nline two')
     expect(doc.content).toEqual([
@@ -160,13 +208,15 @@ describe('markdown ⇄ ADF round-trip', () => {
     expect(roundTrip(markdown)).toBe(markdown)
   })
 
-  it('round-trips nested details byte-equivalently', () => {
-    // Kept out of the shared, schema-validated corpus: nested <details> emits an
-    // `expand` inside an `expand`, which the ADF schema rejects, but the bytes
-    // still round-trip.
+  it('re-emits a nested <details> as a stable, schema-valid flattened form', () => {
+    // A nested <details> flattens (see the toAdf tests), so it no longer round-trips
+    // byte-for-byte — but the flattened markdown it produces is itself stable, and
+    // the emitted ADF is valid where the old expand-in-expand was not.
     const markdown =
       '<details><summary>Outer</summary>\n\n<details><summary>Inner</summary>\n\ndeep\n\n</details>\n\n</details>'
-    expect(roundTrip(markdown)).toBe(markdown)
+    const once = roundTrip(markdown)
+    expect(roundTrip(once)).toBe(once)
+    for (const node of markdownAdfConverter.toAdf(markdown).content) assertValidAdf(node)
   })
 
   it('round-trips the full layered-body template', () => {
@@ -917,5 +967,194 @@ describe('markdownAdfConverter @mentions', () => {
     it('round-trips a display with an entity-like sequence', () => stable('@Ada &copy;'))
     it('round-trips a display with a code delimiter', () => stable('@Ada `x`'))
     it('round-trips a display with a link bracket', () => stable('@Ada [x]'))
+  })
+})
+
+describe('markdownAdfConverter mentions inside containers', () => {
+  const paragraphOf = (node: AdfNode | undefined): AdfNode[] => node?.content?.[0]?.content ?? []
+
+  it('converts a mention inside a single-line blockquote', () => {
+    const [quote] = markdownAdfConverter.toAdf('> hello @{acct-1|Jane Doe} there').content
+    expect(quote?.type).toBe('blockquote')
+    expect(paragraphOf(quote)).toEqual([
+      { type: 'text', text: 'hello ' },
+      { type: 'mention', attrs: { id: 'acct-1', text: '@Jane Doe' } },
+      { type: 'text', text: ' there' },
+    ])
+  })
+
+  it('does not leak the > marker when a mention sits on a blockquote continuation line', () => {
+    const markdown = '> first line\n> second @{acct-1|Jane Doe} line'
+    const [quote] = markdownAdfConverter.toAdf(markdown).content
+    // The continuation-line `> ` lives in the source slice mentions tokenize over;
+    // it must not survive into the emitted text or the quote re-nests on round-trip.
+    expect(paragraphOf(quote)).toEqual([
+      { type: 'text', text: 'first line' },
+      { type: 'hardBreak' },
+      { type: 'text', text: 'second ' },
+      { type: 'mention', attrs: { id: 'acct-1', text: '@Jane Doe' } },
+      { type: 'text', text: ' line' },
+    ])
+    expect(markdownAdfConverter.toMarkdown(markdownAdfConverter.toAdf(markdown).content)).toBe(markdown)
+  })
+
+  it('strips the alert marker even when the panel body carries a mention', () => {
+    const markdown = '> [!NOTE]\n> ping @{acct-1|Jane Doe} please'
+    const [panel] = markdownAdfConverter.toAdf(markdown).content
+    expect(panel?.type).toBe('panel')
+    // Before the fix the mention path read the raw source, leaking `[!NOTE]` and `> `.
+    expect(paragraphOf(panel)).toEqual([
+      { type: 'text', text: 'ping ' },
+      { type: 'mention', attrs: { id: 'acct-1', text: '@Jane Doe' } },
+      { type: 'text', text: ' please' },
+    ])
+    expect(markdownAdfConverter.toMarkdown(markdownAdfConverter.toAdf(markdown).content)).toBe(markdown)
+  })
+
+  it('emits a hardBreak, not an empty text node, when a mention starts a continuation line', () => {
+    // The decoded before-text is `first\n`; its empty trailing segment must not
+    // become a `{ text: '' }` node, which ADF rejects as INVALID_TEXT.
+    const [quote] = markdownAdfConverter.toAdf('> first\n> @{a|b}').content
+    expect(paragraphOf(quote)).toEqual([
+      { type: 'text', text: 'first' },
+      { type: 'hardBreak' },
+      { type: 'mention', attrs: { id: 'a', text: '@b' } },
+    ])
+  })
+})
+
+describe('markdownAdfConverter mention placement is escape-safe', () => {
+  const firstParagraph = (markdown: string): AdfNode[] => markdownAdfConverter.toAdf(markdown).content[0]?.content ?? []
+
+  it('mentions only the real token when an identical escaped literal precedes it', () => {
+    // The decoded value carries two identical `@{acct|Jane}` strings; a naive search
+    // would bind the mention to the first (the escaped literal) and @-mention Jane.
+    expect(firstParagraph('\\@{acct|Jane} then @{acct|Jane}')).toEqual([
+      { type: 'text', text: '@{acct|Jane} then ' },
+      { type: 'mention', attrs: { id: 'acct', text: '@Jane' } },
+    ])
+  })
+
+  it('mentions only the real token when an identical entity literal precedes it', () => {
+    expect(firstParagraph('&#64;{acct|Jane} then @{acct|Jane}')).toEqual([
+      { type: 'text', text: '@{acct|Jane} then ' },
+      { type: 'mention', attrs: { id: 'acct', text: '@Jane' } },
+    ])
+  })
+
+  it('places two genuinely identical real mentions at both occurrences', () => {
+    expect(firstParagraph('@{a|b} and @{a|b}')).toEqual([
+      { type: 'mention', attrs: { id: 'a', text: '@b' } },
+      { type: 'text', text: ' and ' },
+      { type: 'mention', attrs: { id: 'a', text: '@b' } },
+    ])
+  })
+})
+
+describe('markdownAdfConverter emits schema-valid ADF for <details> edge cases', () => {
+  const validate = validator()
+  const validationErrors = (markdown: string): unknown[] => {
+    const errors: unknown[] = []
+    validate(markdownAdfConverter.toAdf(markdown), (_entity, error) => {
+      errors.push(error)
+      return undefined
+    })
+    return errors
+  }
+
+  it('validates a table inside a nested <details> (flattened into the expand)', () => {
+    const markdown =
+      '<details><summary>Outer</summary>\n\n<details><summary>Inner</summary>\n\n| A | B |\n| --- | --- |\n| a | b |\n\n</details>\n\n</details>'
+    expect(validationErrors(markdown)).toEqual([])
+  })
+
+  it('validates a nested <details>', () => {
+    const markdown =
+      '<details><summary>Outer</summary>\n\nbody\n\n<details><summary>Inner</summary>\n\ndeep\n\n</details>\n\n</details>'
+    expect(validationErrors(markdown)).toEqual([])
+  })
+
+  it('validates an empty <details>', () => {
+    expect(validationErrors('<details><summary>Empty</summary>\n\n</details>')).toEqual([])
+  })
+
+  // Depth tracking has to survive list recursion, or a <details> inside a list item
+  // resets to depth 0 and emits an expand (or an expand-in-expand for a task list).
+  const listCases: Array<[string, string]> = [
+    ['a bullet list item', '- item one\n\n  <details><summary>Inner</summary>\n\n  deep\n\n  </details>'],
+    ['an ordered list item', '1. item one\n\n   <details><summary>Inner</summary>\n\n   deep\n\n   </details>'],
+    ['a task list item', '- [ ] task one\n\n  <details><summary>Inner</summary>\n\n  deep\n\n  </details>'],
+  ]
+
+  it.each(listCases)('validates a nested <details> inside %s', (_label, body) => {
+    const markdown = `<details><summary>Outer</summary>\n\n${body}\n\n</details>`
+    const doc = markdownAdfConverter.toAdf(markdown)
+    expect(validationErrors(markdown)).toEqual([])
+    // The inner title and body must survive the flatten, not just validate.
+    const serialized = JSON.stringify(doc.content)
+    expect(serialized).toContain('"text":"Inner"')
+    expect(serialized).toContain('"text":"deep"')
+  })
+
+  it('validates a <details> in a list nested inside a quoted body (depth through blockquote)', () => {
+    const markdown =
+      '<details><summary>O</summary>\n\n> - item\n>\n>   <details><summary>I</summary>\n>\n>   deep\n>\n>   </details>\n\n</details>'
+    expect(validationErrors(markdown)).toEqual([])
+  })
+
+  it('validates a <details> in a list nested inside a panel body (depth through panel)', () => {
+    const markdown =
+      '<details><summary>O</summary>\n\n> [!NOTE]\n> - item\n>\n>   <details><summary>I</summary>\n>\n>   deep\n>\n>   </details>\n\n</details>'
+    expect(validationErrors(markdown)).toEqual([])
+  })
+
+  it('validates a top-level list item holding a <details> (expand is invalid in a listItem)', () => {
+    expect(validationErrors('- item\n\n  <details><summary>I</summary>\n\n  deep\n\n  </details>')).toEqual([])
+  })
+
+  it('validates a table inside a <details> inside a list item (table is invalid in a listItem)', () => {
+    const markdown = '- <details><summary>X</summary>\n\n  | A |\n  | --- |\n  | B |\n\n  </details>'
+    const doc = markdownAdfConverter.toAdf(markdown)
+    expect(validationErrors(markdown)).toEqual([])
+    // The table unwraps to its cell paragraphs, so the cell text survives the flatten.
+    const serialized = JSON.stringify(doc.content)
+    expect(serialized).toContain('"text":"A"')
+    expect(serialized).toContain('"text":"B"')
+  })
+
+  it('validates an empty <details> inside a list item (never an empty listItem)', () => {
+    expect(validationErrors('- <details>\n\n  </details>')).toEqual([])
+  })
+
+  // A table/quote/heading directly in a list item is invalid ADF too — pre-existing,
+  // now normalized by the same listItem coercion the details flatten relies on.
+  const directCases: Array<[string, string]> = [
+    ['a table', '- item\n\n  | A |\n  | --- |\n  | b |'],
+    ['a blockquote', '- item\n\n  > quoted'],
+  ]
+  it.each(directCases)('validates %s placed directly in a list item', (_label, markdown) => {
+    expect(validationErrors(markdown)).toEqual([])
+  })
+
+  it('preserves mention identity when a quoted mention degrades into a list item', () => {
+    // A blockquote is invalid in a listItem, so it unwraps to a paragraph — but the
+    // mention must survive as a node, not become literal @{…} text a later export
+    // re-escapes, which would accumulate backslashes over repeated conversions.
+    const markdown = '- item\n\n  > ping @{acct|Jane}'
+    const doc = markdownAdfConverter.toAdf(markdown)
+    expect(validationErrors(markdown)).toEqual([])
+    expect(JSON.stringify(doc.content)).toContain('"type":"mention"')
+    const once = markdownAdfConverter.toMarkdown(doc.content)
+    expect(once).toContain('@{acct|Jane}')
+    expect(markdownAdfConverter.toMarkdown(markdownAdfConverter.toAdf(once).content)).toBe(once)
+  })
+
+  it('preserves a mention flattened out of a <details> nested in a list item', () => {
+    const markdown = '- <details><summary>X</summary>\n\n  > ping @{acct|Jane}\n\n  </details>'
+    const doc = markdownAdfConverter.toAdf(markdown)
+    expect(validationErrors(markdown)).toEqual([])
+    expect(JSON.stringify(doc.content)).toContain('"type":"mention"')
+    const once = markdownAdfConverter.toMarkdown(doc.content)
+    expect(markdownAdfConverter.toMarkdown(markdownAdfConverter.toAdf(once).content)).toBe(once)
   })
 })
