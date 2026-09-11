@@ -15,16 +15,21 @@ export interface MarkdownAdfConverter {
 
 /**
  * Bidirectional markdown ⇄ ADF conversion for the layered-body subset
- * (docs/layered-body-format.md): headings, paragraphs with bold / code / link
- * marks, fenced code blocks, task lists, bullet and ordered lists, thematic
- * breaks, and `<details>` blocks (mapped to ADF expands). The write direction
- * parses with `mdast-util-from-markdown` plus the GFM extensions and maps mdast
- * nodes to ADF in a `switch` on `node.type`; the read direction is a
- * hand-written emitter, kept off mdast so `*`/`_` are never over-escaped and
- * the round-trip stays byte-stable. Anything outside the mapped subset degrades
- * to literal text sliced from the node's source position on write, so it
- * round-trips unchanged until its own node-family ticket claims it; unknown ADF
- * nodes flatten to their text on read.
+ * (docs/layered-body-format.md): headings, paragraphs with emphasis / strong /
+ * strikethrough / code / link marks, fenced code blocks, task lists, nested
+ * bullet and ordered lists, thematic breaks, and `<details>` blocks (mapped to
+ * ADF expands). The write direction parses with `mdast-util-from-markdown` plus
+ * the GFM extensions and maps mdast nodes to ADF in a `switch` on `node.type`;
+ * the read direction is a hand-written emitter, kept off mdast so `*`/`_` are
+ * never over-escaped. mdast nests marks where ADF flattens them onto one text
+ * node, so the emitter coalesces each text node's stored (outermost-first) marks
+ * into shared spans — opening a delimiter when a mark first applies across
+ * adjacent nodes and closing it only once it stops — which keeps a link inside
+ * or outside a bold consistent with how it was authored and avoids re-opening a
+ * span per node. Anything outside the mapped subset (images, tables,
+ * blockquotes) degrades to literal text sliced from the node's source position
+ * on write, so it round-trips unchanged until its own node-family ticket claims
+ * it; unknown ADF nodes flatten to their text on read.
  */
 export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
   toAdf(markdown: string): AdfDocNode {
@@ -142,7 +147,7 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
 
   private listNodes(node: List, source: string): AdfNode[] {
     if (node.children.some((item) => item.checked === true || item.checked === false)) {
-      return [this.taskList(node, source)]
+      return this.taskList(node, source)
     }
 
     const ordered = node.ordered === true
@@ -164,16 +169,27 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
     return { type: 'orderedList', ...(order === 1 ? {} : { attrs: { order } }), content }
   }
 
-  private taskList(node: List, source: string): AdfNode {
+  /**
+   * ADF's `taskItem` is inline-only, so each item takes just the inline content
+   * of its leading paragraph. A task item's remaining blocks (a nested list or a
+   * continuation paragraph) can't live inside the taskItem or nest a list within
+   * it — both are invalid ADF — so they spill out as sibling blocks after the
+   * taskList, preserving the content without corrupting the flat-checklist case
+   * that gets posted to Jira. Round-trip stays valid; the rare nested case flattens.
+   */
+  private taskList(node: List, source: string): AdfNode[] {
+    const overflow: AdfNode[] = []
     const content = node.children.map((item, index) => {
       const first = item.children[0]
+      const leadsWithParagraph = first !== undefined && first.type === 'paragraph'
+      overflow.push(...this.blocks(leadsWithParagraph ? item.children.slice(1) : item.children, source))
       return {
         type: 'taskItem',
         attrs: { localId: `task-${index + 1}`, state: item.checked === true ? 'DONE' : 'TODO' },
-        content: first !== undefined && first.type === 'paragraph' ? this.inline(first.children, source) : [],
+        content: leadsWithParagraph ? this.inline(first.children, source) : [],
       }
     })
-    return { type: 'taskList', attrs: { localId: 'task-list' }, content }
+    return [{ type: 'taskList', attrs: { localId: 'task-list' }, content }, ...overflow]
   }
 
   private inline(nodes: PhrasingContent[], source: string, marks: AdfMark[] = []): AdfNode[] {
@@ -183,21 +199,31 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
         case 'text':
           out.push(...this.textSegments(node.value, marks))
           break
+        case 'emphasis':
+          out.push(...this.inline(node.children, source, [...marks, { type: 'em' }]))
+          break
         case 'strong':
           out.push(...this.inline(node.children, source, [...marks, { type: 'strong' }]))
           break
-        // ADF's code mark excludes fontStyle marks, so any inherited strong is dropped.
+        case 'delete':
+          out.push(...this.inline(node.children, source, [...marks, { type: 'strike' }]))
+          break
+        // ADF's code mark excludes fontStyle marks (so inherited emphasis/strong drop) but keeps an enclosing link.
         case 'inlineCode':
-          out.push({ type: 'text', text: node.value, marks: [{ type: 'code' }] })
+          out.push({
+            type: 'text',
+            text: node.value,
+            marks: [...marks.filter((mark) => mark.type === 'link'), { type: 'code' }],
+          })
           break
         case 'break':
           out.push({ type: 'hardBreak' })
           break
         case 'link': {
-          const href = node.url
-          for (const child of this.inline(node.children, source, marks)) {
-            out.push({ ...child, marks: [...(child.marks ?? []), { type: 'link', attrs: { href } }] })
-          }
+          const hasTitle = typeof node.title === 'string' && node.title !== ''
+          const attrs = hasTitle ? { href: node.url, title: node.title } : { href: node.url }
+          const link: AdfMark = { type: 'link', attrs }
+          out.push(...this.inline(node.children, source, [...marks.filter((mark) => mark.type !== 'link'), link]))
           break
         }
         default:
@@ -243,21 +269,15 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
         return `\`\`\`${language}\n${text}\n\`\`\``
       }
       case 'taskList':
+        // A taskItem is inline-only, so it renders as a single checklist line.
         return (node.content ?? [])
-          .map(
-            (item) =>
-              `- [${item.attrs?.['state'] === 'DONE' ? 'x' : ' '}] ${this.inlineToMarkdown(item.content ?? [])}`,
-          )
+          .map((item) => `- [${item.attrs?.['state'] === 'DONE' ? 'x' : ' '}] ${this.inlineToMarkdown(item.content ?? [])}`)
           .join('\n')
       case 'bulletList':
-        return (node.content ?? [])
-          .map((item) => `- ${this.toMarkdown(item.content ?? []).replace(/\n/g, '\n  ')}`)
-          .join('\n')
+        return (node.content ?? []).map((item) => this.listItemToMarkdown(item, '- ')).join('\n')
       case 'orderedList': {
         const order = typeof node.attrs?.['order'] === 'number' ? node.attrs['order'] : 1
-        return (node.content ?? [])
-          .map((item, index) => `${order + index}. ${this.toMarkdown(item.content ?? []).replace(/\n/g, '\n   ')}`)
-          .join('\n')
+        return (node.content ?? []).map((item, index) => this.listItemToMarkdown(item, `${order + index}. `)).join('\n')
       }
       case 'expand': {
         const title = typeof node.attrs?.['title'] === 'string' ? node.attrs['title'] : ''
@@ -271,20 +291,212 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
     }
   }
 
+  /**
+   * Emits one list item and its nested blocks. ADF holds a nested list as a
+   * sibling of the item's paragraph, so a nested list joins onto the item with a
+   * single newline while any other block joins with a blank line; continuation
+   * lines then indent by the marker width, nesting `- ` at two spaces, `1. ` at
+   * three, and `10. ` at four.
+   */
+  private listItemToMarkdown(item: AdfNode, marker: string): string {
+    let body = ''
+    for (const block of item.content ?? []) {
+      const rendered = this.blockToMarkdown(block)
+      if (rendered.length === 0) continue
+      const nestedList = block.type === 'bulletList' || block.type === 'orderedList' || block.type === 'taskList'
+      body = body.length === 0 ? rendered : `${body}${nestedList ? '\n' : '\n\n'}${rendered}`
+    }
+    const indent = ' '.repeat(marker.length)
+    return `${marker}${body.replace(/\n/g, `\n${indent}`)}`
+  }
+
+  /**
+   * Serializes a text node's marks as coalesced spans rather than wrapping each
+   * node independently. Marks are stored outermost-first, so a delimiter opens
+   * when a mark first appears across adjacent nodes and closes only once it stops
+   * applying to the next node. That keeps a mark spanning several text nodes as a
+   * single span (`**before [x](u) after**`) instead of re-opening it per node,
+   * which would re-parse to duplicate marks. Text inside a code span is emitted
+   * verbatim; all other text is escaped so decoded literals (`literal *x*`)
+   * don't re-parse as syntax.
+   */
   private inlineToMarkdown(nodes: AdfNode[]): string {
-    return nodes
-      .map((node) => {
-        if (node.type === 'hardBreak') return '\n'
-        let text = node.text ?? (node.content !== undefined ? this.inlineToMarkdown(node.content) : '')
-        const marks = node.marks ?? []
-        if (marks.some((mark) => mark.type === 'code')) text = `\`${text}\``
-        if (marks.some((mark) => mark.type === 'strong')) text = `**${text}**`
-        const link = marks.find((mark) => mark.type === 'link')
-        const href = link?.attrs?.['href']
-        if (typeof href === 'string') text = `[${text}](${href})`
+    let out = ''
+    const open: AdfMark[] = []
+    const closeFrom = (from: number): void => {
+      while (open.length > from) {
+        const mark = open.pop()
+        if (mark !== undefined) out += this.markClose(mark)
+      }
+    }
+    for (const node of nodes) {
+      if (node.type === 'hardBreak') {
+        closeFrom(0)
+        out += '\n'
+        continue
+      }
+      if (node.text === undefined) {
+        // A content-bearing inline node can't share a span, so flush open marks and reapply its own innermost-first.
+        closeFrom(0)
+        const inner = node.content !== undefined ? this.inlineToMarkdown(node.content) : ''
+        out += [...(node.marks ?? [])].reverse().reduce((text, mark) => this.applyMark(text, mark), inner)
+        continue
+      }
+      const marks = node.marks ?? []
+      const solo = marks[0]
+      if (marks.length === 1 && open.length === 0 && solo !== undefined) {
+        const bare = this.tryBareUrl(node.text, solo)
+        if (bare !== undefined) {
+          out += bare
+          continue
+        }
+      }
+      let common = 0
+      while (common < open.length && common < marks.length) {
+        const opened = open[common]
+        const wanted = marks[common]
+        if (opened === undefined || wanted === undefined || !this.marksEqual(opened, wanted)) break
+        common++
+      }
+      closeFrom(common)
+      for (let k = common; k < marks.length; k++) {
+        const mark = marks[k]
+        if (mark === undefined) continue
+        out += this.markOpen(mark)
+        open.push(mark)
+      }
+      out += this.escapeText(node.text, open.some((mark) => mark.type === 'code'))
+    }
+    closeFrom(0)
+    return out
+  }
+
+  /**
+   * Wraps text in the markdown for one mark, innermost-first. Only used for the
+   * rare content-bearing inline node; the main text path coalesces marks instead.
+   */
+  private applyMark(text: string, mark: AdfMark): string {
+    switch (mark.type) {
+      case 'code':
+        return `\`${text}\``
+      case 'em':
+        return `*${text}*`
+      case 'strong':
+        return `**${text}**`
+      case 'strike':
+        return `~~${text}~~`
+      case 'link':
+        return this.linkToMarkdown(text, mark)
+      default:
         return text
-      })
-      .join('')
+    }
+  }
+
+  private markOpen(mark: AdfMark): string {
+    switch (mark.type) {
+      case 'code':
+        return '`'
+      case 'em':
+        return '*'
+      case 'strong':
+        return '**'
+      case 'strike':
+        return '~~'
+      case 'link':
+        return typeof mark.attrs?.['href'] === 'string' ? '[' : ''
+      default:
+        return ''
+    }
+  }
+
+  private markClose(mark: AdfMark): string {
+    switch (mark.type) {
+      case 'code':
+        return '`'
+      case 'em':
+        return '*'
+      case 'strong':
+        return '**'
+      case 'strike':
+        return '~~'
+      case 'link':
+        return this.linkClose(mark)
+      default:
+        return ''
+    }
+  }
+
+  private linkClose(mark: AdfMark): string {
+    const href = mark.attrs?.['href']
+    if (typeof href !== 'string') return ''
+    const title = mark.attrs?.['title']
+    const suffix = typeof title === 'string' ? ` "${this.encodeTitle(title)}"` : ''
+    return `](${this.encodeDestination(href)}${suffix})`
+  }
+
+  private marksEqual(a: AdfMark, b: AdfMark): boolean {
+    if (a.type !== b.type) return false
+    if (a.type === 'link') return a.attrs?.['href'] === b.attrs?.['href'] && a.attrs?.['title'] === b.attrs?.['title']
+    return true
+  }
+
+  /**
+   * Collapses a link whose visible text equals its destination to the bare url,
+   * but only when the destination needs no escaping and there's no title — so the
+   * autolink re-parses to the same href. Otherwise the caller emits `[text](dest)`.
+   */
+  private tryBareUrl(text: string, mark: AdfMark): string | undefined {
+    if (mark.type !== 'link') return undefined
+    const href = mark.attrs?.['href']
+    if (typeof href !== 'string') return undefined
+    if (typeof mark.attrs?.['title'] === 'string') return undefined
+    if (text !== href || this.encodeDestination(href) !== href) return undefined
+    return href
+  }
+
+  private linkToMarkdown(text: string, mark: AdfMark): string {
+    const href = mark.attrs?.['href']
+    if (typeof href !== 'string') return text
+    const bare = this.tryBareUrl(text, mark)
+    if (bare !== undefined) return bare
+    const title = mark.attrs?.['title']
+    const suffix = typeof title === 'string' ? ` "${this.encodeTitle(title)}"` : ''
+    return `[${text}](${this.encodeDestination(href)}${suffix})`
+  }
+
+  /**
+   * Escapes a link destination so it re-parses to the same string: literal `\`
+   * and `&` are backslash-escaped (mdast otherwise reads `&copy;` as an entity),
+   * and a destination carrying spaces, control chars, or parens is wrapped in
+   * `<...>` with its `<`/`>` escaped.
+   */
+  private encodeDestination(url: string): string {
+    const escaped = url.replace(/[\\&]/g, (ch) => `\\${ch}`)
+    // eslint-disable-next-line no-control-regex -- a control char in a bare destination is invalid, so force the <...> form
+    if (/[ \t -()]/.test(url)) return `<${escaped.replace(/[<>]/g, (ch) => `\\${ch}`)}>`
+    return escaped
+  }
+
+  /**
+   * Escapes a link title emitted inside `"..."`: `\`, `&`, and the `"` delimiter
+   * are backslash-escaped so the title re-parses unchanged instead of breaking
+   * the link or being read as an entity.
+   */
+  private encodeTitle(title: string): string {
+    return title.replace(/[\\&"]/g, (ch) => `\\${ch}`)
+  }
+
+  /**
+   * Escapes literal text so mdast-decoded content doesn't re-parse as syntax:
+   * `\`, `*`, and `` ` `` are the markers that would otherwise reinterpret plain
+   * text as emphasis or code. Text inside a code span is left verbatim, and
+   * characters that only matter at block scope (`[`, `|`, `>`, `!`) stay
+   * unescaped so degraded literal blocks round-trip byte-for-byte. Marks like
+   * emphasis are emitted via their own delimiters, not through this.
+   */
+  private escapeText(text: string, insideCode: boolean): string {
+    if (insideCode) return text
+    return text.replace(/[\\*`]/g, (ch) => `\\${ch}`)
   }
 }
 

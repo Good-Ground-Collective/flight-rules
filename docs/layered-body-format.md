@@ -66,34 +66,57 @@ size: ticket
 `LayeredBodyAdfConverter.toAdf` parses with `mdast-util-from-markdown` plus the
 GFM extensions and maps a fixed subset of nodes to ADF. The read direction
 (`toMarkdown`) is a hand-written emitter, so `*`/`_` are never over-escaped and
-the round-trip stays byte-stable.
+canonical markdown round-trips byte-stably.
 
 Mapped constructs:
 
 - **Headings** (`#`–`######`) → `heading` with `attrs.level`.
 - **Paragraphs** → `paragraph`; a soft line break becomes a `hardBreak` so single
   newlines survive the round-trip.
-- **Inline marks**: bold (`**x**`) → `strong`, inline code (`` `x` ``) → `code`,
-  and links (`[label](href)`) → a `link` mark on the label text.
+- **Inline marks**, which accumulate through nesting onto one text node:
+
+  | Markdown | ADF mark |
+  | --- | --- |
+  | `*x*` / `_x_` | `em` |
+  | `**x**` | `strong` |
+  | `~~x~~` | `strike` |
+  | `` `x` `` | `code` |
+  | `[label](href)` / `[label](href "title")` | `link` with `attrs.href` and optional `attrs.title` |
+
+  So `***x***` carries `em` + `strong`, and `[**x**](u)` carries `strong` + `link`.
+  ADF's `code` mark drops any inherited `em`/`strong`/`strike` (but keeps a link),
+  so `` **`x`** `` normalizes to `` `x` ``.
 - **Fenced code** → `codeBlock`, carrying the language in `attrs.language`.
-- **Bullet lists** → `bulletList`; **task lists** (`- [ ]` / `- [x]`) → `taskList`
-  with `TODO`/`DONE` task items; **ordered lists** → `orderedList`.
+- **Bullet, ordered, and nested lists** → `bulletList` / `orderedList`; a
+  `listItem` holds `[paragraph, nested list]` at any depth, and a bullet may nest
+  inside an ordered list or the reverse. **Task lists** (`- [ ]` / `- [x]`) →
+  `taskList` with `TODO`/`DONE` task items (top level only — task items hold
+  inline content, not nested lists).
 - **Thematic breaks** (`---`) → `rule`.
 - **`<details>`/`<summary>` pairs** → `expand`, the summary as `attrs.title`;
   nested details nest.
 
 Degradation and normalizations:
 
-- **Literal-text degradation.** Any construct outside the subset — emphasis,
-  strikethrough, images, tables, blockquotes, stray HTML — is kept as literal
-  text sliced from its markdown source, so it round-trips byte-identically until
-  its own node-family ticket claims it. An unclosed `<details>` degrades to
-  literal paragraph text rather than looping.
+- **Literal-text degradation.** Images, tables, blockquotes, and stray HTML are
+  kept as literal text sliced from their markdown source, so they round-trip
+  byte-identically until their own node-family ticket claims them. An unclosed
+  `<details>` degrades to literal paragraph text rather than looping.
+- **Mark normalizations.** `_x_` → `*x*`; a link whose text equals its href
+  collapses to the bare url; `` **`x`** `` drops the bold from the code span;
+  `underline`, `textColor`, `subsup`, and `border` marks emit their text
+  unmarked. Marks reapply in their stored nesting order, so `[**x**](u)` keeps the
+  link outside the bold and `**[x](u)**` keeps it inside.
+- **List normalizations.** `*` and `+` bullets render as `-`; nested indentation
+  is the parent marker width (`- ` = 2, `1. ` = 3, `10. ` = 4), so four-space
+  nesting collapses; a paragraph joins a nested list with a single newline and
+  another block with a blank line.
 - **Loose lists.** A list with blank lines between its items (a *loose* list) has
   no ADF equivalent, so it emits as one single-item list per item; the emitter's
   `\n\n` block join reproduces the blank lines.
 - **Ordered-list renumbering.** `orderedList` markers are rendered from the list
-  start (`attrs.order`, defaulting to 1), not from the source digits.
+  start (`attrs.order`, defaulting to 1), not from the source digits, so
+  `1. a\n1. b` renumbers to `1. a\n2. b`.
 
 ## Rules
 

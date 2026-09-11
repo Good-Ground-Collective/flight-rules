@@ -48,9 +48,9 @@ describe('markdownAdfConverter.toAdf', () => {
       {
         type: 'paragraph',
         content: [
-          { type: 'text', text: 'bold', marks: [{ type: 'strong' }, { type: 'link', attrs: { href: 'https://a.dev' } }] },
+          { type: 'text', text: 'bold', marks: [{ type: 'link', attrs: { href: 'https://a.dev' } }, { type: 'strong' }] },
           { type: 'text', text: ' and ' },
-          { type: 'text', text: 'code', marks: [{ type: 'code' }, { type: 'link', attrs: { href: 'https://b.dev' } }] },
+          { type: 'text', text: 'code', marks: [{ type: 'link', attrs: { href: 'https://b.dev' } }, { type: 'code' }] },
         ],
       },
     ])
@@ -68,6 +68,7 @@ describe('markdownAdfConverter.toAdf', () => {
     const [taskList] = doc.content
     expect(taskList?.type).toBe('taskList')
     expect(taskList?.content?.map((item) => item.attrs?.['state'])).toEqual(['TODO', 'DONE'])
+    // ADF taskItem is inline-only, so it holds the paragraph's inline text directly (see FINDING 2).
     expect(taskList?.content?.[0]?.content).toEqual([{ type: 'text', text: 'first' }])
   })
 
@@ -170,9 +171,28 @@ describe('markdown ⇄ ADF round-trip', () => {
     ['loose ordered list keeps numbering', '1. first\n\n2. second'],
     ['rule', '---'],
     ['multi-line paragraph', 'line one\nline two'],
-    ['literal emphasis', 'Ship *now* today'],
-    ['literal strikethrough', 'Drop ~~this~~ instead'],
-    ['literal link stays byte-stable', 'See [docs](https://x.dev) first'],
+    ['emphasis', 'Ship *now* today'],
+    ['bold italic', 'Ship ***now*** today'],
+    ['strikethrough', 'Drop ~~this~~ instead'],
+    ['code then emphasis', 'Run `npm test` then *retry*'],
+    ['marks inside a code span stay literal', 'Use `a *b* ~~c~~ **d**` verbatim'],
+    ['link', 'See [the docs](https://x.dev) first'],
+    ['link with title', 'See [the docs](https://x.dev "Docs") first'],
+    ['bold link text', 'See [**the docs**](https://x.dev)'],
+    ['bold around a link', 'See **[the docs](https://x.dev)**'],
+    ['code link text', 'See [`flight-rules check`](https://x.dev)'],
+    ['strike around bold', 'Was ~~**required**~~ now optional'],
+    ['heading with marks', '## Ship *it* **now**'],
+    ['intraword underscore stays literal', 'the max_retry_count field'],
+    ['nested bullets', '- outer\n  - inner\n- second outer'],
+    ['deeply nested bullets', '- a\n  - b\n    - c'],
+    ['bullet with a nested ordered list', '- outer\n  1. one\n  2. two'],
+    ['ordered with a nested bullet list', '1. outer\n   - inner'],
+    ['nested bullet carrying marks', '- outer\n  - inner **bold** and `code`'],
+    [
+      'bullet list nested inside a details block',
+      '<details><summary>Guided Walkthrough</summary>\n\n- outer\n  - inner\n\n</details>',
+    ],
     ['literal image', '![a](https://x.dev/a.png)'],
     ['literal table', '| A |\n| --- |\n| 1 |'],
     ['literal blockquote', '> quoted line'],
@@ -221,6 +241,170 @@ describe('markdown ⇄ ADF round-trip', () => {
     ].join('\n')
 
     expect(roundTrip(body)).toBe(body)
+  })
+})
+
+describe('markdownAdfConverter.toAdf mark and nesting shapes', () => {
+  const firstText = (markdown: string): AdfNode | undefined =>
+    markdownAdfConverter.toAdf(markdown).content[0]?.content?.[0]
+
+  const markTypes = (node: AdfNode | undefined): string[] => (node?.marks ?? []).map((mark) => mark.type).sort()
+
+  it('flattens ~~***x***~~ onto one text node carrying strike, em, and strong', () => {
+    const paragraph = markdownAdfConverter.toAdf('~~***x***~~').content[0]
+    expect(paragraph?.content).toHaveLength(1)
+    const [text] = paragraph?.content ?? []
+    expect(text?.text).toBe('x')
+    expect(markTypes(text)).toEqual(['em', 'strike', 'strong'])
+  })
+
+  it('carries strong and link with an href on a bold link label', () => {
+    const text = firstText('[**x**](https://u)')
+    expect(markTypes(text)).toEqual(['link', 'strong'])
+    const link = text?.marks?.find((mark) => mark.type === 'link')
+    expect(link?.attrs).toEqual({ href: 'https://u' })
+  })
+
+  it('records href and title on a titled link', () => {
+    const text = firstText('[x](https://u "T")')
+    const link = text?.marks?.find((mark) => mark.type === 'link')
+    expect(link?.attrs).toEqual({ href: 'https://u', title: 'T' })
+  })
+
+  it('maps a nested bullet to a listItem holding [paragraph, bulletList]', () => {
+    const [bulletList] = markdownAdfConverter.toAdf('- outer\n  - inner').content
+    const [listItem] = bulletList?.content ?? []
+    expect(listItem?.type).toBe('listItem')
+    expect(listItem?.content?.map((child) => child.type)).toEqual(['paragraph', 'bulletList'])
+  })
+})
+
+describe('markdownAdfConverter round-trip fidelity (adversarial review)', () => {
+  // toAdf → toMarkdown → toAdf must be stable: re-parsing the emitted markdown
+  // yields the same ADF, so no content is lost or corrupted on a round trip.
+  const adfStable = (nodes: AdfNode[]): void => {
+    const markdown = markdownAdfConverter.toMarkdown(nodes)
+    expect(markdownAdfConverter.toAdf(markdown).content).toEqual(nodes)
+  }
+  const linkPara = (text: string, attrs: Record<string, unknown>): AdfNode[] => [
+    { type: 'paragraph', content: [{ type: 'text', text, marks: [{ type: 'link', attrs }] }] },
+  ]
+
+  describe('FINDING 1 — link destination and title are escaped', () => {
+    it('keeps a literal ampersand entity in an href from re-decoding', () => {
+      adfStable(linkPara('x', { href: 'https://u/?q=&copy;' }))
+    })
+
+    it('keeps a bare ampersand in an href intact', () => {
+      adfStable(linkPara('x', { href: 'https://u/?a=1&b=2' }))
+    })
+
+    it('escapes a double quote inside a link title', () => {
+      adfStable(linkPara('x', { href: 'https://u', title: 'say "hi"' }))
+    })
+
+    it('wraps a destination containing a space in angle brackets', () => {
+      adfStable(linkPara('x', { href: 'https://u/a b' }))
+    })
+  })
+
+  describe('FINDING 2 — taskItem is inline-only; list-item children survive', () => {
+    const holdsBlock = (node: AdfNode | undefined): boolean =>
+      (node?.content ?? []).some((child) =>
+        ['paragraph', 'bulletList', 'orderedList', 'taskList'].includes(child.type),
+      )
+
+    it('emits a flat task list as inline-only taskItems that round-trip', () => {
+      const markdown = '- [ ] first\n- [x] second'
+      const doc = markdownAdfConverter.toAdf(markdown)
+      const [taskList] = doc.content
+      expect(taskList?.type).toBe('taskList')
+      expect(taskList?.content?.[0]?.content).toEqual([{ type: 'text', text: 'first' }])
+      expect(taskList?.content?.[1]?.content).toEqual([{ type: 'text', text: 'second' }])
+      // No taskItem carries a paragraph or nested list — that would be invalid Jira ADF.
+      expect((taskList?.content ?? []).some(holdsBlock)).toBe(false)
+      expect(markdownAdfConverter.toMarkdown(doc.content)).toBe(markdown)
+    })
+
+    it('keeps a task item with a mark inline and valid', () => {
+      const doc = markdownAdfConverter.toAdf('- [ ] ship **now**')
+      const taskItem = doc.content[0]?.content?.[0]
+      expect(taskItem?.content).toEqual([
+        { type: 'text', text: 'ship ' },
+        { type: 'text', text: 'now', marks: [{ type: 'strong' }] },
+      ])
+      expect(holdsBlock(taskItem)).toBe(false)
+    })
+
+    it('preserves a nested child list without putting a block inside the taskItem', () => {
+      const doc = markdownAdfConverter.toAdf('- [ ] parent\n  - child')
+      const [taskList, sibling] = doc.content
+      expect(taskList?.type).toBe('taskList')
+      // The taskItem stays inline; the nested child spills to a sibling block.
+      expect(taskList?.content?.[0]?.content).toEqual([{ type: 'text', text: 'parent' }])
+      expect((taskList?.content ?? []).some(holdsBlock)).toBe(false)
+      expect(sibling?.type).toBe('bulletList')
+      expect(JSON.stringify(sibling)).toContain('child')
+    })
+
+    it('preserves both paragraphs of a two-paragraph bullet list item (listItem is block content)', () => {
+      const markdown = '- first para\n\n  second para'
+      const doc = markdownAdfConverter.toAdf(markdown)
+      const listItem = doc.content[0]?.content?.[0]
+      expect(listItem?.content?.map((child) => child.type)).toEqual(['paragraph', 'paragraph'])
+      expect(markdownAdfConverter.toAdf(markdownAdfConverter.toMarkdown(doc.content)).content).toEqual(doc.content)
+    })
+  })
+
+  describe('FINDING 3 — shared marks coalesce across adjacent text nodes', () => {
+    const stableFromMarkdown = (markdown: string): void => {
+      const adf = markdownAdfConverter.toAdf(markdown)
+      const reparsed = markdownAdfConverter.toAdf(markdownAdfConverter.toMarkdown(adf.content))
+      expect(reparsed.content).toEqual(adf.content)
+    }
+
+    it('keeps a bold span wrapping a link as a single strong mark', () => {
+      stableFromMarkdown('**before [x](https://u) after**')
+    })
+
+    it('does not duplicate a strong mark nested inside emphasis', () => {
+      stableFromMarkdown('*before **bold** after*')
+    })
+  })
+
+  describe('FINDING 4 — literal text is escaped so it does not re-parse as syntax', () => {
+    it('keeps decoded emphasis markers literal', () => {
+      adfStable([{ type: 'paragraph', content: [{ type: 'text', text: 'literal *x*' }] }])
+    })
+  })
+})
+
+describe('markdownAdfConverter normalizations', () => {
+  it('rewrites underscore emphasis to asterisks', () => {
+    expect(roundTrip('Ship _now_ today')).toBe('Ship *now* today')
+  })
+
+  it('collapses four-space nesting to the marker width', () => {
+    expect(roundTrip('- a\n    - b')).toBe('- a\n  - b')
+  })
+
+  it('renumbers an ordered list from its start', () => {
+    expect(roundTrip('1. a\n1. b')).toBe('1. a\n2. b')
+  })
+
+  it('drops bold from a code span', () => {
+    expect(roundTrip('Use **`x`** here')).toBe('Use `x` here')
+  })
+
+  it('normalizes a star bullet to a dash', () => {
+    expect(roundTrip('* star bullet')).toBe('- star bullet')
+  })
+
+  it('emits a text node carrying an underline mark as plain text', () => {
+    const nodes: AdfNode[] = [
+      { type: 'paragraph', content: [{ type: 'text', text: 'plain', marks: [{ type: 'underline' }] }] },
+    ]
+    expect(markdownAdfConverter.toMarkdown(nodes)).toBe('plain')
   })
 })
 
@@ -277,6 +461,16 @@ describe('markdownAdfConverter.toMarkdown graceful degradation', () => {
       },
     ]
     expect(markdownAdfConverter.toMarkdown(nodes)).toBe('[docs](https://x.dev)')
+  })
+
+  it('collapses a link whose text equals its href to a bare url', () => {
+    const nodes: AdfNode[] = [
+      {
+        type: 'paragraph',
+        content: [{ type: 'text', text: 'https://x.dev', marks: [{ type: 'link', attrs: { href: 'https://x.dev' } }] }],
+      },
+    ]
+    expect(markdownAdfConverter.toMarkdown(nodes)).toBe('https://x.dev')
   })
 
   it('renders ordered lists with numeric markers', () => {
