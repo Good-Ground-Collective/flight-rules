@@ -29195,6 +29195,13 @@ var CommentSchema = external_exports.object({
   createdAt: external_exports.string(),
   updatedAt: external_exports.string()
 });
+var AttachmentSchema = external_exports.object({
+  id: external_exports.string(),
+  filename: external_exports.string(),
+  mimeType: external_exports.string(),
+  size: external_exports.number().optional(),
+  mediaUuid: external_exports.string().optional()
+});
 var TechnicalDesignSchema = external_exports.object({
   id: external_exports.string(),
   epicId: external_exports.string(),
@@ -29213,6 +29220,9 @@ var TicketSchema = external_exports.object({
   body: external_exports.string(),
   comments: external_exports.array(CommentSchema),
   assignee: external_exports.string().nullable(),
+  attachments: external_exports.array(AttachmentSchema).default([]),
+  reporter: external_exports.string().nullable().default(null),
+  issueType: external_exports.string().default("unknown"),
   blockedBy: external_exports.array(external_exports.string()).default([]),
   blocking: external_exports.array(external_exports.string()).default([]),
   metadata: EntityMetadataSchema.default({}),
@@ -29833,6 +29843,9 @@ var GitHubTaskTracker = class {
       body: issue2.body ?? "",
       comments: comments.map((c) => this.mapComment(c)),
       assignee: issue2.assignee?.login ?? null,
+      attachments: [],
+      reporter: issue2.user?.login ?? null,
+      issueType: issue2.type?.name ?? "Issue",
       blockedBy,
       blocking,
       metadata,
@@ -30267,6 +30280,7 @@ var jiraAdfMetadataService = new JiraAdfMetadataService();
 // src/tasks/jira-task-tracker/jira-task-tracker.ts
 var metadataExpandTitle = "LLM Context";
 var issueFields = "summary,status,labels,assignee,description,issuelinks,updated";
+var ticketFields = `${issueFields},attachment,reporter,issuetype`;
 var ideaIssueType = "Idea";
 var jpdProjectType = "product_discovery";
 var deliveryLinkOutward = "implements";
@@ -30339,7 +30353,7 @@ var JiraTaskTracker = class {
   }
   async getTicket(id) {
     const [issue2, blocksLinkType] = await Promise.all([
-      this.client.request("GET", `/issue/${id}`, void 0, { fields: issueFields }),
+      this.client.request("GET", `/issue/${id}`, void 0, { fields: ticketFields }),
       this.resolveBlocksLinkType()
     ]);
     return this.mapTicket(issue2, blocksLinkType);
@@ -30530,7 +30544,7 @@ var JiraTaskTracker = class {
     const [page, blocksLinkType] = await Promise.all([
       this.client.request("GET", "/search/jql", void 0, {
         jql: `parent = ${epicKey}`,
-        fields: issueFields,
+        fields: ticketFields,
         maxResults: 100
       }),
       this.resolveBlocksLinkType()
@@ -30548,11 +30562,22 @@ var JiraTaskTracker = class {
       body: this.extractBody(issue2.fields.description),
       comments: [],
       assignee: issue2.fields.assignee?.accountId ?? null,
+      attachments: this.mapAttachments(issue2.fields.attachment ?? []),
+      reporter: issue2.fields.reporter?.accountId ?? null,
+      issueType: issue2.fields.issuetype?.name ?? "unknown",
       blockedBy,
       blocking,
       metadata: this.parseMetadata(issue2),
       updatedAt: issue2.fields.updated ?? ""
     };
+  }
+  mapAttachments(attachments) {
+    return attachments.map((attachment) => ({
+      id: attachment.id,
+      filename: attachment.filename ?? "",
+      mimeType: attachment.mimeType ?? "application/octet-stream",
+      ...attachment.size !== void 0 ? { size: attachment.size } : {}
+    }));
   }
   blockingLinks(links, blocksLinkType) {
     const blockedBy = [];
