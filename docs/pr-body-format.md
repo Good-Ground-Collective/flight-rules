@@ -29,9 +29,15 @@ two appear only when their fields are supplied.
 ## Why Was It Changed
 
 <A short, human-centric explanation grounded in the ticket. Speaks in product
-terms even for a technical PR. Uses paragraphs and, where they help, bullets —
-never a wall of text. This is the case for why the work is worth reviewing and
-merging.>
+terms even for a technical PR. Uses paragraphs and, where they help, bullets or
+a diagram — never a wall of text. This is the case for why the work is worth
+reviewing and merging.>
+
+```mermaid
+%% When the change has a shape, a small diagram lands faster than a paragraph.
+%% Optional — the tech-writer includes one only when it beats prose, and only
+%% when every node traces to the real diff. GitHub renders the fence in place.
+```
 
 ## OTS Materials
 
@@ -39,7 +45,8 @@ merging.>
 
 <Screenshots or a screen recording of the change working, when there is a visual
 result to show — always include them for a visual change. For a standalone API,
-JSON pulled from the endpoint. Enough to verify the work, not a data dump.>
+JSON pulled from the endpoint. A heavier diagram can live here too. Enough to
+verify the work, not a data dump.>
 
 </details>
 
@@ -54,7 +61,11 @@ JSON pulled from the endpoint. Enough to verify the work, not a data dump.>
   rejects anything outside that budget; the agent aims for two or three.
 - **`whyWasItChanged`** — required prose. Grounded in the ticket's Problem
   Statement and Solution, phrased for a human deciding whether to spend time on
-  this PR.
+  this PR. May embed a small diagram when the change has a shape a reviewer
+  grasps faster from a picture — a Mermaid sequence/flow, or a `diff`-fenced call
+  tree, file tree, component tree, or pseudocode. The tech-writer includes one
+  only when it beats prose and only when every node traces to the real diff (see
+  its `author` mode).
 - **`otsMaterials`** — optional. A raw markdown/JSON blob the CLI wraps in the
   `<details>` block verbatim. Image *hosting* is the caller's job: pass already-
   hosted image markdown, or text/JSON that needs no hosting. The renderer does
@@ -73,3 +84,9 @@ JSON pulled from the endpoint. Enough to verify the work, not a data dump.>
   decision (see `skills/execute-work/SKILL.md`).
 - **The body is byte-deterministic.** The same template always renders the same
   body, so a re-run of `pr create` after a config fix produces an identical PR.
+- **Diagrams are just fenced blocks in the prose.** ` ```mermaid ` and ` ```diff `
+  render natively in a GitHub PR body, so a diagram needs no image hosting and no
+  renderer support — it rides through `--why` (or `--ots`) as ordinary text. A
+  short "why" with the right visual is grasped at a glance; three paragraphs are
+  skimmed. Prefer the smallest view that carries the point, and never draw a
+  shape the diff doesn't have.

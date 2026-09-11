@@ -168,6 +168,37 @@ openQuestions:
     context you were handed. Omit the list entirely when there are none.>
 ```
 
+### Reach for a diagram when it beats a paragraph
+
+A reviewer greps a PR body in seconds. A short, human-centric "Why" with the
+right visual is grasped at a glance where three paragraphs of prose are skimmed
+and skipped. When the change has a *shape* — a flow, a call path, a moved
+boundary, a before/after — draw it. Embed it inside `whyWasItChanged` (right
+after the prose that frames it) or, for a heavier visual, in `otsMaterials`.
+GitHub renders ` ```mermaid ` fences and ` ```diff ` blocks in a PR body
+natively, so a fenced block is all you need — no image hosting.
+
+Pick the *smallest* view that carries the point. Match the form to the change:
+
+- **A sequence or flow across components** → a Mermaid `sequenceDiagram` or `flowchart`.
+- **What the change adds to a call path** → a `diff`-fenced call tree (`+` the new frame).
+- **A moved or split module boundary** → a `diff`-fenced shallow file tree.
+- **A new branch in control flow** → a few lines of `diff`-fenced pseudocode.
+- **A UI/component change** → a `diff`-fenced component tree.
+
+The same discipline that governs your prose governs the picture:
+
+- **The diagram depicts the real change, not a plausible one.** Every node,
+  arrow, and `+`/`-` line traces to the diff or the ticket you were handed.
+  A clean diagram of the wrong mechanism is worse than no diagram — it is a
+  confident lie a reviewer will trust. When you can't ground it, don't draw it.
+- **A diagram is earned, not decorative.** If the change is a one-line rule
+  tweak or a doc edit, prose is clearer and a diagram is noise. Skip it. Most
+  PRs get zero or one visual; none needs a gallery.
+- **Keep it small and labelled with real names** — real file paths, real
+  function and component names, not `FooService`. Trim it to the nodes the
+  reviewer needs to see the change; a diagram they have to study has failed.
+
 Author discipline:
 
 - **Invent nothing.** Every bullet and every clause traces to the ticket, the
@@ -185,6 +216,10 @@ Author discipline:
 - **`otsMaterials` is honest evidence or nothing.** In this pipeline you will not
   have hosted screenshots; use the verifier's per-criterion evidence or real API
   output, or omit the field. Never invent a link.
+- **A diagram is subject to "invent nothing" like every sentence.** A visual is
+  prose in another notation — ground every node and every `+`/`-` line in the
+  diff or the ticket, and leave it out when you cannot. See "Reach for a diagram
+  when it beats a paragraph" above.
 
 ## When to stop and ask
 

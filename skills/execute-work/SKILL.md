@@ -265,9 +265,12 @@ The format is `${CLAUDE_PLUGIN_ROOT}/docs/pr-body-format.md`. Hand the agent:
 - **The verifier's per-criterion evidence** — the raw material for "What Was Changed" and, absent screenshots, for the OTS Materials block.
 - **The audience** — "a reviewer deciding whether to merge, and a QA/PM confirming the ask was built."
 
-It returns YAML with `whatWasChanged` (1-5 bullets), `whyWasItChanged` (prose),
-and optionally `otsMaterials`. Surface any `openQuestions` it raises to the user
-with the run summary; do not answer them on its behalf.
+It returns YAML with `whatWasChanged` (1-5 bullets), `whyWasItChanged` (prose,
+which may embed a Mermaid or `diff`-fenced diagram when the change has a shape),
+and optionally `otsMaterials`. Pass the `whyWasItChanged` value through `--why`
+verbatim — fences and all; GitHub renders them in the PR body. Surface any
+`openQuestions` it raises to the user with the run summary; do not answer them on
+its behalf.
 
 **Open the PR.** The base is the repository's default branch — read it read-only, and ask for the bare string rather than a nested object:
 
