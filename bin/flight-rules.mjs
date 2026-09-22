@@ -30486,7 +30486,7 @@ function createDocCommand(getResolver) {
 }
 
 // src/shared/config.ts
-import { readFileSync as readFileSync2 } from "node:fs";
+import { existsSync as existsSync2, readFileSync as readFileSync2, statSync as statSync2 } from "node:fs";
 import { dirname as dirname2, isAbsolute, join as join2, resolve as resolve2 } from "node:path";
 
 // src/tasks/jira-task-tracker/jira-host.ts
@@ -30628,13 +30628,41 @@ function getRfcDir(config2, cwd) {
   }
   return join2(cwd, "rfcs");
 }
-function resolveConfigPath(cwd, override) {
-  return override ?? join2(cwd, ".claude", "flight-rules.local.md");
+var NodePathProbe = class {
+  isFile(path3) {
+    return existsSync2(path3) && statSync2(path3, { throwIfNoEntry: false })?.isFile() === true;
+  }
+  isDirectory(path3) {
+    return existsSync2(path3) && statSync2(path3, { throwIfNoEntry: false })?.isDirectory() === true;
+  }
+};
+var nodePathProbe = new NodePathProbe();
+function resolveConfigPath(cwd, override, probe = nodePathProbe) {
+  if (override !== void 0) {
+    return isAbsolute(override) ? override : resolve2(cwd, override);
+  }
+  const claudePath = resolve2(cwd, ".claude", "flight-rules.local.md");
+  const agentsPath = resolve2(cwd, ".agents", "flight-rules.local.md");
+  const candidates = [claudePath, agentsPath];
+  const existing = candidates.find((path3) => probe.isFile(path3));
+  if (existing !== void 0) return existing;
+  return candidates.find((path3) => probe.isDirectory(dirname2(path3))) ?? claudePath;
 }
 function getQaRecipePath(config2, configPath) {
   const recipe = config2.qaRecipe ?? "flight-rules.qa.md";
   if (isAbsolute(recipe)) return recipe;
   return resolve2(dirname2(configPath), recipe);
+}
+
+// src/shared/commands/config/command.ts
+function createConfigCommand(getConfigPath) {
+  const config2 = new Command("config");
+  config2.exitOverride();
+  config2.command("path").description("print the resolved config file path, whether or not it exists").exitOverride().action(() => {
+    process.stdout.write(`${getConfigPath()}
+`);
+  });
+  return config2;
 }
 
 // src/shared/env.ts
@@ -46575,7 +46603,7 @@ function createRfcCommand(getConfig, getCwd = () => process.cwd()) {
 }
 
 // src/tasks/commands/qa/command.ts
-import { existsSync as existsSync2, statSync as statSync2 } from "node:fs";
+import { existsSync as existsSync3, statSync as statSync3 } from "node:fs";
 function createQaCommand(getConfig, getConfigPath) {
   const qa = new Command("qa");
   qa.command("recipe").exitOverride().action(() => {
@@ -46586,12 +46614,12 @@ function createQaCommand(getConfig, getConfigPath) {
       );
     }
     const path3 = getQaRecipePath(config2, getConfigPath());
-    if (!existsSync2(path3)) {
+    if (!existsSync3(path3)) {
       throw new Error(
         `QA recipe not found at ${path3} \u2014 run /flight-rules:setup to scaffold it, or set qaRecipe in the config`
       );
     }
-    if (!statSync2(path3).isFile()) {
+    if (!statSync3(path3).isFile()) {
       throw new Error(
         `QA recipe at ${path3} is not a regular file \u2014 set qaRecipe to the recipe file's path`
       );
@@ -47114,7 +47142,7 @@ function createPrCommand(getHost) {
 
 // src/tasks/tool-probe/tool-probe.ts
 import { execFile as execFile3 } from "node:child_process";
-import { existsSync as existsSync3, readFileSync as readFileSync6 } from "node:fs";
+import { existsSync as existsSync4, readFileSync as readFileSync6 } from "node:fs";
 import { promisify as promisify3 } from "node:util";
 var minimumGhVersion = [2, 99, 0];
 var ghVersionLine = /gh version (\d+)\.(\d+)\.(\d+)/;
@@ -47125,7 +47153,7 @@ var NodeToolProbe = class {
     this.execFile = props.execFileFn ?? ((file2, args) => promisified(file2, [...args]));
   }
   async probe(input2) {
-    const recipe = existsSync3(input2.recipePath) ? readFileSync6(input2.recipePath, "utf8") : void 0;
+    const recipe = existsSync4(input2.recipePath) ? readFileSync6(input2.recipePath, "utf8") : void 0;
     const qaRequired = recipe !== void 0;
     const opRequired = qaRequired && recipe.includes("op://");
     const ghRequired = input2.repo !== void 0;
@@ -47315,6 +47343,7 @@ function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = () => re
   program2.addCommand(createPrCommand(prHost));
   program2.addCommand(createUsersCommand(tracker));
   program2.addCommand(createRfcCommand(config2));
+  program2.addCommand(createConfigCommand(getConfigPath));
   program2.addCommand(createQaCommand(config2, getConfigPath));
   program2.addCommand(createCompetenciesCommand(config2));
   program2.addCommand(createDocCommand(() => FileDocResolver.fromInstall({ moduleUrl: import.meta.url, env: process.env })));

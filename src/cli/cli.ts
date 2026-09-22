@@ -3,6 +3,7 @@ import { createDocCommand } from '../bundled-docs/commands/doc/command.js'
 import { FileDocResolver } from '../bundled-docs/doc-resolver/doc-resolver.js'
 import { readConfig, resolveConfigPath } from '../shared/config.js'
 import type { Config } from '../shared/config.js'
+import { createConfigCommand } from '../shared/commands/config/command.js'
 import { EnvLoader } from '../shared/env.js'
 import { GitHubTaskTracker } from '../tasks/github-task-tracker/github-task-tracker.js'
 import { JiraTaskTracker } from '../tasks/jira-task-tracker/jira-task-tracker.js'
@@ -114,6 +115,7 @@ export function buildProgram(
   program.addCommand(createPrCommand(prHost))
   program.addCommand(createUsersCommand(tracker))
   program.addCommand(createRfcCommand(config))
+  program.addCommand(createConfigCommand(getConfigPath))
   program.addCommand(createQaCommand(config, getConfigPath))
   program.addCommand(createCompetenciesCommand(config))
   program.addCommand(createDocCommand(() => FileDocResolver.fromInstall({ moduleUrl: import.meta.url, env: process.env })))
