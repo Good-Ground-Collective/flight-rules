@@ -9,13 +9,13 @@ This is the skill that turns a landed bug into a document a human can act on. Yo
 
 **The hard rule: this skill never fixes the bug, never changes the ticket's workflow status, and never prompts in its happy path.** Those are one rule with three faces. You reproduce and describe a bug — you do not touch the code that causes it, you do not move the ticket across the board, and you do not stop to ask a human anything the run can decide for itself.
 
-**Terminal state:** the ticket carries a Bug Report body per `${CLAUDE_PLUGIN_ROOT}/docs/bug-report-format.md`, a comment with the before/after evidence inline, and exactly one of `Agentic-Reproduction-Success` or `Agentic-Reproduction-Failure`; the user holds a run summary with the outcome, the label, the evidence paths, and any open questions.
+**Terminal state:** the ticket carries a Bug Report body per the output of `flight-rules doc bug-report-format`, a comment with the before/after evidence inline, and exactly one of `Agentic-Reproduction-Success` or `Agentic-Reproduction-Failure`; the user holds a run summary with the outcome, the label, the evidence paths, and any open questions.
 
 ## Preconditions
 
 - You are handed a **ticket id**.
 - Run everything from the **repo root** of the app the QA recipe describes; the CLI resolves config relative to CWD, and the agent drives that app.
-- **The config file is `$FLIGHT_RULES_CONFIG` when that variable is set, otherwise `.claude/flight-rules.local.md`.** The CLI honours the override, so every read and write below means whichever path is in effect.
+- Run `flight-rules config path`. Read and write the file it prints; `$FLIGHT_RULES_CONFIG` overrides the default.
 - The tracker is **Jira**. The label lifecycle and the reporter mention are Jira shapes.
 - `flight-rules check` reports `"ok": true`, including the `tools:*` probes for `playwright-cli`, `ffmpeg`, and `gh` that the agent's capture depends on.
 
@@ -23,13 +23,13 @@ This is the skill that turns a landed bug into a document a human can act on. Yo
   flight-rules check
   ```
 
-- A QA recipe resolves — `qaRecipe` in config, or the default `.claude/flight-rules.qa.md` beside it. Its format is `${CLAUDE_PLUGIN_ROOT}/docs/qa-recipe-format.md`. Read the resolved path once:
+- A QA recipe resolves — `qaRecipe` in config, or the default `flight-rules.qa.md` beside the config file. Run `flight-rules doc qa-recipe-format` and read the full output for its format. Read the resolved path once:
 
   ```bash
   flight-rules qa recipe
   ```
 
-- Credentials resolve headlessly, per `${CLAUDE_PLUGIN_ROOT}/docs/evidence-capture.md`: `FLIGHT_RULES_QA_USERNAME` and `FLIGHT_RULES_QA_PASSWORD` in the environment, or `op://` references in the recipe with `OP_SERVICE_ACCOUNT_TOKEN` set.
+- Run `flight-rules doc evidence-capture` and read the full output. Credentials resolve headlessly: `FLIGHT_RULES_QA_USERNAME` and `FLIGHT_RULES_QA_PASSWORD` in the environment, or `op://` references in the recipe with `OP_SERVICE_ACCOUNT_TOKEN` set.
 
 ## Process
 
@@ -73,8 +73,8 @@ Dispatch `qa-engineer` in **`reproduce`** mode. Pass **no `model` argument** —
 - The reporter's **`attachments`** (filenames and ids) as prior evidence.
 - The **recipe path** you read in Preconditions.
 - The **evidence directory** `.claude/evidence/<id>/` (gitignored) it writes into.
-- The **charter path** `${CLAUDE_PLUGIN_ROOT}/docs/qa-charter.md`.
-- The **capture-protocol path** `${CLAUDE_PLUGIN_ROOT}/docs/evidence-capture.md`.
+- The **charter path** printed by `flight-rules doc qa-charter --path`; run the command and pass that path.
+- The **capture-protocol path** printed by `flight-rules doc evidence-capture --path`; run the command and pass that path.
 
 Do not include your own opinion on how to reproduce it. The charter and the recipe are the guidance; anything you add is a third voice the agent has to reconcile.
 
@@ -82,7 +82,7 @@ Read the agent's trailing YAML and branch on one key: `reproduced`.
 
 ### 4. Success path — `reproduced: true`
 
-Author the Bug Report body to a temp file, in the exact section order of `${CLAUDE_PLUGIN_ROOT}/docs/bug-report-format.md`. Map the agent's YAML into the sections:
+Run `flight-rules doc bug-report-format` and read the full output. Author the Bug Report body to a temp file in its exact section order. Map the agent's YAML into the sections:
 
 - `## Symptom` — the reporter's original description text, **verbatim**, then the agent's `summary`.
 - `## Environment` — the recipe's environment name and host, the date, the account role used.
@@ -161,7 +161,7 @@ Give the user, in this order: the outcome, the final label, the evidence paths, 
 
 A reviewer can grade a run against this list:
 
-- The Bug Report body reads top to bottom for a QA who never saw the code, in the section order of `docs/bug-report-format.md`, with the reporter's original description preserved under Symptom.
+- The Bug Report body reads top to bottom for a QA who never saw the code, in the section order of the full output of `flight-rules doc bug-report-format`, with the reporter's original description preserved under Symptom.
 - The comment shows the symptom and its absence — the before and after frames, captioned, attached natively.
 - The ticket carries exactly one of `Agentic-Reproduction-Success` or `Agentic-Reproduction-Failure`, and no run ever leaves `Agentic-Reproduction-In-Progress` behind.
 - No code changed, no app data was left mutated, and the ticket's workflow status is untouched.

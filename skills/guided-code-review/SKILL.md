@@ -20,7 +20,7 @@ the weighting rules in Step 1. A PR that arrives here still carrying charter
 noise is a PR the autonomous pass never saw.
 
 All GitHub interaction goes through the `gh` CLI. The exact commands live in
-`${CLAUDE_PLUGIN_ROOT}/docs/github-review-api.md` — read that file when you
+`flight-rules doc github-review-api`. Run it and read the full output when you
 reach a step that touches GitHub. Sections 1–5 are the ones this skill uses;
 §6 belongs to the autonomous skill.
 
@@ -33,8 +33,8 @@ reach a step that touches GitHub. Sections 1–5 are the ones this skill uses;
    PR to review. (See reference §1.)
 2. **Load PR metadata** — title, body, author, base branch, head branch, line
    and file counts. (Reference §1.)
-3. **Load the charter** from `${CLAUDE_PLUGIN_ROOT}/docs/coding-charter.md`. Read
-   the whole file — you vet against every mandate. This is a discrete step so a
+3. **Load the charter**: run `flight-rules doc coding-charter`. Read
+   the full output — you vet against every mandate. This is a discrete step so a
    repo-supplied additional charter can be layered in later; for now there is
    only the bundled one.
 4. **Load the diff.** (Reference §3.)

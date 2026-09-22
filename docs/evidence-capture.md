@@ -3,7 +3,7 @@
 How a web-client capture is taken, verified, and handed downstream. This file is
 tool-generic: it names `playwright-cli`, `ffmpeg`, and `op`, but no hosts,
 selectors, endpoints, or credentials. Those live in the per-repo QA recipe. A
-skill references this file as `${CLAUDE_PLUGIN_ROOT}/docs/evidence-capture.md`.
+skill reaches this file with `flight-rules doc evidence-capture`.
 
 ## 1. Purpose
 
@@ -189,7 +189,7 @@ A complete manifest:
 {
   "version": 1,
   "ticket": "PROJ-123",
-  "recipe": "/repo/.claude/flight-rules.qa.md",
+  "recipe": "/repo/.agents/flight-rules.qa.md",
   "capturedAt": "2026-09-10T03:00:00Z",
   "items": [
     { "path": "/repo/.claude/evidence/PROJ-123/before.png", "kind": "image", "phase": "before", "caption": "Score reads 0% FAIL on a passing section" },

@@ -11,7 +11,7 @@ This skill turns capture directions plus a QA recipe into a verified take and a 
 
 **Terminal state:** the manifest exists at `.claude/evidence/<ticket>/manifest.json`, every item it lists exists on disk and passed verification, and the caller holds the manifest path plus a one-line summary — or the caller holds a single line beginning `No visual evidence:` with the reason.
 
-The protocol this skill obeys is `${CLAUDE_PLUGIN_ROOT}/docs/evidence-capture.md`: named sessions, the viewport paired with `--size`, the one-take rule, `video-chapter` narration, the credential contract, the `ffprobe`/`ffmpeg` verification, and the manifest schema. The recipe format is `${CLAUDE_PLUGIN_ROOT}/docs/qa-recipe-format.md`: `environments`, `credentials` as `op://` references or variable names, and the Login, Token mint, Data setup, Traps, and Visible surfaces sections. Read both in full before you plan a take. This skill points at them and restates neither.
+Run `flight-rules doc evidence-capture` and read the full output for the protocol: named sessions, the viewport paired with `--size`, the one-take rule, `video-chapter` narration, the credential contract, the `ffprobe`/`ffmpeg` verification, and the manifest schema. Run `flight-rules doc qa-recipe-format` and read the full output for the recipe format: `environments`, `credentials` as `op://` references or variable names, and the Login, Token mint, Data setup, Traps, and Visible surfaces sections. Read both outputs before you plan a take. This skill points at them and restates neither.
 
 ## Inputs
 
@@ -74,7 +74,7 @@ Never run `op read` in a Bash call whose output you see. A resolved secret exist
 
 ### 3. Write the take
 
-Generate `.claude/evidence/<ticket>/take.sh` from the skeleton in `${CLAUDE_PLUGIN_ROOT}/docs/evidence-capture.md`, Section 5. Use `set -uo pipefail`, never `set -e`: `playwright-cli` exits 0 on a failed step, so `-e` hides the failure, and the verification checks are the real gate. Fill in:
+Generate `.claude/evidence/<ticket>/take.sh` from the skeleton in Section 5 of the `flight-rules doc evidence-capture` output. Use `set -uo pipefail`, never `set -e`: `playwright-cli` exits 0 on a failed step, so `-e` hides the failure, and the verification checks are the real gate. Fill in:
 
 - The session `fr-<ticket>` on every `playwright-cli` call via `-s=fr-<ticket>`.
 - `resize` and `video-start … --size=<viewport>` both set to the recipe's `viewport`, so the take is not scaled to the recorder's 800×800 default.
@@ -114,7 +114,7 @@ Run this step only when the directions named an API symptom. Read `request.txt` 
 
 ### 7. Write the manifest
 
-Write `.claude/evidence/<ticket>/manifest.json` to the schema in `${CLAUDE_PLUGIN_ROOT}/docs/evidence-capture.md`, Section 10:
+Write `.claude/evidence/<ticket>/manifest.json` to the schema in Section 10 of the `flight-rules doc evidence-capture` output:
 
 - `version: 1`, `ticket`, `recipe` (the absolute recipe path from step 1), `capturedAt` (an ISO 8601 timestamp in UTC).
 - `items`, one per captured file, each with an absolute `path`, `kind` derived from the extension (`png` is `image`, `webm` is `video`), `phase` set per item, and a one-sentence caption. Include `take.webm` with the phase of the flow it shows.

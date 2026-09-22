@@ -17,7 +17,7 @@ The epic→ticket hop **is** the deep pass — there is no separate "ticket → 
 
 ## Terminal state
 
-The output is **nodes in the task tracker** (GitHub/Jira), linked natively, not a document. Every emitted node is a [layered-body artifact](../../docs/layered-body-format.md).
+The output is **nodes in the task tracker** (GitHub/Jira), linked natively, not a document. Every emitted node is a layered-body artifact. Run `flight-rules doc layered-body-format` and read the full output.
 
 ## Input — an RFC file or a node id
 
@@ -137,7 +137,7 @@ Ask plainly (via `AskUserQuestion`): *"Here's the proposed breakdown — good to
 
 ### 8. Author each child as a layered-body artifact
 
-Follow [`docs/layered-body-format.md`](../../docs/layered-body-format.md) exactly. Write the prose **directly** (there is no serializer):
+Run `flight-rules doc layered-body-format`, read the full output, and follow it exactly. Write the prose **directly** (there is no serializer):
 
 - `## Problem Statement`, `## Solution`, `## Acceptance Criteria` (as a `- [ ]` checklist), `## High-level technical writeup`.
 - **Tickets only:** a `<details><summary>Guided Walkthrough</summary>` plain-markdown section (never inside the YAML — a nested fence would break it).

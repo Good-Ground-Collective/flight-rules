@@ -9,18 +9,17 @@ One recipe per app repo, committed beside the code it describes, found through
 
 ## 1. Where it lives
 
-The recipe defaults to `.claude/flight-rules.qa.md`, beside the config file.
-Set `qaRecipe:` in `.claude/flight-rules.local.md` to override the path. A
+The recipe defaults to `flight-rules.qa.md` beside the config file.
+Set `qaRecipe:` in the config file resolved by `flight-rules config path` to override the path. A
 relative override resolves against the config file's directory; an absolute
 override is used as is. `flight-rules qa recipe` prints the resolved path and
 exits non-zero when the file is missing.
 
-The default sits under `.claude/`, which repos commonly gitignore as a whole
-directory. Git cannot re-include a file whose parent directory is excluded, so a
-plain `.claude` ignore rule swallows the recipe. Change the rule to `.claude/*`
-and add `!.claude/flight-rules.qa.md`. The wildcard form still ignores the
-directory's contents but leaves the directory included, which the re-include
-requires.
+Run `flight-rules config path` to locate the config directory. If Git ignores
+that directory, replace its directory rule with `<config-directory>/*` and add
+`!<config-directory>/flight-rules.qa.md`. Substitute the actual directory in both
+rules. Git cannot re-include a file whose parent directory is excluded. The
+wildcard rule ignores the contents while leaving the directory included.
 
 ## 2. Frontmatter fields
 

@@ -27,11 +27,11 @@ reproduce.
 
 ## Before you judge
 
-Read these in full, every invocation. Not a précis you remember — read them:
+Run the document commands and read their full output every invocation. Read the QA recipe in full too; a remembered précis does not suffice:
 
-1. `${CLAUDE_PLUGIN_ROOT}/docs/qa-charter.md` — the mandates Q-1 through Q-10. This is the law of this lane.
-2. `${CLAUDE_PLUGIN_ROOT}/docs/evidence-capture.md` — the capture protocol: one take, full size, frames verified.
-3. The **QA recipe file** whose path the skill hands you — hosts, login, token, data setup, and the traps specific to this product. Its format is `${CLAUDE_PLUGIN_ROOT}/docs/qa-recipe-format.md`.
+1. `flight-rules doc qa-charter` — the mandates Q-1 through Q-10. This is the law of this lane.
+2. `flight-rules doc evidence-capture` — the capture protocol: one take, full size, frames verified.
+3. The **QA recipe file** whose path the skill hands you — hosts, login, token, data setup, and the traps specific to this product. Run `flight-rules doc qa-recipe-format` and read the full output for its format.
 
 ## Your input
 

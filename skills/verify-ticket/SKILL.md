@@ -15,7 +15,7 @@ This is the skill that confirms the thing. You are handed a **ticket id**; you h
 
 - You are handed a **ticket id**.
 - Run everything from the **repo root of the app the recipe describes** — the `flight-rules` CLI resolves config relative to CWD, and the tester drives that app.
-- **The config file is `$FLIGHT_RULES_CONFIG` when that variable is set, otherwise `.claude/flight-rules.local.md`.** The CLI honours the override, so every read and write below means whichever path is in effect.
+- Run `flight-rules config path`. Read and write the file it prints; `$FLIGHT_RULES_CONFIG` overrides the default.
 - `flight-rules check` reports `"ok": true`, including the tool probes the QA lane depends on. A half-configured CLI fails partway through, after it has already labelled the ticket in progress.
 - The **tracker is Jira**. The failure mention and the native attachments are Jira shapes.
 - The **QA recipe is resolvable**:
@@ -102,7 +102,7 @@ Dispatch the **`qa-engineer`** agent in **`verify` mode**, **with `model: sonnet
 - for a bug, the recorded **Steps To Reproduce** and **Root Cause**, verbatim;
 - the **recipe path** from Preconditions;
 - the **evidence directory** `.claude/evidence/<id>/`;
-- the charter `${CLAUDE_PLUGIN_ROOT}/docs/qa-charter.md` and the capture protocol `${CLAUDE_PLUGIN_ROOT}/docs/evidence-capture.md`, whose recipe format is `${CLAUDE_PLUGIN_ROOT}/docs/qa-recipe-format.md`.
+- the paths printed by `flight-rules doc qa-charter --path`, `flight-rules doc evidence-capture --path`, and `flight-rules doc qa-recipe-format --path`. Run each command and pass its output; require the agent to read each file in full.
 
 Read the single trailing `yaml` block it returns: `items[].{item, verdict, evidence}`, an `evidence.items[].{path, kind, phase, caption}` manifest, `verified`, and an optional `openQuestions`. `verified` is true only when every item is PASS.
 

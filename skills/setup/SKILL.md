@@ -1,13 +1,13 @@
 ---
 name: setup
-description: "First-run setup for the flight-rules plugin. Creates .claude/flight-rules.local.md with the correct fields and verifies the environment is ready to use."
+description: "First-run setup for the flight-rules plugin. Creates the flight-rules config file with the correct fields and verifies the environment is ready to use."
 ---
 
 # Setup
 
 This skill creates the per-project configuration file for flight-rules and verifies your environment is ready. It takes about two minutes. Run it once per repository you want to use the plugin in.
 
-The config file is `$FLIGHT_RULES_CONFIG` when that variable is set, otherwise `.claude/flight-rules.local.md`. The CLI honours the override, so every read and write below means whichever path is in effect.
+Run `flight-rules config path`. Read and write the file it prints; `$FLIGHT_RULES_CONFIG` overrides the default.
 
 If that file already exists, read it and show the current values before asking whether to reconfigure.
 
@@ -79,13 +79,13 @@ Validate that the input contains exactly one `/`.
 If they provide labels, split on commas and strip whitespace. If they skip, use an empty list.
 
 **QA lane** (optional)
-> "Will this repo use the QA lane (`capture-evidence`, `reproduce-bug`, `verify-ticket`)? If yes, where should the QA recipe live? Hit enter for the default, `.claude/flight-rules.qa.md`."
+> "Will this repo use the QA lane (`capture-evidence`, `reproduce-bug`, `verify-ticket`)? If yes, where should the QA recipe live? Hit enter for the default, `flight-rules.qa.md` beside the config file."
 
 A relative answer resolves against the config file's directory; an absolute path is used as is. Remember the answer for Step 5 and Step 7.
 
 ## Step 5 (GitHub): Write the config file
 
-Create `.claude/` if it doesn't exist. Write `.claude/flight-rules.local.md`:
+Run `flight-rules config path`. Create the parent directory of the path it prints if needed, then write the file at that path:
 
 **Local RFC storage:**
 
@@ -184,13 +184,13 @@ Ask this even though the tracker is Jira: pull requests always land on GitHub, a
 > "Any default labels to apply to every issue created from this project? Hit enter to skip."
 
 **QA lane** (optional)
-> "Will this repo use the QA lane (`capture-evidence`, `reproduce-bug`, `verify-ticket`)? If yes, where should the QA recipe live? Hit enter for the default, `.claude/flight-rules.qa.md`."
+> "Will this repo use the QA lane (`capture-evidence`, `reproduce-bug`, `verify-ticket`)? If yes, where should the QA recipe live? Hit enter for the default, `flight-rules.qa.md` beside the config file."
 
 A relative answer resolves against the config file's directory; an absolute path is used as is. Remember the answer for Step 5 and Step 7.
 
 ## Step 5 (Jira): Write the config file
 
-Create `.claude/` if it doesn't exist. Write the config file. Jira identifies *work* by project keys, but `repo` is still required — pull requests land on GitHub whichever tracker holds the tickets.
+Run `flight-rules config path`. Create the parent directory of the path it prints if needed, then write the file at that path. Jira identifies *work* by project keys, but `repo` is still required — pull requests land on GitHub whichever tracker holds the tickets.
 
 ```markdown
 ---
@@ -238,7 +238,7 @@ Run:
 flight-rules qa recipe
 ```
 
-If it exits non-zero, the recipe is missing. Write the file at the path the message names, using the example from `${CLAUDE_PLUGIN_ROOT}/docs/qa-recipe-format.md`. Replace the `app` and host placeholders with what the user gave you. Leave everything else as placeholders. Then tell the user which sections they must fill in before a capture can run: Login and the credentials.
+If it exits non-zero, the recipe is missing. Write the file at the path the message names, using the example from `flight-rules doc qa-recipe-format`. Run that command and read the full output first. Replace the `app` and host placeholders with what the user gave you. Leave everything else as placeholders. Then tell the user which sections they must fill in before a capture can run: Login and the credentials.
 
 Then run `git check-ignore -q <path>`. Exit 0 means Git ignores the recipe, so a capture runs against an untracked file. Show the offending rule:
 
@@ -246,6 +246,6 @@ Then run `git check-ignore -q <path>`. Exit 0 means Git ignores the recipe, so a
 git check-ignore -v <path>
 ```
 
-Offer to change a `.claude` rule to `.claude/*` and add `!.claude/flight-rules.qa.md`. Explain in one sentence: a negation cannot re-include a file whose directory is excluded, so the directory rule must become a wildcard.
+Resolve the config directory with `flight-rules config path`. Offer to replace its directory ignore rule with `<config-directory>/*` and add `!<config-directory>/flight-rules.qa.md`. Use the actual directory in both rules. Explain in one sentence: a negation cannot re-include a file whose directory is excluded, so the directory rule must become a wildcard.
 
 Re-run `flight-rules qa recipe`. It prints the resolved path.

@@ -51,7 +51,7 @@ nobody asked for on a question already answered with evidence. Your lenses are
 the charter and holistic code quality — nothing else.
 
 All GitHub interaction goes through the `gh` CLI. The commands live in
-`${CLAUDE_PLUGIN_ROOT}/docs/github-review-api.md` — read that file when you
+`flight-rules doc github-review-api`. Run it and read the full output when you
 reach a step that touches GitHub. This skill uses §1, §2, §3, §5 and **§6**
 (`COMMENT`, not the `PENDING` payload in §4).
 
@@ -69,8 +69,8 @@ You MUST create a todo per step and complete them in order.
 
 1. **Resolve the PR** and load its metadata — title, body, author, base branch,
    head branch, line and file counts. (Reference §1.)
-2. **Load the charter** from `${CLAUDE_PLUGIN_ROOT}/docs/coding-charter.md`.
-   Read the whole file. You vet against every mandate.
+2. **Load the charter**: run `flight-rules doc coding-charter`.
+   Read the full output. You vet against every mandate.
 3. **Load the diff.** (Reference §3.)
 4. **Take the upstream signals, when you have them.** Invoked from
    `execute-work` you are handed the verifier's `charterConcerns` and any
