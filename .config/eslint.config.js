@@ -40,7 +40,8 @@ export default defineConfig([
       // does not end this way (buildTracker, buildPrHost) is not covered.
       "preflight/no-loose-functions": [
         "error",
-        { allowedSuffixes: ["Command", "Program"] },
+        // The core factory returns a class instance, giving the former CLI builders a service home.
+        { allowedSuffixes: ["Command", "Program", "FlightRules"] },
       ],
 
       // Type-aware assertion bans — not in preflight, and they need the
