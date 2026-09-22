@@ -11,8 +11,7 @@ on what comes back. The two modes differ in what they do to your file:
 - **Feedback** — the agent reports; nothing is written. Safe, always.
 - **Rewrite** — the agent proposes exact edits and **this skill applies them**. The agent has no write tools; every change to a file passes through the steps below.
 
-The agent must run `flight-rules doc prose-charter` and `flight-rules doc claudeish-tells` and read both outputs in full.
-Run them yourself only if the user asks what a particular mandate means.
+Resolve the document paths in Step 2. The agent must read the required files in full.
 
 ---
 
@@ -63,7 +62,25 @@ Under git, apply and report; the diff is recoverable.
 
 ## Step 2: Dispatch the agent
 
+Resolve the required document paths before dispatch:
+
+```bash
+flight-rules doc prose-charter --path
+flight-rules doc claudeish-tells --path
+```
+
+Also resolve the optional style reference when available:
+
+```bash
+flight-rules doc google-style-digest --path
+```
+
+Pass the printed paths, labelled by document id. The agent has read-only tools and must read the required files in full.
+It reads the optional digest in full only when needed. If a required path cannot be resolved, stop and report the error.
+
 Dispatch **one** `tech-writer` agent with:
+
+- The resolved document paths.
 
 - The artifact — the file path, or the inline text verbatim.
 - The mode, named explicitly: `feedback` or `rewrite`.

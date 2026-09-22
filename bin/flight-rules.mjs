@@ -30426,6 +30426,9 @@ var DocNotFoundPropsSchema = external_exports.object({ id: external_exports.stri
 var InvalidDocIdError = class extends Error {
   name = "InvalidDocIdError";
 };
+var DocsUnavailableError = class extends Error {
+  name = "DocsUnavailableError";
+};
 var DocNotFoundError = class extends Error {
   name = "DocNotFoundError";
   available;
@@ -30464,7 +30467,7 @@ var FileDocResolver = class _FileDocResolver {
     const docsDir = resolve(home, "docs");
     if (!existsSync(docsDir) || !statSync(docsDir).isDirectory()) {
       const source = override ? `FLIGHT_RULES_HOME is set to ${override} but` : "Bundled docs directory";
-      throw new Error(`${source} ${docsDir} does not exist or is not a directory \u2014 point FLIGHT_RULES_HOME at the flight-rules install root`);
+      throw new DocsUnavailableError(`${source} ${docsDir} does not exist or is not a directory \u2014 point FLIGHT_RULES_HOME at the flight-rules install root`);
     }
     return new _FileDocResolver({ docsDir });
   }

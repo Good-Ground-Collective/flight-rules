@@ -293,7 +293,26 @@ There is no force flag. If the push is rejected, stop and tell the user — do n
 
 **Write the PR body — dispatch the `tech-writer` agent in `author` mode.** The
 body is not yours to hand-write; a human reads it, so a human's editor writes it.
-Run `flight-rules doc pr-body-format` and read the full output. Hand the agent:
+Run `flight-rules doc pr-body-format` and read the full output. Resolve the required document paths before dispatch:
+
+```bash
+flight-rules doc prose-charter --path
+flight-rules doc claudeish-tells --path
+flight-rules doc pr-body-format --path
+```
+
+Also resolve the optional style reference when available:
+
+```bash
+flight-rules doc google-style-digest --path
+```
+
+Pass the printed paths, labelled by document id. The agent has read-only tools and must read the required files in full.
+It reads the optional digest in full only when needed. If a required path cannot be resolved, stop and report the error.
+
+Hand the agent:
+
+- **The resolved document paths.**
 
 - **The ticket's Problem Statement and Solution** — the grounding for "Why Was It Changed."
 - **A summary of the diff** — `git diff --stat <default-branch>..<branch>` and `git log <default-branch>..<branch> --format='%s'`, both read-only, so it describes what actually shipped rather than what the ticket wished for.

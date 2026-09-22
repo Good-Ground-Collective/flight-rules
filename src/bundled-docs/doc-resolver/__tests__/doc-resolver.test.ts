@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { DocNotFoundError, FileDocResolver, InvalidDocIdError } from '../doc-resolver.js'
+import { DocNotFoundError, DocsUnavailableError, FileDocResolver, InvalidDocIdError } from '../doc-resolver.js'
 
 describe('FileDocResolver', () => {
   let root: string
@@ -66,10 +66,26 @@ describe('FileDocResolver', () => {
     })
     expect(installed.resolve('alpha')).toEqual(resolver.resolve('alpha'))
   })
-  it('names the variable and checked path for a missing overridden docs directory', () => {
-    expect(() => FileDocResolver.fromInstall({
-      moduleUrl: pathToFileURL(join(root, 'bin', 'flight-rules.mjs')).href,
-      env: { FLIGHT_RULES_HOME: join(root, 'absent') },
-    })).toThrow(`FLIGHT_RULES_HOME is set to ${join(root, 'absent')} but ${join(root, 'absent', 'docs')}`)
+  it.each([
+    { overridden: false, docsIsFile: false },
+    { overridden: false, docsIsFile: true },
+    { overridden: true, docsIsFile: false },
+    { overridden: true, docsIsFile: true },
+  ])('throws a named error with its diagnostic for unavailable docs: %j', ({ overridden, docsIsFile }) => {
+    const home = join(root, 'unavailable')
+    mkdirSync(home)
+    const docsDir = join(home, 'docs')
+    if (docsIsFile) writeFileSync(docsDir, 'not a directory')
+    const resolveInstall = () => FileDocResolver.fromInstall({
+      moduleUrl: pathToFileURL(join(home, 'bin', 'flight-rules.mjs')).href,
+      env: overridden ? { FLIGHT_RULES_HOME: home } : {},
+    })
+    const source = overridden ? `FLIGHT_RULES_HOME is set to ${home} but` : 'Bundled docs directory'
+
+    expect(resolveInstall).toThrow(DocsUnavailableError)
+    expect(resolveInstall).toThrow(expect.objectContaining({
+      name: 'DocsUnavailableError',
+      message: `${source} ${docsDir} does not exist or is not a directory — point FLIGHT_RULES_HOME at the flight-rules install root`,
+    }))
   })
 })
