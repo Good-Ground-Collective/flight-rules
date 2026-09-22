@@ -18,7 +18,7 @@ export const seedCompetencies = [
   "auth-check",
 ] as const;
 
-const ConfigSchema = z
+export const ConfigSchema = z
   .object({
     tracker: z.enum(["github", "jira"]),
     repo: z

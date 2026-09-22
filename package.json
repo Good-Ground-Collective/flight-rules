@@ -5,13 +5,27 @@
   "license": "MIT",
   "author": "",
   "type": "module",
-  "main": "index.js",
-  "files": ["bin/", "docs/", "skills/", "agents/", ".claude-plugin/"],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "types": "./dist/index.d.ts",
   "bin": {
     "flight-rules": "bin/flight-rules.mjs"
   },
+  "files": [
+    "bin/",
+    "docs/",
+    "skills/",
+    "agents/",
+    ".claude-plugin/",
+    "dist/"
+  ],
   "scripts": {
-    "build": "node scripts/build.mjs",
+    "build": "node scripts/build.mjs && tsc -p tsconfig.build.json",
     "fmt": "sort-package-json && oxfmt -c .config/.oxfmtrc.json",
     "fmt:check": "sort-package-json --check && oxfmt -c .config/.oxfmtrc.json --check",
     "release": "semantic-release",

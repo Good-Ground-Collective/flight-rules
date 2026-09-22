@@ -28,3 +28,13 @@ await esbuild.build({
 })
 
 chmodSync(outfile, 0o755)
+
+await esbuild.build({
+  entryPoints: [fileURLToPath(new URL('../src/index.ts', import.meta.url))],
+  bundle: true,
+  platform: 'node',
+  format: 'esm',
+  packages: 'external',
+  outfile: fileURLToPath(new URL('../dist/index.js', import.meta.url)),
+  define: { _appVersion: JSON.stringify(pkg.version) },
+})

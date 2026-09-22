@@ -22,7 +22,7 @@ import type {
   UpdateTicketInput,
 } from '../task-tracker/task-tracker.js'
 
-interface GitHubTrackerConfig {
+export interface GitHubTrackerConfig {
   token: string
   owner: string
   repo: string
