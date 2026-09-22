@@ -1,4 +1,6 @@
 import { Command } from 'commander'
+import { createDocCommand } from '../bundled-docs/commands/doc/command.js'
+import { FileDocResolver } from '../bundled-docs/doc-resolver/doc-resolver.js'
 import { readConfig, resolveConfigPath } from '../shared/config.js'
 import type { Config } from '../shared/config.js'
 import { EnvLoader } from '../shared/env.js'
@@ -114,6 +116,7 @@ export function buildProgram(
   program.addCommand(createRfcCommand(config))
   program.addCommand(createQaCommand(config, getConfigPath))
   program.addCommand(createCompetenciesCommand(config))
+  program.addCommand(createDocCommand(() => FileDocResolver.fromInstall({ moduleUrl: import.meta.url, env: process.env })))
   const probe = (): ToolProbe => new NodeToolProbe()
   program.addCommand(createCheckCommand(config, tracker, getConfigPath, probe))
   return program

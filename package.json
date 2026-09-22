@@ -6,6 +6,7 @@
   "author": "",
   "type": "module",
   "main": "index.js",
+  "files": ["bin/", "docs/", "skills/", "agents/", ".claude-plugin/"],
   "bin": {
     "flight-rules": "bin/flight-rules.mjs"
   },
