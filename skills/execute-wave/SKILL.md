@@ -164,10 +164,10 @@ So when a ticket parks with a dirty tree, commit the work to its own branch
 before continuing:
 
 ```bash
-flight-rules git commit --type chore --scope <id> --description "park unverified work for handoff" --file <path>
+flight-rules git commit --type chore --scope <id> --description "park unverified work for handoff" --body-file "$TMPDIR/<id>-park.md" --file <path>
 ```
 
-Stage by explicit path, exactly as `execute-work` does. Then:
+Stage by explicit path, exactly as `execute-work` does. The body file says why the ticket parked and what the verifier's last failures were, so whoever checks out the branch knows what state it is in without reading this run's report. Then:
 
 - **Do not push it.** Do not open a PR.
 - **Leave the ticket in in-progress.** That is now true.

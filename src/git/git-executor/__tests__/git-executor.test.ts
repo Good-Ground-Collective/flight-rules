@@ -1,4 +1,9 @@
-import { describe, it, expect, vi } from 'vitest'
+import { execFile } from 'node:child_process'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { promisify } from 'node:util'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { NodeGitExecutor } from '../git-executor.js'
 
 const makeExec = (stdout = '') =>
@@ -27,6 +32,7 @@ describe('NodeGitExecutor.commit', () => {
     await executor.commit('feat(scope): description', ['src/foo.ts', 'src/bar.ts'])
     expect(exec).toHaveBeenCalledWith('git', [
       'commit',
+      '--cleanup=whitespace',
       '--only',
       '-m',
       'feat(scope): description',
@@ -40,14 +46,54 @@ describe('NodeGitExecutor.commit', () => {
     const exec = makeExec()
     const executor = new NodeGitExecutor(exec)
     await executor.commit('feat(scope): description')
-    expect(exec).toHaveBeenCalledWith('git', ['commit', '-m', 'feat(scope): description'])
+    expect(exec).toHaveBeenCalledWith('git', ['commit', '--cleanup=whitespace', '-m', 'feat(scope): description'])
   })
 
   it('commits the whole index rather than passing --only with an empty pathspec', async () => {
     const exec = makeExec()
     const executor = new NodeGitExecutor(exec)
     await executor.commit('feat(scope): description', [])
-    expect(exec).toHaveBeenCalledWith('git', ['commit', '-m', 'feat(scope): description'])
+    expect(exec).toHaveBeenCalledWith('git', ['commit', '--cleanup=whitespace', '-m', 'feat(scope): description'])
+  })
+})
+
+describe('NodeGitExecutor.commit against a real repository', () => {
+  let dir: string
+  const git = promisify(execFile)
+  const inRepo = (file: string, args: readonly string[]) => git(file, [...args], { cwd: dir })
+
+  beforeEach(async () => {
+    dir = mkdtempSync(join(tmpdir(), 'fr-git-'))
+    await inRepo('git', ['init', '-q'])
+    await inRepo('git', ['config', 'user.email', 'test@example.com'])
+    await inRepo('git', ['config', 'user.name', 'Test'])
+    // A user-level strip setting must not reach the body.
+    await inRepo('git', ['config', 'commit.cleanup', 'strip'])
+    writeFileSync(join(dir, 'a.txt'), 'a\n')
+  })
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('records a multi-paragraph markdown body verbatim, # lines included', async () => {
+    const message = [
+      'feat(KAN-1): add thing',
+      '',
+      '## Why',
+      '',
+      'The old path dropped data.',
+      '',
+      '- first point',
+      '- second point',
+      '',
+      'Flight-Rules-Version: 1.2.3',
+    ].join('\n')
+    const executor = new NodeGitExecutor(inRepo)
+    await executor.stage(['a.txt'])
+    await executor.commit(message, ['a.txt'])
+    const { stdout } = await inRepo('git', ['log', '-1', '--format=%B'])
+    expect(stdout.trimEnd()).toBe(message)
   })
 })
 

@@ -46596,8 +46596,7 @@ function createCheckCommand(getConfig, getTracker, getConfigPath, getProbe) {
     }
     const tools = await getProbe().probe({
       repo: config2.repo,
-      recipePath: getQaRecipePath(config2, getConfigPath()),
-      env: process.env
+      recipePath: getQaRecipePath(config2, getConfigPath())
     });
     checks.push(...tools);
     const ok3 = checks.every((c) => c.ok || c.required === false);
@@ -46656,10 +46655,10 @@ var NodeGitExecutor = class {
   }
   async commit(message, files) {
     if (files !== void 0 && files.length > 0) {
-      await this.execFile("git", ["commit", "--only", "-m", message, "--", ...files]);
+      await this.execFile("git", ["commit", "--cleanup=whitespace", "--only", "-m", message, "--", ...files]);
       return;
     }
-    await this.execFile("git", ["commit", "-m", message]);
+    await this.execFile("git", ["commit", "--cleanup=whitespace", "-m", message]);
   }
   async getCommitSha() {
     const { stdout } = await this.execFile("git", ["rev-parse", "HEAD"]);
@@ -46694,6 +46693,9 @@ var NodeGitExecutor = class {
     await this.execFile("git", args);
   }
 };
+
+// src/git/commands/commit/command.ts
+import { readFileSync as readFileSync5 } from "node:fs";
 
 // src/git/commit-message-builder/commit-message-builder.ts
 import { readFileSync as readFileSync4 } from "node:fs";
@@ -46737,8 +46739,9 @@ var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
     if (!headerValidation.success) throw headerValidation.error;
     sections.push(`${headerValidation.data}
 `);
-    if (input2.body !== void 0) {
-      sections.push(`${input2.body}
+    const body = input2.body?.trim();
+    if (body !== void 0 && body !== "") {
+      sections.push(`${body}
 `);
     }
     const trailers = [];
@@ -46782,7 +46785,7 @@ function createGitCommand(getExecutor) {
     "file to stage (repeatable); scopes the commit to exactly these paths. Omitting it commits the whole index",
     collect2,
     []
-  ).option("--body <body>", "commit body").option("--footer <footer>", "commit footer (repeatable)", collect2, []).option("--model <model>", "model identifier").action(async (opts) => {
+  ).option("--body <body>", "commit body (or use --body-file)").option("--body-file <path>", "read the commit body from a file; wins over --body").option("--footer <footer>", "commit footer (repeatable)", collect2, []).option("--model <model>", "model identifier").action(async (opts) => {
     const builder = new DefaultCommitMessageBuilder({
       binPath: process.argv[1] ?? "",
       agentEnv: process.env["AI_AGENT"]
@@ -46791,7 +46794,7 @@ function createGitCommand(getExecutor) {
       type: opts.type,
       scope: opts.scope,
       description: opts.description,
-      body: opts.body ?? void 0,
+      body: opts.bodyFile !== void 0 ? readFileSync5(opts.bodyFile, "utf8") : opts.body,
       footers: opts.footer,
       model: opts.model ?? void 0
     });
@@ -47039,7 +47042,7 @@ function createPrCommand(getHost) {
 
 // src/tasks/tool-probe/tool-probe.ts
 import { execFile as execFile3 } from "node:child_process";
-import { existsSync as existsSync2, readFileSync as readFileSync5 } from "node:fs";
+import { existsSync as existsSync2, readFileSync as readFileSync6 } from "node:fs";
 import { promisify as promisify3 } from "node:util";
 var minimumGhVersion = [2, 99, 0];
 var ghVersionLine = /gh version (\d+)\.(\d+)\.(\d+)/;
@@ -47050,21 +47053,18 @@ var NodeToolProbe = class {
     this.execFile = props.execFileFn ?? ((file2, args) => promisified(file2, [...args]));
   }
   async probe(input2) {
-    const recipe = existsSync2(input2.recipePath) ? readFileSync5(input2.recipePath, "utf8") : void 0;
+    const recipe = existsSync2(input2.recipePath) ? readFileSync6(input2.recipePath, "utf8") : void 0;
     const qaRequired = recipe !== void 0;
-    const opRequired = qaRequired && recipe.includes("op://");
     const ghRequired = input2.repo !== void 0;
-    const env = input2.env ?? {};
-    const [gh, ghAuth, ghPush, playwright, ffmpeg, curl, op] = await Promise.all([
+    const [gh, ghAuth, ghPush, playwright, ffmpeg, curl] = await Promise.all([
       this.ghVersion(ghRequired),
       this.ghAuth(ghRequired),
       this.ghPush(input2.repo, ghRequired),
       this.present("tools:playwright-cli", "playwright-cli", ["--version"], qaRequired),
       this.present("tools:ffmpeg", "ffmpeg", ["-version"], qaRequired),
-      this.present("tools:curl", "curl", ["--version"], qaRequired),
-      this.op(env, opRequired)
+      this.present("tools:curl", "curl", ["--version"], qaRequired)
     ]);
-    return [gh, ghAuth, ghPush, playwright, ffmpeg, curl, op];
+    return [gh, ghAuth, ghPush, playwright, ffmpeg, curl];
   }
   async ghVersion(required2) {
     try {
@@ -47127,24 +47127,6 @@ var NodeToolProbe = class {
     } catch (err) {
       const detail = this.isMissingBinary(err) ? "not installed" : this.stderrOf(err);
       return { name, ok: false, detail, required: required2 };
-    }
-  }
-  async op(env, required2) {
-    try {
-      await this.execFile("op", ["--version"]);
-    } catch (err) {
-      const detail = this.isMissingBinary(err) ? "not installed" : this.stderrOf(err);
-      return { name: "tools:op", ok: false, detail, required: required2 };
-    }
-    if (env["OP_SERVICE_ACCOUNT_TOKEN"] !== void 0) {
-      return { name: "tools:op", ok: true, detail: "authenticated via OP_SERVICE_ACCOUNT_TOKEN", required: required2 };
-    }
-    try {
-      await this.execFile("op", ["whoami", "--format=json"]);
-      return { name: "tools:op", ok: true, detail: "authenticated via op whoami", required: required2 };
-    } catch (err) {
-      const detail = this.isMissingBinary(err) ? "not installed" : this.stderrOf(err);
-      return { name: "tools:op", ok: false, detail: `not signed in \u2014 ${detail}`, required: required2 };
     }
   }
   /** True when `version` is at least `minimum`, comparing major, minor, then patch. */
