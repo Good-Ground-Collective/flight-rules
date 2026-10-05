@@ -46537,13 +46537,15 @@ function createCompetenciesCommand(getConfig) {
 }
 
 // src/tasks/commands/check/command.ts
-function credentialFor(tracker, env) {
-  if (tracker === "github")
-    return { name: "GITHUB_TOKEN", value: env.githubToken };
-  return {
-    name: "JIRA_TOKEN (or JIRA_API_TOKEN / JIRA_API_KEY)",
-    value: env.jiraToken
-  };
+function missingCredentials(config2, env) {
+  if (config2.tracker === "github")
+    return env.githubToken === void 0 ? ["GITHUB_TOKEN"] : [];
+  const missing = [];
+  if (env.jiraToken === void 0)
+    missing.push("JIRA_TOKEN (or JIRA_API_TOKEN / JIRA_API_KEY)");
+  if ((env.jiraEmail ?? config2.jiraEmail) === void 0)
+    missing.push("JIRA_EMAIL (or jiraEmail in the config)");
+  return missing;
 }
 function createCheckCommand(getConfig, getTracker, getConfigPath, getProbe) {
   const check2 = new Command("check");
@@ -46568,12 +46570,12 @@ function createCheckCommand(getConfig, getTracker, getConfigPath, getProbe) {
       ok: true,
       detail: `tracker=${config2.tracker} repo=${config2.repo}`
     });
-    const credential = credentialFor(config2.tracker, new EnvLoader().load());
-    const credOk = credential.value !== void 0;
+    const missing = missingCredentials(config2, new EnvLoader().load());
+    const credOk = missing.length === 0;
     checks.push({
       name: "credentials",
       ok: credOk,
-      detail: credOk ? "present" : `${credential.name} is not set`
+      detail: credOk ? "present" : `not set: ${missing.join(", ")}`
     });
     if (credOk) {
       try {
@@ -47150,7 +47152,7 @@ var NodeToolProbe = class {
 var nodeToolProbe = new NodeToolProbe();
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.47.2";
+var appVersion = false ? "0.0.0-dev" : "1.47.3";
 
 // src/cli/cli.ts
 function buildTracker(overrideTracker) {
@@ -47168,14 +47170,15 @@ function buildTracker(overrideTracker) {
   if (env.jiraToken === void 0) {
     throw new Error("JIRA_TOKEN (or JIRA_API_TOKEN / JIRA_API_KEY) environment variable is required");
   }
-  if (env.jiraEmail === void 0) throw new Error("JIRA_EMAIL environment variable is required");
+  const email3 = env.jiraEmail ?? config2.jiraEmail;
+  if (email3 === void 0) throw new Error("JIRA_EMAIL environment variable or jiraEmail config is required");
   const host = env.jiraHost ?? config2.jiraHost;
   if (host === void 0) throw new Error("JIRA_HOST environment variable or jiraHost config is required");
   if (config2.jiraProject === void 0) throw new Error("jiraProject is required when tracker is jira");
   return new JiraTaskTracker({
     token: env.jiraToken,
     host,
-    email: env.jiraEmail,
+    email: email3,
     project: config2.jiraProject,
     ...config2.jpdProject !== void 0 ? { jpdProject: config2.jpdProject } : {},
     ...config2.confluenceSpaceKey !== void 0 ? { confluenceSpaceKey: config2.confluenceSpaceKey } : {}
