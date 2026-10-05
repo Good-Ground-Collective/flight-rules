@@ -18,7 +18,7 @@ export const seedCompetencies = [
   "auth-check",
 ] as const;
 
-const ConfigSchema = z
+export const ConfigSchema = z
   .object({
     tracker: z.enum(["github", "jira"]),
     repo: z
@@ -91,7 +91,7 @@ const ConfigSchema = z
 export type Config = z.infer<typeof ConfigSchema>;
 
 // eslint-disable-next-line preflight/no-loose-functions -- parseFrontmatter is module-level behaviour awaiting a home on a service; tracked in KAN-39
-function parseFrontmatter(contents: string): Record<string, unknown> {
+export function parseFrontmatter(contents: string): Record<string, unknown> {
   // Simple YAML frontmatter parser for this use case
   // Matches YAML frontmatter between --- delimiters
   const match = contents.match(/^---\n([\s\S]*?)\n---/);

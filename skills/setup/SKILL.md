@@ -1,15 +1,36 @@
 ---
 name: setup
-description: "First-run setup for the flight-rules plugin. Creates .claude/flight-rules.local.md with the correct fields and verifies the environment is ready to use."
+description: "First-run setup for the flight-rules plugin. Writes the flight-rules config — shared values to the user's Claude Code settings, per-project values to the project — and verifies the environment is ready to use."
 ---
 
 # Setup
 
-This skill creates the per-project configuration file for flight-rules and verifies your environment is ready. It takes about two minutes. Run it once per repository you want to use the plugin in.
+This skill writes the flight-rules configuration and verifies your environment is ready. It takes about two minutes the first time, and less in every later repository, because shared values only need setting once.
 
-The config file is `$FLIGHT_RULES_CONFIG` when that variable is set, otherwise `.claude/flight-rules.local.md`. The CLI honours the override, so every read and write below means whichever path is in effect.
+## Where config lives
 
-If that file already exists, read it and show the current values before asking whether to reconfigure.
+The CLI merges config key by key from four layers, lowest precedence first:
+
+| Scope | File | Use it for |
+| --- | --- | --- |
+| `user` | `~/.claude/settings.json` | Values shared by every project: `tracker`, `jiraHost`, `jiraEmail`, `jiraProject`, `jpdProject`, `confluenceSpaceKey`, the status names, `rfcStorage`/`rfcStoragePath`, `defaultLabels` |
+| `project` | `.claude/settings.json` | Per-project values the team shares through git, such as `repo` |
+| `local` | `.claude/settings.local.json` | Per-project values for this machine only |
+| `file` | `$FLIGHT_RULES_CONFIG`, else `.claude/flight-rules.local.md` | The older config file; still read, and it outranks the settings files |
+
+In the settings files the values sit under `pluginConfigs["flight-rules@flight-rules"].options`. Never edit any of these files by hand. Write each value with `flight-rules config set <key> <value…> --scope <scope>`; array keys such as `defaultLabels` take several values.
+
+## Step 0: Read what is already configured
+
+Run:
+
+```bash
+flight-rules config show
+```
+
+It prints the merged `values`, the scope each came from (`sources`), and whether they form a complete config (`valid`, with `error` naming what is missing). Show the user the current values and their scopes. Ask whether to reconfigure or only fill the gaps. When user-scope settings already cover the tracker, skip every question below whose answer is already there; a new repository usually needs only `repo`. When `values` is empty, nothing is configured yet; continue from Step 1.
+
+When writing, offer the scope from the table above as the default for each key, and let the user override it. When a `flight-rules.local.md` already exists, offer to move its values into settings: `config set` each one in its new scope, then delete the file once `config show` reports every key from the new scope.
 
 ---
 
@@ -83,40 +104,19 @@ If they provide labels, split on commas and strip whitespace. If they skip, use 
 
 A relative answer resolves against the config file's directory; an absolute path is used as is. Remember the answer for Step 5 and Step 7.
 
-## Step 5 (GitHub): Write the config file
+## Step 5 (GitHub): Write the config
 
-Create `.claude/` if it doesn't exist. Write `.claude/flight-rules.local.md`:
+Write each answer with `flight-rules config set`, using the scopes from **Where config lives**:
 
-**Local RFC storage:**
-
-```markdown
----
-tracker: github
-repo: <repo>
-defaultLabels:
-  - <label1>
-  - <label2>
-rfcStorage: local
----
+```bash
+flight-rules config set tracker github --scope user
+flight-rules config set rfcStorage <local|global> --scope user
+flight-rules config set rfcStoragePath <path> --scope user        # global storage only
+flight-rules config set defaultLabels <label1> <label2> --scope user   # only if given
+flight-rules config set repo <owner/repo> --scope project
 ```
 
-**Global RFC storage:**
-
-```markdown
----
-tracker: github
-repo: <repo>
-defaultLabels:
-  - <label1>
-  - <label2>
-rfcStorage: global
-rfcStoragePath: <path>
----
-```
-
-Omit the `defaultLabels` block entirely if the user skipped that step.
-
-Add `qaRecipe: <path>` only when the user chose a non-default location. The default needs no key.
+Skip any key Step 0 showed is already set to the right value. Add `qaRecipe` with `--scope project` only when the user chose a non-default location; the default needs no key.
 
 ## Step 6 (GitHub): Smoke test
 
@@ -196,28 +196,26 @@ Ask this even though the tracker is Jira: pull requests always land on GitHub, a
 
 A relative answer resolves against the config file's directory; an absolute path is used as is. Remember the answer for Step 5 and Step 7.
 
-## Step 5 (Jira): Write the config file
+## Step 5 (Jira): Write the config
 
-Create `.claude/` if it doesn't exist. Write the config file. Jira identifies *work* by project keys, but `repo` is still required — pull requests land on GitHub whichever tracker holds the tickets.
+Jira identifies *work* by project keys, but `repo` is still required, because pull requests land on GitHub whichever tracker holds the tickets. Write each answer with `flight-rules config set`, using the scopes from **Where config lives**:
 
-```markdown
----
-tracker: jira
-jiraHost: <host>
-jiraEmail: <email>
-jiraProject: <project key>
-jpdProject: <jpd project key>
-repo: <owner/repo>
-rfcStorage: local
----
+```bash
+flight-rules config set tracker jira --scope user
+flight-rules config set jiraHost <host> --scope user
+flight-rules config set jiraEmail <email> --scope user
+flight-rules config set jiraProject <project key> --scope user
+flight-rules config set jpdProject <jpd project key> --scope user   # only if given
+flight-rules config set rfcStorage <local|global> --scope user
+flight-rules config set rfcStoragePath <path> --scope user          # global storage only
+flight-rules config set repo <owner/repo> --scope project
 ```
 
-- Omit `jpdProject` if the user skipped it.
-- For global RFC storage, use `rfcStorage: global` and add `rfcStoragePath: <path>` instead of `rfcStorage: local`.
-- Add a `defaultLabels` block only if the user provided labels.
-- Add `qaRecipe: <path>` only when the user chose a non-default location. The default needs no key.
+- Skip any key Step 0 showed is already set to the right value.
+- If this repository uses a different Jira project from the user's other repositories, write `jiraProject` with `--scope project` instead.
+- Add `defaultLabels` only if the user provided labels, and `qaRecipe` (with `--scope project`) only for a non-default location.
 
-The API token stays in the environment. Never write it into the config file.
+The API token stays in the environment. Never write a token into any config file.
 
 ## Step 6 (Jira): Smoke test
 

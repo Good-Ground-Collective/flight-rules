@@ -15,7 +15,7 @@ This is the skill that confirms the thing. You are handed a **ticket id**; you h
 
 - You are handed a **ticket id**.
 - Run everything from the **repo root of the app the recipe describes** — the `flight-rules` CLI resolves config relative to CWD, and the tester drives that app.
-- **The config file is `$FLIGHT_RULES_CONFIG` when that variable is set, otherwise `.claude/flight-rules.local.md`.** The CLI honours the override, so every read and write below means whichever path is in effect.
+- **Config comes from the CLI.** It merges the user's and project's Claude Code settings with the flight-rules config file; `flight-rules config show` prints the result and where each value came from. Never hand-edit a config file; write with `flight-rules config set`.
 - `flight-rules check` reports `"ok": true`, including the tool probes the QA lane depends on. A half-configured CLI fails partway through, after it has already labelled the ticket in progress.
 - The **tracker is Jira**. The failure mention and the native attachments are Jira shapes.
 - The **QA recipe is resolvable**:

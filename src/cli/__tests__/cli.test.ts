@@ -50,6 +50,29 @@ describe('run', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.unstubAllEnvs()
+    // Keep the developer's own ~/.claude/settings.json out of the merge.
+    vi.stubEnv('CLAUDE_CONFIG_DIR', join(tmpdir(), `fr-cli-no-user-settings-${Date.now()}`))
+  })
+
+  it('reads config from user settings when no config file exists', async () => {
+    const dir = join(tmpdir(), `fr-cli-settings-${Date.now()}`)
+    const userDir = join(dir, 'user')
+    mkdirSync(userDir, { recursive: true })
+    writeFileSync(
+      join(userDir, 'settings.json'),
+      JSON.stringify({ pluginConfigs: { 'flight-rules@flight-rules': { options: { tracker: 'github', repo: 'acme/proj' } } } }),
+    )
+    vi.stubEnv('CLAUDE_CONFIG_DIR', userDir)
+    vi.stubEnv('FLIGHT_RULES_CONFIG', undefined)
+    const cwd = vi.spyOn(process, 'cwd').mockReturnValue(dir)
+
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    const { run } = await import('../cli.js')
+    await run(['config', 'show'])
+
+    expect(output).toHaveBeenCalledWith(expect.stringContaining('"repo":"acme/proj"') as string)
+    output.mockRestore()
+    cwd.mockRestore()
   })
 
   it('routes "epic create" through the tracker and prints JSON', async () => {
