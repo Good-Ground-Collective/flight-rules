@@ -19,11 +19,25 @@ The epic→ticket hop **is** the deep pass — there is no separate "ticket → 
 
 The output is **nodes in the task tracker** (GitHub/Jira), linked natively, not a document. Every emitted node is a [layered-body artifact](../../docs/layered-body-format.md).
 
+## The hard rule: tickets carry their own context
+
+Another engineer must be able to pick up any ticket you emit and run `/execute-work` on their own machine with no other input. They have a fresh clone, the tracker, and the URLs the ticket links to. They do not have your working directory, your planning notes, or this conversation.
+
+So every fact an implementer needs lives in one of three places, per [Portable context](../../docs/layered-body-format.md#portable-context):
+
+1. **The ticket body.**
+2. **The parent epic or initiative body.**
+3. **A published technical artifact**, linked by URL. Publish it with `flight-rules tdd create`, which writes a Confluence page on Jira and a GitHub Discussion on GitHub.
+
+Never point a body at a local path, an uncommitted or unmerged file, a `specs/` or planning draft, `.claude/` scratch, or an RFC that exists only in a local `rfcs/` folder. Never leave a decision in the conversation. If you wrote planning notes while you worked, move what matters into a body or the artifact, then forget the file.
+
+The CLI rejects bodies with home paths, `~/` paths, and `file://` URLs. It cannot catch an unmerged repo-relative path or a decision you never wrote down. Step 11 catches those.
+
 ## Input — an RFC file or a node id
 
 Two entry modes:
 
-- **RFC file path** (the first hop): a human-authored `rfcs/RFC-NNN.md`. Read its frontmatter `size` and its sections.
+- **RFC file path** (the first hop): a human-authored `rfcs/RFC-NNN.md`. Read its frontmatter `size` and its sections. The RFC file is an input, not a reference. Carry its Problem, Solution, and Acceptance Criteria into the bodies you emit. Link the RFC only when it is merged to a default branch, and then by its GitHub URL, never by its path.
 - **Tracker node id** (every subsequent hop): an id like `31`. Resolve it through the CLI — never call GitHub/Jira directly:
 
   ```bash
@@ -100,6 +114,8 @@ You hold the RFC context and every findings report. Now decide the children:
 - **epic → tickets:** break the work into executable tickets, each roughly one PR. Use the *deep* findings to write each ticket's **Guided Walkthrough** so a Sonnet/Haiku-tier agent can build it — name the exact files, patterns to follow, integration points, and the test approach, drawn straight from the findings (`files`, `patterns`, `integrationPoints`, `risks`). Decide the dependency ordering between tickets.
 - **ticket:** the single deep node.
 
+**Collect the decisions.** List every choice you or the human made that shapes the work: a slicing call, a rejected approach, a naming rule, an answer to an `AskUserQuestion`. Each one belongs in the parent body or the technical artifact before any ticket references it (step 9). Decide now whether the context fits in the bodies or needs a technical artifact. Reach for the artifact when the shared context runs past a screen, or when several tickets need the same long explanation.
+
 Every child ties back to the parent's Problem Statement. If the findings **contradict the RFC** — a seam that isn't real, a missing one, or a risk that reshapes the work — do **not** silently restructure: this is a *stop-and-ask* trigger (see "Working with the human"). Surface what you found via `AskUserQuestion`, propose the adjusted breakdown, and get the human's call before continuing.
 
 ### 6. (epic → tickets only) Sharpen-the-Saw: label at most one leaf
@@ -132,6 +148,7 @@ Stripping the label makes the ticket flow through the pipeline like any other �
 - The **dependency ordering** between children (what blocks what).
 - The **Sharpen-the-Saw pick**, if any — which ticket, which competency, and why (or "none").
 - Any **assumptions or open judgment calls** you made during synthesis.
+- **Where the context will live** — the decisions list, and whether a technical artifact will be published, with its title.
 
 Ask plainly (via `AskUserQuestion`): *"Here's the proposed breakdown — good to create these, or adjust?"* Revise on feedback and re-preview. Only proceed once the human says go.
 
@@ -140,10 +157,13 @@ Ask plainly (via `AskUserQuestion`): *"Here's the proposed breakdown — good to
 Follow [`docs/layered-body-format.md`](../../docs/layered-body-format.md) exactly. Write the prose **directly** (there is no serializer):
 
 - `## Problem Statement`, `## Solution`, `## Acceptance Criteria` (as a `- [ ]` checklist), `## High-level technical writeup`.
+- **Open the writeup with a `**Context:**` line** linking the parent initiative, the parent epic, and the technical artifact by key or URL. Leave out any that don't exist. `execute-work` follows this line to the initiative, which an epic payload does not name.
+- **Parents carry the decisions.** An epic or initiative body records the breakdown's decisions under `### Decisions` in its writeup, one bullet per choice with its reason. A ticket repeats any decision that shapes its own code. It doesn't send the implementer elsewhere for it.
+- **Repo-relative paths only for code on the default branch**, or for files the ticket itself creates. Research ran against your checkout, so confirm a cited path exists on the default branch with `git ls-tree -r --name-only origin/HEAD -- <path>` before you write it in.
 - **Tickets only:** a `<details><summary>Guided Walkthrough</summary>` plain-markdown section (never inside the YAML — a nested fence would break it).
 - The `size` of the **child** is implied by the create command you run (`epic create` → epic, `ticket create` → ticket); it is derived from the entity's kind on read, never stored in the LLM-Context block.
 
-Write each body to a temp file and pass it with `--body-file <file>` — the deterministic way to hand large layered-body markdown (fenced YAML, nested code) to the CLI without shell-escaping it.
+Write each body to a temp file and pass it with `--body-file <file>` — the deterministic way to hand large layered-body markdown (fenced YAML, nested code) to the CLI without shell-escaping it. The temp file is a transport, not a reference: never name it in any body.
 
 ### 9. Create and link via the CLI
 
@@ -157,6 +177,14 @@ flight-rules initiative create --title "<title>" --body-file initiative-body.md 
 flight-rules epic create --title "<title>" --body-file epic-N.md        # → { "id": <epicId> }
 flight-rules epic link-initiative <epicId> --initiative <milestoneId>
 ```
+
+**Publish the technical artifact first, when step 5 called for one.** It needs the epic's id, and tickets need its URL for their `Context:` line:
+
+```bash
+flight-rules tdd create --title "<title>" --body-file tdd.md --epic-id <epicId>   # → { "id": …, "url": … }
+```
+
+On an initiative hop, run it after each `epic create` that needs one. On an epic hop, run it before the first `ticket create`. If the epic's body is missing decisions from this hop, add them with `flight-rules epic edit <epicId> --body-file epic.md` before creating tickets. The artifact is a full document: put the decisions, the cross-ticket explanation, and any diagrams in it, not a pointer to somewhere else.
 
 **epic → tickets:**
 ```bash
@@ -184,6 +212,22 @@ flight-rules epic plan <epicId>   # expect clean waves, no cycles
 ```
 If `cycles` is non-empty, fix the offending `block` edges.
 
+### 11. Read each node as a stranger
+
+Fetch every node you created back from the tracker and read it as an engineer on a fresh machine who has never seen this conversation:
+
+```bash
+flight-rules ticket get <ticketId>
+```
+
+For each one, check:
+
+- Every reference resolves from a fresh clone or a URL: tracker keys, artifact URLs, and repo-relative paths that exist on the default branch or that the ticket creates.
+- No sentence leans on something unwritten: "as discussed", "per the plan", "see my notes", or a decision ID such as `D14` that no body or artifact defines.
+- The Acceptance Criteria and Guided Walkthrough make sense with only the ticket, its parents, and the linked artifact open.
+
+Any failure is a defect in what you emitted. Fix it now with `ticket edit`, `epic edit`, or a new artifact, then re-read. Don't finish with a node that fails.
+
 Report the created node ids and their links. **Stop — one altitude only.** Do not descend into the children you just created; each re-enters this skill as its own invocation.
 
 ## Guardrails
@@ -194,6 +238,7 @@ Report the created node ids and their links. **Stop — one altitude only.** Do 
 - **Check in when unsure, don't guess.** Ambiguity, RFC/code contradiction, real forks, and size mismatches are all `AskUserQuestion` triggers (see "Working with the human").
 - **Everything through `flight-rules`.** The skill stays tracker-agnostic; the CLI resolves GitHub/Jira.
 - **At most one Sharpen-the-Saw leaf per epic** (step 6), only on a non-blocking leaf, always with a written justification. Never label silently; never exceed one.
+- **Portable context only.** No body references a local path, an unmerged file, or an unwritten decision. Never pass `--allow-local-paths` to get a context pointer past the CLI; publish the context instead.
 
 ## What Good Looks Like
 
@@ -204,3 +249,4 @@ Report the created node ids and their links. **Stop — one altitude only.** Do 
 - Children are natively linked (epics→milestone, tickets→epic sub-issues) with a clean, cycle-free dependency graph.
 - An epic→ticket pass labels **at most one** leaf `sharpen-the-saw:<slug>`, with a justification and reduced walkthrough — or none, if nothing fits the rubric.
 - Each emitted node could itself be handed straight back into this skill for the next hop down.
+- An engineer on another machine could run `/execute-work` on any emitted ticket with no input beyond the ticket id. Every decision lives in a body or a published artifact, and every reference resolves from a fresh clone or a URL.

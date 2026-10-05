@@ -14,6 +14,9 @@ describe('ExtensionMimeTypeResolver', () => {
     expect(resolver.forFilename('clip.webm')).toBe('video/webm')
     expect(resolver.forFilename('clip.mp4')).toBe('video/mp4')
     expect(resolver.forFilename('clip.mov')).toBe('video/quicktime')
+    expect(resolver.forFilename('request.txt')).toBe('text/plain')
+    expect(resolver.forFilename('ingest.log')).toBe('text/plain')
+    expect(resolver.forFilename('response.json')).toBe('application/json')
   })
 
   it('resolves the extension case-insensitively', () => {
@@ -22,7 +25,7 @@ describe('ExtensionMimeTypeResolver', () => {
   })
 
   it('falls back to application/octet-stream for unknown or missing extensions', () => {
-    expect(resolver.forFilename('notes.txt')).toBe('application/octet-stream')
+    expect(resolver.forFilename('dump.bin')).toBe('application/octet-stream')
     expect(resolver.forFilename('README')).toBe('application/octet-stream')
   })
 })

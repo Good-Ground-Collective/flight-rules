@@ -1,7 +1,7 @@
 import { Command } from 'commander'
 import { createDocCommand } from '../bundled-docs/commands/doc/command.js'
 import { FileDocResolver } from '../bundled-docs/doc-resolver/doc-resolver.js'
-import { readConfig, resolveConfigPath } from '../shared/config.js'
+import { ConfigStore } from '../shared/config-store.js'
 import type { Config } from '../shared/config.js'
 import { EnvLoader } from '../shared/env.js'
 import { GitHubTaskTracker } from '../tasks/github-task-tracker/github-task-tracker.js'
@@ -15,6 +15,8 @@ import { createRfcCommand } from '../tasks/commands/rfc/command.js'
 import { createQaCommand } from '../tasks/commands/qa/command.js'
 import { createCompetenciesCommand } from '../tasks/commands/competencies/command.js'
 import { createCheckCommand } from '../tasks/commands/check/command.js'
+import { createConfigCommand } from '../tasks/commands/config/command.js'
+import { createHookCommand } from '../hooks/commands/hook/command.js'
 import type { TaskTracker } from '../tasks/task-tracker/task-tracker.js'
 import { NodeGitExecutor } from '../git/git-executor/git-executor.js'
 import { createGitCommand } from '../git/commands/commit/command.js'
@@ -46,7 +48,8 @@ function buildTracker(overrideTracker?: string): TaskTracker {
   if (env.jiraToken === undefined) {
     throw new Error('JIRA_TOKEN (or JIRA_API_TOKEN / JIRA_API_KEY) environment variable is required')
   }
-  if (env.jiraEmail === undefined) throw new Error('JIRA_EMAIL environment variable is required')
+  const email = env.jiraEmail ?? config.jiraEmail
+  if (email === undefined) throw new Error('JIRA_EMAIL environment variable or jiraEmail config is required')
 
   const host = env.jiraHost ?? config.jiraHost
   if (host === undefined) throw new Error('JIRA_HOST environment variable or jiraHost config is required')
@@ -55,7 +58,7 @@ function buildTracker(overrideTracker?: string): TaskTracker {
   return new JiraTaskTracker({
     token: env.jiraToken,
     host,
-    email: env.jiraEmail,
+    email,
     project: config.jiraProject,
     ...(config.jpdProject !== undefined ? { jpdProject: config.jpdProject } : {}),
     ...(config.confluenceSpaceKey !== undefined ? { confluenceSpaceKey: config.confluenceSpaceKey } : {}),
@@ -76,8 +79,7 @@ function buildPrHost(overrideTracker?: string): PullRequestHost {
 
 // eslint-disable-next-line preflight/no-loose-functions -- getConfigFromEnv is module-level behaviour awaiting a home on a service; tracked in KAN-39
 function getConfigFromEnv(overrideTracker?: string): Config {
-  const configPath = resolveConfigPath(process.cwd(), process.env['FLIGHT_RULES_CONFIG'])
-  const config = readConfig(configPath)
+  const config = new ConfigStore({ cwd: process.cwd() }).load()
   if (overrideTracker === undefined) return config
   if (overrideTracker !== 'github' && overrideTracker !== 'jira') {
     throw new Error(`Invalid --tracker "${overrideTracker}" — expected "github" or "jira"`)
@@ -89,7 +91,8 @@ export function buildProgram(
   getTracker: (overrideTracker?: string) => TaskTracker,
   getConfig: (overrideTracker?: string) => Config,
   getPrHost: (overrideTracker?: string) => PullRequestHost,
-  getConfigPath: () => string = () => resolveConfigPath(process.cwd(), process.env['FLIGHT_RULES_CONFIG']),
+  getConfigPath: () => string = () => new ConfigStore({ cwd: process.cwd() }).filePath(),
+  getConfigStore: () => ConfigStore = () => new ConfigStore({ cwd: process.cwd() }),
 ): Command {
   const program = new Command('flight-rules')
   program.version(appVersion)
@@ -116,6 +119,8 @@ export function buildProgram(
   program.addCommand(createRfcCommand(config))
   program.addCommand(createQaCommand(config, getConfigPath))
   program.addCommand(createCompetenciesCommand(config))
+  program.addCommand(createConfigCommand(getConfigStore))
+  program.addCommand(createHookCommand())
   program.addCommand(createDocCommand(() => FileDocResolver.fromInstall({ moduleUrl: import.meta.url, env: process.env })))
   const probe = (): ToolProbe => new NodeToolProbe()
   program.addCommand(createCheckCommand(config, tracker, getConfigPath, probe))
@@ -128,7 +133,7 @@ export async function run(argv: string[]): Promise<void> {
     buildTracker,
     getConfigFromEnv,
     buildPrHost,
-    () => resolveConfigPath(process.cwd(), process.env['FLIGHT_RULES_CONFIG']),
+    () => new ConfigStore({ cwd: process.cwd() }).filePath(),
   ).parseAsync(argv, {
     from: 'user',
   })

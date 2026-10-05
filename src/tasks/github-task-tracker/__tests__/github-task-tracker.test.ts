@@ -582,14 +582,17 @@ describe('GitHubTracker.createTechnicalDesign metadata', () => {
       } as never)
       .mockResolvedValueOnce({
         createDiscussion: {
-          discussion: { number: 5, body: 'TDD body', updatedAt: '2026-01-01T00:00:00Z' },
+          discussion: { number: 5, body: 'TDD body', updatedAt: '2026-01-01T00:00:00Z', url: 'https://github.com/acme/proj/discussions/5' },
         },
       } as never)
 
     mockGet.mockResolvedValueOnce({ data: { body: 'Epic body' } } as never)
     mockUpdate.mockResolvedValueOnce({} as never)
 
-    await tracker.createTechnicalDesign({ title: 'Auth TDD', body: 'TDD body', epicId: '10' })
+    const tdd = await tracker.createTechnicalDesign({ title: 'Auth TDD', body: 'TDD body', epicId: '10' })
+
+    // Tickets link the design by this URL, so it must come back from create.
+    expect(tdd.url).toBe('https://github.com/acme/proj/discussions/5')
 
     // The mutation body should contain epicId: 10 in the metadata block
     const createArgs = mockGql.mock.calls[1] as [string, Record<string, unknown>] | undefined
