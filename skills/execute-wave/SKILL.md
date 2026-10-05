@@ -149,7 +149,12 @@ mutates the branch; two runs in one tree collide.
 ### 7. Handle a ticket that can't finish
 
 `execute-work` stops without a PR in several states: three consecutive FAILs, an
-`UNVERIFIABLE` verdict, a rejected push, `openQuestions` it can't answer.
+`UNVERIFIABLE` verdict, a rejected push, `openQuestions` it can't answer, a ticket
+defect where the body points at something a fresh clone can't resolve.
+
+A ticket defect stops before any mutation, so it leaves no branch and a clean
+tree. Park it, list its unresolvable references in the report, and keep draining.
+Don't patch the ticket from your own machine's files.
 
 **Park the ticket and keep draining.** A sibling that doesn't depend on the
 failure has no reason to wait — wave 0 is independent work by definition.

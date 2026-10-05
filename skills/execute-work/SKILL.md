@@ -53,6 +53,14 @@ Also note the ticket's title (for the branch slug), its labels, and its `metadat
 
 **If the contract section for this format is missing or empty — Acceptance Criteria on a layered body, Fixed When on a bug report — stop and ask the user.** Never infer the contract from the Problem Statement or the Symptom, and never write criteria yourself — a fabricated contract makes the verifier's PASS meaningless. A ticket with no contract isn't ready; say so and stop.
 
+**The ticket is the source of truth.** Run as if you were on a fresh machine with only this repo's clone, the tracker, and the URLs the ticket links to. Your context comes from the ticket, its parent epic and initiative, and the published artifacts they link (step 5). Nothing else. Scan the body for a reference that does not resolve that way:
+
+- an absolute or home path (`/Users/…`, `/home/…`, `~/…`) or a `file://` URL;
+- a repo-relative path that neither exists in this clone nor is a file the ticket asks you to create;
+- a pointer to something unwritten: "per the planning doc", "see decisions.md", or a decision ID that no body or artifact defines.
+
+**On any of these, stop and report a ticket defect.** Name each unresolvable reference and say the ticket needs it inlined or published (see [Portable context](${CLAUDE_PLUGIN_ROOT}/docs/layered-body-format.md#portable-context)). Do not look for the file on this machine, even if it happens to exist. A run that works only on the author's laptop hides the defect from the next engineer.
+
 If the ticket carries the `sharpen-the-saw` label, stop and point the user at `/sharpen-the-saw` instead. That work is reserved for a human.
 
 Confirm the working tree is clean before going further:
@@ -159,6 +167,14 @@ Build the brief you will hand `code-implementation`. It gets exactly:
   ```
 
   On GitHub the epic payload already carries `tdd`, so no second call is needed. Include only the parts that bear on this ticket.
+
+- **The parent initiative and any other linked artifact.** The epic payload does not name its initiative. Find it on the `**Context:**` line that opens the High-level technical writeup of the ticket or epic, then read it:
+
+  ```bash
+  flight-rules initiative get <initiativeId>
+  ```
+
+  Fetch any other artifact that line links: a design by `flight-rules tdd get <id>`, a GitHub file or Discussion URL with `gh`. Include only what bears on this ticket. When a link cannot be fetched, stop and report it the way step 1 reports a ticket defect.
 
 Do not include your own opinion on how to build it. The walkthrough and the charter are the guidance; anything you add is a third voice the agent has to reconcile.
 
@@ -385,6 +401,7 @@ Give the user, in this order:
 
 - **Dirty working tree** → stop before mutating anything. Report the dirty paths and ask the user to commit or stash. No branch, no transition, no dispatch.
 - **Missing or empty contract section** (Acceptance Criteria, or Fixed When on a bug report) → stop and ask. Never invent the contract.
+- **Ticket references something a fresh clone can't resolve** (step 1 or step 5) → stop before mutating anything and report a ticket defect, listing each reference. Don't search this machine for the file. The fix belongs in the ticket, so the next engineer gets it too.
 - **`flight-rules check` fails** → stop and show the report. Fix config or credentials before running.
 - **`ticket status` reports the transition is unreachable** → the CLI's error carries an `available:` list. Show it to the user, ask which status they meant, then **write the corrected value back** into `.claude/flight-rules.local.md` so the next run doesn't repeat the mistake. Don't retry blind.
 - **Verifier returns `UNVERIFIABLE`** → do not treat it as PASS and do not treat it as FAIL, and **do not iterate**. Stop before spending another iteration, surface the criterion and the verifier's question to the user, and ask how to proceed. An untestable criterion is usually a ticket bug, not a code bug — another implementation pass cannot fix it. This takes precedence over any FAIL in the same result.

@@ -90,6 +90,30 @@ describe('ticket command', () => {
     output.mockRestore()
   })
 
+  it('rejects "create" when the body references a machine-local path, before calling the tracker', async () => {
+    const tracker = makeTracker()
+    await expect(
+      run(tracker, ['create', '--title', 'T', '--body', 'Decisions: ~/planning/decisions.md']),
+    ).rejects.toThrow('references files on this machine')
+    expect(tracker.createTicket).not.toHaveBeenCalled()
+  })
+
+  it('accepts a machine-local path on "create" with --allow-local-paths', async () => {
+    const tracker = makeTracker()
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(tracker, ['create', '--title', 'T', '--body', 'Fix the ~/.zshrc parser', '--allow-local-paths'])
+    expect(tracker.createTicket).toHaveBeenCalledWith({ title: 'T', body: 'Fix the ~/.zshrc parser', labels: [] })
+    output.mockRestore()
+  })
+
+  it('rejects "edit" when the body references a machine-local path', async () => {
+    const tracker = makeTracker()
+    await expect(run(tracker, ['edit', '7', '--body', 'See /Users/dev/specs/x.md'])).rejects.toThrow(
+      'references files on this machine',
+    )
+    expect(tracker.updateTicketDescription).not.toHaveBeenCalled()
+  })
+
   it('rejects "create" when neither --body nor --body-file is given', async () => {
     const tracker = makeTracker()
     await expect(run(tracker, ['create', '--title', 'T', '--epic-id', '5'])).rejects.toThrow('one of --body or --body-file')
