@@ -15,7 +15,7 @@ This is the skill that builds the thing. You are handed a **ticket id**; you han
 
 - You are handed a **ticket id**, and optionally a **base branch**. `execute-wave` supplies the base when it drives you as one ticket of a wave; a human invoking you directly normally doesn't.
 - Run everything from the **repo root** (the `flight-rules` CLI resolves config relative to CWD).
-- **The config file is `$FLIGHT_RULES_CONFIG` when that variable is set, otherwise `.claude/flight-rules.local.md`.** The CLI honours the override, so every read and write below means whichever path is in effect — reading one file and writing the other would strand your answers where nothing looks for them.
+- **Read and write config only through the CLI.** Config can live in several places that the CLI merges key by key: the user's `~/.claude/settings.json`, the project's `.claude/settings.json` and `.claude/settings.local.json` (each under `pluginConfigs["flight-rules@flight-rules"].options`), and the config file (`$FLIGHT_RULES_CONFIG`, else `.claude/flight-rules.local.md`). `flight-rules config show` prints the merged values and where each came from; `flight-rules config set` writes one. Never hand-edit any of these files — a value written to the wrong layer is shadowed by another and silently ignored.
 - `flight-rules check` reports `"ok": true`. If it doesn't, fix the environment first — the run mutates tracker state, and a half-configured CLI fails partway through.
 - Config carries a **`repo`** field (`owner/repo`). `flight-rules pr create` needs it regardless of tracker — the PR always lands on GitHub — and it throws before parsing a single option when it is missing. On a Jira-tracked repo `repo` is often absent, because the tracker doesn't need it and `skills/setup/SKILL.md` doesn't ask for it. **Step 2 discovers and stores it**, and it must be settled _before_ the loop runs: reaching step 7 without it means a pushed branch and no PR.
 - The **working tree is clean**. A dirty tree stops the run _before any mutation_: the commit step commits by explicit path, so pre-existing edits to a file the implementer also touched would be swept into the commit silently.
@@ -77,7 +77,7 @@ Three config values decide whether step 7 can finish, and none of them is guaran
 
 This step is **discover → ask → store**, and it is interactive **once per repo**. After the first run it is a silent config read.
 
-**Read** `.claude/flight-rules.local.md`. If `inProgressStatus`, `inReviewStatus` and `repo` are all present, use them and move on.
+**Read** the merged config with `flight-rules config show`. If `values.inProgressStatus`, `values.inReviewStatus` and `values.repo` are all present, use them and move on.
 
 **Discover** the reachable statuses when either status is missing:
 
@@ -103,21 +103,17 @@ gh repo view --json nameWithOwner --jq .nameWithOwner
 
 Questions to ask: "Which status means work has started?", "Which status means a PR is open and awaiting review? (it may not appear in the list — the tracker only reports statuses reachable from where the ticket sits now)", and "PRs will be opened against `<owner/repo>` — is that right?"
 
-**Store** all the answers in **one** `Write` of `.claude/flight-rules.local.md`, exactly as `skills/setup/SKILL.md` does — one write, not one per field. The new keys go **inside the `---` frontmatter fences**, alongside the existing fields, which you preserve verbatim. Write the whole file:
+**Store** each answer with `flight-rules config set`, one call per field:
 
-```markdown
----
-tracker: <existing value>
-<every other existing field, unchanged>
-repo: <owner/repo>
-inProgressStatus: <the chosen in-progress status>
-inReviewStatus: <the chosen in-review status>
----
+```bash
+flight-rules config set repo "<owner/repo>"
+flight-rules config set inProgressStatus "<the chosen in-progress status>"
+flight-rules config set inReviewStatus "<the chosen in-review status>"
 ```
 
-A key that was already present and correct needs no new value — carry it through unchanged. This is about which keys you _add_, not which keys survive: every existing field stays in the file, and no key appears twice.
+Without `--scope`, each value lands where the key already lives, else in the config file when one exists, else in `.claude/settings.local.json`. That default is right for `repo`, which is per project. Status names belong to the board, and a board is usually shared across repos, so when no layer holds them yet, ask the user whether to store them for every project (`--scope user`) or just this one. If the command's JSON carries a `warning`, a higher-precedence layer still holds an older value — show the warning and offer to `flight-rules config unset <key> --scope <that scope>`.
 
-The delimiters matter. The config loader reads only the block between the **first** `---` pair at the very start of the file, and the schema is non-strict — so anything written after the closing `---` is silently dropped with no error, and this step would then re-prompt on every single run instead of once.
+Confirm with `flight-rules config show` that the merged values are the ones you stored; a re-prompt on the next run means the write was shadowed.
 
 Later runs in this repo are then fully non-interactive.
 
@@ -405,12 +401,12 @@ Give the user, in this order:
 - **Missing or empty contract section** (Acceptance Criteria, or Fixed When on a bug report) → stop and ask. Never invent the contract.
 - **Ticket references something a fresh clone can't resolve** (step 1 or step 5) → stop before mutating anything and report a ticket defect, listing each reference. Don't search this machine for the file. The fix belongs in the ticket, so the next engineer gets it too.
 - **`flight-rules check` fails** → stop and show the report. Fix config or credentials before running.
-- **`ticket status` reports the transition is unreachable** → the CLI's error carries an `available:` list. Show it to the user, ask which status they meant, then **write the corrected value back** into `.claude/flight-rules.local.md` so the next run doesn't repeat the mistake. Don't retry blind.
+- **`ticket status` reports the transition is unreachable** → the CLI's error carries an `available:` list. Show it to the user, ask which status they meant, then **store the corrected value** with `flight-rules config set inReviewStatus "<status>"` (or `inProgressStatus`) so the next run doesn't repeat the mistake. Don't retry blind.
 - **Verifier returns `UNVERIFIABLE`** → do not treat it as PASS and do not treat it as FAIL, and **do not iterate**. Stop before spending another iteration, surface the criterion and the verifier's question to the user, and ask how to proceed. An untestable criterion is usually a ticket bug, not a code bug — another implementation pass cannot fix it. This takes precedence over any FAIL in the same result.
 - **Either agent returns `openQuestions`** → surface them unanswered, alongside whatever else that iteration produced.
 - **Third consecutive FAIL** → stop. Present the itemized evidence from the final verification, state that three iterations were used, and **leave the branch intact** with the work in place so a human can pick it up. Do not commit, do not push, do not open a PR, and do not move the ticket to in-review. Leave it in the in-progress status — that is now true.
 - **`git push` rejected** → stop and report. There is no force flag, and inventing one with raw git is not the fix.
-- **`pr create` fails on `repo`** — either `repo (owner/repo) is required in config to create pull requests` or `Invalid repo format …`. This is a config error, not a work error, and by the time you see it **the commit has landed and the branch is pushed**. So: fix `repo` in `.claude/flight-rules.local.md` (confirm the value with the user first) and re-run **only** the `pr create` command, then carry on to the in-review transition. Do **not** redo the implement/verify loop, do not re-commit, and do **not** fall back to raw `gh pr create` — that bypasses the PR template, so the body would lose the authored What/Why sections, the OTS Materials block and the ticket link, which is the whole point of routing through the CLI. Re-run `pr create` with the same authored fields the tech-writer produced and the same `--attach` set — don't re-summon the agent and don't hand-write a body. If the user can't supply a valid `owner/repo`, stop and report the branch name and commit sha so the PR can be opened by hand.
+- **`pr create` fails on `repo`** — either `repo (owner/repo) is required in config to create pull requests` or `Invalid repo format …`. This is a config error, not a work error, and by the time you see it **the commit has landed and the branch is pushed**. So: fix `repo` with `flight-rules config set repo "<owner/repo>"` (confirm the value with the user first) and re-run **only** the `pr create` command, then carry on to the in-review transition. Do **not** redo the implement/verify loop, do not re-commit, and do **not** fall back to raw `gh pr create` — that bypasses the PR template, so the body would lose the authored What/Why sections, the OTS Materials block and the ticket link, which is the whole point of routing through the CLI. Re-run `pr create` with the same authored fields the tech-writer produced and the same `--attach` set — don't re-summon the agent and don't hand-write a body. If the user can't supply a valid `owner/repo`, stop and report the branch name and commit sha so the PR can be opened by hand.
 - **`pr create` exits non-zero but printed a PR URL** → a partial attachment upload. The PR exists, with the files that did upload. Do **not** run `pr create` again — that opens a duplicate. Record the URL, note which attachments failed for the step 9 report, and carry on to the in-review transition. The missing images can be attached to the PR later by hand.
 - **`ticket comment` fails** → report it in step 9 and finish the run. The PR is open, the work is verified, and the ticket has moved; the comment is the only thing missing, and it can be posted by hand from the manifest. Do not roll the ticket status back and do not retry the loop.
 - **`autonomous-code-review` fails to post** → report it in step 9 and finish the run. By this point the PR is open, the work is verified and the ticket has moved, so the review is the only thing missing and it can be re-run against the PR at any time. Do not retry the implement/verify loop, do not roll the ticket status back, and do not withhold the run summary.
