@@ -118,4 +118,14 @@ describe("CommitGuard with the real config store", () => {
   it("allows when no layer holds flight-rules config", () => {
     expect(setup(false).decide(bash("git commit -m x"))).toBeUndefined();
   });
+
+  it("allows when only user settings hold flight-rules config", () => {
+    const guard = setup(false);
+    if (root === undefined) throw new Error("setup did not run");
+    writeFileSync(
+      join(root, "user", "settings.json"),
+      JSON.stringify({ pluginConfigs: { "flight-rules@flight-rules": { options: { tracker: "jira" } } } }),
+    );
+    expect(guard.decide(bash("git commit -m x"))).toBeUndefined();
+  });
 });
