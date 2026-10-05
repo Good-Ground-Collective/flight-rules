@@ -28,7 +28,11 @@ const writeConfig = (tracker = 'github', repo = 'acme/proj'): string => {
   return path
 }
 
-beforeEach(() => { cwd = mkdtempSync(join(tmpdir(), 'fr-core-')) })
+beforeEach(() => {
+  cwd = mkdtempSync(join(tmpdir(), 'fr-core-'))
+  // Keep the developer's own ~/.claude/settings.json out of every merge.
+  vi.stubEnv('HOME', join(cwd, 'home'))
+})
 afterEach(() => {
   rmSync(cwd, { recursive: true, force: true })
   vi.unstubAllEnvs()
@@ -36,11 +40,12 @@ afterEach(() => {
 
 describe('createFlightRules', () => {
   it('constructs without accessing config or credentials', () => {
-    const core = createFlightRules({ cwd: join(cwd, 'missing'), env: {} })
+    // An empty user settings dir keeps the developer's own settings out of the merge.
+    const core = createFlightRules({ cwd: join(cwd, 'missing'), env: { CLAUDE_CONFIG_DIR: join(cwd, 'no-user-settings') } })
     expect(core).toBeInstanceOf(DefaultFlightRules)
-    expect(() => core.config()).toThrow('ENOENT')
-    expect(() => core.tracker()).toThrow('ENOENT')
-    expect(() => core.prHost()).toThrow('ENOENT')
+    expect(() => core.config()).toThrow('No flight-rules config found')
+    expect(() => core.tracker()).toThrow('No flight-rules config found')
+    expect(() => core.prHost()).toThrow('No flight-rules config found')
   })
 
   it.each(['github', 'jira'])('honors overrides on a %s config', (tracker) => {
@@ -78,16 +83,16 @@ describe('createFlightRules', () => {
 
   it('re-reads config for every config, tracker and PR host call', () => {
     const path = writeConfig()
-    const core = createFlightRules({ cwd, env: { GITHUB_TOKEN: 't' } })
+    const core = createFlightRules({ cwd, env: { GITHUB_TOKEN: 't', CLAUDE_CONFIG_DIR: join(cwd, 'no-user-settings') } })
     expect(core.config().repo).toBe('acme/proj')
     expect(core.tracker()).toBeInstanceOf(GitHubTaskTracker)
     expect(core.prHost()).toBeInstanceOf(GhPullRequestHost)
     writeConfig('github', 'acme/changed')
     expect(core.config().repo).toBe('acme/changed')
     rmSync(path)
-    expect(() => core.config()).toThrow('ENOENT')
-    expect(() => core.tracker()).toThrow('ENOENT')
-    expect(() => core.prHost()).toThrow('ENOENT')
+    expect(() => core.config()).toThrow('No flight-rules config found')
+    expect(() => core.tracker()).toThrow('No flight-rules config found')
+    expect(() => core.prHost()).toThrow('No flight-rules config found')
   })
 
   it('resolves config paths with explicit props before live env before cwd discovery', () => {

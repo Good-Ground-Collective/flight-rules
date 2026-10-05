@@ -63,7 +63,7 @@ export const ConfigSchema = z
       .string()
       .optional()
       .describe(
-        "Path to the per-repo QA recipe; relative paths resolve against the directory holding this config file; defaults to flight-rules.qa.md beside it",
+        "Deprecated: path to a legacy QA recipe, read only when no QA.md or AGENTS.md QA section exists; relative paths resolve against the directory holding this config file; defaults to flight-rules.qa.md beside it",
       ),
     competencies: z.array(z.string()).default([...seedCompetencies]),
   })
@@ -91,7 +91,7 @@ export const ConfigSchema = z
 export type Config = z.infer<typeof ConfigSchema>;
 
 // eslint-disable-next-line preflight/no-loose-functions -- parseFrontmatter is module-level behaviour awaiting a home on a service; tracked in KAN-39
-function parseFrontmatter(contents: string): Record<string, unknown> {
+export function parseFrontmatter(contents: string): Record<string, unknown> {
   // Simple YAML frontmatter parser for this use case
   // Matches YAML frontmatter between --- delimiters
   const match = contents.match(/^---\n([\s\S]*?)\n---/);

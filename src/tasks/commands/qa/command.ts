@@ -1,35 +1,61 @@
-import { existsSync, statSync } from "node:fs";
 import { Command } from "commander";
 import { getQaRecipePath } from "../../../shared/config.js";
 import type { Config } from "../../../shared/config.js";
+import { QaInstructionsFinder } from "../../qa-instructions/qa-instructions.js";
 
 export function createQaCommand(
   getConfig: () => Config,
   getConfigPath: () => string,
+  getFinder: () => QaInstructionsFinder = () => new QaInstructionsFinder(),
 ): Command {
   const qa = new Command("qa");
 
+  // The legacy recipe is only a fallback, and QA instructions must be readable
+  // in a repo that has no flight-rules config at all.
+  const legacyRecipePath = (): string | undefined => {
+    let config: Config;
+    try {
+      config = getConfig();
+    } catch {
+      return undefined;
+    }
+    if (config.qaRecipe !== undefined && config.qaRecipe.trim() === "") {
+      throw new Error(
+        "qaRecipe is set to a blank value — remove the key and move the recipe into a QA.md (see docs/qa-instructions.md)",
+      );
+    }
+    return getQaRecipePath(config, getConfigPath());
+  };
+
+  qa.command("instructions")
+    .description("print the QA instructions that apply to a directory, nearest first, as JSON")
+    .option("--from <dir>", "directory (or file) to start from; defaults to the working directory")
+    .exitOverride()
+    .action((opts: { from?: string }) => {
+      const result = getFinder().discover({
+        from: opts.from ?? process.cwd(),
+        legacyRecipePath: legacyRecipePath(),
+      });
+      process.stdout.write(JSON.stringify(result) + "\n");
+    });
+
   qa.command("recipe")
+    .description("deprecated: print the path of the nearest QA instructions; use `qa instructions`")
     .exitOverride()
     .action(() => {
-      const config = getConfig();
-      if (config.qaRecipe !== undefined && config.qaRecipe.trim() === "") {
+      const [nearest] = getFinder().discover({
+        from: process.cwd(),
+        legacyRecipePath: legacyRecipePath(),
+      }).sources;
+      if (nearest === undefined) {
         throw new Error(
-          "qaRecipe is set to a blank value — give it a path to the QA recipe file, or remove the key to fall back to the default beside the config",
+          "No QA instructions found — add a QA.md at the repo root or a QA section in AGENTS.md (see docs/qa-instructions.md)",
         );
       }
-      const path = getQaRecipePath(config, getConfigPath());
-      if (!existsSync(path)) {
-        throw new Error(
-          `QA recipe not found at ${path} — run /flight-rules:setup to scaffold it, or set qaRecipe in the config`,
-        );
-      }
-      if (!statSync(path).isFile()) {
-        throw new Error(
-          `QA recipe at ${path} is not a regular file — set qaRecipe to the recipe file's path`,
-        );
-      }
-      process.stdout.write(`${path}\n`);
+      process.stderr.write(
+        "`flight-rules qa recipe` is deprecated; use `flight-rules qa instructions`\n",
+      );
+      process.stdout.write(`${nearest.path}\n`);
     });
 
   return qa;

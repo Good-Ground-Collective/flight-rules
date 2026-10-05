@@ -1005,14 +1005,14 @@ var require_foldFlowLines = __commonJS({
     var FOLD_FLOW = "flow";
     var FOLD_BLOCK = "block";
     var FOLD_QUOTED = "quoted";
-    function foldFlowLines(text4, indent2, mode = "flow", { indentAtStart, lineWidth = 80, minContentWidth = 20, onFold, onOverflow } = {}) {
+    function foldFlowLines(text5, indent2, mode = "flow", { indentAtStart, lineWidth = 80, minContentWidth = 20, onFold, onOverflow } = {}) {
       if (!lineWidth || lineWidth < 0)
-        return text4;
+        return text5;
       if (lineWidth < minContentWidth)
         minContentWidth = 0;
       const endStep = Math.max(1 + minContentWidth, 1 + lineWidth - indent2.length);
-      if (text4.length <= endStep)
-        return text4;
+      if (text5.length <= endStep)
+        return text5;
       const folds = [];
       const escapedFolds = {};
       let end = lineWidth - indent2.length;
@@ -1029,14 +1029,14 @@ var require_foldFlowLines = __commonJS({
       let escStart = -1;
       let escEnd = -1;
       if (mode === FOLD_BLOCK) {
-        i = consumeMoreIndentedLines(text4, i, indent2.length);
+        i = consumeMoreIndentedLines(text5, i, indent2.length);
         if (i !== -1)
           end = i + endStep;
       }
-      for (let ch; ch = text4[i += 1]; ) {
+      for (let ch; ch = text5[i += 1]; ) {
         if (mode === FOLD_QUOTED && ch === "\\") {
           escStart = i;
-          switch (text4[i + 1]) {
+          switch (text5[i + 1]) {
             case "x":
               i += 3;
               break;
@@ -1053,12 +1053,12 @@ var require_foldFlowLines = __commonJS({
         }
         if (ch === "\n") {
           if (mode === FOLD_BLOCK)
-            i = consumeMoreIndentedLines(text4, i, indent2.length);
+            i = consumeMoreIndentedLines(text5, i, indent2.length);
           end = i + indent2.length + endStep;
           split = void 0;
         } else {
           if (ch === " " && prev && prev !== " " && prev !== "\n" && prev !== "	") {
-            const next = text4[i + 1];
+            const next = text5[i + 1];
             if (next && next !== " " && next !== "\n" && next !== "	")
               split = i;
           }
@@ -1070,12 +1070,12 @@ var require_foldFlowLines = __commonJS({
             } else if (mode === FOLD_QUOTED) {
               while (prev === " " || prev === "	") {
                 prev = ch;
-                ch = text4[i += 1];
+                ch = text5[i += 1];
                 overflow = true;
               }
               const j = i > escEnd + 1 ? i - 2 : escStart - 1;
               if (escapedFolds[j])
-                return text4;
+                return text5;
               folds.push(j);
               escapedFolds[j] = true;
               end = j + endStep;
@@ -1090,39 +1090,39 @@ var require_foldFlowLines = __commonJS({
       if (overflow && onOverflow)
         onOverflow();
       if (folds.length === 0)
-        return text4;
+        return text5;
       if (onFold)
         onFold();
-      let res = text4.slice(0, folds[0]);
+      let res = text5.slice(0, folds[0]);
       for (let i2 = 0; i2 < folds.length; ++i2) {
         const fold = folds[i2];
-        const end2 = folds[i2 + 1] || text4.length;
+        const end2 = folds[i2 + 1] || text5.length;
         if (fold === 0)
           res = `
-${indent2}${text4.slice(0, end2)}`;
+${indent2}${text5.slice(0, end2)}`;
         else {
           if (mode === FOLD_QUOTED && escapedFolds[fold])
-            res += `${text4[fold]}\\`;
+            res += `${text5[fold]}\\`;
           res += `
-${indent2}${text4.slice(fold + 1, end2)}`;
+${indent2}${text5.slice(fold + 1, end2)}`;
         }
       }
       return res;
     }
-    function consumeMoreIndentedLines(text4, i, indent2) {
+    function consumeMoreIndentedLines(text5, i, indent2) {
       let end = i;
       let start = i + 1;
-      let ch = text4[start];
+      let ch = text5[start];
       while (ch === " " || ch === "	") {
         if (i < start + indent2) {
-          ch = text4[++i];
+          ch = text5[++i];
         } else {
           do {
-            ch = text4[++i];
+            ch = text5[++i];
           } while (ch && ch !== "\n");
           end = i;
           start = i + 1;
-          ch = text4[start];
+          ch = text5[start];
         }
       }
       return end;
@@ -10497,9 +10497,9 @@ Expecting one of '${allowedValues.join("', '")}'`);
       helpWidth: context.helpWidth,
       outputHasColors: context.hasColors
     });
-    const text4 = helper.formatHelp(this, helper);
-    if (context.hasColors) return text4;
-    return this._outputConfiguration.stripColor(text4);
+    const text5 = helper.formatHelp(this, helper);
+    if (context.hasColors) return text5;
+    return this._outputConfiguration.stripColor(text5);
   }
   /**
    * @typedef HelpContext
@@ -10659,7 +10659,7 @@ Expecting one of '${allowedValues.join("', '")}'`);
    * @param {(string | Function)} text - string to add, or a function returning a string
    * @return {Command} `this` command for chaining
    */
-  addHelpText(position2, text4) {
+  addHelpText(position2, text5) {
     const allowedValues = ["beforeAll", "before", "after", "afterAll"];
     if (!allowedValues.includes(position2)) {
       throw new Error(`Unexpected value for position to addHelpText.
@@ -10668,10 +10668,10 @@ Expecting one of '${allowedValues.join("', '")}'`);
     const helpEvent = `${position2}Help`;
     this.on(helpEvent, (context) => {
       let helpStr;
-      if (typeof text4 === "function") {
-        helpStr = text4({ error: context.error, command: context.command });
+      if (typeof text5 === "function") {
+        helpStr = text5({ error: context.error, command: context.command });
       } else {
-        helpStr = text4;
+        helpStr = text5;
       }
       if (helpStr) {
         context.write(`${helpStr}
@@ -15772,7 +15772,7 @@ var recursive = /* @__PURE__ */ new WeakMap();
 var NONE = 0;
 var ASSUMED = 1;
 var PROVEN = 2;
-function isRecursive(inst, stack, resolve3) {
+function isRecursive(inst, stack, resolve4) {
   const cached2 = recursive.get(inst);
   if (cached2 !== void 0)
     return cached2 ? PROVEN : NONE;
@@ -15782,7 +15782,7 @@ function isRecursive(inst, stack, resolve3) {
   let result = NONE;
   const check2 = (child) => {
     if (result !== PROVEN && child?._zod) {
-      const answer = isRecursive(child, stack, resolve3);
+      const answer = isRecursive(child, stack, resolve4);
       if (answer > result)
         result = answer;
     }
@@ -15793,7 +15793,7 @@ function isRecursive(inst, stack, resolve3) {
       const desc = Object.getOwnPropertyDescriptor(sh, key);
       if (spread && !desc.enumerable)
         continue;
-      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve3) : NONE;
+      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve4) : NONE;
       if (child > answer)
         answer = child;
     }
@@ -15860,7 +15860,7 @@ function isRecursive(inst, stack, resolve3) {
       break;
     // `$ZodLazy` caches its inner on the def, so a resolved edge is followed exactly
     case "lazy": {
-      const inner = def._cachedInner ?? (resolve3 ? inst._zod.innerType : void 0);
+      const inner = def._cachedInner ?? (resolve4 ? inst._zod.innerType : void 0);
       merge3(inner ? isRecursive(inner, stack, false) : ASSUMED);
       break;
     }
@@ -20026,8 +20026,8 @@ function ko_default() {
 }
 
 // node_modules/zod/v4/locales/lt.js
-var capitalizeFirstCharacter = (text4) => {
-  return text4.charAt(0).toUpperCase() + text4.slice(1);
+var capitalizeFirstCharacter = (text5) => {
+  return text5.charAt(0).toUpperCase() + text5.slice(1);
 };
 function getUnitTypeFromNumber(number4) {
   const abs = Math.abs(number4);
@@ -30515,10 +30515,10 @@ var NodeGitExecutor = class {
   }
   async commit(message, files) {
     if (files !== void 0 && files.length > 0) {
-      await this.execFile("git", ["commit", "--only", "-m", message, "--", ...files]);
+      await this.execFile("git", ["commit", "--cleanup=whitespace", "--only", "-m", message, "--", ...files]);
       return;
     }
-    await this.execFile("git", ["commit", "-m", message]);
+    await this.execFile("git", ["commit", "--cleanup=whitespace", "-m", message]);
   }
   async getCommitSha() {
     const { stdout } = await this.execFile("git", ["rev-parse", "HEAD"]);
@@ -30734,6 +30734,10 @@ var GhPullRequestHost = class {
   }
 };
 
+// src/shared/config-store.ts
+import { existsSync as existsSync4, mkdirSync as mkdirSync2, readFileSync as readFileSync4, writeFileSync as writeFileSync2 } from "node:fs";
+import { dirname as dirname4 } from "node:path";
+
 // src/shared/config.ts
 import { existsSync as existsSync2, readFileSync as readFileSync2, statSync as statSync2 } from "node:fs";
 import { dirname as dirname2, isAbsolute, join as join3, resolve as resolve2 } from "node:path";
@@ -30776,7 +30780,7 @@ var ConfigSchema = external_exports.object({
   rfcStorage: external_exports.enum(["local", "global"]).default("local"),
   rfcStoragePath: external_exports.string().optional(),
   qaRecipe: external_exports.string().optional().describe(
-    "Path to the per-repo QA recipe; relative paths resolve against the directory holding this config file; defaults to flight-rules.qa.md beside it"
+    "Deprecated: path to a legacy QA recipe, read only when no QA.md or AGENTS.md QA section exists; relative paths resolve against the directory holding this config file; defaults to flight-rules.qa.md beside it"
   ),
   competencies: external_exports.array(external_exports.string()).default([...seedCompetencies])
 }).superRefine((cfg, ctx) => {
@@ -30863,11 +30867,6 @@ function parseFrontmatter(contents) {
   }
   return data;
 }
-function readConfig(configPath) {
-  const contents = readFileSync2(configPath, "utf-8");
-  const data = parseFrontmatter(contents);
-  return ConfigSchema.parse(data);
-}
 function getRfcDir(config2, cwd) {
   if (config2.rfcStorage === "global") {
     if (config2.rfcStoragePath === void 0) {
@@ -30902,6 +30901,219 @@ function getQaRecipePath(config2, configPath) {
   if (isAbsolute(recipe)) return recipe;
   return resolve2(dirname2(configPath), recipe);
 }
+
+// src/shared/host-settings/claude-settings-source.ts
+import { existsSync as existsSync3, mkdirSync, readFileSync as readFileSync3, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname as dirname3, join as join4 } from "node:path";
+var pluginId = "flight-rules@flight-rules";
+var pluginKeyPattern = /^flight-rules(@.+)?$/;
+var SettingsSchema = external_exports.looseObject({
+  pluginConfigs: external_exports.record(external_exports.string(), external_exports.looseObject({ options: external_exports.record(external_exports.string(), external_exports.unknown()).optional() })).optional()
+});
+var ClaudeSettingsSource = class {
+  host = "claude";
+  cwd;
+  env;
+  home;
+  constructor(props) {
+    this.cwd = props.cwd;
+    this.env = props.env ?? process.env;
+    this.home = props.home ?? homedir();
+  }
+  pathFor(scope) {
+    switch (scope) {
+      case "user":
+        return join4(this.env["CLAUDE_CONFIG_DIR"] ?? join4(this.home, ".claude"), "settings.json");
+      case "project":
+        return join4(this.cwd, ".claude", "settings.json");
+      case "local":
+        return join4(this.cwd, ".claude", "settings.local.json");
+    }
+  }
+  read(scope) {
+    const path3 = this.pathFor(scope);
+    if (!existsSync3(path3)) return void 0;
+    const settings = this.parse(path3, readFileSync3(path3, "utf-8"));
+    const key = this.pluginKey(settings);
+    return key === void 0 ? void 0 : settings.pluginConfigs?.[key]?.options;
+  }
+  write(scope, update) {
+    const path3 = this.pathFor(scope);
+    const settings = existsSync3(path3) ? this.parse(path3, readFileSync3(path3, "utf-8")) : {};
+    const key = this.pluginKey(settings) ?? pluginId;
+    const pluginConfigs = { ...settings.pluginConfigs };
+    const entry = pluginConfigs[key] ?? {};
+    pluginConfigs[key] = { ...entry, options: update(entry.options ?? {}) };
+    mkdirSync(dirname3(path3), { recursive: true });
+    writeFileSync(path3, `${JSON.stringify({ ...settings, pluginConfigs }, null, 2)}
+`);
+  }
+  hint() {
+    return `set pluginConfigs["${pluginId}"].options in ${this.pathFor("user")}, ${this.pathFor("project")}, or ${this.pathFor("local")}`;
+  }
+  parse(path3, contents) {
+    let json2;
+    try {
+      json2 = JSON.parse(contents);
+    } catch (err) {
+      throw new Error(`${path3} is not valid JSON`, { cause: err });
+    }
+    return SettingsSchema.parse(json2);
+  }
+  pluginKey(settings) {
+    const keys = Object.keys(settings.pluginConfigs ?? {}).filter((k) => pluginKeyPattern.test(k));
+    return keys.includes(pluginId) ? pluginId : keys.sort()[0];
+  }
+};
+
+// src/shared/config-store.ts
+var configScopes = ["user", "project", "local", "file"];
+var ConfigStore = class {
+  cwd;
+  env;
+  hostSettings;
+  pathProbe;
+  constructor(props) {
+    this.cwd = props.cwd;
+    this.env = props.env ?? process.env;
+    this.pathProbe = props.pathProbe;
+    this.hostSettings = props.hostSettings ?? new ClaudeSettingsSource({ cwd: props.cwd, env: this.env, ...props.home !== void 0 ? { home: props.home } : {} });
+  }
+  /** The flight-rules config file path, as `flight-rules config path` reports it. */
+  filePath() {
+    return resolveConfigPath(this.cwd, this.env["FLIGHT_RULES_CONFIG"], this.pathProbe);
+  }
+  pathFor(scope) {
+    return scope === "file" ? this.filePath() : this.hostSettings.pathFor(scope);
+  }
+  layers() {
+    return configScopes.map((scope) => this.readLayer(scope));
+  }
+  load() {
+    return this.report().config;
+  }
+  report() {
+    const { values, sources, layers } = this.merge();
+    if (Object.keys(values).length === 0) {
+      throw new Error(
+        `No flight-rules config found. Run the flight-rules setup skill, write ${this.filePath()}, or ${this.hostSettings.hint()}`
+      );
+    }
+    return { config: ConfigSchema.parse(values), sources, layers };
+  }
+  inspect() {
+    const merged = this.merge();
+    const result = ConfigSchema.safeParse(merged.values);
+    if (result.success) return { valid: true, ...merged, values: result.data };
+    const error62 = Object.keys(merged.values).length === 0 ? "no flight-rules config found" : result.error.issues.map((i) => `${i.path.join(".") || "config"}: ${i.message}`).join("; ");
+    return { valid: false, error: error62, ...merged };
+  }
+  /**
+   * The scope a write lands in when the caller names none: wherever the key
+   * is set now, else the config file when one exists, else `local`.
+   */
+  defaultScopeFor(key) {
+    const layers = this.layers();
+    const owner = [...layers].reverse().find((layer) => key in layer.values);
+    if (owner !== void 0) return owner.scope;
+    return this.layer(layers, "file").present ? "file" : "local";
+  }
+  set(key, rawValues, scope) {
+    const value = this.coerce(key, rawValues);
+    this.write(scope, (values) => ({ ...values, [key]: value }));
+    return scope;
+  }
+  unset(key, scope) {
+    this.assertKnownKey(key);
+    this.write(scope, (values) => {
+      const next = { ...values };
+      delete next[key];
+      return next;
+    });
+  }
+  /**
+   * The highest-precedence scope that sets `key`, when it outranks `scope`.
+   * A write to `scope` would then not take effect.
+   */
+  shadowingScope(key, scope) {
+    const rank = configScopes.indexOf(scope);
+    return [...this.layers()].reverse().find((layer) => configScopes.indexOf(layer.scope) > rank && key in layer.values)?.scope;
+  }
+  merge() {
+    const layers = this.layers();
+    if (this.env["FLIGHT_RULES_CONFIG"] !== void 0 && !this.layer(layers, "file").present) {
+      throw new Error(`FLIGHT_RULES_CONFIG points at ${this.filePath()}, which does not exist`);
+    }
+    const values = {};
+    const sources = {};
+    for (const layer of layers) {
+      for (const [key, value] of Object.entries(layer.values)) {
+        values[key] = value;
+        sources[key] = { scope: layer.scope, path: layer.path };
+      }
+    }
+    return {
+      values,
+      sources,
+      layers: layers.map(({ scope, path: path3, present }) => ({ scope, path: path3, present }))
+    };
+  }
+  layer(layers, scope) {
+    const found = layers.find((l) => l.scope === scope);
+    if (found === void 0) throw new Error(`unknown config scope ${scope}`);
+    return found;
+  }
+  readLayer(scope) {
+    const path3 = this.pathFor(scope);
+    if (scope === "file") {
+      if (!existsSync4(path3)) return { scope, path: path3, present: false, values: {} };
+      return { scope, path: path3, present: true, values: parseFrontmatter(readFileSync4(path3, "utf-8")) };
+    }
+    const values = this.hostSettings.read(scope);
+    return { scope, path: path3, present: values !== void 0, values: values ?? {} };
+  }
+  write(scope, update) {
+    if (scope !== "file") {
+      this.hostSettings.write(scope, update);
+      return;
+    }
+    const path3 = this.filePath();
+    const contents = existsSync4(path3) ? readFileSync4(path3, "utf-8") : void 0;
+    mkdirSync2(dirname4(path3), { recursive: true });
+    const values = update(contents === void 0 ? {} : parseFrontmatter(contents));
+    const body = contents?.replace(/^---\n[\s\S]*?\n---\n?/, "") ?? "";
+    writeFileSync2(path3, `${this.toFrontmatter(values)}${body}`);
+  }
+  toFrontmatter(values) {
+    const lines = Object.entries(values).flatMap(
+      ([key, value]) => Array.isArray(value) ? [`${key}:`, ...value.map((item) => `  - ${String(item)}`)] : [`${key}: ${String(value)}`]
+    );
+    return `---
+${lines.join("\n")}
+---
+`;
+  }
+  assertKnownKey(key) {
+    if (!(key in ConfigSchema.shape)) {
+      throw new Error(
+        `Unknown config key "${key}" \u2014 expected one of: ${Object.keys(ConfigSchema.shape).join(", ")}`
+      );
+    }
+  }
+  coerce(key, rawValues) {
+    this.assertKnownKey(key);
+    const field = Object.entries(ConfigSchema.shape).find(([name]) => name === key)?.[1];
+    if (field === void 0) return void 0;
+    const isArray = field.safeParse([]).success && !field.safeParse("").success;
+    const value = isArray ? [...rawValues] : rawValues.join(" ");
+    const result = field.safeParse(value);
+    if (!result.success) {
+      throw new Error(`Invalid value for ${key}: ${result.error.issues.map((i) => i.message).join("; ")}`);
+    }
+    return value;
+  }
+};
 
 // src/shared/env.ts
 var EnvSchema = external_exports.object({
@@ -31788,8 +32000,8 @@ var convertMarkedBigIntsReviver = (key, value, context, userReviver) => {
   if (!hasUserReviver) return value;
   return userReviver(key, value, context);
 };
-var JSONParseV2 = (text4, reviver) => {
-  return JSON.parse(text4, (key, value, context) => {
+var JSONParseV2 = (text5, reviver) => {
+  return JSON.parse(text5, (key, value, context) => {
     const isNumber = typeof value === "number";
     const isOutOfBounds = value > Number.MAX_SAFE_INTEGER || value < Number.MIN_SAFE_INTEGER;
     const isBigNumber = isNumber && isOutOfBounds;
@@ -31847,8 +32059,8 @@ var applyReviverIteratively = (parsed, userReviver) => {
   }
   return rootHolder[""];
 };
-var serializeBigInts = (text4) => {
-  return text4.replace(
+var serializeBigInts = (text5) => {
+  return text5.replace(
     stringsOrLargeNumbers,
     (match, digits, fractional, exponential) => {
       const isString = match[0] === '"';
@@ -31862,18 +32074,18 @@ var serializeBigInts = (text4) => {
     }
   );
 };
-var JSONParse = (text4, reviver) => {
-  if (!text4) return originalParse(text4, reviver);
+var JSONParse = (text5, reviver) => {
+  if (!text5) return originalParse(text5, reviver);
   try {
-    if (isContextSourceSupported()) return JSONParseV2(text4, reviver);
-    const serializedData = serializeBigInts(text4);
+    if (isContextSourceSupported()) return JSONParseV2(text5, reviver);
+    const serializedData = serializeBigInts(text5);
     return originalParse(
       serializedData,
       (key, value, context) => convertMarkedBigIntsReviver(key, value, context, reviver)
     );
   } catch (error62) {
     if (error62 instanceof RangeError) {
-      const serializedData = serializeBigInts(text4);
+      const serializedData = serializeBigInts(text5);
       const parsed = originalParse(serializedData);
       return applyReviverIteratively(parsed, reviver);
     }
@@ -32041,12 +32253,12 @@ async function getResponseData(response) {
   }
   const mimetype = parse4(contentType);
   if (isJSONResponse(mimetype)) {
-    let text4 = "";
+    let text5 = "";
     try {
-      text4 = await response.text();
-      return JSONParse(text4);
+      text5 = await response.text();
+      return JSONParse(text5);
     } catch (err) {
-      return text4;
+      return text5;
     }
   } else if (mimetype.type.startsWith("text/") || // `application/octet-stream` is the canonical "arbitrary binary" type
   // (RFC 2046) and must never be decoded as text, even when the response
@@ -35499,7 +35711,7 @@ var GitHubTaskTracker = class {
     const createData = await this.gql(
       `mutation CreateDiscussion($repositoryId: ID!, $categoryId: ID!, $title: String!, $body: String!) {
         createDiscussion(input: { repositoryId: $repositoryId, categoryId: $categoryId, title: $title, body: $body }) {
-          discussion { number body updatedAt }
+          discussion { number body updatedAt url }
         }
       }`,
       { repositoryId: repoData.repository.id, categoryId, title: input2.title, body }
@@ -35509,6 +35721,7 @@ var GitHubTaskTracker = class {
     return {
       id: String(discussion.number),
       epicId: input2.epicId,
+      ...discussion.url !== void 0 ? { url: discussion.url } : {},
       body: discussion.body,
       comments: [],
       metadata: this.bodyMetadata.parse(discussion.body),
@@ -35520,7 +35733,7 @@ var GitHubTaskTracker = class {
       `query GetDiscussion($owner: String!, $repo: String!, $number: Int!) {
         repository(owner: $owner, name: $repo) {
           discussion(number: $number) {
-            number body updatedAt
+            number body updatedAt url
             comments(first: 100) {
               nodes { id body author { login } createdAt updatedAt }
             }
@@ -35538,6 +35751,7 @@ var GitHubTaskTracker = class {
     return {
       id,
       epicId,
+      ...discussion.url !== void 0 ? { url: discussion.url } : {},
       body: discussion.body,
       comments: discussion.comments.nodes.map((n) => ({
         id: n.id,
@@ -35672,7 +35886,7 @@ var GitHubTaskTracker = class {
 };
 
 // src/tasks/jira-task-tracker/jira-task-tracker.ts
-import { readFileSync as readFileSync3 } from "node:fs";
+import { readFileSync as readFileSync5 } from "node:fs";
 import { basename } from "node:path";
 
 // src/tasks/jira-task-tracker/jira-api-error.ts
@@ -35718,8 +35932,8 @@ var JiraClient = class {
       ...body !== void 0 ? { body: JSON.stringify(body) } : {}
     });
     if (!res.ok) await this.throwApiError(res);
-    const text4 = await res.text();
-    const data = text4.length > 0 ? JSON.parse(text4) : void 0;
+    const text5 = await res.text();
+    const data = text5.length > 0 ? JSON.parse(text5) : void 0;
     return data;
   }
   /**
@@ -35740,8 +35954,8 @@ var JiraClient = class {
       body: form
     });
     if (!res.ok) await this.throwApiError(res);
-    const text4 = await res.text();
-    const data = text4.length > 0 ? JSON.parse(text4) : void 0;
+    const text5 = await res.text();
+    const data = text5.length > 0 ? JSON.parse(text5) : void 0;
     return data;
   }
   /**
@@ -35771,7 +35985,7 @@ var JiraClient = class {
       const retryAfterSeconds = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : defaultRetryAfterSeconds;
       const jitter = 0.7 + Math.random() * 0.6;
       const delayMs = Math.min(retryAfterSeconds * 1e3 * jitter, maxBackoffMs);
-      await new Promise((resolve3) => setTimeout(resolve3, delayMs));
+      await new Promise((resolve4) => setTimeout(resolve4, delayMs));
       return this.fetchWithRetry(url2, init, attempt + 1);
     }
     return res;
@@ -35811,8 +36025,8 @@ var ConfluenceClient = class {
       ...body !== void 0 ? { body: JSON.stringify(body) } : {}
     });
     if (!res.ok) await this.throwApiError(res);
-    const text4 = await res.text();
-    const data = text4.length > 0 ? JSON.parse(text4) : void 0;
+    const text5 = await res.text();
+    const data = text5.length > 0 ? JSON.parse(text5) : void 0;
     return data;
   }
   async fetchWithRetry(url2, init, attempt = 0) {
@@ -35823,7 +36037,7 @@ var ConfluenceClient = class {
       const retryAfterSeconds = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : defaultRetryAfterSeconds2;
       const jitter = 0.7 + Math.random() * 0.6;
       const delayMs = Math.min(retryAfterSeconds * 1e3 * jitter, maxBackoffMs2);
-      await new Promise((resolve3) => setTimeout(resolve3, delayMs));
+      await new Promise((resolve4) => setTimeout(resolve4, delayMs));
       return this.fetchWithRetry(url2, init, attempt + 1);
     }
     return res;
@@ -35842,10 +36056,13 @@ var mimeTypesByExtension = {
   gif: "image/gif",
   jpeg: "image/jpeg",
   jpg: "image/jpeg",
+  json: "application/json",
+  log: "text/plain",
   mov: "video/quicktime",
   mp4: "video/mp4",
   png: "image/png",
   svg: "image/svg+xml",
+  txt: "text/plain",
   webm: "video/webm",
   webp: "image/webp"
 };
@@ -38428,10 +38645,10 @@ function resolveAll(constructs2, events, context) {
   const called = [];
   let index2 = -1;
   while (++index2 < constructs2.length) {
-    const resolve3 = constructs2[index2].resolveAll;
-    if (resolve3 && !called.includes(resolve3)) {
-      events = resolve3(events, context);
-      called.push(resolve3);
+    const resolve4 = constructs2[index2].resolveAll;
+    if (resolve4 && !called.includes(resolve4)) {
+      events = resolve4(events, context);
+      called.push(resolve4);
     }
   }
   return events;
@@ -38447,7 +38664,7 @@ function resolveAllAttention(events, context) {
   let index2 = -1;
   let open2;
   let group;
-  let text4;
+  let text5;
   let openingSequence;
   let closingSequence;
   let use;
@@ -38485,7 +38702,7 @@ function resolveAllAttention(events, context) {
             },
             end
           };
-          text4 = {
+          text5 = {
             type: use > 1 ? "strongText" : "emphasisText",
             start: {
               ...events[open2][1].end
@@ -38513,9 +38730,9 @@ function resolveAllAttention(events, context) {
           if (events[open2][1].end.offset - events[open2][1].start.offset) {
             nextEvents = push(nextEvents, [["enter", events[open2][1], context], ["exit", events[open2][1], context]]);
           }
-          nextEvents = push(nextEvents, [["enter", group, context], ["enter", openingSequence, context], ["exit", openingSequence, context], ["enter", text4, context]]);
+          nextEvents = push(nextEvents, [["enter", group, context], ["enter", openingSequence, context], ["exit", openingSequence, context], ["enter", text5, context]]);
           nextEvents = push(nextEvents, resolveAll(context.parser.constructs.insideSpan.null, events.slice(open2 + 1, index2), context));
-          nextEvents = push(nextEvents, [["exit", text4, context], ["enter", closingSequence, context], ["exit", closingSequence, context], ["exit", group, context]]);
+          nextEvents = push(nextEvents, [["exit", text5, context], ["enter", closingSequence, context], ["exit", closingSequence, context], ["exit", group, context]]);
           if (events[index2][1].end.offset - events[index2][1].start.offset) {
             offset = 2;
             nextEvents = push(nextEvents, [["enter", events[index2][1], context], ["exit", events[index2][1], context]]);
@@ -39963,7 +40180,7 @@ function resolveHeadingAtx(events, context) {
   let contentEnd = events.length - 2;
   let contentStart = 3;
   let content3;
-  let text4;
+  let text5;
   if (events[contentStart][1].type === "whitespace") {
     contentStart += 2;
   }
@@ -39979,13 +40196,13 @@ function resolveHeadingAtx(events, context) {
       start: events[contentStart][1].start,
       end: events[contentEnd][1].end
     };
-    text4 = {
+    text5 = {
       type: "chunkText",
       start: events[contentStart][1].start,
       end: events[contentEnd][1].end,
       contentType: "text"
     };
-    splice(events, contentStart, contentEnd - contentStart + 1, [["enter", content3, context], ["enter", text4, context], ["exit", text4, context], ["exit", content3, context]]);
+    splice(events, contentStart, contentEnd - contentStart + 1, [["enter", content3, context], ["enter", text5, context], ["exit", text5, context], ["exit", content3, context]]);
   }
   return events;
 }
@@ -40875,7 +41092,7 @@ function resolveToLabelEnd(events, context) {
       ...events[close][1].end
     }
   };
-  const text4 = {
+  const text5 = {
     type: "labelText",
     start: {
       ...events[open2 + offset + 2][1].end
@@ -40886,9 +41103,9 @@ function resolveToLabelEnd(events, context) {
   };
   media = [["enter", group, context], ["enter", label, context]];
   media = push(media, events.slice(open2 + 1, open2 + offset + 3));
-  media = push(media, [["enter", text4, context]]);
+  media = push(media, [["enter", text5, context]]);
   media = push(media, resolveAll(context.parser.constructs.insideSpan.null, events.slice(open2 + offset + 4, close - 3), context));
-  media = push(media, [["exit", text4, context], events[close - 2], events[close - 1], ["exit", label, context]]);
+  media = push(media, [["exit", text5, context], events[close - 2], events[close - 1], ["exit", label, context]]);
   media = push(media, events.slice(close + 1));
   media = push(media, [["exit", group, context]]);
   splice(events, open2, events.length, media);
@@ -41268,7 +41485,7 @@ var setextUnderline = {
 function resolveToSetextUnderline(events, context) {
   let index2 = events.length;
   let content3;
-  let text4;
+  let text5;
   let definition2;
   while (index2--) {
     if (events[index2][0] === "enter") {
@@ -41277,7 +41494,7 @@ function resolveToSetextUnderline(events, context) {
         break;
       }
       if (events[index2][1].type === "paragraph") {
-        text4 = index2;
+        text5 = index2;
       }
     } else {
       if (events[index2][1].type === "content") {
@@ -41297,9 +41514,9 @@ function resolveToSetextUnderline(events, context) {
       ...events[events.length - 1][1].end
     }
   };
-  events[text4][1].type = "setextHeadingText";
+  events[text5][1].type = "setextHeadingText";
   if (definition2) {
-    events.splice(text4, 0, ["enter", heading, context]);
+    events.splice(text5, 0, ["enter", heading, context]);
     events.splice(definition2 + 1, 0, ["exit", events[content3][1], context]);
     events[content3][1].end = {
       ...events[definition2][1].end
@@ -41403,10 +41620,10 @@ function initializeFactory(field) {
   function initializeText(effects) {
     const self = this;
     const constructs2 = this.parser.constructs[field];
-    const text4 = effects.attempt(constructs2, start, notText);
+    const text5 = effects.attempt(constructs2, start, notText);
     return start;
     function start(code2) {
-      return atBreak(code2) ? text4(code2) : notText(code2);
+      return atBreak(code2) ? text5(code2) : notText(code2);
     }
     function notText(code2) {
       if (code2 === null) {
@@ -41420,7 +41637,7 @@ function initializeFactory(field) {
     function data(code2) {
       if (atBreak(code2)) {
         effects.exit("data");
-        return text4(code2);
+        return text5(code2);
       }
       effects.consume(code2);
       return data;
@@ -42468,7 +42685,7 @@ function compiler(options) {
     const siblings = node3.children;
     let tail = siblings[siblings.length - 1];
     if (!tail || tail.type !== "text") {
-      tail = text4();
+      tail = text5();
       tail.position = {
         start: point2(token.start),
         // @ts-expect-error: we’ll add `end` later.
@@ -42713,7 +42930,7 @@ function compiler(options) {
       children: []
     };
   }
-  function text4() {
+  function text5() {
     return {
       type: "text",
       value: ""
@@ -44104,17 +44321,17 @@ function gfmStrikethrough(options) {
               start: Object.assign({}, events[open2][1].start),
               end: Object.assign({}, events[index2][1].end)
             };
-            const text4 = {
+            const text5 = {
               type: "strikethroughText",
               start: Object.assign({}, events[open2][1].end),
               end: Object.assign({}, events[index2][1].start)
             };
-            const nextEvents = [["enter", strikethrough, context], ["enter", events[open2][1], context], ["exit", events[open2][1], context], ["enter", text4, context]];
+            const nextEvents = [["enter", strikethrough, context], ["enter", events[open2][1], context], ["exit", events[open2][1], context], ["enter", text5, context]];
             const insideSpan2 = context.parser.constructs.insideSpan.null;
             if (insideSpan2) {
               splice(nextEvents, nextEvents.length, 0, resolveAll(insideSpan2, events.slice(open2 + 1, index2), context));
             }
-            splice(nextEvents, nextEvents.length, 0, [["exit", text4, context], ["enter", events[index2][1], context], ["exit", events[index2][1], context], ["exit", strikethrough, context]]);
+            splice(nextEvents, nextEvents.length, 0, [["exit", text5, context], ["enter", events[index2][1], context], ["exit", events[index2][1], context], ["exit", strikethrough, context]]);
             splice(events, open2 - 1, index2 - open2 + 3, nextEvents);
             index2 = open2 + nextEvents.length - 2;
             break;
@@ -44973,9 +45190,9 @@ var LayeredBodyAdfConverter = class {
   alertType(node3) {
     const first = node3.children[0];
     if (first === void 0 || first.type !== "paragraph") return void 0;
-    const text4 = first.children[0];
-    if (text4 === void 0 || text4.type !== "text") return void 0;
-    return alertMarker.exec(text4.value)?.[1];
+    const text5 = first.children[0];
+    if (text5 === void 0 || text5.type !== "text") return void 0;
+    return alertMarker.exec(text5.value)?.[1];
   }
   /**
    * Returns the blockquote's children with the admonition marker (and its trailing
@@ -44986,10 +45203,10 @@ var LayeredBodyAdfConverter = class {
   stripAlertMarker(children) {
     const [first, ...rest] = children;
     if (first === void 0 || first.type !== "paragraph") return children;
-    const [text4, ...moreInline] = first.children;
-    if (text4 === void 0 || text4.type !== "text") return children;
-    const stripped = text4.value.replace(alertMarker, "");
-    const inline = stripped === "" ? moreInline : [{ ...text4, value: stripped }, ...moreInline];
+    const [text5, ...moreInline] = first.children;
+    if (text5 === void 0 || text5.type !== "text") return children;
+    const stripped = text5.value.replace(alertMarker, "");
+    const inline = stripped === "" ? moreInline : [{ ...text5, value: stripped }, ...moreInline];
     if (inline.length === 0) return rest;
     return [{ ...first, children: inline }, ...rest];
   }
@@ -45289,12 +45506,12 @@ var LayeredBodyAdfConverter = class {
    * task list would accrete a `>` on every round trip.
    */
   literalBlock(node3, source, stripEnclosingQuote = false) {
-    const text4 = this.literal(node3, source);
-    const inner = stripEnclosingQuote ? this.stripEnclosingQuote(text4) : text4;
+    const text5 = this.literal(node3, source);
+    const inner = stripEnclosingQuote ? this.stripEnclosingQuote(text5) : text5;
     return { type: "paragraph", content: this.textSegments(inner, []) };
   }
-  stripEnclosingQuote(text4) {
-    return text4.split("\n").map((line, index2) => index2 === 0 ? line : line.replace(/^> ?/, "")).join("\n");
+  stripEnclosingQuote(text5) {
+    return text5.split("\n").map((line, index2) => index2 === 0 ? line : line.replace(/^> ?/, "")).join("\n");
   }
   literal(node3, source) {
     return source.slice(node3.position?.start.offset ?? 0, node3.position?.end.offset ?? 0);
@@ -45309,9 +45526,9 @@ var LayeredBodyAdfConverter = class {
         return this.inlineToMarkdown(node3.content ?? [], names);
       case "codeBlock": {
         const language = typeof node3.attrs?.["language"] === "string" ? node3.attrs["language"] : "";
-        const text4 = (node3.content ?? []).map((child) => child.text ?? "").join("");
+        const text5 = (node3.content ?? []).map((child) => child.text ?? "").join("");
         return `\`\`\`${language}
-${text4}
+${text5}
 \`\`\``;
       }
       case "taskList":
@@ -45490,7 +45707,7 @@ ${indent2}`)}`;
       if (node3.text === void 0) {
         closeFrom(0);
         const inner = node3.content !== void 0 ? this.inlineToMarkdown(node3.content, names) : "";
-        out += [...node3.marks ?? []].reverse().reduce((text5, mark) => this.applyMark(text5, mark), inner);
+        out += [...node3.marks ?? []].reverse().reduce((text6, mark) => this.applyMark(text6, mark), inner);
         continue;
       }
       const marks = node3.marks ?? [];
@@ -45511,12 +45728,12 @@ ${indent2}`)}`;
       }
       closeFrom(common);
       const opening = marks.slice(common);
-      let text4 = node3.text;
+      let text5 = node3.text;
       if (common === 0 && opening.length > 0 && opening.every((mark) => this.isEmphasis(mark))) {
-        const lead = /^\s+/.exec(text4)?.[0];
-        if (lead !== void 0 && lead.length < text4.length) {
+        const lead = /^\s+/.exec(text5)?.[0];
+        if (lead !== void 0 && lead.length < text5.length) {
           out += lead;
-          text4 = text4.slice(lead.length);
+          text5 = text5.slice(lead.length);
         }
       }
       for (let k = common; k < marks.length; k++) {
@@ -45525,7 +45742,7 @@ ${indent2}`)}`;
         out += this.markOpen(mark);
         open2.push(mark);
       }
-      out += this.escapeText(text4, open2.some((mark) => mark.type === "code"));
+      out += this.escapeText(text5, open2.some((mark) => mark.type === "code"));
     }
     closeFrom(0);
     return out;
@@ -45541,8 +45758,8 @@ ${indent2}`)}`;
    */
   mentionToMarkdown(node3) {
     const id = typeof node3.attrs?.["id"] === "string" ? node3.attrs["id"] : "";
-    const text4 = node3.attrs?.["text"];
-    const display = typeof text4 === "string" ? text4.startsWith("@") ? text4.slice(1) : text4 : "";
+    const text5 = node3.attrs?.["text"];
+    const display = typeof text5 === "string" ? text5.startsWith("@") ? text5.slice(1) : text5 : "";
     return `@{${id}|${this.escapeMentionDisplay(display)}}`;
   }
   /**
@@ -45558,20 +45775,20 @@ ${indent2}`)}`;
    * Wraps text in the markdown for one mark, innermost-first. Only used for the
    * rare content-bearing inline node; the main text path coalesces marks instead.
    */
-  applyMark(text4, mark) {
+  applyMark(text5, mark) {
     switch (mark.type) {
       case "code":
-        return `\`${text4}\``;
+        return `\`${text5}\``;
       case "em":
-        return `*${text4}*`;
+        return `*${text5}*`;
       case "strong":
-        return `**${text4}**`;
+        return `**${text5}**`;
       case "strike":
-        return `~~${text4}~~`;
+        return `~~${text5}~~`;
       case "link":
-        return this.linkToMarkdown(text4, mark);
+        return this.linkToMarkdown(text5, mark);
       default:
-        return text4;
+        return text5;
     }
   }
   markOpen(mark) {
@@ -45623,22 +45840,22 @@ ${indent2}`)}`;
    * but only when the destination needs no escaping and there's no title — so the
    * autolink re-parses to the same href. Otherwise the caller emits `[text](dest)`.
    */
-  tryBareUrl(text4, mark) {
+  tryBareUrl(text5, mark) {
     if (mark.type !== "link") return void 0;
     const href = mark.attrs?.["href"];
     if (typeof href !== "string") return void 0;
     if (typeof mark.attrs?.["title"] === "string") return void 0;
-    if (text4 !== href || this.encodeDestination(href) !== href) return void 0;
+    if (text5 !== href || this.encodeDestination(href) !== href) return void 0;
     return href;
   }
-  linkToMarkdown(text4, mark) {
+  linkToMarkdown(text5, mark) {
     const href = mark.attrs?.["href"];
-    if (typeof href !== "string") return text4;
-    const bare = this.tryBareUrl(text4, mark);
+    if (typeof href !== "string") return text5;
+    const bare = this.tryBareUrl(text5, mark);
     if (bare !== void 0) return bare;
     const title = mark.attrs?.["title"];
     const suffix = typeof title === "string" ? ` "${this.encodeTitle(title)}"` : "";
-    return `[${text4}](${this.encodeDestination(href)}${suffix})`;
+    return `[${text5}](${this.encodeDestination(href)}${suffix})`;
   }
   /**
    * Escapes a link destination so it re-parses to the same string: literal `\`
@@ -45669,9 +45886,9 @@ ${indent2}`)}`;
    * text node that itself reads as a mention token (`@{id|name}`) is escaped to
    * `\@{…}` so it re-parses as text rather than a mention.
    */
-  escapeText(text4, insideCode) {
-    if (insideCode) return text4;
-    const escaped = text4.replace(/[\\*`]/g, (ch) => `\\${ch}`);
+  escapeText(text5, insideCode) {
+    if (insideCode) return text5;
+    const escaped = text5.replace(/[\\*`]/g, (ch) => `\\${ch}`);
     return escaped.replace(this.mentionToken(), (full) => `\\${full}`);
   }
 };
@@ -45682,18 +45899,18 @@ var import_yaml2 = __toESM(require_dist(), 1);
 
 // src/tasks/jira-task-tracker/adf.ts
 var DefaultAdfBuilder = class {
-  doc(text4) {
+  doc(text5) {
     return {
       version: 1,
       type: "doc",
-      content: [{ type: "paragraph", content: [{ type: "text", text: text4 }] }]
+      content: [{ type: "paragraph", content: [{ type: "text", text: text5 }] }]
     };
   }
-  codeBlock(text4, language = "yaml") {
+  codeBlock(text5, language = "yaml") {
     return {
       type: "codeBlock",
       attrs: { language },
-      content: [{ type: "text", text: text4 }]
+      content: [{ type: "text", text: text5 }]
     };
   }
   expand(title, child) {
@@ -45729,9 +45946,9 @@ var JiraAdfMetadataService = class {
   readMetadataYaml(doc) {
     const expand2 = doc.content.find((n) => this.isMetadataExpand(n));
     const codeBlock = expand2?.content?.find((n) => n.type === "codeBlock");
-    const text4 = codeBlock?.content?.find((n) => n.type === "text")?.text;
-    if (text4 === void 0 || text4.trim() === "") return void 0;
-    return text4;
+    const text5 = codeBlock?.content?.find((n) => n.type === "text")?.text;
+    if (text5 === void 0 || text5.trim() === "") return void 0;
+    return text5;
   }
   isMetadataExpand(node3) {
     return node3.type === "expand" && node3.attrs?.["title"] === metadataTitle;
@@ -46009,7 +46226,7 @@ var JiraTaskTracker = class {
    */
   async addAttachment(ticketId, filePath) {
     const filename = basename(filePath);
-    const file2 = new File([readFileSync3(filePath)], filename, { type: this.mimeTypes.forFilename(filename) });
+    const file2 = new File([readFileSync5(filePath)], filename, { type: this.mimeTypes.forFilename(filename) });
     const uploaded = JiraUploadedAttachmentsSchema.parse(
       await this.client.upload(`/issue/${ticketId}/attachments`, [file2])
     );
@@ -46258,7 +46475,6 @@ var JiraTaskTracker = class {
 
 // src/tasks/tool-probe/tool-probe.ts
 import { execFile as execFile3 } from "node:child_process";
-import { existsSync as existsSync3, readFileSync as readFileSync4 } from "node:fs";
 import { promisify as promisify3 } from "node:util";
 var minimumGhVersion = [2, 99, 0];
 var ghVersionLine = /gh version (\d+)\.(\d+)\.(\d+)/;
@@ -46269,21 +46485,17 @@ var NodeToolProbe = class {
     this.execFile = props.execFileFn ?? ((file2, args) => promisified(file2, [...args]));
   }
   async probe(input2) {
-    const recipe = existsSync3(input2.recipePath) ? readFileSync4(input2.recipePath, "utf8") : void 0;
-    const qaRequired = recipe !== void 0;
-    const opRequired = qaRequired && recipe.includes("op://");
+    const qaRequired = input2.qaInstructionsFound;
     const ghRequired = input2.repo !== void 0;
-    const env = input2.env ?? {};
-    const [gh, ghAuth, ghPush, playwright, ffmpeg, curl, op] = await Promise.all([
+    const [gh, ghAuth, ghPush, playwright, ffmpeg, curl] = await Promise.all([
       this.ghVersion(ghRequired),
       this.ghAuth(ghRequired),
       this.ghPush(input2.repo, ghRequired),
       this.present("tools:playwright-cli", "playwright-cli", ["--version"], qaRequired),
       this.present("tools:ffmpeg", "ffmpeg", ["-version"], qaRequired),
-      this.present("tools:curl", "curl", ["--version"], qaRequired),
-      this.op(env, opRequired)
+      this.present("tools:curl", "curl", ["--version"], qaRequired)
     ]);
-    return [gh, ghAuth, ghPush, playwright, ffmpeg, curl, op];
+    return [gh, ghAuth, ghPush, playwright, ffmpeg, curl];
   }
   async ghVersion(required2) {
     try {
@@ -46348,24 +46560,6 @@ var NodeToolProbe = class {
       return { name, ok: false, detail, required: required2 };
     }
   }
-  async op(env, required2) {
-    try {
-      await this.execFile("op", ["--version"]);
-    } catch (err) {
-      const detail = this.isMissingBinary(err) ? "not installed" : this.stderrOf(err);
-      return { name: "tools:op", ok: false, detail, required: required2 };
-    }
-    if (env["OP_SERVICE_ACCOUNT_TOKEN"] !== void 0) {
-      return { name: "tools:op", ok: true, detail: "authenticated via OP_SERVICE_ACCOUNT_TOKEN", required: required2 };
-    }
-    try {
-      await this.execFile("op", ["whoami", "--format=json"]);
-      return { name: "tools:op", ok: true, detail: "authenticated via op whoami", required: required2 };
-    } catch (err) {
-      const detail = this.isMissingBinary(err) ? "not installed" : this.stderrOf(err);
-      return { name: "tools:op", ok: false, detail: `not signed in \u2014 ${detail}`, required: required2 };
-    }
-  }
   /** True when `version` is at least `minimum`, comparing major, minor, then patch. */
   meetsMinimumVersion(version2, minimum) {
     for (let i = 0; i < minimum.length; i++) {
@@ -46402,18 +46596,23 @@ var DefaultFlightRules = class {
   cwd;
   env;
   explicitConfigPath;
+  hostSettings;
   constructor(props = {}) {
     const parsed = FlightRulesPropsSchema.parse({ ...props, env: props.env === void 0 ? void 0 : { ...props.env } });
     this.cwd = parsed.cwd ?? process.cwd();
     this.env = props.env ?? process.env;
     this.explicitConfigPath = parsed.configPath;
+    this.hostSettings = props.hostSettings;
   }
   configPath() {
-    return resolveConfigPath(this.cwd, this.explicitConfigPath ?? this.env["FLIGHT_RULES_CONFIG"]);
+    return this.configStore().filePath();
+  }
+  configStore() {
+    const env = this.explicitConfigPath === void 0 ? this.env : { ...this.env, FLIGHT_RULES_CONFIG: this.explicitConfigPath };
+    return new ConfigStore({ cwd: this.cwd, env, ...this.hostSettings !== void 0 ? { hostSettings: this.hostSettings } : {} });
   }
   config(overrideTracker) {
-    const configPath = this.configPath();
-    const config2 = readConfig(configPath);
+    const config2 = this.configStore().load();
     if (overrideTracker === void 0) return config2;
     if (overrideTracker !== "github" && overrideTracker !== "jira") {
       throw new Error(`Invalid --tracker "${overrideTracker}" \u2014 expected "github" or "jira"`);
@@ -46435,14 +46634,15 @@ var DefaultFlightRules = class {
     if (env.jiraToken === void 0) {
       throw new Error("JIRA_TOKEN (or JIRA_API_TOKEN / JIRA_API_KEY) environment variable is required");
     }
-    if (env.jiraEmail === void 0) throw new Error("JIRA_EMAIL environment variable is required");
+    const email3 = env.jiraEmail ?? config2.jiraEmail;
+    if (email3 === void 0) throw new Error("JIRA_EMAIL environment variable or jiraEmail config is required");
     const host = env.jiraHost ?? config2.jiraHost;
     if (host === void 0) throw new Error("JIRA_HOST environment variable or jiraHost config is required");
     if (config2.jiraProject === void 0) throw new Error("jiraProject is required when tracker is jira");
     return new JiraTaskTracker({
       token: env.jiraToken,
       host,
-      email: env.jiraEmail,
+      email: email3,
       project: config2.jiraProject,
       ...config2.jpdProject !== void 0 ? { jpdProject: config2.jpdProject } : {},
       ...config2.confluenceSpaceKey !== void 0 ? { confluenceSpaceKey: config2.confluenceSpaceKey } : {}
@@ -46485,23 +46685,85 @@ function createDocCommand(getResolver) {
 }
 
 // src/shared/commands/config/command.ts
-function createConfigCommand(getConfigPath) {
+var scopeHelp = "where to write: user (~/.claude/settings.json), project (.claude/settings.json), local (.claude/settings.local.json), or file (the flight-rules config file)";
+function createConfigCommand(getStore) {
   const config2 = new Command("config");
   config2.exitOverride();
   config2.command("path").description("print the resolved config file path, whether or not it exists").exitOverride().action(() => {
-    process.stdout.write(`${getConfigPath()}
+    process.stdout.write(`${getStore().filePath()}
 `);
+  });
+  config2.command("show").description("print the merged config, which file each value came from, and whether it is valid").exitOverride().action(() => {
+    process.stdout.write(JSON.stringify(getStore().inspect()) + "\n");
+  });
+  config2.command("set").description("write one config value; array keys take several values").argument("<key>").argument("<values...>").addOption(new Option("--scope <scope>", scopeHelp).choices(configScopes)).exitOverride().action((key, values, opts) => {
+    const store = getStore();
+    const scope = opts.scope ?? store.defaultScopeFor(key);
+    store.set(key, values, scope);
+    const shadowedBy = store.shadowingScope(key, scope);
+    process.stdout.write(
+      JSON.stringify({
+        key,
+        scope,
+        path: store.pathFor(scope),
+        ...shadowedBy !== void 0 ? {
+          warning: `${key} is also set in ${shadowedBy} scope (${store.pathFor(shadowedBy)}), which takes precedence`
+        } : {}
+      }) + "\n"
+    );
+  });
+  config2.command("unset").description("remove one config value from a scope").argument("<key>").addOption(new Option("--scope <scope>", scopeHelp).choices(configScopes)).exitOverride().action((key, opts) => {
+    const store = getStore();
+    const scope = opts.scope ?? store.defaultScopeFor(key);
+    store.unset(key, scope);
+    process.stdout.write(
+      JSON.stringify({ key, scope, path: store.pathFor(scope) }) + "\n"
+    );
   });
   return config2;
 }
 
 // src/tasks/commands/resolve-body.ts
-import { readFileSync as readFileSync5 } from "node:fs";
+import { readFileSync as readFileSync6 } from "node:fs";
 function resolveBody(opts) {
-  if (opts.bodyFile !== void 0) return readFileSync5(opts.bodyFile, "utf8");
+  if (opts.bodyFile !== void 0) return readFileSync6(opts.bodyFile, "utf8");
   if (opts.body !== void 0) return opts.body;
   throw new Error("one of --body or --body-file is required");
 }
+
+// src/tasks/portable-context/portable-context.ts
+var tokenStart = String.raw`(?:^|(?<=[\s(\[<{"'\x60=,:;|]))`;
+var localReferencePatterns = [
+  /file:\/\/\S*/g,
+  new RegExp(`${tokenStart}/(?:Users|home)/[^\\s/)\\]>"'\\x60]+\\S*`, "g"),
+  new RegExp(`${tokenStart}~/\\S*`, "g"),
+  /\b[A-Za-z]:\\Users\\\S*/g
+];
+var trailingPunctuation = /[`.,;:!?)\]>"']+$/;
+var maxReported = 5;
+var RegexPortableContextGuard = class {
+  find(body) {
+    return body.split("\n").flatMap(
+      (text5, index2) => localReferencePatterns.flatMap(
+        (pattern) => [...text5.matchAll(pattern)].map((m) => ({ line: index2 + 1, match: m[0].replace(trailingPunctuation, "") }))
+      )
+    );
+  }
+  assertPortable(body, opts = {}) {
+    if (opts.allowLocalPaths === true) return;
+    const found = this.find(body);
+    if (found.length === 0) return;
+    const listed = found.slice(0, maxReported).map((ref) => `  line ${ref.line}: ${ref.match}`).join("\n");
+    const more = found.length > maxReported ? `
+  \u2026and ${found.length - maxReported} more` : "";
+    throw new Error(
+      `body references files on this machine, which nobody else can open:
+${listed}${more}
+A tracker body must stand on its own for an engineer on a fresh clone. Inline the content, link a published artifact (\`flight-rules tdd create\`, a tracker issue, or a file on the default branch by URL), or use a repo-relative path for code that exists on the default branch. Pass --allow-local-paths only when the path is the subject of the work, not a pointer to context.`
+    );
+  }
+};
+var portableContextGuard = new RegexPortableContextGuard();
 
 // src/tasks/dependency-planner/dependency-planner.ts
 var DependencyPlannerService = class {
@@ -46544,17 +46806,21 @@ var DependencyPlannerService = class {
 // src/tasks/commands/epic/command.ts
 function createEpicCommand(getTracker) {
   const epic = new Command("epic");
-  epic.command("create").exitOverride().requiredOption("--title <title>", "epic title").option("--body <body>", "epic body (or use --body-file)").option("--body-file <path>", "read the epic body from a file").option("--labels <labels>", "comma-separated labels").action(async (opts) => {
+  epic.command("create").exitOverride().requiredOption("--title <title>", "epic title").option("--body <body>", "epic body (or use --body-file)").option("--body-file <path>", "read the epic body from a file").option("--labels <labels>", "comma-separated labels").option("--allow-local-paths", "accept machine-local paths in the body (see docs/layered-body-format.md)").action(async (opts) => {
+    const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
+    portableContextGuard.assertPortable(body, { allowLocalPaths: opts.allowLocalPaths });
     const result = await getTracker().createEpic({
       title: opts.title,
-      body: resolveBody({ body: opts.body, bodyFile: opts.bodyFile }),
+      body,
       labels: opts.labels !== void 0 ? opts.labels.split(",") : []
     });
     process.stdout.write(JSON.stringify(result) + "\n");
   });
-  epic.command("edit").exitOverride().argument("<id>", "epic id").option("--body <body>", "new epic body (or use --body-file)").option("--body-file <path>", "read the new epic body from a file").option("--title <title>", "new epic title (unchanged if omitted)").option("--labels <labels>", "comma-separated labels replacing existing free-form labels").action(async (id, opts) => {
+  epic.command("edit").exitOverride().argument("<id>", "epic id").option("--body <body>", "new epic body (or use --body-file)").option("--body-file <path>", "read the new epic body from a file").option("--title <title>", "new epic title (unchanged if omitted)").option("--labels <labels>", "comma-separated labels replacing existing free-form labels").option("--allow-local-paths", "accept machine-local paths in the body (see docs/layered-body-format.md)").action(async (id, opts) => {
+    const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
+    portableContextGuard.assertPortable(body, { allowLocalPaths: opts.allowLocalPaths });
     const result = await getTracker().updateEpicDescription(id, {
-      body: resolveBody({ body: opts.body, bodyFile: opts.bodyFile }),
+      body,
       ...opts.title !== void 0 ? { title: opts.title } : {},
       ...opts.labels !== void 0 ? { labels: opts.labels.split(",") } : {}
     });
@@ -46588,16 +46854,20 @@ function createEpicCommand(getTracker) {
 // src/tasks/commands/initiative/command.ts
 function createInitiativeCommand(getTracker) {
   const initiative = new Command("initiative");
-  initiative.command("create").exitOverride().requiredOption("--title <title>", "initiative title").option("--body <body>", "initiative body (or use --body-file)").option("--body-file <path>", "read the initiative body from a file").action(async (opts) => {
+  initiative.command("create").exitOverride().requiredOption("--title <title>", "initiative title").option("--body <body>", "initiative body (or use --body-file)").option("--body-file <path>", "read the initiative body from a file").option("--allow-local-paths", "accept machine-local paths in the body (see docs/layered-body-format.md)").action(async (opts) => {
+    const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
+    portableContextGuard.assertPortable(body, { allowLocalPaths: opts.allowLocalPaths });
     const result = await getTracker().createInitiative({
       title: opts.title,
-      body: resolveBody({ body: opts.body, bodyFile: opts.bodyFile })
+      body
     });
     process.stdout.write(JSON.stringify(result) + "\n");
   });
-  initiative.command("edit").exitOverride().argument("<id>", "initiative id").option("--body <body>", "new initiative body (or use --body-file)").option("--body-file <path>", "read the new initiative body from a file").option("--title <title>", "new initiative title (unchanged if omitted)").action(async (id, opts) => {
+  initiative.command("edit").exitOverride().argument("<id>", "initiative id").option("--body <body>", "new initiative body (or use --body-file)").option("--body-file <path>", "read the new initiative body from a file").option("--title <title>", "new initiative title (unchanged if omitted)").option("--allow-local-paths", "accept machine-local paths in the body (see docs/layered-body-format.md)").action(async (id, opts) => {
+    const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
+    portableContextGuard.assertPortable(body, { allowLocalPaths: opts.allowLocalPaths });
     const result = await getTracker().updateInitiativeDescription(id, {
-      body: resolveBody({ body: opts.body, bodyFile: opts.bodyFile }),
+      body,
       ...opts.title !== void 0 ? { title: opts.title } : {}
     });
     process.stdout.write(JSON.stringify(result) + "\n");
@@ -46693,7 +46963,7 @@ var BlobSectionSource = class {
       if (current !== void 0) raw[current]?.push(line);
       i++;
     }
-    const text4 = (key) => {
+    const text5 = (key) => {
       const joined = (raw[key] ?? []).join("\n").trim();
       return joined.length > 0 ? joined : void 0;
     };
@@ -46703,7 +46973,7 @@ var BlobSectionSource = class {
       fixedWhenItems: this.checklistItems(raw.fixedWhen)
     };
     for (const key of stringSectionKeys) {
-      const value = text4(key);
+      const value = text5(key);
       if (value !== void 0) sections[key] = value;
     }
     return sections;
@@ -46955,10 +47225,12 @@ var TrackerEvidenceService = class {
 // src/tasks/commands/ticket/command.ts
 function createTicketCommand(getTracker) {
   const ticket = new Command("ticket");
-  ticket.command("create").exitOverride().requiredOption("--title <title>", "ticket title").option("--body <body>", "ticket body (or use --body-file)").option("--body-file <path>", "read the ticket body from a file").option("--epic-id <id>", "parent epic id; omit to create a standalone ticket").option("--labels <labels>", "comma-separated labels").option("--assignee <user>", "assignee login").action(async (opts) => {
+  ticket.command("create").exitOverride().requiredOption("--title <title>", "ticket title").option("--body <body>", "ticket body (or use --body-file)").option("--body-file <path>", "read the ticket body from a file").option("--epic-id <id>", "parent epic id; omit to create a standalone ticket").option("--labels <labels>", "comma-separated labels").option("--assignee <user>", "assignee login").option("--allow-local-paths", "accept machine-local paths in the body (see docs/layered-body-format.md)").action(async (opts) => {
+    const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
+    portableContextGuard.assertPortable(body, { allowLocalPaths: opts.allowLocalPaths });
     const input2 = {
       title: opts.title,
-      body: resolveBody({ body: opts.body, bodyFile: opts.bodyFile }),
+      body,
       labels: opts.labels !== void 0 ? opts.labels.split(",") : [],
       ...opts.epicId !== void 0 ? { epicId: opts.epicId } : {},
       ...opts.assignee !== void 0 ? { assignee: opts.assignee } : {}
@@ -46966,10 +47238,11 @@ function createTicketCommand(getTracker) {
     const result = await getTracker().createTicket(input2);
     process.stdout.write(JSON.stringify(result) + "\n");
   });
-  ticket.command("edit").exitOverride().argument("<id>", "ticket id").option("--body <body>", "new ticket body (or use --body-file)").option("--body-file <path>", "read the new ticket body from a file").option("--title <title>", "new ticket title (unchanged if omitted)").option("--labels <labels>", "comma-separated labels replacing existing free-form labels").option("--attach <spec>", "file to attach, as <path>#<caption> (repeatable)", collect, []).action(async (id, opts) => {
+  ticket.command("edit").exitOverride().argument("<id>", "ticket id").option("--body <body>", "new ticket body (or use --body-file)").option("--body-file <path>", "read the new ticket body from a file").option("--title <title>", "new ticket title (unchanged if omitted)").option("--labels <labels>", "comma-separated labels replacing existing free-form labels").option("--attach <spec>", "file to attach, as <path>#<caption> (repeatable)", collect, []).option("--allow-local-paths", "accept machine-local paths in the body (see docs/layered-body-format.md)").action(async (id, opts) => {
     const tracker = getTracker();
     const raw = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
     const body = opts.attach.length === 0 ? raw : (await new TrackerEvidenceService({ tracker }).attach({ ticketId: id, body: raw, specs: opts.attach })).body;
+    portableContextGuard.assertPortable(body, { allowLocalPaths: opts.allowLocalPaths });
     const result = await tracker.updateTicketDescription(id, {
       body,
       ...opts.title !== void 0 ? { title: opts.title } : {},
@@ -47027,10 +47300,12 @@ function createTicketCommand(getTracker) {
 // src/tasks/commands/tdd/command.ts
 function createTddCommand(getTracker) {
   const tdd = new Command("tdd");
-  tdd.command("create").exitOverride().requiredOption("--title <title>", "tdd title").requiredOption("--body <body>", "tdd body").requiredOption("--epic-id <id>", "parent epic id").action(async (opts) => {
+  tdd.command("create").exitOverride().requiredOption("--title <title>", "tdd title").option("--body <body>", "tdd body (or use --body-file)").option("--body-file <path>", "read the tdd body from a file").requiredOption("--epic-id <id>", "parent epic id").option("--allow-local-paths", "accept machine-local paths in the body (see docs/layered-body-format.md)").action(async (opts) => {
+    const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
+    portableContextGuard.assertPortable(body, { allowLocalPaths: opts.allowLocalPaths });
     const result = await getTracker().createTechnicalDesign({
       title: opts.title,
-      body: opts.body,
+      body,
       epicId: opts.epicId
     });
     process.stdout.write(JSON.stringify(result) + "\n");
@@ -47079,29 +47354,135 @@ function createRfcCommand(getConfig, getCwd = () => process.cwd()) {
   return rfc;
 }
 
+// src/tasks/qa-instructions/qa-instructions.ts
+import { existsSync as existsSync5, readFileSync as readFileSync7, statSync as statSync3 } from "node:fs";
+import { dirname as dirname5, join as join5, resolve as resolve3 } from "node:path";
+var atxHeading = /^ {0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$/;
+var fenceRun2 = /^ {0,3}(`{3,}|~{3,})/;
+var legacyHint = 'Legacy QA recipe in use. Move its content into a QA.md at the repo root (or a "QA" section of AGENTS.md); see docs/qa-instructions.md.';
+var nodeFileSystem = {
+  isFile: (path3) => existsSync5(path3) && statSync3(path3).isFile(),
+  exists: (path3) => existsSync5(path3),
+  readFile: (path3) => readFileSync7(path3, "utf8")
+};
+var QaInstructionsFinder = class {
+  fs;
+  constructor(props = {}) {
+    this.fs = props.fs ?? nodeFileSystem;
+  }
+  discover(input2) {
+    const sources = this.levels(input2.from).map((dir) => this.sourceAt(dir)).filter((source) => source !== void 0);
+    if (sources.length > 0) return { found: true, sources };
+    const legacy = this.legacySource(input2.legacyRecipePath);
+    if (legacy !== void 0) return { found: true, sources: [legacy] };
+    return { found: false, sources: [] };
+  }
+  /**
+   * Extracts the body of the first heading whose text is exactly "QA" (any
+   * case, any level), up to the next heading of the same or a higher level.
+   * Headings inside fenced code blocks are ignored. Returns undefined when the
+   * section is absent or empty.
+   */
+  extractQaSection(markdown) {
+    const lines = markdown.split("\n");
+    let openFence = null;
+    let sectionLevel = null;
+    const body = [];
+    for (const line of lines) {
+      const fence = fenceRun2.exec(line)?.[1];
+      if (fence !== void 0) {
+        if (openFence === null) openFence = fence;
+        else if (fence[0] === openFence[0] && fence.length >= openFence.length) openFence = null;
+        if (sectionLevel !== null) body.push(line);
+        continue;
+      }
+      const heading = openFence === null ? atxHeading.exec(line) : null;
+      if (heading !== null) {
+        const level = heading[1]?.length ?? 0;
+        if (sectionLevel !== null && level <= sectionLevel) break;
+        if (sectionLevel === null && (heading[2] ?? "").trim().toLowerCase() === "qa") {
+          sectionLevel = level;
+          continue;
+        }
+      }
+      if (sectionLevel !== null) body.push(line);
+    }
+    const content3 = body.join("\n").trim();
+    return content3.length > 0 ? content3 : void 0;
+  }
+  /** The start directory and each parent up to the repository root; only the start when no root is found. */
+  levels(from) {
+    const absolute = resolve3(from);
+    const start = this.fs.isFile(absolute) ? dirname5(absolute) : absolute;
+    const levels = [];
+    let current = start;
+    for (; ; ) {
+      levels.push(current);
+      if (this.fs.exists(join5(current, ".git"))) return levels;
+      const parent = dirname5(current);
+      if (parent === current) return [start];
+      current = parent;
+    }
+  }
+  sourceAt(dir) {
+    const agentsMd = join5(dir, "AGENTS.md");
+    if (this.fs.isFile(agentsMd)) {
+      const section = this.extractQaSection(this.fs.readFile(agentsMd));
+      if (section !== void 0)
+        return { path: agentsMd, kind: "agents-md-section", dir, content: section };
+    }
+    return this.fileSource(join5(dir, "QA.md"), "qa-md", dir) ?? this.fileSource(join5(dir, ".agents", "QA.md"), "agents-dir-qa-md", dir);
+  }
+  fileSource(path3, kind, dir) {
+    if (!this.fs.isFile(path3)) return void 0;
+    const content3 = this.fs.readFile(path3).trim();
+    return content3.length > 0 ? { path: path3, kind, dir, content: content3 } : void 0;
+  }
+  legacySource(path3) {
+    if (path3 === void 0) return void 0;
+    const source = this.fileSource(path3, "legacy-recipe", dirname5(path3));
+    return source === void 0 ? void 0 : { ...source, legacy: true, hint: legacyHint };
+  }
+};
+
 // src/tasks/commands/qa/command.ts
-import { existsSync as existsSync4, statSync as statSync3 } from "node:fs";
-function createQaCommand(getConfig, getConfigPath) {
+function createQaCommand(getConfig, getConfigPath, getFinder = () => new QaInstructionsFinder()) {
   const qa = new Command("qa");
-  qa.command("recipe").exitOverride().action(() => {
-    const config2 = getConfig();
+  const legacyRecipePath = () => {
+    let config2;
+    try {
+      config2 = getConfig();
+    } catch {
+      return void 0;
+    }
     if (config2.qaRecipe !== void 0 && config2.qaRecipe.trim() === "") {
       throw new Error(
-        "qaRecipe is set to a blank value \u2014 give it a path to the QA recipe file, or remove the key to fall back to the default beside the config"
+        "qaRecipe is set to a blank value \u2014 remove the key and move the recipe into a QA.md (see docs/qa-instructions.md)"
       );
     }
-    const path3 = getQaRecipePath(config2, getConfigPath());
-    if (!existsSync4(path3)) {
+    return getQaRecipePath(config2, getConfigPath());
+  };
+  qa.command("instructions").description("print the QA instructions that apply to a directory, nearest first, as JSON").option("--from <dir>", "directory (or file) to start from; defaults to the working directory").exitOverride().action((opts) => {
+    const result = getFinder().discover({
+      from: opts.from ?? process.cwd(),
+      legacyRecipePath: legacyRecipePath()
+    });
+    process.stdout.write(JSON.stringify(result) + "\n");
+  });
+  qa.command("recipe").description("deprecated: print the path of the nearest QA instructions; use `qa instructions`").exitOverride().action(() => {
+    const [nearest] = getFinder().discover({
+      from: process.cwd(),
+      legacyRecipePath: legacyRecipePath()
+    }).sources;
+    if (nearest === void 0) {
       throw new Error(
-        `QA recipe not found at ${path3} \u2014 run /flight-rules:setup to scaffold it, or set qaRecipe in the config`
+        "No QA instructions found \u2014 add a QA.md at the repo root or a QA section in AGENTS.md (see docs/qa-instructions.md)"
       );
     }
-    if (!statSync3(path3).isFile()) {
-      throw new Error(
-        `QA recipe at ${path3} is not a regular file \u2014 set qaRecipe to the recipe file's path`
-      );
-    }
-    process.stdout.write(`${path3}
+    process.stderr.write(
+      "`flight-rules qa recipe` is deprecated; use `flight-rules qa instructions`\n"
+    );
+    process.stdout.write(`${nearest.path}
 `);
   });
   return qa;
@@ -47117,15 +47498,17 @@ function createCompetenciesCommand(getConfig) {
 }
 
 // src/tasks/commands/check/command.ts
-function credentialFor(tracker, env) {
-  if (tracker === "github")
-    return { name: "GITHUB_TOKEN", value: env.githubToken };
-  return {
-    name: "JIRA_TOKEN (or JIRA_API_TOKEN / JIRA_API_KEY)",
-    value: env.jiraToken
-  };
+function missingCredentials(config2, env) {
+  if (config2.tracker === "github")
+    return env.githubToken === void 0 ? ["GITHUB_TOKEN"] : [];
+  const missing = [];
+  if (env.jiraToken === void 0)
+    missing.push("JIRA_TOKEN (or JIRA_API_TOKEN / JIRA_API_KEY)");
+  if ((env.jiraEmail ?? config2.jiraEmail) === void 0)
+    missing.push("JIRA_EMAIL (or jiraEmail in the config)");
+  return missing;
 }
-function createCheckCommand(getConfig, getTracker, getConfigPath, getProbe) {
+function createCheckCommand(getConfig, getTracker, getConfigPath, getProbe, getFinder = () => new QaInstructionsFinder()) {
   const check2 = new Command("check");
   check2.exitOverride().action(async () => {
     const checks = [];
@@ -47148,12 +47531,12 @@ function createCheckCommand(getConfig, getTracker, getConfigPath, getProbe) {
       ok: true,
       detail: `tracker=${config2.tracker} repo=${config2.repo}`
     });
-    const credential = credentialFor(config2.tracker, new EnvLoader().load());
-    const credOk = credential.value !== void 0;
+    const missing = missingCredentials(config2, new EnvLoader().load());
+    const credOk = missing.length === 0;
     checks.push({
       name: "credentials",
       ok: credOk,
-      detail: credOk ? "present" : `${credential.name} is not set`
+      detail: credOk ? "present" : `not set: ${missing.join(", ")}`
     });
     if (credOk) {
       try {
@@ -47174,10 +47557,20 @@ function createCheckCommand(getConfig, getTracker, getConfigPath, getProbe) {
         detail: "skipped \u2014 credentials missing"
       });
     }
+    const qa = getFinder().discover({
+      from: process.cwd(),
+      legacyRecipePath: getQaRecipePath(config2, getConfigPath())
+    });
+    const [nearest] = qa.sources;
+    checks.push({
+      name: "qa-instructions",
+      ok: qa.found,
+      detail: nearest === void 0 ? "none found \u2014 add a QA.md or a QA section in AGENTS.md to enable the QA lane" : [nearest.path, ...qa.sources.slice(1).map((s) => s.path)].join(", ") + (nearest.legacy === true ? " (legacy recipe \u2014 migrate to QA.md)" : ""),
+      required: false
+    });
     const tools = await getProbe().probe({
       repo: config2.repo,
-      recipePath: getQaRecipePath(config2, getConfigPath()),
-      env: process.env
+      qaInstructionsFound: qa.found
     });
     checks.push(...tools);
     const ok3 = checks.every((c) => c.ok || c.required === false);
@@ -47194,9 +47587,96 @@ function createCheckCommand(getConfig, getTracker, getConfigPath, getProbe) {
   return check2;
 }
 
+// src/hooks/commands/hook/command.ts
+import { text as text4 } from "node:stream/consumers";
+
+// src/hooks/commit-guard/commit-guard.ts
+var PreToolUseInputSchema = external_exports.looseObject({
+  tool_name: external_exports.string().optional(),
+  tool_input: external_exports.looseObject({ command: external_exports.string().optional() }).optional(),
+  cwd: external_exports.string().optional()
+});
+var bypassVariable = "FLIGHT_RULES_RAW_GIT";
+var optionsWithValue = /* @__PURE__ */ new Set(["-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path"]);
+var assignment = /^[A-Za-z_][A-Za-z0-9_]*=/;
+var CommitGuard = class {
+  isConfigured;
+  env;
+  constructor(props = {}) {
+    this.env = props.env ?? process.env;
+    this.isConfigured = props.isConfigured ?? ((dir) => Object.keys(new ConfigStore({ cwd: dir, env: this.env }).inspect().values).length > 0);
+  }
+  decide(payload) {
+    const parsed = PreToolUseInputSchema.safeParse(payload);
+    if (!parsed.success) return void 0;
+    const input2 = parsed.data;
+    if (input2.tool_name !== "Bash") return void 0;
+    const command = input2.tool_input?.command;
+    if (command === void 0) return void 0;
+    if (!this.commitsWithMessage(command)) return void 0;
+    const dir = this.env["CLAUDE_PROJECT_DIR"] ?? input2.cwd;
+    if (dir === void 0 || !this.configured(dir)) return void 0;
+    return {
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: [
+          "This repo uses flight-rules, so commits go through its CLI, which writes the conventional subject, the body, and the version trailers:",
+          '  flight-rules git commit --type <type> --scope <scope> --description "<subject>" --body-file <path-to-body.md> --file <path>\u2026',
+          `If raw git is genuinely the right tool here (for example the CLI cannot express this commit), re-run the same command prefixed with ${bypassVariable}=1 and say why in your reply.`
+        ].join("\n")
+      }
+    };
+  }
+  /** True when any segment of the command is a `git commit` that authors a message. */
+  commitsWithMessage(command) {
+    if (new RegExp(`(^|[\\s;&|(])(export\\s+)?${bypassVariable}=1\\b`).test(command)) return false;
+    return this.segments(command).some((tokens) => this.isAuthoringCommit(tokens));
+  }
+  configured(dir) {
+    try {
+      return this.isConfigured(dir);
+    } catch {
+      return false;
+    }
+  }
+  segments(command) {
+    return command.split(/&&|\|\||[;|\n`]|\$\(|\(|\)/).map((segment) => segment.trim().split(/\s+/).filter((token) => token !== ""));
+  }
+  isAuthoringCommit(tokens) {
+    let i = 0;
+    while (i < tokens.length && assignment.test(tokens[i] ?? "")) i++;
+    const program2 = tokens[i];
+    if (program2 === void 0 || !/(^|\/)git$/.test(program2)) return false;
+    i++;
+    while (i < tokens.length && (tokens[i] ?? "").startsWith("-")) {
+      i += optionsWithValue.has(tokens[i] ?? "") ? 2 : 1;
+    }
+    if (tokens[i] !== "commit") return false;
+    return !tokens.slice(i + 1).includes("--no-edit");
+  }
+};
+
+// src/hooks/commands/hook/command.ts
+function createHookCommand(getGuard = () => new CommitGuard(), readStdin = () => text4(process.stdin)) {
+  const hook2 = new Command("hook").description("handlers for the plugin's Claude Code hooks");
+  hook2.command("guard-commit").description("PreToolUse(Bash): block a hand-written `git commit` in a flight-rules repo").exitOverride().action(async () => {
+    try {
+      const decision = getGuard().decide(JSON.parse(await readStdin()));
+      if (decision !== void 0) process.stdout.write(JSON.stringify(decision) + "\n");
+    } catch {
+      return;
+    }
+  });
+  return hook2;
+}
+
+// src/git/commands/commit/command.ts
+import { readFileSync as readFileSync9 } from "node:fs";
+
 // src/git/commit-message-builder/commit-message-builder.ts
-import { readFileSync as readFileSync6 } from "node:fs";
-import { dirname as dirname3, join as join4 } from "node:path";
+import { readFileSync as readFileSync8 } from "node:fs";
+import { dirname as dirname6, join as join6 } from "node:path";
 
 // src/git/commit-message-builder/commit-message.schema.ts
 var CommitMessageInputSchema = external_exports.object({
@@ -47236,8 +47716,9 @@ var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
     if (!headerValidation.success) throw headerValidation.error;
     sections.push(`${headerValidation.data}
 `);
-    if (input2.body !== void 0) {
-      sections.push(`${input2.body}
+    const body = input2.body?.trim();
+    if (body !== void 0 && body !== "") {
+      sections.push(`${body}
 `);
     }
     const trailers = [];
@@ -47252,8 +47733,8 @@ var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
   }
   static readPluginVersion(binPath) {
     try {
-      const pkgPath = join4(dirname3(binPath), "..", "package.json");
-      const parsed = JSON.parse(readFileSync6(pkgPath, "utf-8"));
+      const pkgPath = join6(dirname6(binPath), "..", "package.json");
+      const parsed = JSON.parse(readFileSync8(pkgPath, "utf-8"));
       if (typeof parsed === "object" && parsed !== null && "version" in parsed && typeof parsed.version === "string") {
         return parsed.version;
       }
@@ -47281,7 +47762,7 @@ function createGitCommand(getExecutor) {
     "file to stage (repeatable); scopes the commit to exactly these paths. Omitting it commits the whole index",
     collect2,
     []
-  ).option("--body <body>", "commit body").option("--footer <footer>", "commit footer (repeatable)", collect2, []).option("--model <model>", "model identifier").action(async (opts) => {
+  ).option("--body <body>", "commit body (or use --body-file)").option("--body-file <path>", "read the commit body from a file; wins over --body").option("--footer <footer>", "commit footer (repeatable)", collect2, []).option("--model <model>", "model identifier").action(async (opts) => {
     const builder = new DefaultCommitMessageBuilder({
       binPath: process.argv[1] ?? "",
       agentEnv: process.env["AI_AGENT"]
@@ -47290,7 +47771,7 @@ function createGitCommand(getExecutor) {
       type: opts.type,
       scope: opts.scope,
       description: opts.description,
-      body: opts.body ?? void 0,
+      body: opts.bodyFile !== void 0 ? readFileSync9(opts.bodyFile, "utf8") : opts.body,
       footers: opts.footer,
       model: opts.model ?? void 0
     });
@@ -47357,10 +47838,10 @@ function createPrCommand(getHost) {
 }
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.47.1";
+var appVersion = false ? "0.0.0-dev" : "1.50.0";
 
 // src/cli/cli.ts
-function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = () => resolveConfigPath(process.cwd(), process.env["FLIGHT_RULES_CONFIG"]), services = createFlightRules()) {
+function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = () => createFlightRules().configPath(), services = createFlightRules()) {
   const program2 = new Command("flight-rules");
   program2.version(appVersion);
   program2.exitOverride();
@@ -47381,7 +47862,8 @@ function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = () => re
   program2.addCommand(createPrCommand(prHost));
   program2.addCommand(createUsersCommand(tracker));
   program2.addCommand(createRfcCommand(config2));
-  program2.addCommand(createConfigCommand(getConfigPath));
+  program2.addCommand(createConfigCommand(() => services.configStore()));
+  program2.addCommand(createHookCommand());
   program2.addCommand(createQaCommand(config2, getConfigPath));
   program2.addCommand(createCompetenciesCommand(config2));
   program2.addCommand(createDocCommand(() => services.docs()));
