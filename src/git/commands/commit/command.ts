@@ -89,7 +89,7 @@ export function createGitCommand(getExecutor: () => GitExecutor): Command {
     .option('--from <base>', 'existing branch to base the new branch on (for stacking)')
     .action(async (opts: GitCheckoutOptions) => {
       const executor = getExecutor()
-      const branch = await executor.checkout(
+      const { branch, renamedFrom } = await executor.startBranch(
         {
           type: opts.type,
           scope: opts.scope,
@@ -97,7 +97,7 @@ export function createGitCommand(getExecutor: () => GitExecutor): Command {
         },
         opts.from,
       )
-      process.stdout.write(JSON.stringify({ branch, from: opts.from ?? null }) + '\n')
+      process.stdout.write(JSON.stringify({ branch, from: opts.from ?? null, renamedFrom }) + '\n')
     })
 
   git

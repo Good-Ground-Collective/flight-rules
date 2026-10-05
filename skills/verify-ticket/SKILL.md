@@ -101,7 +101,7 @@ Dispatch the **`qa-engineer`** agent in **`verify` mode**, **with `model: sonnet
 - the **numbered contract items** — Fixed When for a bug, Acceptance Criteria for a story;
 - for a bug, the recorded **Steps To Reproduce** and **Root Cause**, verbatim;
 - the **QA instruction source paths** from Preconditions, nearest first;
-- the **evidence directory** `.claude/evidence/<id>/`;
+- the **evidence directory**: the `path` printed by `flight-rules qa evidence-dir <id>`;
 - the paths printed by `flight-rules doc qa-charter --path` and `flight-rules doc evidence-capture --path`. Run each command and pass its output; require the agent to read each file in full.
 
 Read the single trailing `yaml` block it returns: `items[].{item, verdict, evidence}`, an `evidence.items[].{path, kind, phase, caption}` manifest, `verified`, and optional `needs` and `openQuestions` lists. `verified` is true only when every item is PASS. Treat each `needs` entry like an `openQuestions` entry on the UNVERIFIABLE path, and report it to the user as a `needs:` line.

@@ -15,6 +15,7 @@ import { createCheckCommand } from '../tasks/commands/check/command.js'
 import { createHookCommand } from '../hooks/commands/hook/command.js'
 import type { TaskTracker } from '../tasks/task-tracker/task-tracker.js'
 import { createGitCommand } from '../git/commands/commit/command.js'
+import { createBranchNameCommand, createCommitMessageCommand } from '../git/commands/message/command.js'
 import type { PullRequestHost } from '../pr/pull-request-host/pull-request-host.js'
 import { createPrCommand } from '../pr/commands/pr/command.js'
 import { appVersion } from '../version.js'
@@ -24,7 +25,7 @@ export function buildProgram(
   getConfig: (overrideTracker?: string) => Config,
   getPrHost: (overrideTracker?: string) => PullRequestHost,
   getConfigPath: () => string = () => createFlightRules().configPath(),
-  services: Pick<FlightRules, 'git' | 'probe' | 'docs' | 'configStore'> = createFlightRules(),
+  services: Pick<FlightRules, 'git' | 'probe' | 'docs' | 'configStore' | 'evidence'> = createFlightRules(),
 ): Command {
   const program = new Command('flight-rules')
   program.version(appVersion)
@@ -46,12 +47,14 @@ export function buildProgram(
   program.addCommand(createTicketCommand(tracker))
   program.addCommand(createTddCommand(tracker))
   program.addCommand(createGitCommand(() => services.git()))
+  program.addCommand(createCommitMessageCommand())
+  program.addCommand(createBranchNameCommand())
   program.addCommand(createPrCommand(prHost))
   program.addCommand(createUsersCommand(tracker))
   program.addCommand(createRfcCommand(config))
   program.addCommand(createConfigCommand(() => services.configStore()))
   program.addCommand(createHookCommand())
-  program.addCommand(createQaCommand(config, getConfigPath))
+  program.addCommand(createQaCommand(config, getConfigPath, undefined, () => services.evidence()))
   program.addCommand(createCompetenciesCommand(config))
   program.addCommand(createDocCommand(() => services.docs()))
   program.addCommand(createCheckCommand(config, tracker, getConfigPath, () => services.probe()))

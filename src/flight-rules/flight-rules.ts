@@ -5,6 +5,8 @@ import type { PullRequestHost } from '../pr/pull-request-host/pull-request-host.
 import type { Config } from '../shared/config.js'
 import { ConfigStore } from '../shared/config-store.js'
 import type { HostSettingsSource } from '../shared/host-settings/host-settings-source.js'
+import { WorktreeLocator } from '../git/worktree-locator/worktree-locator.js'
+import { EvidenceLocation } from '../tasks/evidence/evidence-location.js'
 import { EnvLoader } from '../shared/env.js'
 import { GitHubTaskTracker } from '../tasks/github-task-tracker/github-task-tracker.js'
 import { JiraTaskTracker } from '../tasks/jira-task-tracker/jira-task-tracker.js'
@@ -15,6 +17,9 @@ import { FlightRulesPropsSchema, type FlightRulesProps } from './flight-rules.sc
 export interface FlightRules {
   configPath(): string
   configStore(): ConfigStore
+  /** The main checkout when the working directory is a linked git worktree. */
+  mainCheckout(): string | undefined
+  evidence(): EvidenceLocation
   config(overrideTracker?: string): Config
   tracker(overrideTracker?: string): TaskTracker
   prHost(overrideTracker?: string): PullRequestHost
@@ -29,6 +34,7 @@ export class DefaultFlightRules implements FlightRules {
   private readonly env: Record<string, string | undefined>
   private readonly explicitConfigPath: string | undefined
   private readonly hostSettings: HostSettingsSource | undefined
+  private untrackedRoot: { value: string | undefined } | undefined
 
   constructor(props: FlightRulesProps = {}) {
     const parsed = FlightRulesPropsSchema.parse({ ...props, env: props.env === undefined ? undefined : { ...props.env } })
@@ -46,7 +52,23 @@ export class DefaultFlightRules implements FlightRules {
   configStore(): ConfigStore {
     // An explicit configPath acts as FLIGHT_RULES_CONFIG; otherwise the live env is passed through.
     const env = this.explicitConfigPath === undefined ? this.env : { ...this.env, FLIGHT_RULES_CONFIG: this.explicitConfigPath }
-    return new ConfigStore({ cwd: this.cwd, env, ...(this.hostSettings !== undefined ? { hostSettings: this.hostSettings } : {}) })
+    const untrackedRoot = this.mainCheckout()
+    return new ConfigStore({
+      cwd: this.cwd,
+      env,
+      ...(this.hostSettings !== undefined ? { hostSettings: this.hostSettings } : {}),
+      ...(untrackedRoot !== undefined ? { untrackedRoot } : {}),
+    })
+  }
+
+  /** Looked up once per instance. */
+  mainCheckout(): string | undefined {
+    this.untrackedRoot ??= { value: new WorktreeLocator().mainCheckoutFor(this.cwd) }
+    return this.untrackedRoot.value
+  }
+
+  evidence(): EvidenceLocation {
+    return new EvidenceLocation({ cwd: this.cwd, mainCheckout: this.mainCheckout() })
   }
 
   config(overrideTracker?: string): Config {
