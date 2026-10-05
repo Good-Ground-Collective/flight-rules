@@ -44,7 +44,8 @@ function buildTracker(overrideTracker?: string): TaskTracker {
   if (env.jiraToken === undefined) {
     throw new Error('JIRA_TOKEN (or JIRA_API_TOKEN / JIRA_API_KEY) environment variable is required')
   }
-  if (env.jiraEmail === undefined) throw new Error('JIRA_EMAIL environment variable is required')
+  const email = env.jiraEmail ?? config.jiraEmail
+  if (email === undefined) throw new Error('JIRA_EMAIL environment variable or jiraEmail config is required')
 
   const host = env.jiraHost ?? config.jiraHost
   if (host === undefined) throw new Error('JIRA_HOST environment variable or jiraHost config is required')
@@ -53,7 +54,7 @@ function buildTracker(overrideTracker?: string): TaskTracker {
   return new JiraTaskTracker({
     token: env.jiraToken,
     host,
-    email: env.jiraEmail,
+    email,
     project: config.jiraProject,
     ...(config.jpdProject !== undefined ? { jpdProject: config.jpdProject } : {}),
     ...(config.confluenceSpaceKey !== undefined ? { confluenceSpaceKey: config.confluenceSpaceKey } : {}),

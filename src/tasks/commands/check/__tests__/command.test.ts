@@ -238,4 +238,24 @@ describe("check command (jira)", () => {
     expect(ping).not.toHaveBeenCalled();
     output.mockRestore();
   });
+
+  it("fails credentials when neither JIRA_EMAIL nor jiraEmail is set", async () => {
+    vi.stubEnv("JIRA_TOKEN", "tok");
+    vi.stubEnv("JIRA_EMAIL", undefined);
+    const withoutEmail: Config = { ...jiraConfig };
+    delete withoutEmail.jiraEmail;
+    const output = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+    await expect(run(() => withoutEmail, makeTracker())).rejects.toThrow(
+      "check failed",
+    );
+    const credentials = lastJson(output).checks.find(
+      (c) => c.name === "credentials",
+    );
+    expect(credentials?.ok).toBe(false);
+    expect(credentials?.detail).toContain("JIRA_EMAIL");
+    expect(credentials?.detail).not.toContain("JIRA_TOKEN");
+    output.mockRestore();
+  });
 });
