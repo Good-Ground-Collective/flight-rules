@@ -1,5 +1,5 @@
 {
-  "description": "Route commits through the flight-rules CLI in repos that use flight-rules",
+  "description": "Route commits through the flight-rules CLI in repos that use flight-rules, and strip Claude Code's attribution trailers from commits and PR bodies",
   "hooks": {
     "PreToolUse": [
       {
@@ -9,7 +9,21 @@
             "type": "command",
             "if": "Bash(git *)",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/bin/flight-rules.mjs", "hook", "guard-commit"],
+            "args": ["${CLAUDE_PLUGIN_ROOT}/bin/flight-rules.mjs", "hook", "pre-bash"],
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "if": "Bash(gh pr *)",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/bin/flight-rules.mjs", "hook", "pre-bash"],
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "if": "Bash(flight-rules *)",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/bin/flight-rules.mjs", "hook", "pre-bash"],
             "timeout": 15
           }
         ]
