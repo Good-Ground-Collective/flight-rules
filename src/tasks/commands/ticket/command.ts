@@ -1,6 +1,7 @@
 import { Command } from 'commander'
 import type { CreateTicketInput, TaskTracker } from '../../task-tracker/task-tracker.js'
 import { resolveBody } from '../resolve-body.js'
+import { portableContextGuard } from '../../portable-context/portable-context.js'
 import { blobSectionSource, sectionSelector } from '../../body-sections/body-sections.js'
 import { bodyFormatDetector } from '../../body-sections/body-format-detector.js'
 import { collect } from '../../../shared/collect.js'
@@ -13,6 +14,7 @@ type CreateTicketOptions = {
   epicId?: string
   labels?: string
   assignee?: string
+  allowLocalPaths?: boolean
 }
 
 type EditTicketOptions = {
@@ -21,6 +23,7 @@ type EditTicketOptions = {
   title?: string
   labels?: string
   attach: string[]
+  allowLocalPaths?: boolean
 }
 
 export function createTicketCommand(getTracker: () => TaskTracker): Command {
@@ -35,10 +38,13 @@ export function createTicketCommand(getTracker: () => TaskTracker): Command {
     .option('--epic-id <id>', 'parent epic id; omit to create a standalone ticket')
     .option('--labels <labels>', 'comma-separated labels')
     .option('--assignee <user>', 'assignee login')
+    .option('--allow-local-paths', 'accept machine-local paths in the body (see docs/layered-body-format.md)')
     .action(async (opts: CreateTicketOptions) => {
+      const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile })
+      portableContextGuard.assertPortable(body, { allowLocalPaths: opts.allowLocalPaths })
       const input: CreateTicketInput = {
         title: opts.title,
-        body: resolveBody({ body: opts.body, bodyFile: opts.bodyFile }),
+        body,
         labels: opts.labels !== undefined ? opts.labels.split(',') : [],
         ...(opts.epicId !== undefined ? { epicId: opts.epicId } : {}),
         ...(opts.assignee !== undefined ? { assignee: opts.assignee } : {}),
@@ -56,13 +62,16 @@ export function createTicketCommand(getTracker: () => TaskTracker): Command {
     .option('--title <title>', 'new ticket title (unchanged if omitted)')
     .option('--labels <labels>', 'comma-separated labels replacing existing free-form labels')
     .option('--attach <spec>', 'file to attach, as <path>#<caption> (repeatable)', collect, [])
+    .option('--allow-local-paths', 'accept machine-local paths in the body (see docs/layered-body-format.md)')
     .action(async (id: string, opts: EditTicketOptions) => {
       const tracker = getTracker()
       const raw = resolveBody({ body: opts.body, bodyFile: opts.bodyFile })
+      // Checked after attaching: attach rewrites each local image path to its uploaded form.
       const body =
         opts.attach.length === 0
           ? raw
           : (await new TrackerEvidenceService({ tracker }).attach({ ticketId: id, body: raw, specs: opts.attach })).body
+      portableContextGuard.assertPortable(body, { allowLocalPaths: opts.allowLocalPaths })
       const result = await tracker.updateTicketDescription(id, {
         body,
         ...(opts.title !== undefined ? { title: opts.title } : {}),

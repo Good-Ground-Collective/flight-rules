@@ -1,6 +1,7 @@
 import { Command } from 'commander'
 import type { TaskTracker } from '../../task-tracker/task-tracker.js'
 import { resolveBody } from '../resolve-body.js'
+import { portableContextGuard } from '../../portable-context/portable-context.js'
 import { DependencyPlannerService } from '../../dependency-planner/dependency-planner.js'
 
 type CreateEpicOptions = {
@@ -8,6 +9,7 @@ type CreateEpicOptions = {
   body?: string
   bodyFile?: string
   labels?: string
+  allowLocalPaths?: boolean
 }
 
 type EditEpicOptions = {
@@ -15,6 +17,7 @@ type EditEpicOptions = {
   bodyFile?: string
   title?: string
   labels?: string
+  allowLocalPaths?: boolean
 }
 
 export function createEpicCommand(getTracker: () => TaskTracker): Command {
@@ -27,10 +30,13 @@ export function createEpicCommand(getTracker: () => TaskTracker): Command {
     .option('--body <body>', 'epic body (or use --body-file)')
     .option('--body-file <path>', 'read the epic body from a file')
     .option('--labels <labels>', 'comma-separated labels')
+    .option('--allow-local-paths', 'accept machine-local paths in the body (see docs/layered-body-format.md)')
     .action(async (opts: CreateEpicOptions) => {
+      const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile })
+      portableContextGuard.assertPortable(body, { allowLocalPaths: opts.allowLocalPaths })
       const result = await getTracker().createEpic({
         title: opts.title,
-        body: resolveBody({ body: opts.body, bodyFile: opts.bodyFile }),
+        body,
         labels: opts.labels !== undefined ? opts.labels.split(',') : [],
       })
       process.stdout.write(JSON.stringify(result) + '\n')
@@ -44,9 +50,12 @@ export function createEpicCommand(getTracker: () => TaskTracker): Command {
     .option('--body-file <path>', 'read the new epic body from a file')
     .option('--title <title>', 'new epic title (unchanged if omitted)')
     .option('--labels <labels>', 'comma-separated labels replacing existing free-form labels')
+    .option('--allow-local-paths', 'accept machine-local paths in the body (see docs/layered-body-format.md)')
     .action(async (id: string, opts: EditEpicOptions) => {
+      const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile })
+      portableContextGuard.assertPortable(body, { allowLocalPaths: opts.allowLocalPaths })
       const result = await getTracker().updateEpicDescription(id, {
-        body: resolveBody({ body: opts.body, bodyFile: opts.bodyFile }),
+        body,
         ...(opts.title !== undefined ? { title: opts.title } : {}),
         ...(opts.labels !== undefined ? { labels: opts.labels.split(',') } : {}),
       })
