@@ -17,7 +17,7 @@ The epic→ticket hop **is** the deep pass — there is no separate "ticket → 
 
 ## Terminal state
 
-The output is **nodes in the task tracker** (GitHub/Jira), linked natively, not a document. Every emitted node is a [layered-body artifact](../../docs/layered-body-format.md).
+The output is **nodes in the task tracker** (GitHub/Jira), linked natively, not a document. Every emitted node is a layered-body artifact. Run `flight-rules doc layered-body-format` and read the full output.
 
 ## The hard rule: tickets carry their own context
 
@@ -154,7 +154,7 @@ Ask plainly (via `AskUserQuestion`): *"Here's the proposed breakdown — good to
 
 ### 8. Author each child as a layered-body artifact
 
-Follow [`docs/layered-body-format.md`](../../docs/layered-body-format.md) exactly. Write the prose **directly** (there is no serializer):
+Run `flight-rules doc layered-body-format`, read the full output, and follow it exactly. Write the prose **directly** (there is no serializer):
 
 - `## Problem Statement`, `## Solution`, `## Acceptance Criteria` (as a `- [ ]` checklist), `## High-level technical writeup`.
 - **Open the writeup with a `**Context:**` line** linking the parent initiative, the parent epic, and the technical artifact by key or URL. Leave out any that don't exist. `execute-work` follows this line to the initiative, which an epic payload does not name.

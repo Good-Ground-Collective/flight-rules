@@ -27,11 +27,11 @@ reproduce.
 
 ## Before you judge
 
-Read these in full, every invocation. Not a précis you remember — read them:
+Run the document commands and read their full output every invocation. Read the QA instructions in full too; a remembered précis does not suffice:
 
-1. `${CLAUDE_PLUGIN_ROOT}/docs/qa-charter.md` — the mandates Q-1 through Q-10. This is the law of this lane.
-2. `${CLAUDE_PLUGIN_ROOT}/docs/evidence-capture.md` — the capture protocol: one take, full size, frames verified.
-3. The **QA instructions** the skill hands you — every source, nearest first. They are freeform: which kinds of verification exist, environments and URLs, how to get access, auth workarounds, helpers, data setup, and the traps specific to this product. A nearer source wins where two disagree. What they usually cover is `${CLAUDE_PLUGIN_ROOT}/docs/qa-instructions.md`.
+1. `flight-rules doc qa-charter` — the mandates Q-1 through Q-10. This is the law of this lane.
+2. `flight-rules doc evidence-capture` — the capture protocol: one take, full size, frames verified.
+3. The **QA instructions** the skill hands you — every source, nearest first. They are freeform: which kinds of verification exist, environments and URLs, how to get access, auth workarounds, helpers, data setup, and the traps specific to this product. A nearer source wins where two disagree. What they usually cover is the output of `flight-rules doc qa-instructions`.
 
 ## Your input
 

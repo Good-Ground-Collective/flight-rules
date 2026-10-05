@@ -3,8 +3,7 @@
 How a web-client capture is taken, verified, and handed downstream. This file is
 tool-generic: it names `playwright-cli` and `ffmpeg`, but no hosts, selectors,
 endpoints, or credentials. Those live in the repo's QA instructions
-(`docs/qa-instructions.md`). A skill references this file as
-`${CLAUDE_PLUGIN_ROOT}/docs/evidence-capture.md`.
+(`docs/qa-instructions.md`). A skill reaches this file with `flight-rules doc evidence-capture`.
 
 ## 1. Purpose
 

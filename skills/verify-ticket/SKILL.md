@@ -24,7 +24,7 @@ This is the skill that confirms the thing. You are handed a **ticket id**; you h
   flight-rules qa instructions --from <dir>
   ```
 
-  Hand the tester every source path, nearest first. `"found": false` is a stop, not a prompt — report it and point the user at `${CLAUDE_PLUGIN_ROOT}/docs/qa-instructions.md`.
+  Hand the tester every source path, nearest first. `"found": false` is a stop, not a prompt — report it and point the user at the output of `flight-rules doc qa-instructions`.
 - **The access the QA instructions name is available headlessly.** Check each environment variable they name with `printenv <VAR> >/dev/null`, never by printing it. When something a human must supply is missing, stop with one line, `needs: <what to provide>`, before you mutate the ticket. Do not pre-check a secrets manager's sign-in state; the tester resolves secrets inside the wrapper the instructions name.
 - **The fix or feature under test is already deployed** to the environment the QA instructions name. This skill verifies; it does not deploy.
 
@@ -102,7 +102,7 @@ Dispatch the **`qa-engineer`** agent in **`verify` mode**, **with `model: sonnet
 - for a bug, the recorded **Steps To Reproduce** and **Root Cause**, verbatim;
 - the **QA instruction source paths** from Preconditions, nearest first;
 - the **evidence directory** `.claude/evidence/<id>/`;
-- the charter `${CLAUDE_PLUGIN_ROOT}/docs/qa-charter.md` and the capture protocol `${CLAUDE_PLUGIN_ROOT}/docs/evidence-capture.md`.
+- the paths printed by `flight-rules doc qa-charter --path` and `flight-rules doc evidence-capture --path`. Run each command and pass its output; require the agent to read each file in full.
 
 Read the single trailing `yaml` block it returns: `items[].{item, verdict, evidence}`, an `evidence.items[].{path, kind, phase, caption}` manifest, `verified`, and optional `needs` and `openQuestions` lists. `verified` is true only when every item is PASS. Treat each `needs` entry like an `openQuestions` entry on the UNVERIFIABLE path, and report it to the user as a `needs:` line.
 

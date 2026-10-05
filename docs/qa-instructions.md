@@ -46,7 +46,7 @@ path. A skill passes the directory of the code the ticket changed when it knows
 it.
 
 When no source exists at any level, the command falls back to the old QA recipe
-(`qaRecipe` in the config, or `.claude/flight-rules.qa.md` beside it). That
+(`qaRecipe` in the config, or `flight-rules.qa.md` beside it). That
 source carries `"legacy": true` and a `hint` to move it into a `QA.md`. The
 fallback will be removed in a later release.
 

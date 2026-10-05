@@ -15,7 +15,7 @@ This is the skill that builds the thing. You are handed a **ticket id**; you han
 
 - You are handed a **ticket id**, and optionally a **base branch**. `execute-wave` supplies the base when it drives you as one ticket of a wave; a human invoking you directly normally doesn't.
 - Run everything from the **repo root** (the `flight-rules` CLI resolves config relative to CWD).
-- **Read and write config only through the CLI.** Config can live in several places that the CLI merges key by key: the user's `~/.claude/settings.json`, the project's `.claude/settings.json` and `.claude/settings.local.json` (each under `pluginConfigs["flight-rules@flight-rules"].options`), and the config file (`$FLIGHT_RULES_CONFIG`, else `.claude/flight-rules.local.md`). `flight-rules config show` prints the merged values and where each came from; `flight-rules config set` writes one. Never hand-edit any of these files — a value written to the wrong layer is shadowed by another and silently ignored.
+- **Read and write config only through the CLI.** Config can live in several places that the CLI merges key by key: the user's `~/.claude/settings.json`, the project's `.claude/settings.json` and `.claude/settings.local.json` (each under `pluginConfigs["flight-rules@flight-rules"].options`), and the config file that `flight-rules config path` prints. `flight-rules config show` prints the merged values and where each came from; `flight-rules config set` writes one. Never hand-edit any of these files — a value written to the wrong layer is shadowed by another and silently ignored.
 - `flight-rules check` reports `"ok": true`. If it doesn't, fix the environment first — the run mutates tracker state, and a half-configured CLI fails partway through.
 - Config carries a **`repo`** field (`owner/repo`). `flight-rules pr create` needs it regardless of tracker — the PR always lands on GitHub — and it throws before parsing a single option when it is missing. On a Jira-tracked repo `repo` is often absent, because the tracker doesn't need it and `skills/setup/SKILL.md` doesn't ask for it. **Step 2 discovers and stores it**, and it must be settled _before_ the loop runs: reaching step 7 without it means a pushed branch and no PR.
 - The **working tree is clean**. A dirty tree stops the run _before any mutation_: the commit step commits by explicit path, so pre-existing edits to a file the implementer also touched would be swept into the commit silently.
@@ -59,7 +59,7 @@ Also note the ticket's title (for the branch slug), its labels, and its `metadat
 - a repo-relative path that neither exists in this clone nor is a file the ticket asks you to create;
 - a pointer to something unwritten: "per the planning doc", "see decisions.md", or a decision ID that no body or artifact defines.
 
-**On any of these, stop and report a ticket defect.** Name each unresolvable reference and say the ticket needs it inlined or published (see [Portable context](${CLAUDE_PLUGIN_ROOT}/docs/layered-body-format.md#portable-context)). Do not look for the file on this machine, even if it happens to exist. A run that works only on the author's laptop hides the defect from the next engineer.
+**On any of these, stop and report a ticket defect.** Name each unresolvable reference and say the ticket needs it inlined or published (see the Portable context section of `flight-rules doc layered-body-format`). Do not look for the file on this machine, even if it happens to exist. A run that works only on the author's laptop hides the defect from the next engineer.
 
 If the ticket carries the `sharpen-the-saw` label, stop and point the user at `/sharpen-the-saw` instead. That work is reserved for a human.
 
@@ -149,7 +149,12 @@ The command prints `{"branch":"…","from":null}`. Keep that branch name — the
 Build the brief you will hand `code-implementation`. It gets exactly:
 
 - **The ticket's full body, in whichever format step 1 settled** — every section, including the Guided Walkthrough on a layered body or the Reproduction Notes on a bug report. Don't summarize it; the agent is a lower-tier model and paraphrase loses the contract.
-- **A pointer to the coding charter**: `${CLAUDE_PLUGIN_ROOT}/docs/coding-charter.md`. Pass the path, not your précis of it — the agent is required to read it in full.
+- **A pointer to the coding charter**: run this command and pass the printed path. The agent must read it in full, not your précis.
+
+  ```bash
+  flight-rules doc coding-charter --path
+  ```
+
 - **Parent RFC / TDD content, when the ticket links one.** Read the parent epic for the technical writeup, using the `metadata.epicId` you noted in step 1:
 
   ```bash
@@ -302,7 +307,7 @@ There is no force flag. If the push is rejected, stop and tell the user — do n
 
 **Write the PR body — dispatch the `tech-writer` agent in `author` mode.** The
 body is not yours to hand-write; a human reads it, so a human's editor writes it.
-The format is `${CLAUDE_PLUGIN_ROOT}/docs/pr-body-format.md`. Hand the agent:
+Run `flight-rules doc pr-body-format` and read the full output. Hand the agent:
 
 - **The ticket's Problem Statement and Solution** — the grounding for "Why Was It Changed."
 - **A summary of the diff** — `git diff --stat <default-branch>..<branch>` and `git log <default-branch>..<branch> --format='%s'`, both read-only, so it describes what actually shipped rather than what the ticket wished for.

@@ -9,7 +9,7 @@ This is the skill that turns a landed bug into a document a human can act on. Yo
 
 **The hard rule: this skill never fixes the bug, never changes the ticket's workflow status, and never prompts in its happy path.** Those are one rule with three faces. You reproduce and describe a bug — you do not touch the code that causes it, you do not move the ticket across the board, and you do not stop to ask a human anything the run can decide for itself.
 
-**Terminal state:** the ticket carries a Bug Report body per `${CLAUDE_PLUGIN_ROOT}/docs/bug-report-format.md`, a comment with the before/after evidence inline, and exactly one of `Agentic-Reproduction-Success` or `Agentic-Reproduction-Failure`; the user holds a run summary with the outcome, the label, the evidence paths, and any open questions.
+**Terminal state:** the ticket carries a Bug Report body per the output of `flight-rules doc bug-report-format`, a comment with the before/after evidence inline, and exactly one of `Agentic-Reproduction-Success` or `Agentic-Reproduction-Failure`; the user holds a run summary with the outcome, the label, the evidence paths, and any open questions.
 
 ## Preconditions
 
@@ -29,7 +29,7 @@ This is the skill that turns a landed bug into a document a human can act on. Yo
   flight-rules qa instructions --from <dir>
   ```
 
-  `"found": false` is a stop. Where they live and what they cover is `${CLAUDE_PLUGIN_ROOT}/docs/qa-instructions.md`. Read every source, nearest first.
+  `"found": false` is a stop. Where they live and what they cover is the output of `flight-rules doc qa-instructions`. Read every source, nearest first.
 
 - The access the QA instructions name is available headlessly. Check each environment variable they name with `printenv <VAR> >/dev/null`, never by printing it. When something a human must supply is missing, stop with one line, `needs: <what to provide>`. Do not pre-check a secrets manager's sign-in state; the agent resolves secrets inside the wrapper the instructions name.
 
@@ -75,8 +75,8 @@ Dispatch `qa-engineer` in **`reproduce`** mode. Pass **no `model` argument** —
 - The reporter's **`attachments`** (filenames and ids) as prior evidence.
 - The **QA instruction source paths**, nearest first, from Preconditions.
 - The **evidence directory** `.claude/evidence/<id>/` (gitignored) it writes into.
-- The **charter path** `${CLAUDE_PLUGIN_ROOT}/docs/qa-charter.md`.
-- The **capture-protocol path** `${CLAUDE_PLUGIN_ROOT}/docs/evidence-capture.md`.
+- The **charter path** printed by `flight-rules doc qa-charter --path`; run the command and pass that path.
+- The **capture-protocol path** printed by `flight-rules doc evidence-capture --path`; run the command and pass that path.
 
 Do not include your own opinion on how to reproduce it. The charter and the QA instructions are the guidance; anything you add is a third voice the agent has to reconcile.
 
@@ -84,7 +84,7 @@ Read the agent's trailing YAML and branch on one key: `reproduced`.
 
 ### 4. Success path — `reproduced: true`
 
-Author the Bug Report body to a temp file, in the exact section order of `${CLAUDE_PLUGIN_ROOT}/docs/bug-report-format.md`. Map the agent's YAML into the sections:
+Run `flight-rules doc bug-report-format` and read the full output. Author the Bug Report body to a temp file in its exact section order. Map the agent's YAML into the sections:
 
 - `## Symptom` — the reporter's original description text, **verbatim**, then the agent's `summary`.
 - `## Environment` — the environment name and host the QA instructions gave, the date, the account role used.

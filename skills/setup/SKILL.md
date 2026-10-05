@@ -16,7 +16,7 @@ The CLI merges config key by key from four layers, lowest precedence first:
 | `user` | `~/.claude/settings.json` | Values shared by every project: `tracker`, `jiraHost`, `jiraEmail`, `jiraProject`, `jpdProject`, `confluenceSpaceKey`, the status names, `rfcStorage`/`rfcStoragePath`, `defaultLabels` |
 | `project` | `.claude/settings.json` | Per-project values the team shares through git, such as `repo` |
 | `local` | `.claude/settings.local.json` | Per-project values for this machine only |
-| `file` | `$FLIGHT_RULES_CONFIG`, else `.claude/flight-rules.local.md` | The older config file; still read, and it outranks the settings files |
+| `file` | the path `flight-rules config path` prints (`$FLIGHT_RULES_CONFIG` overrides it) | The older config file; still read, and it outranks the settings files |
 
 In the settings files the values sit under `pluginConfigs["flight-rules@flight-rules"].options`. Never edit any of these files by hand. Write each value with `flight-rules config set <key> <value…> --scope <scope>`; array keys such as `defaultLabels` take several values.
 

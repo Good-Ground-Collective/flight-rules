@@ -11,10 +11,8 @@ on what comes back. The two modes differ in what they do to your file:
 - **Feedback** — the agent reports; nothing is written. Safe, always.
 - **Rewrite** — the agent proposes exact edits and **this skill applies them**. The agent has no write tools; every change to a file passes through the steps below.
 
-The charter is `${CLAUDE_PLUGIN_ROOT}/docs/prose-charter.md` and the tells
-catalog is `${CLAUDE_PLUGIN_ROOT}/docs/claudeish-tells.md`. You don't need to
-read either one — the agent does. Read them only if the user asks what a
-particular mandate means.
+The agent must run `flight-rules doc prose-charter` and `flight-rules doc claudeish-tells` and read both outputs in full.
+Run them yourself only if the user asks what a particular mandate means.
 
 ---
 
