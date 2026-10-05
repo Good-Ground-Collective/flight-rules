@@ -250,10 +250,12 @@ When capture fails on a visible change, write `No visual evidence: capture faile
 
 `.claude/` is gitignored, so nothing under `.claude/evidence/` shows in `git status --porcelain` and nothing from it ever goes in the `--file` set below.
 
-**Commit.** Stage by explicit path. Passing any `--file` scopes the commit to exactly those paths, so an unrelated stray edit cannot ride along; **omitting `--file` entirely commits the whole index**, which is why you always pass it. Repeat `--file` once per path:
+**Commit.** Stage by explicit path. Passing any `--file` scopes the commit to exactly those paths, so an unrelated stray edit cannot ride along; **omitting `--file` entirely commits the whole index**, which is why you always pass it. Repeat `--file` once per path.
+
+**Always write a body.** A squash merge builds the PR's merge message from the commit messages, so a commit with no body reaches the default branch as a subject and a pile of `Flight-Rules-Version` trailers. Write the body to a file outside the repo, for example `$TMPDIR/<id>-commit.md`, and pass it with `--body-file`. Use a file rather than `--body "…"` so newlines, backticks, and `$` survive without shell escaping. The body says what changed and why, in a few short paragraphs or a bullet list: the behaviour the ticket asked for, the approach and any non-obvious choice, and the ticket id. Take it from the ticket and the implementer's report. Do not paste the diff or the verifier's checklist. Do not add trailers to the file either; the CLI appends them.
 
 ```bash
-flight-rules git commit --type <type> --scope <id> --description "<description>" --file <path> --file <path>
+flight-rules git commit --type <type> --scope <id> --description "<description>" --body-file "$TMPDIR/<id>-commit.md" --file <path> --file <path>
 ```
 
 `<description>` is **prose, not the kebab slug from step 4** — an imperative phrase like `add ticket transitions command`, matching the commit history. `feat(KAN-35): add-execute-work-orchestrator` is the shape to avoid; the branch is the only place kebab belongs.
