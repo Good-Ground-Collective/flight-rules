@@ -28,6 +28,19 @@ describe('DefaultCommitMessageBuilder.build', () => {
     expect(msg).toBe('fix(core): fix bug\n\nextra context here\n\nFlight-Rules-Version: 1.2.3')
   })
 
+  it('keeps a multi-paragraph body intact and trims its surrounding blank lines', () => {
+    const body = '\n\nFirst paragraph.\n\n- a\n- b\n\nLast paragraph.\n\n\n'
+    const msg = build({ type: 'fix', scope: 'core', description: 'fix bug', body, footers: ['Refs: KAN-1'] })
+    expect(msg).toBe(
+      'fix(core): fix bug\n\nFirst paragraph.\n\n- a\n- b\n\nLast paragraph.\n\nRefs: KAN-1\nFlight-Rules-Version: 1.2.3',
+    )
+  })
+
+  it('omits a whitespace-only body rather than leaving an empty paragraph', () => {
+    const msg = build({ type: 'fix', scope: 'core', description: 'fix bug', body: ' \n\n ', footers: [] })
+    expect(msg).toBe('fix(core): fix bug\n\nFlight-Rules-Version: 1.2.3')
+  })
+
   it('parses the agent env into a Harness-Version trailer after Flight-Rules-Version', () => {
     const msg = build({ type: 'feat', scope: 'cli', description: 'add thing', footers: [] }, 'claude-code_2-1-165_agent')
     expect(msg).toContain('Flight-Rules-Version: 1.2.3\nHarness-Version: claude-code@2.1.165')

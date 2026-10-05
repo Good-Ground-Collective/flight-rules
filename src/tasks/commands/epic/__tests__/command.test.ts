@@ -86,6 +86,18 @@ describe('epic command', () => {
     output.mockRestore()
   })
 
+  it('rejects "create" and "edit" when the body references a machine-local path', async () => {
+    const tracker = makeTracker()
+    await expect(run(tracker, ['create', '--title', 'T', '--body', 'Spec at ~/specs/e.md'])).rejects.toThrow(
+      'references files on this machine',
+    )
+    await expect(run(tracker, ['edit', '42', '--body', 'file:///tmp/spec.html'])).rejects.toThrow(
+      'references files on this machine',
+    )
+    expect(tracker.createEpic).not.toHaveBeenCalled()
+    expect(tracker.updateEpicDescription).not.toHaveBeenCalled()
+  })
+
   it('rejects "create" when neither --body nor --body-file is given', async () => {
     const tracker = makeTracker()
     await expect(run(tracker, ['create', '--title', 'T'])).rejects.toThrow('one of --body or --body-file')
