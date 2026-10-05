@@ -47896,7 +47896,7 @@ function createPrCommand(getHost) {
 }
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.54.0";
+var appVersion = false ? "0.0.0-dev" : "1.55.0";
 
 // src/cli/cli.ts
 function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = () => createFlightRules().configPath(), services = createFlightRules()) {
