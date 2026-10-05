@@ -139,22 +139,25 @@ The command prints a JSON array of `{ accountId, displayName }` pairs — the `a
 
 ## Step 3 (Jira): Check credentials
 
-Jira, Jira Product Discovery, and Confluence all authenticate with one Atlassian API token plus the account email (HTTP Basic auth). Run:
+Jira, Jira Product Discovery, and Confluence all authenticate with one Atlassian API token plus the account email (HTTP Basic auth).
+
+The CLI reads the token from the first of these that is set: `JIRA_TOKEN`, `JIRA_API_TOKEN`, `JIRA_API_KEY`. Any one is enough. Do not ask the user to rename or re-export a token they already have under another of these names. Run:
 
 ```bash
-echo "${JIRA_TOKEN:+token-set} ${JIRA_EMAIL:+email-set}"
+for v in JIRA_TOKEN JIRA_API_TOKEN JIRA_API_KEY; do printenv "$v" >/dev/null && echo "token: $v"; done; echo "email: ${JIRA_EMAIL:+set}"
 ```
 
-If either is missing, tell the user:
+If no `token:` line prints, tell the user:
 
-> "Jira needs an API token and the account email. Export both before continuing:
+> "Jira needs an Atlassian API token (id.atlassian.com → Security → API tokens). Export it under any one of `JIRA_TOKEN`, `JIRA_API_TOKEN`, or `JIRA_API_KEY`, for example:
 > ```bash
-> export JIRA_TOKEN=your_atlassian_api_token   # id.atlassian.com → Security → API tokens
-> export JIRA_EMAIL=you@example.com            # the Atlassian account the token belongs to
+> export JIRA_TOKEN=your_atlassian_api_token
 > ```
 > The same token works for Jira, Jira Product Discovery, and Confluence."
 
-Stop if either is not present.
+Stop if no token is present.
+
+The email does not need to be exported. Step 4 asks for it and writes it to the config as `jiraEmail`. When `JIRA_EMAIL` is set, it overrides the config value, so offer it as the default answer in Step 4.
 
 ## Step 4 (Jira): Collect configuration
 
@@ -162,6 +165,11 @@ Ask each question in order, one at a time.
 
 **Host**
 > "What's your Atlassian Cloud host? Just the domain, e.g. `acme.atlassian.net`."
+
+**Atlassian email**
+> "Which Atlassian account email does the API token belong to?"
+
+Offer `$JIRA_EMAIL` as the default when it is set.
 
 **Jira project key**
 > "Which Jira project key will hold epics and tickets? (e.g. `PROJ`)"
@@ -209,7 +217,7 @@ rfcStorage: local
 - Add a `defaultLabels` block only if the user provided labels.
 - Add `qaRecipe: <path>` only when the user chose a non-default location. The default needs no key.
 
-`JIRA_TOKEN` and `JIRA_EMAIL` stay in the environment — never write them into the config file.
+The API token stays in the environment. Never write it into the config file.
 
 ## Step 6 (Jira): Smoke test
 
@@ -222,7 +230,7 @@ flight-rules check
 - If the JSON report shows `"ok": true`: setup is complete. Tell the user:
   > "Setup complete. `flight-rules` is configured for Jira project `<project key>`. Try `/draft-request-for-comments` to author your first RFC."
 - If a check fails, show the report and explain by failed check:
-  - `credentials` — `JIRA_TOKEN` (or `JIRA_EMAIL`) is not exported in this shell.
+  - `credentials` — the detail names what is missing: no token under `JIRA_TOKEN`, `JIRA_API_TOKEN`, or `JIRA_API_KEY`, or no email in either `JIRA_EMAIL` or the config's `jiraEmail`.
   - `reachable` — 401 means the token/email pair is wrong; 404 means the host or project key is wrong; a network error means the host domain is unreachable.
   - `config` — the config file was written incorrectly; show the file and offer to fix it.
 

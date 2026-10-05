@@ -92,6 +92,26 @@ describe('run', () => {
     output.mockRestore()
   })
 
+  it('takes the jira email from config and the token from JIRA_API_TOKEN when nothing else is set', async () => {
+    const dir = join(tmpdir(), `fr-cli-jira-alias-${Date.now()}`)
+    const configPath = writeConfig(
+      dir,
+      `---\ntracker: jira\njiraHost: acme.atlassian.net\njiraEmail: me@acme.com\njiraProject: PROJ\n---\n`,
+    )
+    vi.stubEnv('JIRA_TOKEN', undefined)
+    vi.stubEnv('JIRA_API_KEY', undefined)
+    vi.stubEnv('JIRA_EMAIL', undefined)
+    vi.stubEnv('JIRA_API_TOKEN', 'jira-token')
+    vi.stubEnv('FLIGHT_RULES_CONFIG', configPath)
+
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    const { run } = await import('../cli.js')
+    await run(['check'])
+
+    expect(output).toHaveBeenCalledWith(expect.stringContaining('"ok":true') as string)
+    output.mockRestore()
+  })
+
   it('honors --tracker to override the configured tracker for one run', async () => {
     const dir = join(tmpdir(), `fr-cli-override-${Date.now()}`)
     const configPath = writeConfig(
