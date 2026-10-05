@@ -14,19 +14,19 @@ This is the skill that confirms the thing. You are handed a **ticket id**; you h
 ## Preconditions
 
 - You are handed a **ticket id**.
-- Run everything from the **repo root of the app the recipe describes** — the `flight-rules` CLI resolves config relative to CWD, and the tester drives that app.
+- Run everything from the **repo root of the app under test** — the `flight-rules` CLI resolves config relative to CWD, and the tester drives that app.
 - **The config file is `$FLIGHT_RULES_CONFIG` when that variable is set, otherwise `.claude/flight-rules.local.md`.** The CLI honours the override, so every read and write below means whichever path is in effect.
 - `flight-rules check` reports `"ok": true`, including the tool probes the QA lane depends on. A half-configured CLI fails partway through, after it has already labelled the ticket in progress.
 - The **tracker is Jira**. The failure mention and the native attachments are Jira shapes.
-- The **QA recipe is resolvable**:
+- **QA instructions exist.** Read them, passing `--from` the directory of the code the ticket changed when the ticket names it:
 
   ```bash
-  flight-rules qa recipe
+  flight-rules qa instructions --from <dir>
   ```
 
-  Its stdout is the recipe path you hand the tester. A non-zero exit is a stop, not a prompt — report the CLI's own error and point the user at setup.
-- **Credentials resolve headlessly** — `FLIGHT_RULES_QA_USERNAME` and `FLIGHT_RULES_QA_PASSWORD` in the environment, or the `op://` references the recipe names with `OP_SERVICE_ACCOUNT_TOKEN` exported. The tester resolves them; you only confirm they are present before you mutate the ticket.
-- **The fix or feature under test is already deployed** to the recipe's environment. This skill verifies; it does not deploy.
+  Hand the tester every source path, nearest first. `"found": false` is a stop, not a prompt — report it and point the user at `${CLAUDE_PLUGIN_ROOT}/docs/qa-instructions.md`.
+- **The access the QA instructions name is available headlessly.** Check each environment variable they name with `printenv <VAR> >/dev/null`, never by printing it. When something a human must supply is missing, stop with one line, `needs: <what to provide>`, before you mutate the ticket. Do not pre-check a secrets manager's sign-in state; the tester resolves secrets inside the wrapper the instructions name.
+- **The fix or feature under test is already deployed** to the environment the QA instructions name. This skill verifies; it does not deploy.
 
 ## Process
 
@@ -100,11 +100,11 @@ Dispatch the **`qa-engineer`** agent in **`verify` mode**, **with `model: sonnet
 
 - the **numbered contract items** — Fixed When for a bug, Acceptance Criteria for a story;
 - for a bug, the recorded **Steps To Reproduce** and **Root Cause**, verbatim;
-- the **recipe path** from Preconditions;
+- the **QA instruction source paths** from Preconditions, nearest first;
 - the **evidence directory** `.claude/evidence/<id>/`;
-- the charter `${CLAUDE_PLUGIN_ROOT}/docs/qa-charter.md` and the capture protocol `${CLAUDE_PLUGIN_ROOT}/docs/evidence-capture.md`, whose recipe format is `${CLAUDE_PLUGIN_ROOT}/docs/qa-recipe-format.md`.
+- the charter `${CLAUDE_PLUGIN_ROOT}/docs/qa-charter.md` and the capture protocol `${CLAUDE_PLUGIN_ROOT}/docs/evidence-capture.md`.
 
-Read the single trailing `yaml` block it returns: `items[].{item, verdict, evidence}`, an `evidence.items[].{path, kind, phase, caption}` manifest, `verified`, and an optional `openQuestions`. `verified` is true only when every item is PASS.
+Read the single trailing `yaml` block it returns: `items[].{item, verdict, evidence}`, an `evidence.items[].{path, kind, phase, caption}` manifest, `verified`, and optional `needs` and `openQuestions` lists. `verified` is true only when every item is PASS. Treat each `needs` entry like an `openQuestions` entry on the UNVERIFIABLE path, and report it to the user as a `needs:` line.
 
 ### 6. Branch on the verdict, in this order
 
@@ -147,14 +147,14 @@ Give the user, in order: the detected format, the gate result, the per-item verd
 - **Never re-discover a bug's steps.** The tester replays the recorded reproduction (Q-6). If the steps no longer match the UI, that is a FAIL item with that evidence — you post it, you do not go hunting for a different symptom.
 - **Every tracker write goes through `flight-rules`** — `ticket label` and `ticket comment`, never the Jira REST API or `gh`. Read-only inspection with plain `flight-rules ticket get` is fine.
 - **The tester never writes; you do.** The `qa-engineer` agent hands back a verdict and files under the evidence directory and nothing else. Comments and labels are yours.
-- **No `AskUserQuestion` in the happy path.** A missing recipe or credential is a stop with a named reason, not a question.
+- **No `AskUserQuestion` in the happy path.** Missing QA instructions or a missing credential is a stop with a named reason, not a question.
 - **Success and failure are each exactly one `ticket label` call** that removes the lock and adds the outcome in the same invocation.
 
 ## Error handling
 
 - **Capture failed** — `verified: true` but `evidence.items` is empty. Do not post a success with no proof. Take the UNVERIFIABLE path with the reason **captured no evidence**: remove the lock, add no outcome label, and report it.
 - **CLI error after step 3** — the lock is on and a later command failed. Attempt `flight-rules ticket label <id> --remove Agentic-Verification-In-Progress`, then stop and report; do not retry the dispatch and do not leave the ticket locked.
-- **Missing recipe or credentials** — stop **before** step 3, name the missing thing (the recipe path, or which credential variable is empty), and never prompt. Nothing is labelled, so there is no lock to clear.
+- **Missing QA instructions or access** — stop **before** step 3, name the missing thing in a `needs:` line (which variable to export, or which access to grant), and never prompt. Nothing is labelled, so there is no lock to clear.
 
 ## What Good Looks Like
 

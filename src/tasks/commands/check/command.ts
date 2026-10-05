@@ -4,6 +4,7 @@ import type { Config } from "../../../shared/config.js";
 import { EnvLoader, type Env } from "../../../shared/env.js";
 import type { TaskTracker } from "../../task-tracker/task-tracker.js";
 import type { ToolProbe } from "../../tool-probe/tool-probe.js";
+import { QaInstructionsFinder } from "../../qa-instructions/qa-instructions.js";
 
 type Check = { name: string; ok: boolean; detail: string; required?: boolean };
 
@@ -25,6 +26,7 @@ export function createCheckCommand(
   getTracker: () => TaskTracker,
   getConfigPath: () => string,
   getProbe: () => ToolProbe,
+  getFinder: () => QaInstructionsFinder = () => new QaInstructionsFinder(),
 ): Command {
   const check = new Command("check");
 
@@ -81,9 +83,25 @@ export function createCheckCommand(
       });
     }
 
+    const qa = getFinder().discover({
+      from: process.cwd(),
+      legacyRecipePath: getQaRecipePath(config, getConfigPath()),
+    });
+    const [nearest] = qa.sources;
+    checks.push({
+      name: "qa-instructions",
+      ok: qa.found,
+      detail:
+        nearest === undefined
+          ? "none found — add a QA.md or a QA section in AGENTS.md to enable the QA lane"
+          : [nearest.path, ...qa.sources.slice(1).map((s) => s.path)].join(", ") +
+            (nearest.legacy === true ? " (legacy recipe — migrate to QA.md)" : ""),
+      required: false,
+    });
+
     const tools = await getProbe().probe({
       repo: config.repo,
-      recipePath: getQaRecipePath(config, getConfigPath()),
+      qaInstructionsFound: qa.found,
     });
     checks.push(...tools);
 

@@ -63,7 +63,7 @@ const ConfigSchema = z
       .string()
       .optional()
       .describe(
-        "Path to the per-repo QA recipe; relative paths resolve against the directory holding this config file; defaults to flight-rules.qa.md beside it",
+        "Deprecated: path to a legacy QA recipe, read only when no QA.md or AGENTS.md QA section exists; relative paths resolve against the directory holding this config file; defaults to flight-rules.qa.md beside it",
       ),
     competencies: z.array(z.string()).default([...seedCompetencies]),
   })

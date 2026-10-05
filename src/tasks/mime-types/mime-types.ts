@@ -4,10 +4,13 @@ const mimeTypesByExtension: Record<string, string> = {
   gif: 'image/gif',
   jpeg: 'image/jpeg',
   jpg: 'image/jpeg',
+  json: 'application/json',
+  log: 'text/plain',
   mov: 'video/quicktime',
   mp4: 'video/mp4',
   png: 'image/png',
   svg: 'image/svg+xml',
+  txt: 'text/plain',
   webm: 'video/webm',
   webp: 'image/webp',
 }
@@ -18,8 +21,8 @@ export interface MimeTypeResolver {
 }
 
 /**
- * Evidence uploads carry the screenshot and recording formats the QA lane
- * captures; anything else is handed to Jira as opaque bytes.
+ * Evidence uploads carry the screenshot, recording, and text formats the QA
+ * lane captures; anything else is handed to Jira as opaque bytes.
  */
 export class ExtensionMimeTypeResolver implements MimeTypeResolver {
   forFilename(filename: string): string {

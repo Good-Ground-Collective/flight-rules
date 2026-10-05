@@ -1,5 +1,4 @@
 import { execFile } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
 import { promisify } from 'node:util'
 
 type ExecFileFn = (
@@ -16,7 +15,8 @@ export interface ToolCheck {
 
 export interface ToolProbeInput {
   repo?: string | undefined
-  recipePath: string
+  /** True when QA instructions apply to the repo, which makes the capture tools required. */
+  qaInstructionsFound: boolean
 }
 
 export interface ToolProbe {
@@ -44,8 +44,7 @@ export class NodeToolProbe implements ToolProbe {
   }
 
   async probe(input: ToolProbeInput): Promise<ToolCheck[]> {
-    const recipe = existsSync(input.recipePath) ? readFileSync(input.recipePath, 'utf8') : undefined
-    const qaRequired = recipe !== undefined
+    const qaRequired = input.qaInstructionsFound
     const ghRequired = input.repo !== undefined
 
     const [gh, ghAuth, ghPush, playwright, ffmpeg, curl] = await Promise.all([
