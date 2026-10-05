@@ -47899,6 +47899,55 @@ async function run(argv) {
   });
 }
 
+// src/agents/agent-frontmatter/agent-frontmatter.ts
+var import_yaml3 = __toESM(require_dist(), 1);
+
+// src/agents/agent-frontmatter/agent-frontmatter.schema.ts
+var agentCapabilities = ["read", "edit", "shell", "web", "spawn", "ask"];
+var modelTiers = ["standard", "escalated", "expert"];
+var reasoningLevels = ["low", "medium", "high"];
+var claudeAgentColors = ["red", "blue", "green", "yellow", "purple", "orange", "pink", "cyan"];
+var AgentCapabilitySchema = external_exports.enum(agentCapabilities);
+var ModelTierSchema = external_exports.enum(modelTiers);
+var AgentFrontmatterSchema = external_exports.strictObject({
+  name: external_exports.string().regex(/^[a-z][a-z0-9-]*$/),
+  description: external_exports.string().min(1),
+  capabilities: external_exports.array(AgentCapabilitySchema).min(1).refine(
+    (capabilities) => new Set(capabilities).size === capabilities.length,
+    { message: "duplicate capability" }
+  ),
+  model: ModelTierSchema,
+  reasoning: external_exports.enum(reasoningLevels).optional(),
+  sandbox: external_exports.strictObject({
+    fs: external_exports.enum(["read-only", "workspace-write"]),
+    network: external_exports.enum(["none", "enabled"])
+  }).optional(),
+  dispatch: external_exports.strictObject({
+    maxConcurrent: external_exports.int().positive(),
+    maxDepth: external_exports.int().positive()
+  }).optional(),
+  "x-claude": external_exports.strictObject({ color: external_exports.enum(claudeAgentColors).optional() }).optional()
+});
+
+// src/agents/agent-frontmatter/agent-frontmatter.ts
+var MissingFrontmatterError = class extends Error {
+  name = "MissingFrontmatterError";
+};
+var YamlAgentFrontmatterParser = class {
+  parse(markdown) {
+    const match = /^---\r?\n([\s\S]*?)^---(?:\r?\n|$)/m.exec(markdown);
+    if (match === null || match.index !== 0 || match[1] === void 0) {
+      throw new MissingFrontmatterError("agent file has no leading --- frontmatter block");
+    }
+    const raw = (0, import_yaml3.parse)(match[1]);
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+      throw new MissingFrontmatterError("frontmatter is not a YAML mapping");
+    }
+    return AgentFrontmatterSchema.parse(raw);
+  }
+};
+var agentFrontmatterParser = new YamlAgentFrontmatterParser();
+
 // src/main.ts
 run(process.argv.slice(2)).catch((err) => {
   if (err instanceof CommanderError) {
@@ -47908,6 +47957,9 @@ run(process.argv.slice(2)).catch((err) => {
 `);
   process.exit(1);
 });
+export {
+  agentFrontmatterParser
+};
 /*! Bundled license information:
 
 content-type/dist/index.js:

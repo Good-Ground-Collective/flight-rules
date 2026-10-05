@@ -3,6 +3,8 @@
 import { CommanderError } from 'commander'
 import { run } from './cli/cli.js'
 
+export { agentFrontmatterParser } from './agents/agent-frontmatter/agent-frontmatter.js'
+
 run(process.argv.slice(2)).catch((err: unknown) => {
   if (err instanceof CommanderError) {
     // Commander already wrote help/usage/error output; just honor its exit code.
