@@ -89,6 +89,21 @@ describe('run', () => {
     output.mockRestore()
   })
 
+  it('prints a nonexistent config path without reading config or requiring credentials', async () => {
+    vi.stubEnv('FLIGHT_RULES_CONFIG', '/tmp/fr-none/does-not-exist.md')
+    const savedToken = process.env['GITHUB_TOKEN']
+    delete process.env['GITHUB_TOKEN']
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    try {
+      const { run } = await import('../cli.js')
+      await run(['config', 'path'])
+      expect(output).toHaveBeenCalledExactlyOnceWith('/tmp/fr-none/does-not-exist.md\n')
+    } finally {
+      output.mockRestore()
+      if (savedToken !== undefined) process.env['GITHUB_TOKEN'] = savedToken
+    }
+  })
+
   it('does not require GITHUB_TOKEN to show help', async () => {
     vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
     const { run } = await import('../cli.js')

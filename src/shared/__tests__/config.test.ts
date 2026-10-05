@@ -9,7 +9,7 @@ import {
 import { writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import type { Config } from "../config.js";
+import type { Config, PathProbe } from "../config.js";
 
 const setupFixture = (content: string): string => {
   const dir = join(tmpdir(), `flight-rules-test-${Date.now()}`);
@@ -176,16 +176,50 @@ describe("getRfcDir", () => {
 });
 
 describe("resolveConfigPath", () => {
-  it("defaults to <cwd>/.claude/flight-rules.local.md when no override", () => {
-    expect(resolveConfigPath("/repo", undefined)).toBe(
-      "/repo/.claude/flight-rules.local.md",
-    );
+  const claudePath = "/repo/.claude/flight-rules.local.md";
+  const agentsPath = "/repo/.agents/flight-rules.local.md";
+  const probe = (files: string[] = [], directories: string[] = []): PathProbe => ({
+    isFile: (path) => new Set(files).has(path),
+    isDirectory: (path) => new Set(directories).has(path),
   });
 
-  it("returns the override unchanged when provided", () => {
-    expect(resolveConfigPath("/repo", "/elsewhere/cfg.md")).toBe(
-      "/elsewhere/cfg.md",
-    );
+  it("defaults to <cwd>/.claude/flight-rules.local.md when no override", () => {
+    expect(resolveConfigPath("/repo", undefined, probe())).toBe(claudePath);
+  });
+
+  it("returns the override unchanged when provided, ahead of existing configs", () => {
+    expect(resolveConfigPath("/repo", "/elsewhere/cfg.md", probe([claudePath, agentsPath])))
+      .toBe("/elsewhere/cfg.md");
+  });
+
+  it("resolves a relative override against cwd", () => {
+    expect(resolveConfigPath("/repo", "../config/local.md", probe([claudePath])))
+      .toBe("/config/local.md");
+  });
+
+  it("prefers an existing claude config when both configs exist", () => {
+    expect(resolveConfigPath("/repo", undefined, probe([claudePath, agentsPath])))
+      .toBe(claudePath);
+  });
+
+  it("uses an existing agents config even when the claude directory exists", () => {
+    expect(resolveConfigPath("/repo", undefined, probe([agentsPath], ["/repo/.claude"])))
+      .toBe(agentsPath);
+  });
+
+  it("prefers creating in claude when both harness directories exist", () => {
+    expect(resolveConfigPath("/repo", undefined, probe([], ["/repo/.claude", "/repo/.agents"])))
+      .toBe(claudePath);
+  });
+
+  it("creates in agents when only that harness directory exists", () => {
+    expect(resolveConfigPath("/repo", undefined, probe([], ["/repo/.agents"])))
+      .toBe(agentsPath);
+  });
+
+  it("does not treat a directory named like a config as an existing file", () => {
+    expect(resolveConfigPath("/repo", undefined, probe([], [claudePath, "/repo/.agents"])))
+      .toBe(agentsPath);
   });
 });
 

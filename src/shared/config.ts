@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { z } from "zod";
 import { JiraHostSchema } from "../tasks/jira-task-tracker/jira-host.js";
@@ -193,12 +193,45 @@ export function getRfcDir(config: Config, cwd: string): string {
   return join(cwd, "rfcs");
 }
 
-// eslint-disable-next-line preflight/no-loose-functions -- resolveConfigPath is module-level behaviour awaiting a home on a service; tracked in KAN-39
-export function resolveConfigPath(
+export interface PathProbe {
+  isFile(path: string): boolean;
+  isDirectory(path: string): boolean;
+}
+
+export class NodePathProbe implements PathProbe {
+  isFile(path: string): boolean {
+    return existsSync(path) && statSync(path, { throwIfNoEntry: false })?.isFile() === true;
+  }
+
+  isDirectory(path: string): boolean {
+    return existsSync(path) && statSync(path, { throwIfNoEntry: false })?.isDirectory() === true;
+  }
+}
+
+const nodePathProbe: PathProbe = new NodePathProbe();
+
+/**
+ * Resolves the config location without reading its contents. Precedence is:
+ * FLIGHT_RULES_CONFIG (relative to cwd), an existing .claude config, an existing
+ * .agents config, a create-path in an existing .claude directory, a create-path
+ * in an existing .agents directory, then .claude/flight-rules.local.md.
+ */
+export function resolveConfigPath( // eslint-disable-line preflight/no-loose-functions -- resolveConfigPath is module-level behaviour awaiting a home on a service; tracked in KAN-39
   cwd: string,
   override: string | undefined,
+  probe: PathProbe = nodePathProbe,
 ): string {
-  return override ?? join(cwd, ".claude", "flight-rules.local.md");
+  if (override !== undefined) {
+    return isAbsolute(override) ? override : resolve(cwd, override);
+  }
+
+  const claudePath = resolve(cwd, ".claude", "flight-rules.local.md");
+  const agentsPath = resolve(cwd, ".agents", "flight-rules.local.md");
+  const candidates = [claudePath, agentsPath];
+  const existing = candidates.find((path) => probe.isFile(path));
+  if (existing !== undefined) return existing;
+
+  return candidates.find((path) => probe.isDirectory(dirname(path))) ?? claudePath;
 }
 
 // eslint-disable-next-line preflight/no-loose-functions -- getQaRecipePath is module-level behaviour awaiting a home on a service; tracked in KAN-39

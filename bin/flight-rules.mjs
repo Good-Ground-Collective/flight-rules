@@ -30486,11 +30486,11 @@ function createDocCommand(getResolver) {
 }
 
 // src/shared/config-store.ts
-import { existsSync as existsSync2, mkdirSync, readFileSync as readFileSync2, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { dirname as dirname3, join as join3 } from "node:path";
+import { existsSync as existsSync4, mkdirSync as mkdirSync2, readFileSync as readFileSync4, writeFileSync as writeFileSync2 } from "node:fs";
+import { dirname as dirname4 } from "node:path";
 
 // src/shared/config.ts
+import { existsSync as existsSync2, readFileSync as readFileSync2, statSync as statSync2 } from "node:fs";
 import { dirname as dirname2, isAbsolute, join as join2, resolve as resolve2 } from "node:path";
 
 // src/tasks/jira-task-tracker/jira-host.ts
@@ -30627,20 +30627,43 @@ function getRfcDir(config2, cwd) {
   }
   return join2(cwd, "rfcs");
 }
+var NodePathProbe = class {
+  isFile(path3) {
+    return existsSync2(path3) && statSync2(path3, { throwIfNoEntry: false })?.isFile() === true;
+  }
+  isDirectory(path3) {
+    return existsSync2(path3) && statSync2(path3, { throwIfNoEntry: false })?.isDirectory() === true;
+  }
+};
+var nodePathProbe = new NodePathProbe();
+function resolveConfigPath(cwd, override, probe = nodePathProbe) {
+  if (override !== void 0) {
+    return isAbsolute(override) ? override : resolve2(cwd, override);
+  }
+  const claudePath = resolve2(cwd, ".claude", "flight-rules.local.md");
+  const agentsPath = resolve2(cwd, ".agents", "flight-rules.local.md");
+  const candidates = [claudePath, agentsPath];
+  const existing = candidates.find((path3) => probe.isFile(path3));
+  if (existing !== void 0) return existing;
+  return candidates.find((path3) => probe.isDirectory(dirname2(path3))) ?? claudePath;
+}
 function getQaRecipePath(config2, configPath) {
   const recipe = config2.qaRecipe ?? "flight-rules.qa.md";
   if (isAbsolute(recipe)) return recipe;
   return resolve2(dirname2(configPath), recipe);
 }
 
-// src/shared/config-store.ts
-var configScopes = ["user", "project", "local", "file"];
+// src/shared/host-settings/claude-settings-source.ts
+import { existsSync as existsSync3, mkdirSync, readFileSync as readFileSync3, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname as dirname3, join as join3 } from "node:path";
 var pluginId = "flight-rules@flight-rules";
 var pluginKeyPattern = /^flight-rules(@.+)?$/;
 var SettingsSchema = external_exports.looseObject({
   pluginConfigs: external_exports.record(external_exports.string(), external_exports.looseObject({ options: external_exports.record(external_exports.string(), external_exports.unknown()).optional() })).optional()
 });
-var ConfigStore = class {
+var ClaudeSettingsSource = class {
+  host = "claude";
   cwd;
   env;
   home;
@@ -30648,10 +30671,6 @@ var ConfigStore = class {
     this.cwd = props.cwd;
     this.env = props.env ?? process.env;
     this.home = props.home ?? homedir();
-  }
-  /** The flight-rules config file path, honouring `FLIGHT_RULES_CONFIG`. */
-  filePath() {
-    return this.env["FLIGHT_RULES_CONFIG"] ?? join3(this.cwd, ".claude", "flight-rules.local.md");
   }
   pathFor(scope) {
     switch (scope) {
@@ -30661,9 +30680,63 @@ var ConfigStore = class {
         return join3(this.cwd, ".claude", "settings.json");
       case "local":
         return join3(this.cwd, ".claude", "settings.local.json");
-      case "file":
-        return this.filePath();
     }
+  }
+  read(scope) {
+    const path3 = this.pathFor(scope);
+    if (!existsSync3(path3)) return void 0;
+    const settings = this.parse(path3, readFileSync3(path3, "utf-8"));
+    const key = this.pluginKey(settings);
+    return key === void 0 ? void 0 : settings.pluginConfigs?.[key]?.options;
+  }
+  write(scope, update) {
+    const path3 = this.pathFor(scope);
+    const settings = existsSync3(path3) ? this.parse(path3, readFileSync3(path3, "utf-8")) : {};
+    const key = this.pluginKey(settings) ?? pluginId;
+    const pluginConfigs = { ...settings.pluginConfigs };
+    const entry = pluginConfigs[key] ?? {};
+    pluginConfigs[key] = { ...entry, options: update(entry.options ?? {}) };
+    mkdirSync(dirname3(path3), { recursive: true });
+    writeFileSync(path3, `${JSON.stringify({ ...settings, pluginConfigs }, null, 2)}
+`);
+  }
+  hint() {
+    return `set pluginConfigs["${pluginId}"].options in ${this.pathFor("user")}, ${this.pathFor("project")}, or ${this.pathFor("local")}`;
+  }
+  parse(path3, contents) {
+    let json2;
+    try {
+      json2 = JSON.parse(contents);
+    } catch (err) {
+      throw new Error(`${path3} is not valid JSON`, { cause: err });
+    }
+    return SettingsSchema.parse(json2);
+  }
+  pluginKey(settings) {
+    const keys = Object.keys(settings.pluginConfigs ?? {}).filter((k) => pluginKeyPattern.test(k));
+    return keys.includes(pluginId) ? pluginId : keys.sort()[0];
+  }
+};
+
+// src/shared/config-store.ts
+var configScopes = ["user", "project", "local", "file"];
+var ConfigStore = class {
+  cwd;
+  env;
+  hostSettings;
+  pathProbe;
+  constructor(props) {
+    this.cwd = props.cwd;
+    this.env = props.env ?? process.env;
+    this.pathProbe = props.pathProbe;
+    this.hostSettings = props.hostSettings ?? new ClaudeSettingsSource({ cwd: props.cwd, env: this.env, ...props.home !== void 0 ? { home: props.home } : {} });
+  }
+  /** The flight-rules config file path, as `flight-rules config path` reports it. */
+  filePath() {
+    return resolveConfigPath(this.cwd, this.env["FLIGHT_RULES_CONFIG"], this.pathProbe);
+  }
+  pathFor(scope) {
+    return scope === "file" ? this.filePath() : this.hostSettings.pathFor(scope);
   }
   layers() {
     return configScopes.map((scope) => this.readLayer(scope));
@@ -30675,7 +30748,7 @@ var ConfigStore = class {
     const { values, sources, layers } = this.merge();
     if (Object.keys(values).length === 0) {
       throw new Error(
-        `No flight-rules config found. Run /flight-rules:setup, or set pluginConfigs["${pluginId}"].options in ${this.pathFor("user")}, ${this.pathFor("project")}, or ${this.pathFor("local")}`
+        `No flight-rules config found. Run the flight-rules setup skill, write ${this.filePath()}, or ${this.hostSettings.hint()}`
       );
     }
     return { config: ConfigSchema.parse(values), sources, layers };
@@ -30744,47 +30817,24 @@ var ConfigStore = class {
   }
   readLayer(scope) {
     const path3 = this.pathFor(scope);
-    if (!existsSync2(path3)) return { scope, path: path3, present: false, values: {} };
-    const contents = readFileSync2(path3, "utf-8");
-    if (scope === "file") return { scope, path: path3, present: true, values: parseFrontmatter(contents) };
-    const options = this.pluginOptions(this.parseSettings(path3, contents));
-    return { scope, path: path3, present: options !== void 0, values: options ?? {} };
-  }
-  parseSettings(path3, contents) {
-    let json2;
-    try {
-      json2 = JSON.parse(contents);
-    } catch (err) {
-      throw new Error(`${path3} is not valid JSON`, { cause: err });
+    if (scope === "file") {
+      if (!existsSync4(path3)) return { scope, path: path3, present: false, values: {} };
+      return { scope, path: path3, present: true, values: parseFrontmatter(readFileSync4(path3, "utf-8")) };
     }
-    return SettingsSchema.parse(json2);
-  }
-  pluginKey(settings) {
-    const keys = Object.keys(settings.pluginConfigs ?? {}).filter((k) => pluginKeyPattern.test(k));
-    return keys.includes(pluginId) ? pluginId : keys.sort()[0];
-  }
-  pluginOptions(settings) {
-    const key = this.pluginKey(settings);
-    if (key === void 0) return void 0;
-    return settings.pluginConfigs?.[key]?.options;
+    const values = this.hostSettings.read(scope);
+    return { scope, path: path3, present: values !== void 0, values: values ?? {} };
   }
   write(scope, update) {
-    const path3 = this.pathFor(scope);
-    const contents = existsSync2(path3) ? readFileSync2(path3, "utf-8") : void 0;
-    mkdirSync(dirname3(path3), { recursive: true });
-    if (scope === "file") {
-      const values = update(contents === void 0 ? {} : parseFrontmatter(contents));
-      const body = contents?.replace(/^---\n[\s\S]*?\n---\n?/, "") ?? "";
-      writeFileSync(path3, `${this.toFrontmatter(values)}${body}`);
+    if (scope !== "file") {
+      this.hostSettings.write(scope, update);
       return;
     }
-    const settings = contents === void 0 ? {} : this.parseSettings(path3, contents);
-    const key = this.pluginKey(settings) ?? pluginId;
-    const pluginConfigs = { ...settings.pluginConfigs };
-    const entry = pluginConfigs[key] ?? {};
-    pluginConfigs[key] = { ...entry, options: update(entry.options ?? {}) };
-    writeFileSync(path3, `${JSON.stringify({ ...settings, pluginConfigs }, null, 2)}
-`);
+    const path3 = this.filePath();
+    const contents = existsSync4(path3) ? readFileSync4(path3, "utf-8") : void 0;
+    mkdirSync2(dirname4(path3), { recursive: true });
+    const values = update(contents === void 0 ? {} : parseFrontmatter(contents));
+    const body = contents?.replace(/^---\n[\s\S]*?\n---\n?/, "") ?? "";
+    writeFileSync2(path3, `${this.toFrontmatter(values)}${body}`);
   }
   toFrontmatter(values) {
     const lines = Object.entries(values).flatMap(
@@ -30815,6 +30865,45 @@ ${lines.join("\n")}
     return value;
   }
 };
+
+// src/shared/commands/config/command.ts
+var scopeHelp = "where to write: user (~/.claude/settings.json), project (.claude/settings.json), local (.claude/settings.local.json), or file (the flight-rules config file)";
+function createConfigCommand(getStore) {
+  const config2 = new Command("config");
+  config2.exitOverride();
+  config2.command("path").description("print the resolved config file path, whether or not it exists").exitOverride().action(() => {
+    process.stdout.write(`${getStore().filePath()}
+`);
+  });
+  config2.command("show").description("print the merged config, which file each value came from, and whether it is valid").exitOverride().action(() => {
+    process.stdout.write(JSON.stringify(getStore().inspect()) + "\n");
+  });
+  config2.command("set").description("write one config value; array keys take several values").argument("<key>").argument("<values...>").addOption(new Option("--scope <scope>", scopeHelp).choices(configScopes)).exitOverride().action((key, values, opts) => {
+    const store = getStore();
+    const scope = opts.scope ?? store.defaultScopeFor(key);
+    store.set(key, values, scope);
+    const shadowedBy = store.shadowingScope(key, scope);
+    process.stdout.write(
+      JSON.stringify({
+        key,
+        scope,
+        path: store.pathFor(scope),
+        ...shadowedBy !== void 0 ? {
+          warning: `${key} is also set in ${shadowedBy} scope (${store.pathFor(shadowedBy)}), which takes precedence`
+        } : {}
+      }) + "\n"
+    );
+  });
+  config2.command("unset").description("remove one config value from a scope").argument("<key>").addOption(new Option("--scope <scope>", scopeHelp).choices(configScopes)).exitOverride().action((key, opts) => {
+    const store = getStore();
+    const scope = opts.scope ?? store.defaultScopeFor(key);
+    store.unset(key, scope);
+    process.stdout.write(
+      JSON.stringify({ key, scope, path: store.pathFor(scope) }) + "\n"
+    );
+  });
+  return config2;
+}
 
 // src/shared/env.ts
 var EnvSchema = external_exports.object({
@@ -35587,7 +35676,7 @@ var GitHubTaskTracker = class {
 };
 
 // src/tasks/jira-task-tracker/jira-task-tracker.ts
-import { readFileSync as readFileSync3 } from "node:fs";
+import { readFileSync as readFileSync5 } from "node:fs";
 import { basename } from "node:path";
 
 // src/tasks/jira-task-tracker/jira-api-error.ts
@@ -45927,7 +46016,7 @@ var JiraTaskTracker = class {
    */
   async addAttachment(ticketId, filePath) {
     const filename = basename(filePath);
-    const file2 = new File([readFileSync3(filePath)], filename, { type: this.mimeTypes.forFilename(filename) });
+    const file2 = new File([readFileSync5(filePath)], filename, { type: this.mimeTypes.forFilename(filename) });
     const uploaded = JiraUploadedAttachmentsSchema.parse(
       await this.client.upload(`/issue/${ticketId}/attachments`, [file2])
     );
@@ -46175,9 +46264,9 @@ var JiraTaskTracker = class {
 };
 
 // src/tasks/commands/resolve-body.ts
-import { readFileSync as readFileSync4 } from "node:fs";
+import { readFileSync as readFileSync6 } from "node:fs";
 function resolveBody(opts) {
-  if (opts.bodyFile !== void 0) return readFileSync4(opts.bodyFile, "utf8");
+  if (opts.bodyFile !== void 0) return readFileSync6(opts.bodyFile, "utf8");
   if (opts.body !== void 0) return opts.body;
   throw new Error("one of --body or --body-file is required");
 }
@@ -46806,15 +46895,15 @@ function createRfcCommand(getConfig, getCwd = () => process.cwd()) {
 }
 
 // src/tasks/qa-instructions/qa-instructions.ts
-import { existsSync as existsSync3, readFileSync as readFileSync5, statSync as statSync2 } from "node:fs";
-import { dirname as dirname4, join as join4, resolve as resolve3 } from "node:path";
+import { existsSync as existsSync5, readFileSync as readFileSync7, statSync as statSync3 } from "node:fs";
+import { dirname as dirname5, join as join4, resolve as resolve3 } from "node:path";
 var atxHeading = /^ {0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$/;
 var fenceRun2 = /^ {0,3}(`{3,}|~{3,})/;
 var legacyHint = 'Legacy QA recipe in use. Move its content into a QA.md at the repo root (or a "QA" section of AGENTS.md); see docs/qa-instructions.md.';
 var nodeFileSystem = {
-  isFile: (path3) => existsSync3(path3) && statSync2(path3).isFile(),
-  exists: (path3) => existsSync3(path3),
-  readFile: (path3) => readFileSync5(path3, "utf8")
+  isFile: (path3) => existsSync5(path3) && statSync3(path3).isFile(),
+  exists: (path3) => existsSync5(path3),
+  readFile: (path3) => readFileSync7(path3, "utf8")
 };
 var QaInstructionsFinder = class {
   fs;
@@ -46864,13 +46953,13 @@ var QaInstructionsFinder = class {
   /** The start directory and each parent up to the repository root; only the start when no root is found. */
   levels(from) {
     const absolute = resolve3(from);
-    const start = this.fs.isFile(absolute) ? dirname4(absolute) : absolute;
+    const start = this.fs.isFile(absolute) ? dirname5(absolute) : absolute;
     const levels = [];
     let current = start;
     for (; ; ) {
       levels.push(current);
       if (this.fs.exists(join4(current, ".git"))) return levels;
-      const parent = dirname4(current);
+      const parent = dirname5(current);
       if (parent === current) return [start];
       current = parent;
     }
@@ -46891,7 +46980,7 @@ var QaInstructionsFinder = class {
   }
   legacySource(path3) {
     if (path3 === void 0) return void 0;
-    const source = this.fileSource(path3, "legacy-recipe", dirname4(path3));
+    const source = this.fileSource(path3, "legacy-recipe", dirname5(path3));
     return source === void 0 ? void 0 : { ...source, legacy: true, hint: legacyHint };
   }
 };
@@ -47036,40 +47125,6 @@ function createCheckCommand(getConfig, getTracker, getConfigPath, getProbe, getF
     if (!ok3) throw new Error("flight-rules check failed \u2014 see report above");
   });
   return check2;
-}
-
-// src/tasks/commands/config/command.ts
-var scopeHelp = "where to write: user (~/.claude/settings.json), project (.claude/settings.json), local (.claude/settings.local.json), or file (the flight-rules config file)";
-function createConfigCommand(getStore) {
-  const config2 = new Command("config");
-  config2.command("show").description("print the merged config, which file each value came from, and whether it is valid").exitOverride().action(() => {
-    process.stdout.write(JSON.stringify(getStore().inspect()) + "\n");
-  });
-  config2.command("set").description("write one config value; array keys take several values").argument("<key>").argument("<values...>").addOption(new Option("--scope <scope>", scopeHelp).choices(configScopes)).exitOverride().action((key, values, opts) => {
-    const store = getStore();
-    const scope = opts.scope ?? store.defaultScopeFor(key);
-    store.set(key, values, scope);
-    const shadowedBy = store.shadowingScope(key, scope);
-    process.stdout.write(
-      JSON.stringify({
-        key,
-        scope,
-        path: store.pathFor(scope),
-        ...shadowedBy !== void 0 ? {
-          warning: `${key} is also set in ${shadowedBy} scope (${store.pathFor(shadowedBy)}), which takes precedence`
-        } : {}
-      }) + "\n"
-    );
-  });
-  config2.command("unset").description("remove one config value from a scope").argument("<key>").addOption(new Option("--scope <scope>", scopeHelp).choices(configScopes)).exitOverride().action((key, opts) => {
-    const store = getStore();
-    const scope = opts.scope ?? store.defaultScopeFor(key);
-    store.unset(key, scope);
-    process.stdout.write(
-      JSON.stringify({ key, scope, path: store.pathFor(scope) }) + "\n"
-    );
-  });
-  return config2;
 }
 
 // src/hooks/commands/hook/command.ts
@@ -47298,11 +47353,11 @@ var NodeGitExecutor = class {
 };
 
 // src/git/commands/commit/command.ts
-import { readFileSync as readFileSync7 } from "node:fs";
+import { readFileSync as readFileSync9 } from "node:fs";
 
 // src/git/commit-message-builder/commit-message-builder.ts
-import { readFileSync as readFileSync6 } from "node:fs";
-import { dirname as dirname5, join as join5 } from "node:path";
+import { readFileSync as readFileSync8 } from "node:fs";
+import { dirname as dirname6, join as join5 } from "node:path";
 
 // src/git/commit-message-builder/commit-message.schema.ts
 var CommitMessageInputSchema = external_exports.object({
@@ -47360,8 +47415,8 @@ var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
   }
   static readPluginVersion(binPath) {
     try {
-      const pkgPath = join5(dirname5(binPath), "..", "package.json");
-      const parsed = JSON.parse(readFileSync6(pkgPath, "utf-8"));
+      const pkgPath = join5(dirname6(binPath), "..", "package.json");
+      const parsed = JSON.parse(readFileSync8(pkgPath, "utf-8"));
       if (typeof parsed === "object" && parsed !== null && "version" in parsed && typeof parsed.version === "string") {
         return parsed.version;
       }
@@ -47398,7 +47453,7 @@ function createGitCommand(getExecutor) {
       type: opts.type,
       scope: opts.scope,
       description: opts.description,
-      body: opts.bodyFile !== void 0 ? readFileSync7(opts.bodyFile, "utf8") : opts.body,
+      body: opts.bodyFile !== void 0 ? readFileSync9(opts.bodyFile, "utf8") : opts.body,
       footers: opts.footer,
       model: opts.model ?? void 0
     });

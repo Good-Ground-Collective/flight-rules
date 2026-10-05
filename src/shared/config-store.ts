@@ -1,16 +1,15 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { dirname, join } from "node:path";
-import { z } from "zod";
-import { ConfigSchema, parseFrontmatter } from "./config.js";
-import type { Config } from "./config.js";
+import { dirname } from "node:path";
+import { ConfigSchema, parseFrontmatter, resolveConfigPath } from "./config.js";
+import type { Config, PathProbe } from "./config.js";
+import { ClaudeSettingsSource } from "./host-settings/claude-settings-source.js";
+import type { HostSettingsSource } from "./host-settings/host-settings-source.js";
 
 /**
  * Where a config layer lives, lowest precedence first. `user`, `project`, and
- * `local` are Claude Code settings files carrying the values under
- * `pluginConfigs["flight-rules@<marketplace>"].options`; `file` is the
- * flight-rules config file (`$FLIGHT_RULES_CONFIG` or
- * `.claude/flight-rules.local.md`).
+ * `local` are the host's settings files, read through a `HostSettingsSource`;
+ * `file` is the flight-rules config file that `flight-rules config path`
+ * reports.
  */
 export const configScopes = ["user", "project", "local", "file"] as const;
 export type ConfigScope = (typeof configScopes)[number];
@@ -43,50 +42,40 @@ export interface ConfigInspection {
 export interface ConfigStoreProps {
   cwd: string;
   env?: Record<string, string | undefined>;
+  /** The host's settings layers; defaults to Claude Code's. */
+  hostSettings?: HostSettingsSource;
+  /** Used for the user settings path when no host source is given. */
   home?: string;
+  pathProbe?: PathProbe;
 }
-
-const pluginId = "flight-rules@flight-rules";
-const pluginKeyPattern = /^flight-rules(@.+)?$/;
-
-const SettingsSchema = z.looseObject({
-  pluginConfigs: z
-    .record(z.string(), z.looseObject({ options: z.record(z.string(), z.unknown()).optional() }))
-    .optional(),
-});
 
 /**
  * Resolves flight-rules config from every place it may live and merges it
  * key by key, so shared values (tracker, Jira host, statuses) can sit in the
- * user's Claude Code settings while a project sets only what differs.
+ * user's host settings while a project sets only what differs.
  */
 export class ConfigStore {
   private readonly cwd: string;
   private readonly env: Record<string, string | undefined>;
-  private readonly home: string;
+  private readonly hostSettings: HostSettingsSource;
+  private readonly pathProbe: PathProbe | undefined;
 
   constructor(props: ConfigStoreProps) {
     this.cwd = props.cwd;
     this.env = props.env ?? process.env;
-    this.home = props.home ?? homedir();
+    this.pathProbe = props.pathProbe;
+    this.hostSettings =
+      props.hostSettings ??
+      new ClaudeSettingsSource({ cwd: props.cwd, env: this.env, ...(props.home !== undefined ? { home: props.home } : {}) });
   }
 
-  /** The flight-rules config file path, honouring `FLIGHT_RULES_CONFIG`. */
+  /** The flight-rules config file path, as `flight-rules config path` reports it. */
   filePath(): string {
-    return this.env["FLIGHT_RULES_CONFIG"] ?? join(this.cwd, ".claude", "flight-rules.local.md");
+    return resolveConfigPath(this.cwd, this.env["FLIGHT_RULES_CONFIG"], this.pathProbe);
   }
 
   pathFor(scope: ConfigScope): string {
-    switch (scope) {
-      case "user":
-        return join(this.env["CLAUDE_CONFIG_DIR"] ?? join(this.home, ".claude"), "settings.json");
-      case "project":
-        return join(this.cwd, ".claude", "settings.json");
-      case "local":
-        return join(this.cwd, ".claude", "settings.local.json");
-      case "file":
-        return this.filePath();
-    }
+    return scope === "file" ? this.filePath() : this.hostSettings.pathFor(scope);
   }
 
   layers(): ConfigLayer[] {
@@ -101,7 +90,7 @@ export class ConfigStore {
     const { values, sources, layers } = this.merge();
     if (Object.keys(values).length === 0) {
       throw new Error(
-        `No flight-rules config found. Run /flight-rules:setup, or set pluginConfigs["${pluginId}"].options in ${this.pathFor("user")}, ${this.pathFor("project")}, or ${this.pathFor("local")}`,
+        `No flight-rules config found. Run the flight-rules setup skill, write ${this.filePath()}, or ${this.hostSettings.hint()}`,
       );
     }
     return { config: ConfigSchema.parse(values), sources, layers };
@@ -183,55 +172,28 @@ export class ConfigStore {
 
   private readLayer(scope: ConfigScope): ConfigLayer {
     const path = this.pathFor(scope);
-    if (!existsSync(path)) return { scope, path, present: false, values: {} };
-    const contents = readFileSync(path, "utf-8");
-    if (scope === "file") return { scope, path, present: true, values: parseFrontmatter(contents) };
-    const options = this.pluginOptions(this.parseSettings(path, contents));
-    return { scope, path, present: options !== undefined, values: options ?? {} };
-  }
-
-  private parseSettings(path: string, contents: string): z.infer<typeof SettingsSchema> {
-    let json: unknown;
-    try {
-      json = JSON.parse(contents);
-    } catch (err) {
-      throw new Error(`${path} is not valid JSON`, { cause: err });
+    if (scope === "file") {
+      if (!existsSync(path)) return { scope, path, present: false, values: {} };
+      return { scope, path, present: true, values: parseFrontmatter(readFileSync(path, "utf-8")) };
     }
-    return SettingsSchema.parse(json);
-  }
-
-  private pluginKey(settings: z.infer<typeof SettingsSchema>): string | undefined {
-    const keys = Object.keys(settings.pluginConfigs ?? {}).filter((k) => pluginKeyPattern.test(k));
-    return keys.includes(pluginId) ? pluginId : keys.sort()[0];
-  }
-
-  private pluginOptions(settings: z.infer<typeof SettingsSchema>): Record<string, unknown> | undefined {
-    const key = this.pluginKey(settings);
-    if (key === undefined) return undefined;
-    return settings.pluginConfigs?.[key]?.options;
+    const values = this.hostSettings.read(scope);
+    return { scope, path, present: values !== undefined, values: values ?? {} };
   }
 
   private write(
     scope: ConfigScope,
     update: (values: Record<string, unknown>) => Record<string, unknown>,
   ): void {
-    const path = this.pathFor(scope);
-    const contents = existsSync(path) ? readFileSync(path, "utf-8") : undefined;
-    mkdirSync(dirname(path), { recursive: true });
-
-    if (scope === "file") {
-      const values = update(contents === undefined ? {} : parseFrontmatter(contents));
-      const body = contents?.replace(/^---\n[\s\S]*?\n---\n?/, "") ?? "";
-      writeFileSync(path, `${this.toFrontmatter(values)}${body}`);
+    if (scope !== "file") {
+      this.hostSettings.write(scope, update);
       return;
     }
-
-    const settings = contents === undefined ? {} : this.parseSettings(path, contents);
-    const key = this.pluginKey(settings) ?? pluginId;
-    const pluginConfigs = { ...settings.pluginConfigs };
-    const entry = pluginConfigs[key] ?? {};
-    pluginConfigs[key] = { ...entry, options: update(entry.options ?? {}) };
-    writeFileSync(path, `${JSON.stringify({ ...settings, pluginConfigs }, null, 2)}\n`);
+    const path = this.filePath();
+    const contents = existsSync(path) ? readFileSync(path, "utf-8") : undefined;
+    mkdirSync(dirname(path), { recursive: true });
+    const values = update(contents === undefined ? {} : parseFrontmatter(contents));
+    const body = contents?.replace(/^---\n[\s\S]*?\n---\n?/, "") ?? "";
+    writeFileSync(path, `${this.toFrontmatter(values)}${body}`);
   }
 
   private toFrontmatter(values: Record<string, unknown>): string {
