@@ -51,6 +51,29 @@ describe('run', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.unstubAllEnvs()
+    // Keep the developer's own ~/.claude/settings.json out of the merge.
+    vi.stubEnv('CLAUDE_CONFIG_DIR', join(tmpdir(), `fr-cli-no-user-settings-${Date.now()}`))
+  })
+
+  it('reads config from user settings when no config file exists', async () => {
+    const dir = join(tmpdir(), `fr-cli-settings-${Date.now()}`)
+    const userDir = join(dir, 'user')
+    mkdirSync(userDir, { recursive: true })
+    writeFileSync(
+      join(userDir, 'settings.json'),
+      JSON.stringify({ pluginConfigs: { 'flight-rules@flight-rules': { options: { tracker: 'github', repo: 'acme/proj' } } } }),
+    )
+    vi.stubEnv('CLAUDE_CONFIG_DIR', userDir)
+    vi.stubEnv('FLIGHT_RULES_CONFIG', undefined)
+    const cwd = vi.spyOn(process, 'cwd').mockReturnValue(dir)
+
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    const { run } = await import('../cli.js')
+    await run(['config', 'show'])
+
+    expect(output).toHaveBeenCalledWith(expect.stringContaining('"repo":"acme/proj"') as string)
+    output.mockRestore()
+    cwd.mockRestore()
   })
 
   it('routes "epic create" through the tracker and prints JSON', async () => {
@@ -108,6 +131,26 @@ describe('run', () => {
     output.mockRestore()
   })
 
+  it('takes the jira email from config and the token from JIRA_API_TOKEN when nothing else is set', async () => {
+    const dir = join(tmpdir(), `fr-cli-jira-alias-${Date.now()}`)
+    const configPath = writeConfig(
+      dir,
+      `---\ntracker: jira\njiraHost: acme.atlassian.net\njiraEmail: me@acme.com\njiraProject: PROJ\n---\n`,
+    )
+    vi.stubEnv('JIRA_TOKEN', undefined)
+    vi.stubEnv('JIRA_API_KEY', undefined)
+    vi.stubEnv('JIRA_EMAIL', undefined)
+    vi.stubEnv('JIRA_API_TOKEN', 'jira-token')
+    vi.stubEnv('FLIGHT_RULES_CONFIG', configPath)
+
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    const { run } = await import('../cli.js')
+    await run(['check'])
+
+    expect(output).toHaveBeenCalledWith(expect.stringContaining('"ok":true') as string)
+    output.mockRestore()
+  })
+
   it('honors --tracker to override the configured tracker for one run', async () => {
     const dir = join(tmpdir(), `fr-cli-override-${Date.now()}`)
     const configPath = writeConfig(
@@ -134,7 +177,7 @@ describe('injected core', () => {
   it('does not call any accessor when showing help', async () => {
     const core: FlightRules = {
       configPath: vi.fn(), config: vi.fn(), tracker: vi.fn(), prHost: vi.fn(),
-      git: vi.fn(), probe: vi.fn(), docs: vi.fn(),
+      git: vi.fn(), probe: vi.fn(), docs: vi.fn(), configStore: vi.fn(),
     }
     const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
     try {

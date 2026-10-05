@@ -1,7 +1,6 @@
 import { createFlightRules, type FlightRules } from '../flight-rules/flight-rules.js'
 import { Command } from 'commander'
 import { createDocCommand } from '../bundled-docs/commands/doc/command.js'
-import { resolveConfigPath } from '../shared/config.js'
 import type { Config } from '../shared/config.js'
 import { createConfigCommand } from '../shared/commands/config/command.js'
 import { createEpicCommand } from '../tasks/commands/epic/command.js'
@@ -13,6 +12,7 @@ import { createRfcCommand } from '../tasks/commands/rfc/command.js'
 import { createQaCommand } from '../tasks/commands/qa/command.js'
 import { createCompetenciesCommand } from '../tasks/commands/competencies/command.js'
 import { createCheckCommand } from '../tasks/commands/check/command.js'
+import { createHookCommand } from '../hooks/commands/hook/command.js'
 import type { TaskTracker } from '../tasks/task-tracker/task-tracker.js'
 import { createGitCommand } from '../git/commands/commit/command.js'
 import type { PullRequestHost } from '../pr/pull-request-host/pull-request-host.js'
@@ -23,8 +23,8 @@ export function buildProgram(
   getTracker: (overrideTracker?: string) => TaskTracker,
   getConfig: (overrideTracker?: string) => Config,
   getPrHost: (overrideTracker?: string) => PullRequestHost,
-  getConfigPath: () => string = () => resolveConfigPath(process.cwd(), process.env['FLIGHT_RULES_CONFIG']),
-  services: Pick<FlightRules, 'git' | 'probe' | 'docs'> = createFlightRules(),
+  getConfigPath: () => string = () => createFlightRules().configPath(),
+  services: Pick<FlightRules, 'git' | 'probe' | 'docs' | 'configStore'> = createFlightRules(),
 ): Command {
   const program = new Command('flight-rules')
   program.version(appVersion)
@@ -49,7 +49,8 @@ export function buildProgram(
   program.addCommand(createPrCommand(prHost))
   program.addCommand(createUsersCommand(tracker))
   program.addCommand(createRfcCommand(config))
-  program.addCommand(createConfigCommand(getConfigPath))
+  program.addCommand(createConfigCommand(() => services.configStore()))
+  program.addCommand(createHookCommand())
   program.addCommand(createQaCommand(config, getConfigPath))
   program.addCommand(createCompetenciesCommand(config))
   program.addCommand(createDocCommand(() => services.docs()))

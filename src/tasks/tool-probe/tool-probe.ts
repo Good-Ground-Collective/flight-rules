@@ -1,5 +1,4 @@
 import { execFile } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
 import { promisify } from 'node:util'
 
 type ExecFileFn = (
@@ -16,8 +15,8 @@ export interface ToolCheck {
 
 export interface ToolProbeInput {
   repo?: string | undefined
-  recipePath: string
-  env?: Record<string, string | undefined>
+  /** True when QA instructions apply to the repo, which makes the capture tools required. */
+  qaInstructionsFound: boolean
 }
 
 export interface ToolProbe {
@@ -45,23 +44,19 @@ export class NodeToolProbe implements ToolProbe {
   }
 
   async probe(input: ToolProbeInput): Promise<ToolCheck[]> {
-    const recipe = existsSync(input.recipePath) ? readFileSync(input.recipePath, 'utf8') : undefined
-    const qaRequired = recipe !== undefined
-    const opRequired = qaRequired && recipe.includes('op://')
+    const qaRequired = input.qaInstructionsFound
     const ghRequired = input.repo !== undefined
-    const env = input.env ?? {}
 
-    const [gh, ghAuth, ghPush, playwright, ffmpeg, curl, op] = await Promise.all([
+    const [gh, ghAuth, ghPush, playwright, ffmpeg, curl] = await Promise.all([
       this.ghVersion(ghRequired),
       this.ghAuth(ghRequired),
       this.ghPush(input.repo, ghRequired),
       this.present('tools:playwright-cli', 'playwright-cli', ['--version'], qaRequired),
       this.present('tools:ffmpeg', 'ffmpeg', ['-version'], qaRequired),
       this.present('tools:curl', 'curl', ['--version'], qaRequired),
-      this.op(env, opRequired),
     ])
 
-    return [gh, ghAuth, ghPush, playwright, ffmpeg, curl, op]
+    return [gh, ghAuth, ghPush, playwright, ffmpeg, curl]
   }
 
   private async ghVersion(required: boolean): Promise<ToolCheck> {
@@ -135,27 +130,6 @@ export class NodeToolProbe implements ToolProbe {
     } catch (err) {
       const detail = this.isMissingBinary(err) ? 'not installed' : this.stderrOf(err)
       return { name, ok: false, detail, required }
-    }
-  }
-
-  private async op(env: Record<string, string | undefined>, required: boolean): Promise<ToolCheck> {
-    try {
-      await this.execFile('op', ['--version'])
-    } catch (err) {
-      const detail = this.isMissingBinary(err) ? 'not installed' : this.stderrOf(err)
-      return { name: 'tools:op', ok: false, detail, required }
-    }
-
-    if (env['OP_SERVICE_ACCOUNT_TOKEN'] !== undefined) {
-      return { name: 'tools:op', ok: true, detail: 'authenticated via OP_SERVICE_ACCOUNT_TOKEN', required }
-    }
-
-    try {
-      await this.execFile('op', ['whoami', '--format=json'])
-      return { name: 'tools:op', ok: true, detail: 'authenticated via op whoami', required }
-    } catch (err) {
-      const detail = this.isMissingBinary(err) ? 'not installed' : this.stderrOf(err)
-      return { name: 'tools:op', ok: false, detail: `not signed in — ${detail}`, required }
     }
   }
 

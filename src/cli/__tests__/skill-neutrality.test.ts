@@ -40,7 +40,7 @@ describe("document references are host neutral", () => {
           if (references.length === 0) return [];
           const allowed =
             relative(root, file) === "skills/setup/SKILL.md" &&
-            index === 25 &&
+            line.includes("The flight-rules binary isn't reachable") &&
             references.length === 2 &&
             [...line.matchAll(/CLAUDE_PLUGIN_ROOT}\/bin/g)].length === 2;
           return allowed ? [] : [`${relative(root, file)}:${index + 1}`];
