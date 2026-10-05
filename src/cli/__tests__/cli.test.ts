@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import type { FlightRules } from '../../flight-rules/flight-rules.js'
 
 vi.mock('@octokit/rest', () => ({
   Octokit: vi.fn().mockImplementation(function () {
@@ -168,5 +169,23 @@ describe('run', () => {
 
     expect(output).toHaveBeenCalledWith(expect.stringContaining('"tracker":"github"') as string)
     output.mockRestore()
+  })
+})
+
+
+describe('injected core', () => {
+  it('does not call any accessor when showing help', async () => {
+    const core: FlightRules = {
+      configPath: vi.fn(), config: vi.fn(), tracker: vi.fn(), prHost: vi.fn(),
+      git: vi.fn(), probe: vi.fn(), docs: vi.fn(), configStore: vi.fn(),
+    }
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    try {
+      const { run } = await import('../cli.js')
+      await expect(run(['--help'], core)).rejects.toMatchObject({ code: 'commander.helpDisplayed' })
+      for (const accessor of Object.values(core)) expect(accessor).not.toHaveBeenCalled()
+    } finally {
+      output.mockRestore()
+    }
   })
 })
