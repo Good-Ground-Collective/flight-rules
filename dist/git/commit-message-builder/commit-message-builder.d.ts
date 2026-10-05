@@ -6,6 +6,7 @@ export interface CommitMessageBuilder {
 export declare class DefaultCommitMessageBuilder implements CommitMessageBuilder {
     private readonly pluginVersion;
     private readonly harnessVersion;
+    private readonly stripper;
     constructor(props: CommitMessageBuilderProps);
     build(input: CommitMessageInput): string;
     private static readPluginVersion;

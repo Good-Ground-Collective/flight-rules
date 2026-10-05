@@ -13,9 +13,6 @@ var DocNotFoundPropsSchema = z.object({ id: z.string(), available: z.array(z.str
 var InvalidDocIdError = class extends Error {
   name = "InvalidDocIdError";
 };
-var DocsUnavailableError = class extends Error {
-  name = "DocsUnavailableError";
-};
 var DocNotFoundError = class extends Error {
   name = "DocNotFoundError";
   available;
@@ -54,7 +51,7 @@ var FileDocResolver = class _FileDocResolver {
     const docsDir = resolve(home, "docs");
     if (!existsSync(docsDir) || !statSync(docsDir).isDirectory()) {
       const source = override ? `FLIGHT_RULES_HOME is set to ${override} but` : "Bundled docs directory";
-      throw new DocsUnavailableError(`${source} ${docsDir} does not exist or is not a directory \u2014 point FLIGHT_RULES_HOME at the flight-rules install root`);
+      throw new Error(`${source} ${docsDir} does not exist or is not a directory \u2014 point FLIGHT_RULES_HOME at the flight-rules install root`);
     }
     return new _FileDocResolver({ docsDir });
   }
@@ -81,24 +78,6 @@ var semanticTypes = [
   "revert"
 ];
 var SemanticTypeSchema = z2.enum(semanticTypes);
-
-// src/git/branch-namer/branch-namer.ts
-var BranchNamer = class {
-  name(spec) {
-    const semanticTypeValidation = SemanticTypeSchema.safeParse(spec.type);
-    if (!semanticTypeValidation.success) {
-      throw new Error(
-        `invalid branch type "${spec.type}" \u2014 must be one of: ${semanticTypes.join(", ")}`
-      );
-    }
-    if (spec.scope.trim() === "") {
-      throw new Error("branch scope is required");
-    }
-    const slug = spec.description !== void 0 && spec.description !== "" ? `-${spec.description}` : "";
-    return `${spec.type}/${spec.scope}${slug}`;
-  }
-};
-var branchNamer = new BranchNamer();
 
 // src/git/git-executor/git-executor.ts
 var PushSpecSchema = z3.object({
@@ -132,20 +111,21 @@ var NodeGitExecutor = class {
     return stdout.trim();
   }
   async checkout(spec, from) {
-    const branch = branchNamer.name(spec);
+    const semanticTypeValidation = SemanticTypeSchema.safeParse(spec.type);
+    if (!semanticTypeValidation.success) {
+      throw new Error(
+        `invalid branch type "${spec.type}" \u2014 must be one of: ${semanticTypes.join(", ")}`
+      );
+    }
+    if (spec.scope.trim() === "") {
+      throw new Error("branch scope is required");
+    }
+    const slug = spec.description !== void 0 && spec.description !== "" ? `-${spec.description}` : "";
+    const branch = `${spec.type}/${spec.scope}${slug}`;
     const args = ["checkout", "-b", branch];
     if (from !== void 0) args.push(from);
     await this.execFile("git", args);
     return branch;
-  }
-  async startBranch(spec, from) {
-    const branch = branchNamer.name(spec);
-    const current = await this.getCurrentBranch();
-    if (await this.isDisposableWorktreeBranch(current, from)) {
-      await this.execFile("git", ["branch", "-m", branch]);
-      return { branch, renamedFrom: current };
-    }
-    return { branch: await this.checkout(spec, from), renamedFrom: null };
   }
   async getCurrentBranch() {
     const { stdout } = await this.execFile("git", ["rev-parse", "--abbrev-ref", "HEAD"]);
@@ -157,46 +137,6 @@ var NodeGitExecutor = class {
     if (parsed.setUpstream) args.push("--set-upstream");
     args.push(parsed.remote, parsed.branch);
     await this.execFile("git", args);
-  }
-  async isDisposableWorktreeBranch(current, from) {
-    if (current === "HEAD") return false;
-    const { stdout: dirs } = await this.execFile("git", ["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"]);
-    const [gitDir, commonDir] = dirs.trim().split("\n");
-    if (gitDir === void 0 || gitDir === commonDir) return false;
-    if (await this.succeeds(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"])) return false;
-    if (current === await this.defaultBranch()) return false;
-    const { stdout: unique } = await this.execFile("git", [
-      "rev-list",
-      "--count",
-      "HEAD",
-      "--not",
-      `--exclude=${current}`,
-      "--branches",
-      "--remotes"
-    ]);
-    if (unique.trim() !== "0") return false;
-    if (from === void 0) return true;
-    const [{ stdout: head }, { stdout: base }] = await Promise.all([
-      this.execFile("git", ["rev-parse", "HEAD"]),
-      this.execFile("git", ["rev-parse", `${from}^{commit}`])
-    ]);
-    return head.trim() === base.trim();
-  }
-  async defaultBranch() {
-    try {
-      const { stdout } = await this.execFile("git", ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]);
-      return stdout.trim().replace(/^origin\//, "");
-    } catch {
-      return void 0;
-    }
-  }
-  async succeeds(args) {
-    try {
-      await this.execFile("git", args);
-      return true;
-    } catch {
-      return false;
-    }
   }
 };
 
@@ -572,12 +512,10 @@ var ClaudeSettingsSource = class {
   cwd;
   env;
   home;
-  untrackedCwd;
   constructor(props) {
     this.cwd = props.cwd;
     this.env = props.env ?? process.env;
     this.home = props.home ?? homedir();
-    this.untrackedCwd = props.untrackedCwd;
   }
   pathFor(scope) {
     switch (scope) {
@@ -586,7 +524,7 @@ var ClaudeSettingsSource = class {
       case "project":
         return join4(this.cwd, ".claude", "settings.json");
       case "local":
-        return this.localPath();
+        return join4(this.cwd, ".claude", "settings.local.json");
     }
   }
   read(scope) {
@@ -610,12 +548,6 @@ var ClaudeSettingsSource = class {
   hint() {
     return `set pluginConfigs["${pluginId}"].options in ${this.pathFor("user")}, ${this.pathFor("project")}, or ${this.pathFor("local")}`;
   }
-  /** settings.local.json is untracked, so a linked worktree starts without one. */
-  localPath() {
-    const here = join4(this.cwd, ".claude", "settings.local.json");
-    if (this.untrackedCwd === void 0 || existsSync3(here)) return here;
-    return join4(this.untrackedCwd, ".claude", "settings.local.json");
-  }
   parse(path, contents) {
     let json;
     try {
@@ -638,26 +570,15 @@ var ConfigStore = class {
   env;
   hostSettings;
   pathProbe;
-  untrackedRoot;
   constructor(props) {
     this.cwd = props.cwd;
     this.env = props.env ?? process.env;
     this.pathProbe = props.pathProbe;
-    this.untrackedRoot = props.untrackedRoot;
-    this.hostSettings = props.hostSettings ?? new ClaudeSettingsSource({
-      cwd: props.cwd,
-      env: this.env,
-      ...props.home !== void 0 ? { home: props.home } : {},
-      ...props.untrackedRoot !== void 0 ? { untrackedCwd: props.untrackedRoot } : {}
-    });
+    this.hostSettings = props.hostSettings ?? new ClaudeSettingsSource({ cwd: props.cwd, env: this.env, ...props.home !== void 0 ? { home: props.home } : {} });
   }
   /** The flight-rules config file path, as `flight-rules config path` reports it. */
   filePath() {
-    const override = this.env["FLIGHT_RULES_CONFIG"];
-    const here = resolveConfigPath(this.cwd, override, this.pathProbe);
-    if (override !== void 0 || this.untrackedRoot === void 0) return here;
-    const isFile = this.pathProbe?.isFile.bind(this.pathProbe) ?? existsSync4;
-    return isFile(here) ? here : resolveConfigPath(this.untrackedRoot, void 0, this.pathProbe);
+    return resolveConfigPath(this.cwd, this.env["FLIGHT_RULES_CONFIG"], this.pathProbe);
   }
   pathFor(scope) {
     return scope === "file" ? this.filePath() : this.hostSettings.pathFor(scope);
@@ -787,56 +708,6 @@ ${lines.join("\n")}
       throw new Error(`Invalid value for ${key}: ${result.error.issues.map((i) => i.message).join("; ")}`);
     }
     return value;
-  }
-};
-
-// src/git/worktree-locator/worktree-locator.ts
-import { execFileSync } from "node:child_process";
-import { basename, dirname as dirname5 } from "node:path";
-var WorktreeLocator = class {
-  execFileSync;
-  constructor(props = {}) {
-    this.execFileSync = props.execFileSyncFn ?? ((file, args, cwd) => execFileSync(file, [...args], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
-  }
-  /** The main checkout's root when `cwd` is inside a linked worktree; otherwise undefined. */
-  mainCheckoutFor(cwd) {
-    let output;
-    try {
-      output = this.execFileSync("git", ["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"], cwd);
-    } catch {
-      return void 0;
-    }
-    const [gitDir, commonDir] = output.trim().split("\n");
-    if (gitDir === void 0 || commonDir === void 0 || gitDir === commonDir) return void 0;
-    if (basename(commonDir) !== ".git") return void 0;
-    return dirname5(commonDir);
-  }
-};
-
-// src/tasks/evidence/evidence-location.ts
-import { execFileSync as execFileSync2 } from "node:child_process";
-import { dirname as dirname6, join as join5 } from "node:path";
-var EvidenceLocation = class {
-  root;
-  execFileSync;
-  constructor(props) {
-    this.root = props.mainCheckout ?? props.cwd;
-    this.execFileSync = props.execFileSyncFn ?? ((file, args, cwd) => execFileSync2(file, [...args], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
-  }
-  dirFor(ticket) {
-    if (ticket.trim() === "" || /[/\\]|\.\./.test(ticket)) {
-      throw new Error(`invalid ticket id "${ticket}" for an evidence directory`);
-    }
-    const path = join5(dirname6(resolveConfigPath(this.root, void 0)), "evidence", ticket);
-    return { path, gitignored: this.isIgnored(path) };
-  }
-  isIgnored(path) {
-    try {
-      this.execFileSync("git", ["check-ignore", "-q", "--no-index", path], this.root);
-      return true;
-    } catch (err) {
-      return typeof err === "object" && err !== null && "status" in err && err.status === 1 ? false : null;
-    }
   }
 };
 
@@ -1572,7 +1443,7 @@ var GitHubTaskTracker = class {
 
 // src/tasks/jira-task-tracker/jira-task-tracker.ts
 import { readFileSync as readFileSync5 } from "node:fs";
-import { basename as basename2 } from "node:path";
+import { basename } from "node:path";
 import { z as z16 } from "zod";
 
 // src/tasks/jira-task-tracker/jira-client.ts
@@ -1935,8 +1806,8 @@ var LayeredBodyAdfConverter = class {
   }
   /** Looks up a target's basename as an OWN entry, so inherited names (`constructor`, `__proto__`) never resolve. */
   mediaByName(target, media) {
-    const basename4 = target.slice(target.lastIndexOf("/") + 1);
-    return Object.hasOwn(media, basename4) ? media[basename4] : void 0;
+    const basename3 = target.slice(target.lastIndexOf("/") + 1);
+    return Object.hasOwn(media, basename3) ? media[basename3] : void 0;
   }
   /** The ADF block type an mdast node maps to, or `''` when it only degrades to literal text. */
   adfType(node) {
@@ -3029,7 +2900,7 @@ var JiraTaskTracker = class {
    * redirect it issues for the attachment's content URL.
    */
   async addAttachment(ticketId, filePath) {
-    const filename = basename2(filePath);
+    const filename = basename(filePath);
     const file = new File([readFileSync5(filePath)], filename, { type: this.mimeTypes.forFilename(filename) });
     const uploaded = JiraUploadedAttachmentsSchema.parse(
       await this.client.upload(`/issue/${ticketId}/attachments`, [file])
@@ -3402,7 +3273,6 @@ var DefaultFlightRules = class {
   env;
   explicitConfigPath;
   hostSettings;
-  untrackedRoot;
   constructor(props = {}) {
     const parsed = FlightRulesPropsSchema.parse({ ...props, env: props.env === void 0 ? void 0 : { ...props.env } });
     this.cwd = parsed.cwd ?? process.cwd();
@@ -3415,21 +3285,7 @@ var DefaultFlightRules = class {
   }
   configStore() {
     const env = this.explicitConfigPath === void 0 ? this.env : { ...this.env, FLIGHT_RULES_CONFIG: this.explicitConfigPath };
-    const untrackedRoot = this.mainCheckout();
-    return new ConfigStore({
-      cwd: this.cwd,
-      env,
-      ...this.hostSettings !== void 0 ? { hostSettings: this.hostSettings } : {},
-      ...untrackedRoot !== void 0 ? { untrackedRoot } : {}
-    });
-  }
-  /** Looked up once per instance. */
-  mainCheckout() {
-    this.untrackedRoot ??= { value: new WorktreeLocator().mainCheckoutFor(this.cwd) };
-    return this.untrackedRoot.value;
-  }
-  evidence() {
-    return new EvidenceLocation({ cwd: this.cwd, mainCheckout: this.mainCheckout() });
+    return new ConfigStore({ cwd: this.cwd, env, ...this.hostSettings !== void 0 ? { hostSettings: this.hostSettings } : {} });
   }
   config(overrideTracker) {
     const config = this.configStore().load();
@@ -3491,7 +3347,35 @@ function createFlightRules(props = {}) {
 
 // src/git/commit-message-builder/commit-message-builder.ts
 import { readFileSync as readFileSync6 } from "node:fs";
-import { dirname as dirname7, join as join6 } from "node:path";
+import { dirname as dirname5, join as join5 } from "node:path";
+
+// src/shared/attribution-stripper/attribution-stripper.ts
+var trailerText = String.raw`(?:Co-Authored-By:[^\n"']*(?:Claude|anthropic\.com)[^\n"']*|Claude-Session:[^\n"']*|https://claude\.ai/code/session_[A-Za-z0-9_-]+)`;
+var lineEnd = String.raw`(?=["']?[ \t]*(?:\r?\n|$))`;
+var closingBlock = new RegExp(
+  String.raw`(?:\r?\n[ \t]*)+${trailerText}(?:\r?\n[ \t]*${trailerText})*(?=["'](?:\s|$)|$)`,
+  "gi"
+);
+var attributionLine = new RegExp(String.raw`(?:^|\r?\n)[ \t]*${trailerText}${lineEnd}`, "gi");
+var messageCommand = /(^|[\s;&|(])(?:git\b[^\n;&|]*\bcommit\b|gh\s+pr\s+(?:create|edit)\b|flight-rules\s+(?:git\s+commit|pr\s+create)\b)/;
+var AttributionStripper = class {
+  strip(text) {
+    const stripped = text.replace(closingBlock, "").replace(attributionLine, "");
+    if (stripped === text) return text;
+    return stripped.replace(/\n{3,}/g, "\n\n");
+  }
+  /** The command with attribution removed, or undefined when it writes no message or carries none. */
+  stripCommand(command) {
+    if (!messageCommand.test(command)) return void 0;
+    const stripped = this.strip(command);
+    return stripped === command ? void 0 : stripped;
+  }
+  /** True when a single trailer line, such as one `--footer` value, is Claude attribution. */
+  isAttribution(line) {
+    return this.strip(`
+${line.trim()}`) === "";
+  }
+};
 
 // src/git/commit-message-builder/commit-message.schema.ts
 import { z as z18 } from "zod";
@@ -3519,6 +3403,7 @@ var CommitMessageBuilderPropsSchema = z18.object({
 var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
   pluginVersion;
   harnessVersion;
+  stripper = new AttributionStripper();
   constructor(props) {
     const parsed = CommitMessageBuilderPropsSchema.parse(props);
     this.pluginVersion = _DefaultCommitMessageBuilder.readPluginVersion(parsed.binPath);
@@ -3532,13 +3417,13 @@ var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
     if (!headerValidation.success) throw headerValidation.error;
     sections.push(`${headerValidation.data}
 `);
-    const body = input.body?.trim();
+    const body = input.body === void 0 ? void 0 : this.stripper.strip(input.body).trim();
     if (body !== void 0 && body !== "") {
       sections.push(`${body}
 `);
     }
     const trailers = [];
-    if (input.footers) trailers.push(...input.footers);
+    if (input.footers) trailers.push(...input.footers.filter((footer) => !this.stripper.isAttribution(footer)));
     trailers.push(
       `Flight-Rules-Version: ${this.pluginVersion}`,
       ...this.harnessVersion !== void 0 ? [`Harness-Version: ${this.harnessVersion}`] : [],
@@ -3549,7 +3434,7 @@ var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
   }
   static readPluginVersion(binPath) {
     try {
-      const pkgPath = join6(dirname7(binPath), "..", "package.json");
+      const pkgPath = join5(dirname5(binPath), "..", "package.json");
       const parsed = JSON.parse(readFileSync6(pkgPath, "utf-8"));
       if (typeof parsed === "object" && parsed !== null && "version" in parsed && typeof parsed.version === "string") {
         return parsed.version;
@@ -3803,7 +3688,7 @@ var PrecedenceBodyFormatDetector = class {
 var bodyFormatDetector = new PrecedenceBodyFormatDetector();
 
 // src/tasks/evidence/evidence.ts
-import { basename as basename3 } from "node:path/posix";
+import { basename as basename2 } from "node:path/posix";
 import { z as z19 } from "zod";
 var mediaReference = /(!?)\[([^\]]*)\]\(\s*<?([^\s()<>]+)>?(?:\s+"[^"]*")?\s*\)/g;
 var absoluteTarget = /^[a-zA-Z][a-zA-Z0-9+.-]*:|^\/\/|^#/;
@@ -3813,7 +3698,7 @@ var AttachmentSpecSchema = z19.string().min(1).transform((spec) => {
   const hash = spec.lastIndexOf("#");
   const path = hash > 0 ? spec.slice(0, hash) : spec;
   const caption = hash > 0 ? spec.slice(hash + 1).trim() : "";
-  return { path, caption: caption.length > 0 ? caption : basename3(path) };
+  return { path, caption: caption.length > 0 ? caption : basename2(path) };
 });
 var DuplicateEvidenceNameError = class extends Error {
   name = "DuplicateEvidenceNameError";
@@ -3836,14 +3721,14 @@ var TrackerEvidenceService = class {
       })
     );
     const byName = /* @__PURE__ */ new Map();
-    for (const attachment of attachments) byName.set(basename3(attachment.path), attachment);
+    for (const attachment of attachments) byName.set(basename2(attachment.path), attachment);
     const rewritten = this.rewriteReferences(input.body, byName);
     return { body: this.appendUnreferenced(rewritten, attachments), attachments };
   }
   rejectDuplicateNames(specs) {
     const paths = /* @__PURE__ */ new Map();
     for (const spec of specs) {
-      const name = basename3(spec.path);
+      const name = basename2(spec.path);
       paths.set(name, [...paths.get(name) ?? [], spec.path]);
     }
     for (const [filename, group] of paths) {
@@ -3914,7 +3799,7 @@ var TrackerEvidenceService = class {
   }
   resolve(target, byName) {
     if (absoluteTarget.test(target)) return void 0;
-    return byName.get(basename3(target.replace(localPrefix, "")));
+    return byName.get(basename2(target.replace(localPrefix, "")));
   }
   appendUnreferenced(body, attachments) {
     let result = body;
@@ -3931,7 +3816,7 @@ var TrackerEvidenceService = class {
 var settingsScopes = ["user", "project", "local"];
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.50.0";
+var appVersion = false ? "0.0.0-dev" : "1.53.0";
 
 // src/agents/agent-frontmatter/agent-frontmatter.schema.ts
 import { z as z20 } from "zod";

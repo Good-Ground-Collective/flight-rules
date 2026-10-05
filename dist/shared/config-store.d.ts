@@ -45,13 +45,6 @@ export interface ConfigStoreProps {
     /** Used for the user settings path when no host source is given. */
     home?: string;
     pathProbe?: PathProbe;
-    /**
-     * The main checkout when running in a linked git worktree. Untracked layers
-     * (the config file, and the host's local settings) resolve there when the
-     * worktree has no copy of its own, so reads find them and writes outlive
-     * the worktree.
-     */
-    untrackedRoot?: string;
 }
 /**
  * Resolves flight-rules config from every place it may live and merges it
@@ -63,7 +56,6 @@ export declare class ConfigStore {
     private readonly env;
     private readonly hostSettings;
     private readonly pathProbe;
-    private readonly untrackedRoot;
     constructor(props: ConfigStoreProps);
     /** The flight-rules config file path, as `flight-rules config path` reports it. */
     filePath(): string;
