@@ -84,7 +84,6 @@ export function createCheckCommand(
     const tools = await getProbe().probe({
       repo: config.repo,
       recipePath: getQaRecipePath(config, getConfigPath()),
-      env: process.env,
     });
     checks.push(...tools);
 

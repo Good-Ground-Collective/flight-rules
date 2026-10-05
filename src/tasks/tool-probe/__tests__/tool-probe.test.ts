@@ -36,8 +36,6 @@ describe('NodeToolProbe', () => {
     if (file === 'playwright-cli') return ok('1.0.0\n')
     if (file === 'ffmpeg') return ok('ffmpeg version 6.0\n')
     if (file === 'curl') return ok('curl 8.0.0\n')
-    if (file === 'op' && args[0] === '--version') return ok('2.0.0\n')
-    if (file === 'op' && args[0] === 'whoami') return ok('{"email":"me@acme.com"}\n')
     return notInstalled()
   }
 
@@ -104,7 +102,7 @@ describe('NodeToolProbe', () => {
   it('reports the QA tools as not ok and not required when no recipe file exists', async () => {
     const probe = new NodeToolProbe({ execFileFn: notInstalled })
     const checks = await probe.probe({ repo: undefined, recipePath: noRecipePath() })
-    for (const name of ['tools:playwright-cli', 'tools:ffmpeg', 'tools:curl', 'tools:op']) {
+    for (const name of ['tools:playwright-cli', 'tools:ffmpeg', 'tools:curl']) {
       const check = checks.find((c) => c.name === name)
       expect(check?.ok).toBe(false)
       expect(check?.required).toBe(false)
@@ -122,51 +120,13 @@ describe('NodeToolProbe', () => {
     }
   })
 
-  it('requires tools:op only when the recipe references op://', async () => {
-    const withoutOp = writeRecipe('# QA recipe\n\nRun the browser.\n')
-    const probeWithoutOp = new NodeToolProbe({ execFileFn: notInstalled })
-    const checksWithoutOp = await probeWithoutOp.probe({ repo: undefined, recipePath: withoutOp })
-    expect(checksWithoutOp.find((c) => c.name === 'tools:op')?.required).toBe(false)
-
-    const withOp = writeRecipe('# QA recipe\n\nlogin: op://vault/item/field\n')
-    const probeWithOp = new NodeToolProbe({ execFileFn: notInstalled })
-    const checksWithOp = await probeWithOp.probe({ repo: undefined, recipePath: withOp })
-    expect(checksWithOp.find((c) => c.name === 'tools:op')?.required).toBe(true)
-  })
-
-  it('reports tools:op ok via a signed-in op whoami session', async () => {
-    const probe = new NodeToolProbe({ execFileFn: allInstalled })
-    const checks = await probe.probe({ repo: undefined, recipePath: noRecipePath() })
-    const op = checks.find((c) => c.name === 'tools:op')
-    expect(op?.ok).toBe(true)
-    expect(op?.detail).toContain('whoami')
-  })
-
-  it('reports tools:op ok via OP_SERVICE_ACCOUNT_TOKEN without calling whoami', async () => {
-    const exec = vi.fn<ExecCall>((file, args) => {
-      if (file === 'op' && args[0] === 'whoami') return Promise.reject(new Error('should not be called'))
-      return allInstalled(file, args)
-    })
+  it('never spawns op, even when the recipe references op://', async () => {
+    const exec = vi.fn<ExecCall>(allInstalled)
+    const recipePath = writeRecipe('# QA recipe\n\nlogin: op://vault/item/field\n')
     const probe = new NodeToolProbe({ execFileFn: exec })
-    const checks = await probe.probe({
-      repo: undefined,
-      recipePath: noRecipePath(),
-      env: { OP_SERVICE_ACCOUNT_TOKEN: 'tok' },
-    })
-    const op = checks.find((c) => c.name === 'tools:op')
-    expect(op?.ok).toBe(true)
-    expect(op?.detail).toContain('OP_SERVICE_ACCOUNT_TOKEN')
-    expect(exec).not.toHaveBeenCalledWith('op', ['whoami', '--format=json'])
-  })
-
-  it('reports tools:op not ok when op is not signed in and no token is set', async () => {
-    const exec: ExecCall = (file, args) => {
-      if (file === 'op' && args[0] === 'whoami') return failed('not signed in')
-      return allInstalled(file, args)
-    }
-    const probe = new NodeToolProbe({ execFileFn: exec })
-    const checks = await probe.probe({ repo: undefined, recipePath: noRecipePath() })
-    expect(checks.find((c) => c.name === 'tools:op')?.ok).toBe(false)
+    const checks = await probe.probe({ repo: undefined, recipePath })
+    expect(checks.map((c) => c.name)).not.toContain('tools:op')
+    expect(exec.mock.calls.map(([file]) => file)).not.toContain('op')
   })
 
   it('reports "not installed" for a missing binary (ENOENT)', async () => {

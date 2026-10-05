@@ -133,7 +133,7 @@ describe("check command", () => {
     output.mockRestore();
   });
 
-  it("treats tools:op as required when only an overridden recipe with op:// exists", async () => {
+  it("treats the QA tools as required when only an overridden recipe exists", async () => {
     vi.stubEnv("GITHUB_TOKEN", "tok");
     // A recipe outside the config dir, referenced via qaRecipe; no default
     // flight-rules.qa.md beside the config exists.
@@ -165,11 +165,11 @@ describe("check command", () => {
     ).rejects.toThrow("check failed");
 
     const parsed = lastJson(output);
-    const op = parsed.checks.find((c) => c.name === "tools:op") as
-      | (ToolCheck & { required: boolean })
-      | undefined;
-    expect(op).toBeDefined();
-    expect(op?.required).toBe(true);
+    const playwright = parsed.checks.find(
+      (c) => c.name === "tools:playwright-cli",
+    ) as (ToolCheck & { required: boolean }) | undefined;
+    expect(playwright?.required).toBe(true);
+    expect(parsed.checks.map((c) => c.name)).not.toContain("tools:op");
     output.mockRestore();
   });
 
