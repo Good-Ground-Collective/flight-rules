@@ -24,6 +24,9 @@ export interface InstallDocsProps {
 export declare class InvalidDocIdError extends Error {
     name: string;
 }
+export declare class DocsUnavailableError extends Error {
+    name: string;
+}
 export declare class DocNotFoundError extends Error {
     name: string;
     readonly available: string[];

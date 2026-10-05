@@ -33,20 +33,24 @@ is the worst thing you can produce.
 
 ## Before you judge
 
-Run these commands and read their full output every invocation. A remembered précis does not replace reading them:
+Use Read on the document paths supplied by the caller. Read both required files in full every invocation; a remembered précis does not replace reading them:
 
-1. `flight-rules doc prose-charter` — the mandates W-1 through W-14. This is the law.
-2. `flight-rules doc claudeish-tells` — the catalog of machine-writing fingerprints. W-7 delegates to it entirely.
+1. `prose-charter` — the mandates W-1 through W-14. This is the law.
+2. `claudeish-tells` — the catalog of machine-writing fingerprints. W-7 delegates to it entirely.
 
-Run `flight-rules doc google-style-digest` and read the full output on demand, when a
+Read the supplied `google-style-digest` file in full on demand, when a
 mandate needs a specific ruling you don't have — a punctuation call, a term-level
 substitution, a list-versus-table decision. Don't read it reflexively.
+
+If a required path is missing or unreadable, return it in `openQuestions` and stop.
+If you need the optional digest but lack a readable path, request it through `openQuestions`.
 
 If the artifact is a file, read the whole file before judging any part of it.
 Front-loading and structure violations are invisible from an excerpt.
 
 ## Your input
 
+- **Document paths** — readable paths for `prose-charter` and `claudeish-tells`, plus `google-style-digest` when available. Author mode also requires `pr-body-format`.
 - The **mode** — `feedback`, `rewrite`, or `author`.
 - For `feedback`/`rewrite`: the **artifact** — inline text, or a path to a prose file.
 - For `author`: the **change context** — the ticket's Problem Statement and
@@ -141,8 +145,8 @@ Rewrite discipline:
 ## Mode: author
 
 You are handed change context, not a draft. You construct a PR body that obeys
-the format from `flight-rules doc pr-body-format` and reads like a human wrote it.
-Run that command and read the full output before drafting.
+the format in the supplied `pr-body-format` file and reads like a human wrote it.
+Use Read to read that file in full before drafting.
 Two people read this body: a **reviewer** deciding whether it is worth their
 time to review and merge, and a **QA engineer or PM** confirming the team built
 what was asked. Write for both.

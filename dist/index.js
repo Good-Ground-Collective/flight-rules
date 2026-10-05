@@ -13,6 +13,9 @@ var DocNotFoundPropsSchema = z.object({ id: z.string(), available: z.array(z.str
 var InvalidDocIdError = class extends Error {
   name = "InvalidDocIdError";
 };
+var DocsUnavailableError = class extends Error {
+  name = "DocsUnavailableError";
+};
 var DocNotFoundError = class extends Error {
   name = "DocNotFoundError";
   available;
@@ -51,7 +54,7 @@ var FileDocResolver = class _FileDocResolver {
     const docsDir = resolve(home, "docs");
     if (!existsSync(docsDir) || !statSync(docsDir).isDirectory()) {
       const source = override ? `FLIGHT_RULES_HOME is set to ${override} but` : "Bundled docs directory";
-      throw new Error(`${source} ${docsDir} does not exist or is not a directory \u2014 point FLIGHT_RULES_HOME at the flight-rules install root`);
+      throw new DocsUnavailableError(`${source} ${docsDir} does not exist or is not a directory \u2014 point FLIGHT_RULES_HOME at the flight-rules install root`);
     }
     return new _FileDocResolver({ docsDir });
   }
@@ -3816,7 +3819,7 @@ var TrackerEvidenceService = class {
 var settingsScopes = ["user", "project", "local"];
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.53.0";
+var appVersion = false ? "0.0.0-dev" : "1.54.0";
 
 // src/agents/agent-frontmatter/agent-frontmatter.schema.ts
 import { z as z20 } from "zod";

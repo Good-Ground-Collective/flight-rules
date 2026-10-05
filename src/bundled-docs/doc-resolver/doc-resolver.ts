@@ -23,6 +23,10 @@ export class InvalidDocIdError extends Error {
   override name = 'InvalidDocIdError'
 }
 
+export class DocsUnavailableError extends Error {
+  override name = 'DocsUnavailableError'
+}
+
 export class DocNotFoundError extends Error {
   override name = 'DocNotFoundError'
   readonly available: string[]
@@ -75,7 +79,7 @@ export class FileDocResolver implements DocResolver {
 
     if (!existsSync(docsDir) || !statSync(docsDir).isDirectory()) {
       const source = override ? `FLIGHT_RULES_HOME is set to ${override} but` : 'Bundled docs directory'
-      throw new Error(`${source} ${docsDir} does not exist or is not a directory — point FLIGHT_RULES_HOME at the flight-rules install root`)
+      throw new DocsUnavailableError(`${source} ${docsDir} does not exist or is not a directory — point FLIGHT_RULES_HOME at the flight-rules install root`)
     }
 
     return new FileDocResolver({ docsDir })
