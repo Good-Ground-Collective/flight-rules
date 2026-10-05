@@ -177,7 +177,7 @@ describe('injected core', () => {
   it('does not call any accessor when showing help', async () => {
     const core: FlightRules = {
       configPath: vi.fn(), config: vi.fn(), tracker: vi.fn(), prHost: vi.fn(),
-      git: vi.fn(), probe: vi.fn(), docs: vi.fn(), configStore: vi.fn(),
+      git: vi.fn(), probe: vi.fn(), docs: vi.fn(), configStore: vi.fn(), mainCheckout: vi.fn(), evidence: vi.fn(),
     }
     const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
     try {

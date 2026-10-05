@@ -10,6 +10,7 @@ const makeMockExecutor = (): GitExecutor => ({
   commit: vi.fn().mockResolvedValue(undefined),
   getCommitSha: vi.fn().mockResolvedValue('abc123'),
   checkout: vi.fn().mockResolvedValue('feat/25-saw'),
+  startBranch: vi.fn().mockResolvedValue({ branch: 'feat/25-saw', renamedFrom: null }),
   getCurrentBranch: vi.fn().mockResolvedValue('feat/25-saw'),
   push: vi.fn().mockResolvedValue(undefined),
 })

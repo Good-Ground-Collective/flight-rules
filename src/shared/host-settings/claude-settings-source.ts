@@ -18,6 +18,8 @@ export interface ClaudeSettingsSourceProps {
   cwd: string;
   env?: Record<string, string | undefined>;
   home?: string;
+  /** The main checkout of a linked worktree; `local` settings fall back there. */
+  untrackedCwd?: string;
 }
 
 /**
@@ -31,11 +33,13 @@ export class ClaudeSettingsSource implements HostSettingsSource {
   private readonly cwd: string;
   private readonly env: Record<string, string | undefined>;
   private readonly home: string;
+  private readonly untrackedCwd: string | undefined;
 
   constructor(props: ClaudeSettingsSourceProps) {
     this.cwd = props.cwd;
     this.env = props.env ?? process.env;
     this.home = props.home ?? homedir();
+    this.untrackedCwd = props.untrackedCwd;
   }
 
   pathFor(scope: SettingsScope): string {
@@ -45,7 +49,7 @@ export class ClaudeSettingsSource implements HostSettingsSource {
       case "project":
         return join(this.cwd, ".claude", "settings.json");
       case "local":
-        return join(this.cwd, ".claude", "settings.local.json");
+        return this.localPath();
     }
   }
 
@@ -70,6 +74,13 @@ export class ClaudeSettingsSource implements HostSettingsSource {
 
   hint(): string {
     return `set pluginConfigs["${pluginId}"].options in ${this.pathFor("user")}, ${this.pathFor("project")}, or ${this.pathFor("local")}`;
+  }
+
+  /** settings.local.json is untracked, so a linked worktree starts without one. */
+  private localPath(): string {
+    const here = join(this.cwd, ".claude", "settings.local.json");
+    if (this.untrackedCwd === undefined || existsSync(here)) return here;
+    return join(this.untrackedCwd, ".claude", "settings.local.json");
   }
 
   private parse(path: string, contents: string): Settings {

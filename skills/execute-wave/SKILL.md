@@ -172,6 +172,8 @@ before continuing:
 flight-rules git commit --type chore --scope <id> --description "park unverified work for handoff" --body-file "$TMPDIR/<id>-park.md" --file <path>
 ```
 
+In plain-git mode (see `execute-work`), build the same message with `flight-rules commit-message` and commit that file with `git commit -F`.
+
 Stage by explicit path, exactly as `execute-work` does. The body file says why the ticket parked and what the verifier's last failures were, so whoever checks out the branch knows what state it is in without reading this run's report. Then:
 
 - **Do not push it.** Do not open a PR.

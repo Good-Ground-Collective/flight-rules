@@ -15,7 +15,7 @@ export interface PreToolUseDecision {
     };
 }
 export interface CommitGuardProps {
-    /** Reports whether a directory has project-level flight-rules config; defaults to the `ConfigStore` layers. */
+    /** Reports whether a directory has project-level flight-rules config; defaults to the config store's layers. */
     isConfigured?: (dir: string) => boolean;
     env?: Record<string, string | undefined>;
 }
@@ -33,9 +33,16 @@ export declare class CommitGuard {
     private readonly env;
     constructor(props?: CommitGuardProps);
     decide(payload: unknown): PreToolUseDecision | undefined;
-    /** True when any segment of the command is a `git commit` that authors a message. */
-    commitsWithMessage(command: string): boolean;
+    /**
+     * True when any segment of the command is a `git commit` that authors a
+     * message by hand. A commit whose `-F`/`--file` message carries the CLI's
+     * `Flight-Rules-Version` trailer came from `flight-rules commit-message`
+     * and is not hand-written.
+     */
+    commitsWithMessage(command: string, cwd?: string): boolean;
     private configured;
     private segments;
     private isAuthoringCommit;
+    private messageFile;
+    private isCliMessage;
 }

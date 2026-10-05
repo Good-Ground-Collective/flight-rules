@@ -2,11 +2,13 @@ import { Command } from "commander";
 import { getQaRecipePath } from "../../../shared/config.js";
 import type { Config } from "../../../shared/config.js";
 import { QaInstructionsFinder } from "../../qa-instructions/qa-instructions.js";
+import type { EvidenceLocation } from "../../evidence/evidence-location.js";
 
 export function createQaCommand(
   getConfig: () => Config,
   getConfigPath: () => string,
   getFinder: () => QaInstructionsFinder = () => new QaInstructionsFinder(),
+  getEvidence?: () => EvidenceLocation,
 ): Command {
   const qa = new Command("qa");
 
@@ -37,6 +39,15 @@ export function createQaCommand(
         legacyRecipePath: legacyRecipePath(),
       });
       process.stdout.write(JSON.stringify(result) + "\n");
+    });
+
+  qa.command("evidence-dir")
+    .description("print where QA evidence for a ticket is written, and whether git ignores it, as JSON")
+    .argument("<ticket>")
+    .exitOverride()
+    .action((ticket: string) => {
+      if (getEvidence === undefined) throw new Error("evidence location is not available in this program");
+      process.stdout.write(JSON.stringify(getEvidence().dirFor(ticket)) + "\n");
     });
 
   qa.command("recipe")

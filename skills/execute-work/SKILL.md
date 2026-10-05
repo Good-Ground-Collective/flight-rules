@@ -20,6 +20,29 @@ This is the skill that builds the thing. You are handed a **ticket id**; you han
 - Config carries a **`repo`** field (`owner/repo`). `flight-rules pr create` needs it regardless of tracker — the PR always lands on GitHub — and it throws before parsing a single option when it is missing. On a Jira-tracked repo `repo` is often absent, because the tracker doesn't need it and `skills/setup/SKILL.md` doesn't ask for it. **Step 2 discovers and stores it**, and it must be settled _before_ the loop runs: reaching step 7 without it means a pushed branch and no PR.
 - The **working tree is clean**. A dirty tree stops the run _before any mutation_: the commit step commits by explicit path, so pre-existing edits to a file the implementer also touched would be swept into the commit silently.
 
+### Plain-git mode
+
+Some harnesses refuse any command that runs git on the agent's behalf; a worktree-isolated session rejects `flight-rules git …` because it cannot see which directory the CLI's git targets. When a `flight-rules git` command is refused that way, switch to these equivalents for the rest of the run. Everything else in this skill stays the same, and the message and branch name are still the CLI's.
+
+- **Branch (step 4).** Get the name, then either take over a disposable worktree branch or create one:
+
+  ```bash
+  flight-rules branch-name --type <type> --scope <id> --description <slug>
+  git rev-list --count HEAD --not --exclude="$(git rev-parse --abbrev-ref HEAD)" --branches --remotes
+  ```
+
+  If that count is `0`, the current branch has no upstream, it is not the default branch, and no `--from` base was given (or HEAD already sits on it), rename it: `git branch -m <branch>`. Otherwise `git checkout -b <branch> [<base>]`.
+- **Commit (step 7).** Write the message with the CLI, then commit that file by path:
+
+  ```bash
+  flight-rules commit-message --type <type> --scope <id> --description "<description>" --body-file "$TMPDIR/<id>-commit.md"
+  git add -- <path> <path>
+  git commit --cleanup=whitespace -F <printed path> --only -- <path> <path>
+  ```
+
+  The commit guard lets this through because the file carries the CLI's `Flight-Rules-Version` trailer. Use the same `<path>` set the CLI form would take.
+- **Push (step 7).** `git push --set-upstream origin <branch>`. There is still no force push.
+
 ## Process
 
 You MUST create a todo per step and complete them in order.
@@ -142,7 +165,7 @@ flight-rules git checkout --type <type> --scope <id> --description <slug> [--fro
 
   The caller-supplied case exists because `git checkout -b <branch> <from>` cuts from the named base _regardless of where HEAD currently sits_. When `execute-wave` runs you as the third ticket of a wave, HEAD is still on the second ticket's branch — so omitting `--from` would silently stack ticket three on ticket two, and its PR diff would carry the previous ticket's commits. Passing the base makes each ticket in a wave branch from the same place.
 
-The command prints `{"branch":"…","from":null}`. Keep that branch name — the PR's `--head` needs it.
+The command prints `{"branch":"…","from":null,"renamedFrom":null}`. Keep that branch name — the PR's `--head` needs it. In a linked worktree whose branch is disposable (no upstream, no commits of its own, not the default branch, and at `--from` when given), the command renames that branch instead of stacking a new one on it, and `renamedFrom` names the old branch.
 
 ### 5. Assemble the implementation dispatch
 
@@ -259,13 +282,13 @@ Only once `verified: true`.
 
 **Capture the evidence.** Decide whether this change has a visible surface. Read the ticket's Solution, its contract items, and its Guided Walkthrough or Reproduction Notes, and look at the union of `filesChanged[].path`: client or UI paths, or a contract item that names something a user sees, mean yes. A backend change still counts when its consequence renders somewhere — an endpoint that now returns a differently formatted string has a visible surface on the page that shows it, so that page is what you capture. The repo's QA instructions often say which page shows which backend change; read them with `flight-rules qa instructions --from <directory of the changed code>`. When they report `"found": false`, or describe no web surface for this change, there is nothing to capture. Write two or three lines of **capture directions**: which screen, what to do, and whether the take is before-and-after (a bug) or after-only (a story).
 
-When there is a visible surface, invoke the `capture-evidence` skill with the directions, the ticket id, and the directory of the changed code as `from`. It drives the app, writes screenshots and video under `.claude/evidence/<ticket>/`, and returns an evidence manifest: one entry per file with `path`, `kind` (`image` or `video`), `phase` (`before` or `after`), and `caption`. Keep the manifest; step 7 hands it to the PR body and the ticket comment, and step 9 reports it.
+When there is a visible surface, invoke the `capture-evidence` skill with the directions, the ticket id, and the directory of the changed code as `from`. It drives the app, writes screenshots and video under the directory `flight-rules qa evidence-dir <ticket>` prints, and returns an evidence manifest: one entry per file with `path`, `kind` (`image` or `video`), `phase` (`before` or `after`), and `caption`. Keep the manifest; step 7 hands it to the PR body and the ticket comment, and step 9 reports it.
 
 When there is no visible surface, write one line instead: `No visual evidence: <reason>` — for example `No visual evidence: API-only change with no UI consequence.` That line travels everywhere the manifest would have.
 
 When capture fails on a visible change, write `No visual evidence: capture failed — <reason>` and carry on. The verifier already passed this tree; a missing picture is a missing signal, not a failed run. Do not re-run the loop and do not stop the ship.
 
-`.claude/` is gitignored, so nothing under `.claude/evidence/` shows in `git status --porcelain` and nothing from it ever goes in the `--file` set below.
+The evidence directory is gitignored, or outside this worktree entirely when running in a linked worktree, so nothing from it shows in `git status --porcelain` and nothing from it ever goes in the `--file` set below.
 
 **Commit.** Stage by explicit path. Passing any `--file` scopes the commit to exactly those paths, so an unrelated stray edit cannot ride along; **omitting `--file` entirely commits the whole index**, which is why you always pass it. Repeat `--file` once per path.
 
@@ -415,7 +438,7 @@ Give the user, in this order:
 - **Never let an unverified change reach a PR.** `verified: true` is the only key that unlocks step 7.
 - **The autonomous review's verdict gates nothing.** `ESCALATE` does not reopen the implement/verify loop, `CLEAR` does not approve anything, and neither changes where this skill stops. Acting on a review finding here would put an unverified edit on the branch after the verifier signed off.
 - **Never tick contract checkboxes.** The `items[].done` flags are read-only to this skill; the verifier's itemized verdict is the record of what passed. A ticked box in a tracker is a claim nobody checked.
-- **All git and tracker mutations go through `flight-rules`.** Never hand-rolled `git commit`/`checkout`/`push`, never Claude Code auto-generated commits, never native tracker APIs (`gh issue edit`, the Jira REST API) for state changes. Read-only inspection with plain `git` or `gh` is fine. The plugin's commit guard hook blocks a raw `git commit` in any repo with flight-rules config. When it fires, switch to `flight-rules git commit`; do not reach for the `FLIGHT_RULES_RAW_GIT=1` bypass during a run.
+- **All git and tracker mutations go through `flight-rules`.** Never hand-rolled `git commit`/`checkout`/`push`, never Claude Code auto-generated commits, never native tracker APIs (`gh issue edit`, the Jira REST API) for state changes. Read-only inspection with plain `git` or `gh` is fine. The plugin's commit guard hook blocks a raw `git commit` in any repo with flight-rules config. When it fires, switch to `flight-rules git commit`; do not reach for the `FLIGHT_RULES_RAW_GIT=1` bypass during a run. The one exception to running git through `flight-rules` is plain-git mode, above, which still takes its message and branch name from the CLI.
 - **`openQuestions` and `UNVERIFIABLE` always reach the user, unanswered.** The agents ask when they are genuinely unsure. Answering on their behalf converts a flagged unknown into a silent guess — which is the exact failure the loop exists to prevent.
 - **Never overrule the verifier.** A FAIL you disagree with is still a FAIL. Feed it back to the implementer or stop.
 
@@ -442,7 +465,7 @@ A reviewer can grade a run against this list:
 - The branch name follows the convention `flight-rules git checkout` produces — no hand-cut branches in the history.
 - Every commit message is CLI-generated, correctly typed and scoped to the ticket id.
 - The commit contains exactly the union of the paths the implementer reported across all iterations: nothing unrelated rode along, and nothing the verifier passed was left behind. The working tree is clean afterwards.
-- A visible change produced evidence under `.claude/evidence/<ticket>/`, or the run recorded `No visual evidence: <reason>`; nothing from that directory was committed.
+- A visible change produced evidence under the directory `flight-rules qa evidence-dir <ticket>` prints, or the run recorded `No visual evidence: <reason>`; nothing from that directory was committed.
 - The ticket carries a comment linking the PR and, for a visible change, the same evidence the PR shows; it was posted after the in-review transition.
 - The PR body matches `docs/pr-body-format.md`: tech-writer-authored What/Why sections, the ticket linked, and — when present — an OTS Materials block whose images and video render from GitHub-hosted assets, not relative paths, or which states `No visual evidence: <reason>`.
 - The ticket's status trail reads to-do → in-progress → in-review, with the in-review transition happening *after* the PR exists.

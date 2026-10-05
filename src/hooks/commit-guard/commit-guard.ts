@@ -1,5 +1,7 @@
+import { readFileSync } from "node:fs";
+import { isAbsolute, resolve } from "node:path";
 import { z } from "zod";
-import { ConfigStore } from "../../shared/config-store.js";
+import { createFlightRules } from "../../flight-rules/flight-rules.js";
 
 /** The fields of a Claude Code PreToolUse hook payload this guard reads. */
 export const PreToolUseInputSchema = z.looseObject({
@@ -17,7 +19,7 @@ export interface PreToolUseDecision {
 }
 
 export interface CommitGuardProps {
-  /** Reports whether a directory has project-level flight-rules config; defaults to the `ConfigStore` layers. */
+  /** Reports whether a directory has project-level flight-rules config; defaults to the config store's layers. */
   isConfigured?: (dir: string) => boolean;
   env?: Record<string, string | undefined>;
 }
@@ -47,7 +49,8 @@ export class CommitGuard {
       props.isConfigured ??
       ((dir) =>
         // User-scope config applies to every repo, so it alone doesn't count.
-        new ConfigStore({ cwd: dir, env: this.env })
+        createFlightRules({ cwd: dir, env: this.env })
+          .configStore()
           .inspect()
           .layers.some((layer) => layer.present && layer.scope !== "user"));
   }
@@ -59,7 +62,7 @@ export class CommitGuard {
     if (input.tool_name !== "Bash") return undefined;
     const command = input.tool_input?.command;
     if (command === undefined) return undefined;
-    if (!this.commitsWithMessage(command)) return undefined;
+    if (!this.commitsWithMessage(command, input.cwd)) return undefined;
 
     const dir = this.env["CLAUDE_PROJECT_DIR"] ?? input.cwd;
     if (dir === undefined || !this.configured(dir)) return undefined;
@@ -71,16 +74,24 @@ export class CommitGuard {
         permissionDecisionReason: [
           "This repo uses flight-rules, so commits go through its CLI, which writes the conventional subject, the body, and the version trailers:",
           "  flight-rules git commit --type <type> --scope <scope> --description \"<subject>\" --body-file <path-to-body.md> --file <path>…",
+          "Where the harness only allows plain git, build the message with the CLI and commit that file; the guard lets it through:",
+          "  flight-rules commit-message --type <type> --scope <scope> --description \"<subject>\" --body-file <path-to-body.md>",
+          "  git commit --cleanup=whitespace -F <printed path> --only -- <path>…",
           `If raw git is genuinely the right tool here (for example the CLI cannot express this commit), re-run the same command prefixed with ${bypassVariable}=1 and say why in your reply.`,
         ].join("\n"),
       },
     };
   }
 
-  /** True when any segment of the command is a `git commit` that authors a message. */
-  commitsWithMessage(command: string): boolean {
+  /**
+   * True when any segment of the command is a `git commit` that authors a
+   * message by hand. A commit whose `-F`/`--file` message carries the CLI's
+   * `Flight-Rules-Version` trailer came from `flight-rules commit-message`
+   * and is not hand-written.
+   */
+  commitsWithMessage(command: string, cwd?: string): boolean {
     if (new RegExp(`(^|[\\s;&|(])(export\\s+)?${bypassVariable}=1\\b`).test(command)) return false;
-    return this.segments(command).some((tokens) => this.isAuthoringCommit(tokens));
+    return this.segments(command).some((tokens) => this.isAuthoringCommit(tokens, cwd));
   }
 
   private configured(dir: string): boolean {
@@ -98,7 +109,7 @@ export class CommitGuard {
       .map((segment) => segment.trim().split(/\s+/).filter((token) => token !== ""));
   }
 
-  private isAuthoringCommit(tokens: string[]): boolean {
+  private isAuthoringCommit(tokens: string[], cwd: string | undefined): boolean {
     let i = 0;
     while (i < tokens.length && assignment.test(tokens[i] ?? "")) i++;
     const program = tokens[i];
@@ -108,6 +119,30 @@ export class CommitGuard {
       i += optionsWithValue.has(tokens[i] ?? "") ? 2 : 1;
     }
     if (tokens[i] !== "commit") return false;
-    return !tokens.slice(i + 1).includes("--no-edit");
+    const args = tokens.slice(i + 1);
+    if (args.includes("--no-edit")) return false;
+    const messageFile = this.messageFile(args);
+    return messageFile === undefined || !this.isCliMessage(messageFile, cwd);
+  }
+
+  private messageFile(args: string[]): string | undefined {
+    for (let i = 0; i < args.length; i++) {
+      const arg = args[i] ?? "";
+      if (arg === "-F" || arg === "--file") return args[i + 1];
+      if (arg.startsWith("--file=")) return arg.slice("--file=".length);
+      if (/^-F./.test(arg)) return arg.slice(2);
+    }
+    return undefined;
+  }
+
+  private isCliMessage(file: string, cwd: string | undefined): boolean {
+    const unquoted = file.replace(/^["']|["']$/g, "");
+    if (unquoted === "-" || (!isAbsolute(unquoted) && cwd === undefined)) return false;
+    try {
+      const contents = readFileSync(isAbsolute(unquoted) ? unquoted : resolve(cwd ?? "", unquoted), "utf8");
+      return /^Flight-Rules-Version: /m.test(contents);
+    } catch {
+      return false;
+    }
   }
 }

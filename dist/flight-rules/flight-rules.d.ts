@@ -3,12 +3,16 @@ import { type GitExecutor } from '../git/git-executor/git-executor.js';
 import type { PullRequestHost } from '../pr/pull-request-host/pull-request-host.js';
 import type { Config } from '../shared/config.js';
 import { ConfigStore } from '../shared/config-store.js';
+import { EvidenceLocation } from '../tasks/evidence/evidence-location.js';
 import type { TaskTracker } from '../tasks/task-tracker/task-tracker.js';
 import { type ToolProbe } from '../tasks/tool-probe/tool-probe.js';
 import { type FlightRulesProps } from './flight-rules.schema.js';
 export interface FlightRules {
     configPath(): string;
     configStore(): ConfigStore;
+    /** The main checkout when the working directory is a linked git worktree. */
+    mainCheckout(): string | undefined;
+    evidence(): EvidenceLocation;
     config(overrideTracker?: string): Config;
     tracker(overrideTracker?: string): TaskTracker;
     prHost(overrideTracker?: string): PullRequestHost;
@@ -22,9 +26,13 @@ export declare class DefaultFlightRules implements FlightRules {
     private readonly env;
     private readonly explicitConfigPath;
     private readonly hostSettings;
+    private untrackedRoot;
     constructor(props?: FlightRulesProps);
     configPath(): string;
     configStore(): ConfigStore;
+    /** Looked up once per instance. */
+    mainCheckout(): string | undefined;
+    evidence(): EvidenceLocation;
     config(overrideTracker?: string): Config;
     tracker(overrideTracker?: string): TaskTracker;
     prHost(overrideTracker?: string): PullRequestHost;

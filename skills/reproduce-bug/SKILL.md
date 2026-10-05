@@ -74,7 +74,7 @@ Dispatch `qa-engineer` in **`reproduce`** mode. Pass **no `model` argument** —
 - The ticket's **full body, verbatim** — every section, not a summary.
 - The reporter's **`attachments`** (filenames and ids) as prior evidence.
 - The **QA instruction source paths**, nearest first, from Preconditions.
-- The **evidence directory** `.claude/evidence/<id>/` (gitignored) it writes into.
+- The **evidence directory** it writes into: the `path` printed by `flight-rules qa evidence-dir <id>`.
 - The **charter path** printed by `flight-rules doc qa-charter --path`; run the command and pass that path.
 - The **capture-protocol path** printed by `flight-rules doc evidence-capture --path`; run the command and pass that path.
 

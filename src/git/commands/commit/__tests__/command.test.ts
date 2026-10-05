@@ -12,6 +12,7 @@ const makeMockExecutor = (): GitExecutor => ({
   commit: vi.fn().mockResolvedValue(undefined),
   getCommitSha: vi.fn().mockResolvedValue('abc123'),
   checkout: vi.fn().mockResolvedValue('feat/25-saw'),
+  startBranch: vi.fn().mockResolvedValue({ branch: 'feat/25-saw', renamedFrom: null }),
   getCurrentBranch: vi.fn().mockResolvedValue('feat/25-saw'),
   push: vi.fn().mockResolvedValue(undefined),
 })
@@ -97,7 +98,7 @@ describe('git checkout command', () => {
     const executor = makeMockExecutor()
     const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
     await run(executor, ['checkout', '--type', 'feat', '--scope', '25', '--description', 'saw'])
-    expect(vi.mocked(executor.checkout)).toHaveBeenCalledWith({ type: 'feat', scope: '25', description: 'saw' }, undefined)
+    expect(vi.mocked(executor.startBranch)).toHaveBeenCalledWith({ type: 'feat', scope: '25', description: 'saw' }, undefined)
     expect(output).toHaveBeenCalledWith(expect.stringContaining('"branch":"feat/25-saw"') as string)
     output.mockRestore()
   })
@@ -106,7 +107,7 @@ describe('git checkout command', () => {
     const executor = makeMockExecutor()
     const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
     await run(executor, ['checkout', '--type', 'feat', '--scope', '25', '--from', 'feat/22-research-agent'])
-    expect(vi.mocked(executor.checkout)).toHaveBeenCalledWith({ type: 'feat', scope: '25' }, 'feat/22-research-agent')
+    expect(vi.mocked(executor.startBranch)).toHaveBeenCalledWith({ type: 'feat', scope: '25' }, 'feat/22-research-agent')
     output.mockRestore()
   })
 
@@ -114,7 +115,7 @@ describe('git checkout command', () => {
     const executor = makeMockExecutor()
     const errOutput = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
     await expect(run(executor, ['checkout', '--type', 'feat'])).rejects.toThrow(CommanderError)
-    expect(vi.mocked(executor.checkout)).not.toHaveBeenCalled()
+    expect(vi.mocked(executor.startBranch)).not.toHaveBeenCalled()
     errOutput.mockRestore()
   })
 })

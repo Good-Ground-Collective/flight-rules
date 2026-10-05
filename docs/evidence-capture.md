@@ -50,7 +50,7 @@ rules are Section 8.
 #!/usr/bin/env bash
 set -uo pipefail                      # not -e: playwright-cli exits 0 on script errors
 TICKET="$1"; APP_URL="$2"
-OUT=".claude/evidence/${TICKET}"; mkdir -p "$OUT"
+OUT="<evidence-dir>"; mkdir -p "$OUT"   # the absolute path `flight-rules qa evidence-dir <ticket>` printed
 PW="playwright-cli -s=fr-${TICKET}"
 
 $PW open
@@ -140,16 +140,17 @@ provide>`. A QA skill never prompts.
 
 ## 9. Output layout
 
-Every file lands under `.claude/evidence/<ticket>/`: `before.png` and
+Every file lands under the ticket's evidence directory, the `path` that `flight-rules qa evidence-dir <ticket>` prints: `before.png` and
 `after.png` for the bracketing frames, `take.webm` for the run, `frame-2s.png`
 for the extracted verification frame, `auth.json` for saved storage state,
 `qa.env` for secrets-manager references (never resolved secrets), `take.sh` for the
 script that produced the take, and `manifest.json` for the manifest (Section
 10).
 
-`.claude/` must be gitignored so the working tree stays clean. Confirm it before
-you write anything: `git check-ignore -q .claude/evidence` exits 0 when the path
-is ignored.
+The evidence directory must be gitignored so the working tree stays clean.
+`flight-rules qa evidence-dir <ticket>` reports `gitignored` for its path; confirm
+it is `true` before you write anything. In a linked worktree the path sits in the
+main checkout, so the worktree's own status never shows it.
 
 ## 10. Evidence manifest
 

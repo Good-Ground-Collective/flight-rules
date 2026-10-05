@@ -1,15 +1,15 @@
 ---
 name: capture-evidence
-description: "Headless web-client capture for the QA lane: takes capture directions and the repo's QA instructions, drives playwright-cli for one verified 1080p take with before/after screenshots, and writes an evidence manifest under .claude/evidence/<ticket>/. Never prompts; never writes to the tracker, git, or a PR. Invoked by reproduce-bug, verify-ticket, and execute-work — not usually by hand."
+description: "Headless web-client capture for the QA lane: takes capture directions and the repo's QA instructions, drives playwright-cli for one verified 1080p take with before/after screenshots, and writes an evidence manifest under the ticket's evidence directory. Never prompts; never writes to the tracker, git, or a PR. Invoked by reproduce-bug, verify-ticket, and execute-work — not usually by hand."
 ---
 
 # Capture Evidence
 
 This skill turns capture directions plus the repo's QA instructions into a verified take and a manifest, asking no one anything. It drives `playwright-cli` for one take at 1920×1080. It brackets the take with before and after screenshots and gates it on those screenshots rather than the exit code. It then writes the manifest the QA lane consumes. Its callers — `reproduce-bug`, `verify-ticket`, and `execute-work` — invoke it inside a larger flow, so it must finish or fail on its own.
 
-**This skill never prompts and never writes anywhere except `.claude/evidence/<ticket>/`.** A missing input is a failure with a reason, not a question.
+**This skill never prompts and never writes anywhere except `<evidence-dir>/`.** A missing input is a failure with a reason, not a question.
 
-**Terminal state:** the manifest exists at `.claude/evidence/<ticket>/manifest.json`, every item it lists exists on disk and passed verification, and the caller holds the manifest path plus a one-line summary — or the caller holds a single line beginning `No visual evidence:` with the reason.
+**Terminal state:** the manifest exists at `<evidence-dir>/manifest.json`, every item it lists exists on disk and passed verification, and the caller holds the manifest path plus a one-line summary — or the caller holds a single line beginning `No visual evidence:` with the reason.
 
 Run `flight-rules doc evidence-capture` and read the full output for the protocol: named sessions, the viewport paired with `--size`, the one-take rule, `video-chapter` narration, the credential rules, the `ffprobe`/`ffmpeg` verification, and the manifest schema. Run `flight-rules doc qa-instructions` and read the full output for where QA instructions live and what they usually cover. Read both outputs before you plan a take. This skill points at them and restates neither.
 
@@ -17,7 +17,7 @@ Run `flight-rules doc evidence-capture` and read the full output for the protoco
 
 The caller passes:
 
-- **`ticket`** — the tracker id. It names both the evidence directory (`.claude/evidence/<ticket>/`) and the browser session (`fr-<ticket>`).
+- **`ticket`** — the tracker id. It names both the evidence directory and the browser session (`fr-<ticket>`). Run `flight-rules qa evidence-dir <ticket>`; the `path` it prints is `<evidence-dir>` everywhere below. In a linked worktree it points into the main checkout, so evidence outlives the worktree.
 - **`directions`** — a short markdown block stating what to show, which phases are wanted (`before` and `after`, or `after` only), an optional API symptom written as "the `<method> <path>` response field `<name>` should …", and an optional environment name.
 - **`from`** (optional) — the directory of the code the ticket touches. Defaults to the working directory.
 
@@ -35,7 +35,7 @@ Each of these is a hard stop. When one fails, return the exact message and write
 - `ffmpeg -version` and `ffprobe -version` both succeed. Otherwise return `No visual evidence: ffmpeg and ffprobe are required on PATH`.
 - `flight-rules qa instructions` reports `"found": true`. Otherwise return `No visual evidence: no QA instructions found — add a QA.md at the repo root or a QA section in AGENTS.md (see docs/qa-instructions.md)`.
 - The instructions describe a web surface a browser can reach. Otherwise return `No visual evidence: the QA instructions describe no web surface for this change`.
-- `git check-ignore -q .claude/evidence` exits 0. Otherwise return `No visual evidence: .claude/evidence is not gitignored in this repo; add .claude/ to .gitignore`. An un-ignored evidence directory dirties the working tree, and a caller that commits by path sweeps it in.
+- `flight-rules qa evidence-dir <ticket>` reports `"gitignored": true`. Otherwise return `No visual evidence: <evidence-dir> is not gitignored in this repo; ignore its parent directory in .gitignore`. An un-ignored evidence directory dirties the working tree, and a caller that commits by path sweeps it in.
 - Every credential and access the take needs is available (step 2). Otherwise return `No visual evidence: needs: <exactly what to provide>`.
 
 ## Process
@@ -50,14 +50,14 @@ From the instructions, note: the environment to use (the one the directions name
 
 Decide the phases from the directions. A bug wants `before` and `after`; a story or a shipped change wants `after` only. The directions override this default when they state otherwise.
 
-`mkdir -p .claude/evidence/<ticket>` first, then write `.claude/evidence/<ticket>/plan.md`: the ordered steps, the chapter titles, which step yields the before screenshot and which yields the after screenshot, and the API request to inspect when the directions name one.
+`mkdir -p <evidence-dir>` first, then write `<evidence-dir>/plan.md`: the ordered steps, the chapter titles, which step yields the before screenshot and which yields the after screenshot, and the API request to inspect when the directions name one.
 
 ### 2. Check access
 
 For each credential the instructions name, decide where it comes from and confirm it is there without printing it:
 
 - **An environment variable** — `printenv <VAR> >/dev/null && echo set`. Empty means stop with `No visual evidence: needs: export <VAR> (<what the instructions say it is>)`.
-- **A secrets manager the instructions name, such as `op run`** — write `.claude/evidence/<ticket>/qa.env` with the reference lines the instructions give. This file holds references, never secrets. Do not pre-check the manager's sign-in state; the take runs inside it in step 4.
+- **A secrets manager the instructions name, such as `op run`** — write `<evidence-dir>/qa.env` with the reference lines the instructions give. This file holds references, never secrets. Do not pre-check the manager's sign-in state; the take runs inside it in step 4.
 - **Something a human must supply** that the environment does not already provide — stop with `No visual evidence: needs: <what to provide, and where the instructions say it comes from>`.
 
 When the instructions need no credentials, record `credentials: none`. Otherwise record where they came from (`environment`, or the manager's name) in the plan.
@@ -66,7 +66,7 @@ Never run a secret-reading command, such as `op read`, in a Bash call whose outp
 
 ### 3. Write the take
 
-Generate `.claude/evidence/<ticket>/take.sh` from the skeleton in Section 5 of the `flight-rules doc evidence-capture` output. Use `set -uo pipefail`, never `set -e`: `playwright-cli` exits 0 on a failed step, so `-e` hides the failure, and the verification checks are the real gate. Fill in:
+Generate `<evidence-dir>/take.sh` from the skeleton in Section 5 of the `flight-rules doc evidence-capture` output. Use `set -uo pipefail`, never `set -e`: `playwright-cli` exits 0 on a failed step, so `-e` hides the failure, and the verification checks are the real gate. Fill in:
 
 - The session `fr-<ticket>` on every `playwright-cli` call via `-s=fr-<ticket>`.
 - `resize` and `video-start … --size=<viewport>` both set to the viewport, so the take is not scaled to the recorder's 800×800 default.
@@ -85,8 +85,8 @@ Make the script executable.
 
 Run the whole script in one Bash call, per the one-take rule. Splitting it across calls records the gaps as dead air, and another job may reuse the session between calls.
 
-- **Environment or no credentials:** `bash .claude/evidence/<ticket>/take.sh <ticket> <appUrl>`.
-- **Secrets manager:** wrap the same command as the instructions say, for example `op run --env-file=.claude/evidence/<ticket>/qa.env -- bash .claude/evidence/<ticket>/take.sh <ticket> <appUrl>`. The manager exposes the values only to the subprocess. When it fails because nobody is signed in, stop with `No visual evidence: needs: <sign in to the manager, as its error says>`.
+- **Environment or no credentials:** `bash <evidence-dir>/take.sh <ticket> <appUrl>`.
+- **Secrets manager:** wrap the same command as the instructions say, for example `op run --env-file=<evidence-dir>/qa.env -- bash <evidence-dir>/take.sh <ticket> <appUrl>`. The manager exposes the values only to the subprocess. When it fails because nobody is signed in, stop with `No visual evidence: needs: <sign in to the manager, as its error says>`.
 
 ### 5. Verify
 
@@ -106,7 +106,7 @@ Run this step only when the directions named an API symptom. Read `request.txt` 
 
 ### 7. Write the manifest
 
-Write `.claude/evidence/<ticket>/manifest.json` to the schema in Section 10 of the `flight-rules doc evidence-capture` output:
+Write `<evidence-dir>/manifest.json` to the schema in Section 10 of the `flight-rules doc evidence-capture` output:
 
 - `version: 1`, `ticket`, `instructions` (the absolute paths of the QA instruction sources from step 1, nearest first), `capturedAt` (an ISO 8601 timestamp in UTC).
 - `items`, one per captured file, each with an absolute `path`, `kind` derived from the extension (`png` is `image`, `webm` is `video`), `phase` set per item, and a one-sentence caption. Include `take.webm` with the phase of the flow it shows.
@@ -122,7 +122,7 @@ On failure, return exactly one line beginning `No visual evidence:` followed by 
 ## Guardrails
 
 - Never `AskUserQuestion`. A missing input is a failure with a reason.
-- Never write outside `.claude/evidence/<ticket>/`.
+- Never write outside `<evidence-dir>/`.
 - Never call `flight-rules ticket …`, `flight-rules pr …`, or `gh`, and never call `git` for anything but `git check-ignore`.
 - Never echo a credential, and never run a secret-reading command where its output is visible.
 - Never pass `--headed`. The browser stays headless.
@@ -137,7 +137,7 @@ On failure, return exactly one line beginning `No visual evidence:` followed by 
 | A credential or access is missing | `No visual evidence: needs: <what to provide>` | Provides it, then re-invokes. |
 | Login selectors do not match | re-plan once with `snapshot`; then `No visual evidence: login form did not match the QA instructions (<selector>)` | Fixes the login steps in the QA instructions. |
 | Wrong dimensions or detected black | `No visual evidence: <the failing check and what it showed>` | Reads the reason and the plan left on disk. |
-| `.claude/evidence` not gitignored | `No visual evidence: .claude/evidence is not gitignored in this repo; add .claude/ to .gitignore` | Adds `.claude/` to `.gitignore`. |
+| Evidence directory not gitignored | `No visual evidence: <evidence-dir> is not gitignored in this repo; ignore its parent directory in .gitignore` | Ignores the directory in `.gitignore`. |
 
 ## What Good Looks Like
 

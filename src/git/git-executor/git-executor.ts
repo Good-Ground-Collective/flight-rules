@@ -1,17 +1,18 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { z } from 'zod'
-import { SemanticTypeSchema, semanticTypes } from '../semantic-types.js';
+import { branchNamer, type BranchSpec } from '../branch-namer/branch-namer.js'
+export type { BranchSpec } from '../branch-namer/branch-namer.js'
 
 type ExecFileFn = (
   file: string,
   args: readonly string[],
 ) => Promise<{ stdout: string; stderr: string }>
 
-export interface BranchSpec {
-  type: string
-  scope: string
-  description?: string
+/** Where a branch started: a new branch, or a disposable worktree branch renamed in place. */
+export interface BranchStart {
+  branch: string
+  renamedFrom: string | null
 }
 
 export const PushSpecSchema = z.object({
@@ -35,6 +36,13 @@ export interface GitExecutor {
   commit(message: string, files?: readonly string[]): Promise<void>
   getCommitSha(): Promise<string>
   checkout(spec: BranchSpec, from?: string): Promise<string>
+  /**
+   * Like `checkout`, but in a linked worktree whose current branch is
+   * disposable (no upstream, no commits of its own, not the default branch,
+   * and at `from` when one is given) it renames that branch instead of
+   * stacking a second branch on it.
+   */
+  startBranch(spec: BranchSpec, from?: string): Promise<BranchStart>
   getCurrentBranch(): Promise<string>
   push(spec: PushSpec): Promise<void>
 }
@@ -67,22 +75,21 @@ export class NodeGitExecutor implements GitExecutor {
   }
 
   async checkout(spec: BranchSpec, from?: string): Promise<string> {
-    const semanticTypeValidation = SemanticTypeSchema.safeParse(spec.type)
-    if (!semanticTypeValidation.success) {
-      throw new Error(
-        `invalid branch type "${spec.type}" — must be one of: ${semanticTypes.join(', ')}`,
-      )
-    }
-    if (spec.scope.trim() === '') {
-      throw new Error('branch scope is required')
-    }
-    const slug =
-      spec.description !== undefined && spec.description !== '' ? `-${spec.description}` : ''
-    const branch = `${spec.type}/${spec.scope}${slug}`
+    const branch = branchNamer.name(spec)
     const args = ['checkout', '-b', branch]
     if (from !== undefined) args.push(from)
     await this.execFile('git', args)
     return branch
+  }
+
+  async startBranch(spec: BranchSpec, from?: string): Promise<BranchStart> {
+    const branch = branchNamer.name(spec)
+    const current = await this.getCurrentBranch()
+    if (await this.isDisposableWorktreeBranch(current, from)) {
+      await this.execFile('git', ['branch', '-m', branch])
+      return { branch, renamedFrom: current }
+    }
+    return { branch: await this.checkout(spec, from), renamedFrom: null }
   }
 
   async getCurrentBranch(): Promise<string> {
@@ -97,4 +104,42 @@ export class NodeGitExecutor implements GitExecutor {
     args.push(parsed.remote, parsed.branch)
     await this.execFile('git', args)
   }
+
+  private async isDisposableWorktreeBranch(current: string, from: string | undefined): Promise<boolean> {
+    if (current === 'HEAD') return false
+    const { stdout: dirs } = await this.execFile('git', ['rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir'])
+    const [gitDir, commonDir] = dirs.trim().split('\n')
+    if (gitDir === undefined || gitDir === commonDir) return false
+    if (await this.succeeds(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'])) return false
+    if (current === (await this.defaultBranch())) return false
+    const { stdout: unique } = await this.execFile('git', [
+      'rev-list', '--count', 'HEAD', '--not', `--exclude=${current}`, '--branches', '--remotes',
+    ])
+    if (unique.trim() !== '0') return false
+    if (from === undefined) return true
+    const [{ stdout: head }, { stdout: base }] = await Promise.all([
+      this.execFile('git', ['rev-parse', 'HEAD']),
+      this.execFile('git', ['rev-parse', `${from}^{commit}`]),
+    ])
+    return head.trim() === base.trim()
+  }
+
+  private async defaultBranch(): Promise<string | undefined> {
+    try {
+      const { stdout } = await this.execFile('git', ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'])
+      return stdout.trim().replace(/^origin\//, '')
+    } catch {
+      return undefined
+    }
+  }
+
+  private async succeeds(args: readonly string[]): Promise<boolean> {
+    try {
+      await this.execFile('git', args)
+      return true
+    } catch {
+      return false
+    }
+  }
+
 }

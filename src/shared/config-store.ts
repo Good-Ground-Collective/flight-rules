@@ -47,6 +47,13 @@ export interface ConfigStoreProps {
   /** Used for the user settings path when no host source is given. */
   home?: string;
   pathProbe?: PathProbe;
+  /**
+   * The main checkout when running in a linked git worktree. Untracked layers
+   * (the config file, and the host's local settings) resolve there when the
+   * worktree has no copy of its own, so reads find them and writes outlive
+   * the worktree.
+   */
+  untrackedRoot?: string;
 }
 
 /**
@@ -59,19 +66,30 @@ export class ConfigStore {
   private readonly env: Record<string, string | undefined>;
   private readonly hostSettings: HostSettingsSource;
   private readonly pathProbe: PathProbe | undefined;
+  private readonly untrackedRoot: string | undefined;
 
   constructor(props: ConfigStoreProps) {
     this.cwd = props.cwd;
     this.env = props.env ?? process.env;
     this.pathProbe = props.pathProbe;
+    this.untrackedRoot = props.untrackedRoot;
     this.hostSettings =
       props.hostSettings ??
-      new ClaudeSettingsSource({ cwd: props.cwd, env: this.env, ...(props.home !== undefined ? { home: props.home } : {}) });
+      new ClaudeSettingsSource({
+        cwd: props.cwd,
+        env: this.env,
+        ...(props.home !== undefined ? { home: props.home } : {}),
+        ...(props.untrackedRoot !== undefined ? { untrackedCwd: props.untrackedRoot } : {}),
+      });
   }
 
   /** The flight-rules config file path, as `flight-rules config path` reports it. */
   filePath(): string {
-    return resolveConfigPath(this.cwd, this.env["FLIGHT_RULES_CONFIG"], this.pathProbe);
+    const override = this.env["FLIGHT_RULES_CONFIG"];
+    const here = resolveConfigPath(this.cwd, override, this.pathProbe);
+    if (override !== undefined || this.untrackedRoot === undefined) return here;
+    const isFile = this.pathProbe?.isFile.bind(this.pathProbe) ?? existsSync;
+    return isFile(here) ? here : resolveConfigPath(this.untrackedRoot, undefined, this.pathProbe);
   }
 
   pathFor(scope: ConfigScope): string {
