@@ -66,6 +66,19 @@ describe('DefaultCommitMessageBuilder.build', () => {
     expect(msg).not.toContain('Model-Used')
   })
 
+  it('drops Claude attribution from the body and the footers', () => {
+    const msg = build({
+      type: 'fix',
+      scope: 'core',
+      description: 'fix bug',
+      body: 'why it changed\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_abc\n',
+      footers: ['Refs: FRT-1', 'Co-Authored-By: Claude <noreply@anthropic.com>', 'Co-Authored-By: Jane <jane@acme.com>'],
+    })
+    expect(msg).toBe(
+      'fix(core): fix bug\n\nwhy it changed\n\nRefs: FRT-1\nCo-Authored-By: Jane <jane@acme.com>\nFlight-Rules-Version: 1.2.3',
+    )
+  })
+
   it('places caller footers before auto-generated footers', () => {
     const msg = build({ type: 'feat', scope: 'cli', description: 'add thing', footers: ['Reviewed-By: alice'] })
     const reviewedIdx = msg.indexOf('Reviewed-By: alice')
