@@ -100,9 +100,9 @@ Validate that the input contains exactly one `/`.
 If they provide labels, split on commas and strip whitespace. If they skip, use an empty list.
 
 **QA lane** (optional)
-> "Will this repo use the QA lane (`capture-evidence`, `reproduce-bug`, `verify-ticket`)? If yes, where should the QA recipe live? Hit enter for the default, `.claude/flight-rules.qa.md`."
+> "Will this repo use the QA lane (`capture-evidence`, `reproduce-bug`, `verify-ticket`)?"
 
-A relative answer resolves against the config file's directory; an absolute path is used as is. Remember the answer for Step 5 and Step 7.
+Remember the answer for Step 7.
 
 ## Step 5 (GitHub): Write the config
 
@@ -116,7 +116,7 @@ flight-rules config set defaultLabels <label1> <label2> --scope user   # only if
 flight-rules config set repo <owner/repo> --scope project
 ```
 
-Skip any key Step 0 showed is already set to the right value. Add `qaRecipe` with `--scope project` only when the user chose a non-default location; the default needs no key.
+Skip any key Step 0 showed is already set to the right value.
 
 ## Step 6 (GitHub): Smoke test
 
@@ -192,9 +192,9 @@ Ask this even though the tracker is Jira: pull requests always land on GitHub, a
 > "Any default labels to apply to every issue created from this project? Hit enter to skip."
 
 **QA lane** (optional)
-> "Will this repo use the QA lane (`capture-evidence`, `reproduce-bug`, `verify-ticket`)? If yes, where should the QA recipe live? Hit enter for the default, `.claude/flight-rules.qa.md`."
+> "Will this repo use the QA lane (`capture-evidence`, `reproduce-bug`, `verify-ticket`)?"
 
-A relative answer resolves against the config file's directory; an absolute path is used as is. Remember the answer for Step 5 and Step 7.
+Remember the answer for Step 7.
 
 ## Step 5 (Jira): Write the config
 
@@ -213,7 +213,7 @@ flight-rules config set repo <owner/repo> --scope project
 
 - Skip any key Step 0 showed is already set to the right value.
 - If this repository uses a different Jira project from the user's other repositories, write `jiraProject` with `--scope project` instead.
-- Add `defaultLabels` only if the user provided labels, and `qaRecipe` (with `--scope project`) only for a non-default location.
+- Add `defaultLabels` only if the user provided labels.
 
 The API token stays in the environment. Never write a token into any config file.
 
@@ -234,24 +234,44 @@ flight-rules check
 
 ---
 
-## Step 7: Scaffold the QA recipe
+## Step 7: Scaffold the QA instructions
 
 This step is shared by both branches and does not depend on the tracker. If the user declined the QA lane in Step 4, skip this step.
 
 Run:
 
 ```bash
-flight-rules qa recipe
+flight-rules qa instructions
 ```
 
-If it exits non-zero, the recipe is missing. Write the file at the path the message names, using the example from `${CLAUDE_PLUGIN_ROOT}/docs/qa-recipe-format.md`. Replace the `app` and host placeholders with what the user gave you. Leave everything else as placeholders. Then tell the user which sections they must fill in before a capture can run: Login and the credentials.
+If it reports `"found": true` with no `"legacy": true` source, QA instructions already exist; show their paths and stop.
 
-Then run `git check-ignore -q <path>`. Exit 0 means Git ignores the recipe, so a capture runs against an untracked file. Show the offending rule:
+If a source carries `"legacy": true`, the repo still has an old QA recipe. Offer to move its content into a `QA.md` at the repo root, rewritten as plain prose.
 
-```bash
-git check-ignore -v <path>
+Otherwise ask:
+
+> "Where should the QA instructions live — a `QA.md` at the repo root, or a `## QA` section in `AGENTS.md`?"
+
+Write the chosen file from this template, filling in what the user already told you and leaving the rest for them:
+
+```markdown
+## QA
+
+<!-- How an agent verifies work in this repo. Freeform; see the flight-rules docs/qa-instructions.md for suggested topics. Never put a secret here. -->
+
+Kinds of verification: <web UI, API, Salesforce org, AWS account, CLI…>
+
+Environments: <name — URL>, default <name>.
+
+Access: <which environment variables or secrets-manager items hold credentials, and what a human must supply>.
+
+Login and auth workarounds: <entry URL, selectors, SSO bypass>.
+
+Traps: <rules that make a check look right when it is wrong>.
+
+Visible surfaces: <which page shows which backend change>.
 ```
 
-Offer to change a `.claude` rule to `.claude/*` and add `!.claude/flight-rules.qa.md`. Explain in one sentence: a negation cannot re-include a file whose directory is excluded, so the directory rule must become a wildcard.
+In a `QA.md`, use `# QA` as the top heading. Subprojects that verify differently can add their own `QA.md` later; the nearest one wins. Tell the user which parts they must fill in before a capture can run: environments and access.
 
-Re-run `flight-rules qa recipe`. It prints the resolved path.
+Re-run `flight-rules qa instructions`. It reports the new source.

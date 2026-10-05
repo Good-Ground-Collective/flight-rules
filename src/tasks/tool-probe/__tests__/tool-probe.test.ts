@@ -1,7 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { NodeToolProbe } from '../tool-probe.js'
 
 type ExecResult = { stdout: string; stderr: string }
@@ -12,23 +9,6 @@ const failed = (stderr: string): Promise<never> => Promise.reject({ code: 1, std
 const ok = (stdout: string): Promise<ExecResult> => Promise.resolve({ stdout, stderr: '' })
 
 describe('NodeToolProbe', () => {
-  let scratch: string
-
-  beforeEach(() => {
-    scratch = mkdtempSync(join(tmpdir(), 'tool-probe-'))
-  })
-
-  afterEach(() => {
-    rmSync(scratch, { recursive: true, force: true })
-  })
-
-  const noRecipePath = (): string => join(scratch, 'no-such-recipe.md')
-  const writeRecipe = (content: string): string => {
-    const recipePath = join(scratch, 'flight-rules.qa.md')
-    writeFileSync(recipePath, content)
-    return recipePath
-  }
-
   const allInstalled: ExecCall = (file, args) => {
     if (file === 'gh' && args[0] === '--version') return ok('gh version 2.99.0 (2026-09-01)\n')
     if (file === 'gh' && args[0] === 'auth') return ok('Logged in to github.com\n')
@@ -41,7 +21,7 @@ describe('NodeToolProbe', () => {
 
   it('reports tools:gh ok with the found version when at or above the minimum', async () => {
     const probe = new NodeToolProbe({ execFileFn: allInstalled })
-    const checks = await probe.probe({ repo: 'acme/proj', recipePath: noRecipePath() })
+    const checks = await probe.probe({ repo: 'acme/proj', qaInstructionsFound: false })
     const gh = checks.find((c) => c.name === 'tools:gh')
     expect(gh).toEqual({ name: 'tools:gh', ok: true, detail: 'gh 2.99.0', required: true })
   })
@@ -52,7 +32,7 @@ describe('NodeToolProbe', () => {
       return allInstalled(file, args)
     }
     const probe = new NodeToolProbe({ execFileFn: exec })
-    const checks = await probe.probe({ repo: 'acme/proj', recipePath: noRecipePath() })
+    const checks = await probe.probe({ repo: 'acme/proj', qaInstructionsFound: false })
     const gh = checks.find((c) => c.name === 'tools:gh')
     expect(gh?.ok).toBe(false)
     expect(gh?.detail).toContain('2.98.0')
@@ -61,7 +41,7 @@ describe('NodeToolProbe', () => {
 
   it('marks the gh probes required only when repo is configured', async () => {
     const probe = new NodeToolProbe({ execFileFn: notInstalled })
-    const checks = await probe.probe({ repo: undefined, recipePath: noRecipePath() })
+    const checks = await probe.probe({ repo: undefined, qaInstructionsFound: false })
     expect(checks.find((c) => c.name === 'tools:gh')?.required).toBe(false)
     expect(checks.find((c) => c.name === 'tools:gh-auth')?.required).toBe(false)
     expect(checks.find((c) => c.name === 'tools:gh-push')?.required).toBe(false)
@@ -69,7 +49,7 @@ describe('NodeToolProbe', () => {
 
   it('reports tools:gh-auth ok when gh auth status succeeds', async () => {
     const probe = new NodeToolProbe({ execFileFn: allInstalled })
-    const checks = await probe.probe({ repo: 'acme/proj', recipePath: noRecipePath() })
+    const checks = await probe.probe({ repo: 'acme/proj', qaInstructionsFound: false })
     expect(checks.find((c) => c.name === 'tools:gh-auth')?.ok).toBe(true)
   })
 
@@ -79,13 +59,13 @@ describe('NodeToolProbe', () => {
       return allInstalled(file, args)
     }
     const probe = new NodeToolProbe({ execFileFn: exec })
-    const checks = await probe.probe({ repo: 'acme/proj', recipePath: noRecipePath() })
+    const checks = await probe.probe({ repo: 'acme/proj', qaInstructionsFound: false })
     expect(checks.find((c) => c.name === 'tools:gh-auth')?.ok).toBe(false)
   })
 
   it('reports tools:gh-push ok when the push permission is true', async () => {
     const probe = new NodeToolProbe({ execFileFn: allInstalled })
-    const checks = await probe.probe({ repo: 'acme/proj', recipePath: noRecipePath() })
+    const checks = await probe.probe({ repo: 'acme/proj', qaInstructionsFound: false })
     expect(checks.find((c) => c.name === 'tools:gh-push')).toMatchObject({ ok: true, required: true })
   })
 
@@ -95,13 +75,13 @@ describe('NodeToolProbe', () => {
       return allInstalled(file, args)
     }
     const probe = new NodeToolProbe({ execFileFn: exec })
-    const checks = await probe.probe({ repo: 'acme/proj', recipePath: noRecipePath() })
+    const checks = await probe.probe({ repo: 'acme/proj', qaInstructionsFound: false })
     expect(checks.find((c) => c.name === 'tools:gh-push')?.ok).toBe(false)
   })
 
-  it('reports the QA tools as not ok and not required when no recipe file exists', async () => {
+  it('reports the QA tools as not ok and not required when no QA instructions exist', async () => {
     const probe = new NodeToolProbe({ execFileFn: notInstalled })
-    const checks = await probe.probe({ repo: undefined, recipePath: noRecipePath() })
+    const checks = await probe.probe({ repo: undefined, qaInstructionsFound: false })
     for (const name of ['tools:playwright-cli', 'tools:ffmpeg', 'tools:curl']) {
       const check = checks.find((c) => c.name === name)
       expect(check?.ok).toBe(false)
@@ -109,10 +89,9 @@ describe('NodeToolProbe', () => {
     }
   })
 
-  it('requires playwright-cli, ffmpeg, and curl when a recipe file is present', async () => {
-    const recipePath = writeRecipe('# QA recipe\n\nRun the browser and capture a clip.\n')
+  it('requires playwright-cli, ffmpeg, and curl when QA instructions exist', async () => {
     const probe = new NodeToolProbe({ execFileFn: notInstalled })
-    const checks = await probe.probe({ repo: undefined, recipePath })
+    const checks = await probe.probe({ repo: undefined, qaInstructionsFound: true })
     for (const name of ['tools:playwright-cli', 'tools:ffmpeg', 'tools:curl']) {
       const check = checks.find((c) => c.name === name)
       expect(check?.ok).toBe(false)
@@ -120,18 +99,17 @@ describe('NodeToolProbe', () => {
     }
   })
 
-  it('never spawns op, even when the recipe references op://', async () => {
+  it('never spawns op', async () => {
     const exec = vi.fn<ExecCall>(allInstalled)
-    const recipePath = writeRecipe('# QA recipe\n\nlogin: op://vault/item/field\n')
     const probe = new NodeToolProbe({ execFileFn: exec })
-    const checks = await probe.probe({ repo: undefined, recipePath })
+    const checks = await probe.probe({ repo: undefined, qaInstructionsFound: true })
     expect(checks.map((c) => c.name)).not.toContain('tools:op')
     expect(exec.mock.calls.map(([file]) => file)).not.toContain('op')
   })
 
   it('reports "not installed" for a missing binary (ENOENT)', async () => {
     const probe = new NodeToolProbe({ execFileFn: notInstalled })
-    const checks = await probe.probe({ repo: undefined, recipePath: noRecipePath() })
+    const checks = await probe.probe({ repo: undefined, qaInstructionsFound: false })
     expect(checks.find((c) => c.name === 'tools:ffmpeg')?.detail).toBe('not installed')
   })
 })

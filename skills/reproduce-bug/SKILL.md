@@ -14,7 +14,7 @@ This is the skill that turns a landed bug into a document a human can act on. Yo
 ## Preconditions
 
 - You are handed a **ticket id**.
-- Run everything from the **repo root** of the app the QA recipe describes; the CLI resolves config relative to CWD, and the agent drives that app.
+- Run everything from the **repo root** of the app under test; the CLI resolves config relative to CWD, and the agent drives that app.
 - **Config comes from the CLI.** It merges the user's and project's Claude Code settings with the flight-rules config file; `flight-rules config show` prints the result and where each value came from. Never hand-edit a config file; write with `flight-rules config set`.
 - The tracker is **Jira**. The label lifecycle and the reporter mention are Jira shapes.
 - `flight-rules check` reports `"ok": true`, including the `tools:*` probes for `playwright-cli`, `ffmpeg`, and `gh` that the agent's capture depends on.
@@ -23,13 +23,15 @@ This is the skill that turns a landed bug into a document a human can act on. Yo
   flight-rules check
   ```
 
-- A QA recipe resolves — `qaRecipe` in config, or the default `.claude/flight-rules.qa.md` beside it. Its format is `${CLAUDE_PLUGIN_ROOT}/docs/qa-recipe-format.md`. Read the resolved path once:
+- QA instructions exist. Read them once, passing `--from` the directory of the code the bug lives in when the ticket names it:
 
   ```bash
-  flight-rules qa recipe
+  flight-rules qa instructions --from <dir>
   ```
 
-- Credentials resolve headlessly, per `${CLAUDE_PLUGIN_ROOT}/docs/evidence-capture.md`: `FLIGHT_RULES_QA_USERNAME` and `FLIGHT_RULES_QA_PASSWORD` in the environment, or `op://` references in the recipe with `OP_SERVICE_ACCOUNT_TOKEN` set.
+  `"found": false` is a stop. Where they live and what they cover is `${CLAUDE_PLUGIN_ROOT}/docs/qa-instructions.md`. Read every source, nearest first.
+
+- The access the QA instructions name is available headlessly. Check each environment variable they name with `printenv <VAR> >/dev/null`, never by printing it. When something a human must supply is missing, stop with one line, `needs: <what to provide>`. Do not pre-check a secrets manager's sign-in state; the agent resolves secrets inside the wrapper the instructions name.
 
 ## Process
 
@@ -71,12 +73,12 @@ Dispatch `qa-engineer` in **`reproduce`** mode. Pass **no `model` argument** —
 
 - The ticket's **full body, verbatim** — every section, not a summary.
 - The reporter's **`attachments`** (filenames and ids) as prior evidence.
-- The **recipe path** you read in Preconditions.
+- The **QA instruction source paths**, nearest first, from Preconditions.
 - The **evidence directory** `.claude/evidence/<id>/` (gitignored) it writes into.
 - The **charter path** `${CLAUDE_PLUGIN_ROOT}/docs/qa-charter.md`.
 - The **capture-protocol path** `${CLAUDE_PLUGIN_ROOT}/docs/evidence-capture.md`.
 
-Do not include your own opinion on how to reproduce it. The charter and the recipe are the guidance; anything you add is a third voice the agent has to reconcile.
+Do not include your own opinion on how to reproduce it. The charter and the QA instructions are the guidance; anything you add is a third voice the agent has to reconcile.
 
 Read the agent's trailing YAML and branch on one key: `reproduced`.
 
@@ -85,7 +87,7 @@ Read the agent's trailing YAML and branch on one key: `reproduced`.
 Author the Bug Report body to a temp file, in the exact section order of `${CLAUDE_PLUGIN_ROOT}/docs/bug-report-format.md`. Map the agent's YAML into the sections:
 
 - `## Symptom` — the reporter's original description text, **verbatim**, then the agent's `summary`.
-- `## Environment` — the recipe's environment name and host, the date, the account role used.
+- `## Environment` — the environment name and host the QA instructions gave, the date, the account role used.
 - `## Steps To Reproduce` — `steps` numbered, then `after` continuing the numbering; then the trap block, verbatim shape:
 
   ```markdown
@@ -152,10 +154,11 @@ Give the user, in this order: the outcome, the final label, the evidence paths, 
 
 ## Error handling
 
+- **Agent returns `needs`** → surface each item to the user as a `needs:` line, and take the failure path with the reason "reproduction blocked: needs <first item>", so the ticket is not left in progress.
 - **Agent returns `openQuestions`** → surface them to the user unanswered, and take the failure path with the reason "reproduction blocked: <first question>", so the ticket is not left in progress.
 - **Capture produced nothing** (`evidence.items` empty on `reproduced: true`) → take the failure path with the reason "captured no evidence".
 - **A CLI error after step 2** → attempt the failure label swap with the error as the reason, then stop and report. Never leave `In-Progress` behind.
-- **Missing recipe or credentials** → stop before step 2 with the missing thing named. Never prompt.
+- **Missing QA instructions or access** → stop before step 2 with the missing thing named in a `needs:` line. Never prompt.
 
 ## What Good Looks Like
 
