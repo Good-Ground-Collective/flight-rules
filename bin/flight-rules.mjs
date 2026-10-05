@@ -1005,14 +1005,14 @@ var require_foldFlowLines = __commonJS({
     var FOLD_FLOW = "flow";
     var FOLD_BLOCK = "block";
     var FOLD_QUOTED = "quoted";
-    function foldFlowLines(text4, indent2, mode = "flow", { indentAtStart, lineWidth = 80, minContentWidth = 20, onFold, onOverflow } = {}) {
+    function foldFlowLines(text5, indent2, mode = "flow", { indentAtStart, lineWidth = 80, minContentWidth = 20, onFold, onOverflow } = {}) {
       if (!lineWidth || lineWidth < 0)
-        return text4;
+        return text5;
       if (lineWidth < minContentWidth)
         minContentWidth = 0;
       const endStep = Math.max(1 + minContentWidth, 1 + lineWidth - indent2.length);
-      if (text4.length <= endStep)
-        return text4;
+      if (text5.length <= endStep)
+        return text5;
       const folds = [];
       const escapedFolds = {};
       let end = lineWidth - indent2.length;
@@ -1029,14 +1029,14 @@ var require_foldFlowLines = __commonJS({
       let escStart = -1;
       let escEnd = -1;
       if (mode === FOLD_BLOCK) {
-        i = consumeMoreIndentedLines(text4, i, indent2.length);
+        i = consumeMoreIndentedLines(text5, i, indent2.length);
         if (i !== -1)
           end = i + endStep;
       }
-      for (let ch; ch = text4[i += 1]; ) {
+      for (let ch; ch = text5[i += 1]; ) {
         if (mode === FOLD_QUOTED && ch === "\\") {
           escStart = i;
-          switch (text4[i + 1]) {
+          switch (text5[i + 1]) {
             case "x":
               i += 3;
               break;
@@ -1053,12 +1053,12 @@ var require_foldFlowLines = __commonJS({
         }
         if (ch === "\n") {
           if (mode === FOLD_BLOCK)
-            i = consumeMoreIndentedLines(text4, i, indent2.length);
+            i = consumeMoreIndentedLines(text5, i, indent2.length);
           end = i + indent2.length + endStep;
           split = void 0;
         } else {
           if (ch === " " && prev && prev !== " " && prev !== "\n" && prev !== "	") {
-            const next = text4[i + 1];
+            const next = text5[i + 1];
             if (next && next !== " " && next !== "\n" && next !== "	")
               split = i;
           }
@@ -1070,12 +1070,12 @@ var require_foldFlowLines = __commonJS({
             } else if (mode === FOLD_QUOTED) {
               while (prev === " " || prev === "	") {
                 prev = ch;
-                ch = text4[i += 1];
+                ch = text5[i += 1];
                 overflow = true;
               }
               const j = i > escEnd + 1 ? i - 2 : escStart - 1;
               if (escapedFolds[j])
-                return text4;
+                return text5;
               folds.push(j);
               escapedFolds[j] = true;
               end = j + endStep;
@@ -1090,39 +1090,39 @@ var require_foldFlowLines = __commonJS({
       if (overflow && onOverflow)
         onOverflow();
       if (folds.length === 0)
-        return text4;
+        return text5;
       if (onFold)
         onFold();
-      let res = text4.slice(0, folds[0]);
+      let res = text5.slice(0, folds[0]);
       for (let i2 = 0; i2 < folds.length; ++i2) {
         const fold = folds[i2];
-        const end2 = folds[i2 + 1] || text4.length;
+        const end2 = folds[i2 + 1] || text5.length;
         if (fold === 0)
           res = `
-${indent2}${text4.slice(0, end2)}`;
+${indent2}${text5.slice(0, end2)}`;
         else {
           if (mode === FOLD_QUOTED && escapedFolds[fold])
-            res += `${text4[fold]}\\`;
+            res += `${text5[fold]}\\`;
           res += `
-${indent2}${text4.slice(fold + 1, end2)}`;
+${indent2}${text5.slice(fold + 1, end2)}`;
         }
       }
       return res;
     }
-    function consumeMoreIndentedLines(text4, i, indent2) {
+    function consumeMoreIndentedLines(text5, i, indent2) {
       let end = i;
       let start = i + 1;
-      let ch = text4[start];
+      let ch = text5[start];
       while (ch === " " || ch === "	") {
         if (i < start + indent2) {
-          ch = text4[++i];
+          ch = text5[++i];
         } else {
           do {
-            ch = text4[++i];
+            ch = text5[++i];
           } while (ch && ch !== "\n");
           end = i;
           start = i + 1;
-          ch = text4[start];
+          ch = text5[start];
         }
       }
       return end;
@@ -10497,9 +10497,9 @@ Expecting one of '${allowedValues.join("', '")}'`);
       helpWidth: context.helpWidth,
       outputHasColors: context.hasColors
     });
-    const text4 = helper.formatHelp(this, helper);
-    if (context.hasColors) return text4;
-    return this._outputConfiguration.stripColor(text4);
+    const text5 = helper.formatHelp(this, helper);
+    if (context.hasColors) return text5;
+    return this._outputConfiguration.stripColor(text5);
   }
   /**
    * @typedef HelpContext
@@ -10659,7 +10659,7 @@ Expecting one of '${allowedValues.join("', '")}'`);
    * @param {(string | Function)} text - string to add, or a function returning a string
    * @return {Command} `this` command for chaining
    */
-  addHelpText(position2, text4) {
+  addHelpText(position2, text5) {
     const allowedValues = ["beforeAll", "before", "after", "afterAll"];
     if (!allowedValues.includes(position2)) {
       throw new Error(`Unexpected value for position to addHelpText.
@@ -10668,10 +10668,10 @@ Expecting one of '${allowedValues.join("', '")}'`);
     const helpEvent = `${position2}Help`;
     this.on(helpEvent, (context) => {
       let helpStr;
-      if (typeof text4 === "function") {
-        helpStr = text4({ error: context.error, command: context.command });
+      if (typeof text5 === "function") {
+        helpStr = text5({ error: context.error, command: context.command });
       } else {
-        helpStr = text4;
+        helpStr = text5;
       }
       if (helpStr) {
         context.write(`${helpStr}
@@ -20026,8 +20026,8 @@ function ko_default() {
 }
 
 // node_modules/zod/v4/locales/lt.js
-var capitalizeFirstCharacter = (text4) => {
-  return text4.charAt(0).toUpperCase() + text4.slice(1);
+var capitalizeFirstCharacter = (text5) => {
+  return text5.charAt(0).toUpperCase() + text5.slice(1);
 };
 function getUnitTypeFromNumber(number4) {
   const abs = Math.abs(number4);
@@ -31626,8 +31626,8 @@ var convertMarkedBigIntsReviver = (key, value, context, userReviver) => {
   if (!hasUserReviver) return value;
   return userReviver(key, value, context);
 };
-var JSONParseV2 = (text4, reviver) => {
-  return JSON.parse(text4, (key, value, context) => {
+var JSONParseV2 = (text5, reviver) => {
+  return JSON.parse(text5, (key, value, context) => {
     const isNumber = typeof value === "number";
     const isOutOfBounds = value > Number.MAX_SAFE_INTEGER || value < Number.MIN_SAFE_INTEGER;
     const isBigNumber = isNumber && isOutOfBounds;
@@ -31685,8 +31685,8 @@ var applyReviverIteratively = (parsed, userReviver) => {
   }
   return rootHolder[""];
 };
-var serializeBigInts = (text4) => {
-  return text4.replace(
+var serializeBigInts = (text5) => {
+  return text5.replace(
     stringsOrLargeNumbers,
     (match, digits, fractional, exponential) => {
       const isString = match[0] === '"';
@@ -31700,18 +31700,18 @@ var serializeBigInts = (text4) => {
     }
   );
 };
-var JSONParse = (text4, reviver) => {
-  if (!text4) return originalParse(text4, reviver);
+var JSONParse = (text5, reviver) => {
+  if (!text5) return originalParse(text5, reviver);
   try {
-    if (isContextSourceSupported()) return JSONParseV2(text4, reviver);
-    const serializedData = serializeBigInts(text4);
+    if (isContextSourceSupported()) return JSONParseV2(text5, reviver);
+    const serializedData = serializeBigInts(text5);
     return originalParse(
       serializedData,
       (key, value, context) => convertMarkedBigIntsReviver(key, value, context, reviver)
     );
   } catch (error62) {
     if (error62 instanceof RangeError) {
-      const serializedData = serializeBigInts(text4);
+      const serializedData = serializeBigInts(text5);
       const parsed = originalParse(serializedData);
       return applyReviverIteratively(parsed, reviver);
     }
@@ -31879,12 +31879,12 @@ async function getResponseData(response) {
   }
   const mimetype = parse4(contentType);
   if (isJSONResponse(mimetype)) {
-    let text4 = "";
+    let text5 = "";
     try {
-      text4 = await response.text();
-      return JSONParse(text4);
+      text5 = await response.text();
+      return JSONParse(text5);
     } catch (err) {
-      return text4;
+      return text5;
     }
   } else if (mimetype.type.startsWith("text/") || // `application/octet-stream` is the canonical "arbitrary binary" type
   // (RFC 2046) and must never be decoded as text, even when the response
@@ -35558,8 +35558,8 @@ var JiraClient = class {
       ...body !== void 0 ? { body: JSON.stringify(body) } : {}
     });
     if (!res.ok) await this.throwApiError(res);
-    const text4 = await res.text();
-    const data = text4.length > 0 ? JSON.parse(text4) : void 0;
+    const text5 = await res.text();
+    const data = text5.length > 0 ? JSON.parse(text5) : void 0;
     return data;
   }
   /**
@@ -35580,8 +35580,8 @@ var JiraClient = class {
       body: form
     });
     if (!res.ok) await this.throwApiError(res);
-    const text4 = await res.text();
-    const data = text4.length > 0 ? JSON.parse(text4) : void 0;
+    const text5 = await res.text();
+    const data = text5.length > 0 ? JSON.parse(text5) : void 0;
     return data;
   }
   /**
@@ -35651,8 +35651,8 @@ var ConfluenceClient = class {
       ...body !== void 0 ? { body: JSON.stringify(body) } : {}
     });
     if (!res.ok) await this.throwApiError(res);
-    const text4 = await res.text();
-    const data = text4.length > 0 ? JSON.parse(text4) : void 0;
+    const text5 = await res.text();
+    const data = text5.length > 0 ? JSON.parse(text5) : void 0;
     return data;
   }
   async fetchWithRetry(url2, init, attempt = 0) {
@@ -38290,7 +38290,7 @@ function resolveAllAttention(events, context) {
   let index2 = -1;
   let open2;
   let group;
-  let text4;
+  let text5;
   let openingSequence;
   let closingSequence;
   let use;
@@ -38328,7 +38328,7 @@ function resolveAllAttention(events, context) {
             },
             end
           };
-          text4 = {
+          text5 = {
             type: use > 1 ? "strongText" : "emphasisText",
             start: {
               ...events[open2][1].end
@@ -38356,9 +38356,9 @@ function resolveAllAttention(events, context) {
           if (events[open2][1].end.offset - events[open2][1].start.offset) {
             nextEvents = push(nextEvents, [["enter", events[open2][1], context], ["exit", events[open2][1], context]]);
           }
-          nextEvents = push(nextEvents, [["enter", group, context], ["enter", openingSequence, context], ["exit", openingSequence, context], ["enter", text4, context]]);
+          nextEvents = push(nextEvents, [["enter", group, context], ["enter", openingSequence, context], ["exit", openingSequence, context], ["enter", text5, context]]);
           nextEvents = push(nextEvents, resolveAll(context.parser.constructs.insideSpan.null, events.slice(open2 + 1, index2), context));
-          nextEvents = push(nextEvents, [["exit", text4, context], ["enter", closingSequence, context], ["exit", closingSequence, context], ["exit", group, context]]);
+          nextEvents = push(nextEvents, [["exit", text5, context], ["enter", closingSequence, context], ["exit", closingSequence, context], ["exit", group, context]]);
           if (events[index2][1].end.offset - events[index2][1].start.offset) {
             offset = 2;
             nextEvents = push(nextEvents, [["enter", events[index2][1], context], ["exit", events[index2][1], context]]);
@@ -39806,7 +39806,7 @@ function resolveHeadingAtx(events, context) {
   let contentEnd = events.length - 2;
   let contentStart = 3;
   let content3;
-  let text4;
+  let text5;
   if (events[contentStart][1].type === "whitespace") {
     contentStart += 2;
   }
@@ -39822,13 +39822,13 @@ function resolveHeadingAtx(events, context) {
       start: events[contentStart][1].start,
       end: events[contentEnd][1].end
     };
-    text4 = {
+    text5 = {
       type: "chunkText",
       start: events[contentStart][1].start,
       end: events[contentEnd][1].end,
       contentType: "text"
     };
-    splice(events, contentStart, contentEnd - contentStart + 1, [["enter", content3, context], ["enter", text4, context], ["exit", text4, context], ["exit", content3, context]]);
+    splice(events, contentStart, contentEnd - contentStart + 1, [["enter", content3, context], ["enter", text5, context], ["exit", text5, context], ["exit", content3, context]]);
   }
   return events;
 }
@@ -40718,7 +40718,7 @@ function resolveToLabelEnd(events, context) {
       ...events[close][1].end
     }
   };
-  const text4 = {
+  const text5 = {
     type: "labelText",
     start: {
       ...events[open2 + offset + 2][1].end
@@ -40729,9 +40729,9 @@ function resolveToLabelEnd(events, context) {
   };
   media = [["enter", group, context], ["enter", label, context]];
   media = push(media, events.slice(open2 + 1, open2 + offset + 3));
-  media = push(media, [["enter", text4, context]]);
+  media = push(media, [["enter", text5, context]]);
   media = push(media, resolveAll(context.parser.constructs.insideSpan.null, events.slice(open2 + offset + 4, close - 3), context));
-  media = push(media, [["exit", text4, context], events[close - 2], events[close - 1], ["exit", label, context]]);
+  media = push(media, [["exit", text5, context], events[close - 2], events[close - 1], ["exit", label, context]]);
   media = push(media, events.slice(close + 1));
   media = push(media, [["exit", group, context]]);
   splice(events, open2, events.length, media);
@@ -41111,7 +41111,7 @@ var setextUnderline = {
 function resolveToSetextUnderline(events, context) {
   let index2 = events.length;
   let content3;
-  let text4;
+  let text5;
   let definition2;
   while (index2--) {
     if (events[index2][0] === "enter") {
@@ -41120,7 +41120,7 @@ function resolveToSetextUnderline(events, context) {
         break;
       }
       if (events[index2][1].type === "paragraph") {
-        text4 = index2;
+        text5 = index2;
       }
     } else {
       if (events[index2][1].type === "content") {
@@ -41140,9 +41140,9 @@ function resolveToSetextUnderline(events, context) {
       ...events[events.length - 1][1].end
     }
   };
-  events[text4][1].type = "setextHeadingText";
+  events[text5][1].type = "setextHeadingText";
   if (definition2) {
-    events.splice(text4, 0, ["enter", heading, context]);
+    events.splice(text5, 0, ["enter", heading, context]);
     events.splice(definition2 + 1, 0, ["exit", events[content3][1], context]);
     events[content3][1].end = {
       ...events[definition2][1].end
@@ -41246,10 +41246,10 @@ function initializeFactory(field) {
   function initializeText(effects) {
     const self = this;
     const constructs2 = this.parser.constructs[field];
-    const text4 = effects.attempt(constructs2, start, notText);
+    const text5 = effects.attempt(constructs2, start, notText);
     return start;
     function start(code2) {
-      return atBreak(code2) ? text4(code2) : notText(code2);
+      return atBreak(code2) ? text5(code2) : notText(code2);
     }
     function notText(code2) {
       if (code2 === null) {
@@ -41263,7 +41263,7 @@ function initializeFactory(field) {
     function data(code2) {
       if (atBreak(code2)) {
         effects.exit("data");
-        return text4(code2);
+        return text5(code2);
       }
       effects.consume(code2);
       return data;
@@ -42311,7 +42311,7 @@ function compiler(options) {
     const siblings = node3.children;
     let tail = siblings[siblings.length - 1];
     if (!tail || tail.type !== "text") {
-      tail = text4();
+      tail = text5();
       tail.position = {
         start: point2(token.start),
         // @ts-expect-error: we’ll add `end` later.
@@ -42556,7 +42556,7 @@ function compiler(options) {
       children: []
     };
   }
-  function text4() {
+  function text5() {
     return {
       type: "text",
       value: ""
@@ -43947,17 +43947,17 @@ function gfmStrikethrough(options) {
               start: Object.assign({}, events[open2][1].start),
               end: Object.assign({}, events[index2][1].end)
             };
-            const text4 = {
+            const text5 = {
               type: "strikethroughText",
               start: Object.assign({}, events[open2][1].end),
               end: Object.assign({}, events[index2][1].start)
             };
-            const nextEvents = [["enter", strikethrough, context], ["enter", events[open2][1], context], ["exit", events[open2][1], context], ["enter", text4, context]];
+            const nextEvents = [["enter", strikethrough, context], ["enter", events[open2][1], context], ["exit", events[open2][1], context], ["enter", text5, context]];
             const insideSpan2 = context.parser.constructs.insideSpan.null;
             if (insideSpan2) {
               splice(nextEvents, nextEvents.length, 0, resolveAll(insideSpan2, events.slice(open2 + 1, index2), context));
             }
-            splice(nextEvents, nextEvents.length, 0, [["exit", text4, context], ["enter", events[index2][1], context], ["exit", events[index2][1], context], ["exit", strikethrough, context]]);
+            splice(nextEvents, nextEvents.length, 0, [["exit", text5, context], ["enter", events[index2][1], context], ["exit", events[index2][1], context], ["exit", strikethrough, context]]);
             splice(events, open2 - 1, index2 - open2 + 3, nextEvents);
             index2 = open2 + nextEvents.length - 2;
             break;
@@ -44816,9 +44816,9 @@ var LayeredBodyAdfConverter = class {
   alertType(node3) {
     const first = node3.children[0];
     if (first === void 0 || first.type !== "paragraph") return void 0;
-    const text4 = first.children[0];
-    if (text4 === void 0 || text4.type !== "text") return void 0;
-    return alertMarker.exec(text4.value)?.[1];
+    const text5 = first.children[0];
+    if (text5 === void 0 || text5.type !== "text") return void 0;
+    return alertMarker.exec(text5.value)?.[1];
   }
   /**
    * Returns the blockquote's children with the admonition marker (and its trailing
@@ -44829,10 +44829,10 @@ var LayeredBodyAdfConverter = class {
   stripAlertMarker(children) {
     const [first, ...rest] = children;
     if (first === void 0 || first.type !== "paragraph") return children;
-    const [text4, ...moreInline] = first.children;
-    if (text4 === void 0 || text4.type !== "text") return children;
-    const stripped = text4.value.replace(alertMarker, "");
-    const inline = stripped === "" ? moreInline : [{ ...text4, value: stripped }, ...moreInline];
+    const [text5, ...moreInline] = first.children;
+    if (text5 === void 0 || text5.type !== "text") return children;
+    const stripped = text5.value.replace(alertMarker, "");
+    const inline = stripped === "" ? moreInline : [{ ...text5, value: stripped }, ...moreInline];
     if (inline.length === 0) return rest;
     return [{ ...first, children: inline }, ...rest];
   }
@@ -45132,12 +45132,12 @@ var LayeredBodyAdfConverter = class {
    * task list would accrete a `>` on every round trip.
    */
   literalBlock(node3, source, stripEnclosingQuote = false) {
-    const text4 = this.literal(node3, source);
-    const inner = stripEnclosingQuote ? this.stripEnclosingQuote(text4) : text4;
+    const text5 = this.literal(node3, source);
+    const inner = stripEnclosingQuote ? this.stripEnclosingQuote(text5) : text5;
     return { type: "paragraph", content: this.textSegments(inner, []) };
   }
-  stripEnclosingQuote(text4) {
-    return text4.split("\n").map((line, index2) => index2 === 0 ? line : line.replace(/^> ?/, "")).join("\n");
+  stripEnclosingQuote(text5) {
+    return text5.split("\n").map((line, index2) => index2 === 0 ? line : line.replace(/^> ?/, "")).join("\n");
   }
   literal(node3, source) {
     return source.slice(node3.position?.start.offset ?? 0, node3.position?.end.offset ?? 0);
@@ -45152,9 +45152,9 @@ var LayeredBodyAdfConverter = class {
         return this.inlineToMarkdown(node3.content ?? [], names);
       case "codeBlock": {
         const language = typeof node3.attrs?.["language"] === "string" ? node3.attrs["language"] : "";
-        const text4 = (node3.content ?? []).map((child) => child.text ?? "").join("");
+        const text5 = (node3.content ?? []).map((child) => child.text ?? "").join("");
         return `\`\`\`${language}
-${text4}
+${text5}
 \`\`\``;
       }
       case "taskList":
@@ -45333,7 +45333,7 @@ ${indent2}`)}`;
       if (node3.text === void 0) {
         closeFrom(0);
         const inner = node3.content !== void 0 ? this.inlineToMarkdown(node3.content, names) : "";
-        out += [...node3.marks ?? []].reverse().reduce((text5, mark) => this.applyMark(text5, mark), inner);
+        out += [...node3.marks ?? []].reverse().reduce((text6, mark) => this.applyMark(text6, mark), inner);
         continue;
       }
       const marks = node3.marks ?? [];
@@ -45354,12 +45354,12 @@ ${indent2}`)}`;
       }
       closeFrom(common);
       const opening = marks.slice(common);
-      let text4 = node3.text;
+      let text5 = node3.text;
       if (common === 0 && opening.length > 0 && opening.every((mark) => this.isEmphasis(mark))) {
-        const lead = /^\s+/.exec(text4)?.[0];
-        if (lead !== void 0 && lead.length < text4.length) {
+        const lead = /^\s+/.exec(text5)?.[0];
+        if (lead !== void 0 && lead.length < text5.length) {
           out += lead;
-          text4 = text4.slice(lead.length);
+          text5 = text5.slice(lead.length);
         }
       }
       for (let k = common; k < marks.length; k++) {
@@ -45368,7 +45368,7 @@ ${indent2}`)}`;
         out += this.markOpen(mark);
         open2.push(mark);
       }
-      out += this.escapeText(text4, open2.some((mark) => mark.type === "code"));
+      out += this.escapeText(text5, open2.some((mark) => mark.type === "code"));
     }
     closeFrom(0);
     return out;
@@ -45384,8 +45384,8 @@ ${indent2}`)}`;
    */
   mentionToMarkdown(node3) {
     const id = typeof node3.attrs?.["id"] === "string" ? node3.attrs["id"] : "";
-    const text4 = node3.attrs?.["text"];
-    const display = typeof text4 === "string" ? text4.startsWith("@") ? text4.slice(1) : text4 : "";
+    const text5 = node3.attrs?.["text"];
+    const display = typeof text5 === "string" ? text5.startsWith("@") ? text5.slice(1) : text5 : "";
     return `@{${id}|${this.escapeMentionDisplay(display)}}`;
   }
   /**
@@ -45401,20 +45401,20 @@ ${indent2}`)}`;
    * Wraps text in the markdown for one mark, innermost-first. Only used for the
    * rare content-bearing inline node; the main text path coalesces marks instead.
    */
-  applyMark(text4, mark) {
+  applyMark(text5, mark) {
     switch (mark.type) {
       case "code":
-        return `\`${text4}\``;
+        return `\`${text5}\``;
       case "em":
-        return `*${text4}*`;
+        return `*${text5}*`;
       case "strong":
-        return `**${text4}**`;
+        return `**${text5}**`;
       case "strike":
-        return `~~${text4}~~`;
+        return `~~${text5}~~`;
       case "link":
-        return this.linkToMarkdown(text4, mark);
+        return this.linkToMarkdown(text5, mark);
       default:
-        return text4;
+        return text5;
     }
   }
   markOpen(mark) {
@@ -45466,22 +45466,22 @@ ${indent2}`)}`;
    * but only when the destination needs no escaping and there's no title — so the
    * autolink re-parses to the same href. Otherwise the caller emits `[text](dest)`.
    */
-  tryBareUrl(text4, mark) {
+  tryBareUrl(text5, mark) {
     if (mark.type !== "link") return void 0;
     const href = mark.attrs?.["href"];
     if (typeof href !== "string") return void 0;
     if (typeof mark.attrs?.["title"] === "string") return void 0;
-    if (text4 !== href || this.encodeDestination(href) !== href) return void 0;
+    if (text5 !== href || this.encodeDestination(href) !== href) return void 0;
     return href;
   }
-  linkToMarkdown(text4, mark) {
+  linkToMarkdown(text5, mark) {
     const href = mark.attrs?.["href"];
-    if (typeof href !== "string") return text4;
-    const bare = this.tryBareUrl(text4, mark);
+    if (typeof href !== "string") return text5;
+    const bare = this.tryBareUrl(text5, mark);
     if (bare !== void 0) return bare;
     const title = mark.attrs?.["title"];
     const suffix = typeof title === "string" ? ` "${this.encodeTitle(title)}"` : "";
-    return `[${text4}](${this.encodeDestination(href)}${suffix})`;
+    return `[${text5}](${this.encodeDestination(href)}${suffix})`;
   }
   /**
    * Escapes a link destination so it re-parses to the same string: literal `\`
@@ -45512,9 +45512,9 @@ ${indent2}`)}`;
    * text node that itself reads as a mention token (`@{id|name}`) is escaped to
    * `\@{…}` so it re-parses as text rather than a mention.
    */
-  escapeText(text4, insideCode) {
-    if (insideCode) return text4;
-    const escaped = text4.replace(/[\\*`]/g, (ch) => `\\${ch}`);
+  escapeText(text5, insideCode) {
+    if (insideCode) return text5;
+    const escaped = text5.replace(/[\\*`]/g, (ch) => `\\${ch}`);
     return escaped.replace(this.mentionToken(), (full) => `\\${full}`);
   }
 };
@@ -45525,18 +45525,18 @@ var import_yaml2 = __toESM(require_dist(), 1);
 
 // src/tasks/jira-task-tracker/adf.ts
 var DefaultAdfBuilder = class {
-  doc(text4) {
+  doc(text5) {
     return {
       version: 1,
       type: "doc",
-      content: [{ type: "paragraph", content: [{ type: "text", text: text4 }] }]
+      content: [{ type: "paragraph", content: [{ type: "text", text: text5 }] }]
     };
   }
-  codeBlock(text4, language = "yaml") {
+  codeBlock(text5, language = "yaml") {
     return {
       type: "codeBlock",
       attrs: { language },
-      content: [{ type: "text", text: text4 }]
+      content: [{ type: "text", text: text5 }]
     };
   }
   expand(title, child) {
@@ -45572,9 +45572,9 @@ var JiraAdfMetadataService = class {
   readMetadataYaml(doc) {
     const expand2 = doc.content.find((n) => this.isMetadataExpand(n));
     const codeBlock = expand2?.content?.find((n) => n.type === "codeBlock");
-    const text4 = codeBlock?.content?.find((n) => n.type === "text")?.text;
-    if (text4 === void 0 || text4.trim() === "") return void 0;
-    return text4;
+    const text5 = codeBlock?.content?.find((n) => n.type === "text")?.text;
+    if (text5 === void 0 || text5.trim() === "") return void 0;
+    return text5;
   }
   isMetadataExpand(node3) {
     return node3.type === "expand" && node3.attrs?.["title"] === metadataTitle;
@@ -46120,8 +46120,8 @@ var maxReported = 5;
 var RegexPortableContextGuard = class {
   find(body) {
     return body.split("\n").flatMap(
-      (text4, index2) => localReferencePatterns.flatMap(
-        (pattern) => [...text4.matchAll(pattern)].map((m) => ({ line: index2 + 1, match: m[0].replace(trailingPunctuation, "") }))
+      (text5, index2) => localReferencePatterns.flatMap(
+        (pattern) => [...text5.matchAll(pattern)].map((m) => ({ line: index2 + 1, match: m[0].replace(trailingPunctuation, "") }))
       )
     );
   }
@@ -46339,7 +46339,7 @@ var BlobSectionSource = class {
       if (current !== void 0) raw[current]?.push(line);
       i++;
     }
-    const text4 = (key) => {
+    const text5 = (key) => {
       const joined = (raw[key] ?? []).join("\n").trim();
       return joined.length > 0 ? joined : void 0;
     };
@@ -46349,7 +46349,7 @@ var BlobSectionSource = class {
       fixedWhenItems: this.checklistItems(raw.fixedWhen)
     };
     for (const key of stringSectionKeys) {
-      const value = text4(key);
+      const value = text5(key);
       if (value !== void 0) sections[key] = value;
     }
     return sections;
@@ -46997,6 +46997,90 @@ function createConfigCommand(getStore) {
   return config2;
 }
 
+// src/hooks/commands/hook/command.ts
+import { text as text4 } from "node:stream/consumers";
+
+// src/hooks/commit-guard/commit-guard.ts
+var PreToolUseInputSchema = external_exports.looseObject({
+  tool_name: external_exports.string().optional(),
+  tool_input: external_exports.looseObject({ command: external_exports.string().optional() }).optional(),
+  cwd: external_exports.string().optional()
+});
+var bypassVariable = "FLIGHT_RULES_RAW_GIT";
+var optionsWithValue = /* @__PURE__ */ new Set(["-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path"]);
+var assignment = /^[A-Za-z_][A-Za-z0-9_]*=/;
+var CommitGuard = class {
+  isConfigured;
+  env;
+  constructor(props = {}) {
+    this.env = props.env ?? process.env;
+    this.isConfigured = props.isConfigured ?? ((dir) => Object.keys(new ConfigStore({ cwd: dir, env: this.env }).inspect().values).length > 0);
+  }
+  decide(payload) {
+    const parsed = PreToolUseInputSchema.safeParse(payload);
+    if (!parsed.success) return void 0;
+    const input2 = parsed.data;
+    if (input2.tool_name !== "Bash") return void 0;
+    const command = input2.tool_input?.command;
+    if (command === void 0) return void 0;
+    if (!this.commitsWithMessage(command)) return void 0;
+    const dir = this.env["CLAUDE_PROJECT_DIR"] ?? input2.cwd;
+    if (dir === void 0 || !this.configured(dir)) return void 0;
+    return {
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: [
+          "This repo uses flight-rules, so commits go through its CLI, which writes the conventional subject, the body, and the version trailers:",
+          '  flight-rules git commit --type <type> --scope <scope> --description "<subject>" --body-file <path-to-body.md> --file <path>\u2026',
+          `If raw git is genuinely the right tool here (for example the CLI cannot express this commit), re-run the same command prefixed with ${bypassVariable}=1 and say why in your reply.`
+        ].join("\n")
+      }
+    };
+  }
+  /** True when any segment of the command is a `git commit` that authors a message. */
+  commitsWithMessage(command) {
+    if (new RegExp(`(^|[\\s;&|(])(export\\s+)?${bypassVariable}=1\\b`).test(command)) return false;
+    return this.segments(command).some((tokens) => this.isAuthoringCommit(tokens));
+  }
+  configured(dir) {
+    try {
+      return this.isConfigured(dir);
+    } catch {
+      return false;
+    }
+  }
+  segments(command) {
+    return command.split(/&&|\|\||[;|\n`]|\$\(|\(|\)/).map((segment) => segment.trim().split(/\s+/).filter((token) => token !== ""));
+  }
+  isAuthoringCommit(tokens) {
+    let i = 0;
+    while (i < tokens.length && assignment.test(tokens[i] ?? "")) i++;
+    const program2 = tokens[i];
+    if (program2 === void 0 || !/(^|\/)git$/.test(program2)) return false;
+    i++;
+    while (i < tokens.length && (tokens[i] ?? "").startsWith("-")) {
+      i += optionsWithValue.has(tokens[i] ?? "") ? 2 : 1;
+    }
+    if (tokens[i] !== "commit") return false;
+    return !tokens.slice(i + 1).includes("--no-edit");
+  }
+};
+
+// src/hooks/commands/hook/command.ts
+function createHookCommand(getGuard = () => new CommitGuard(), readStdin = () => text4(process.stdin)) {
+  const hook2 = new Command("hook").description("handlers for the plugin's Claude Code hooks");
+  hook2.command("guard-commit").description("PreToolUse(Bash): block a hand-written `git commit` in a flight-rules repo").exitOverride().action(async () => {
+    try {
+      const decision = getGuard().decide(JSON.parse(await readStdin()));
+      if (decision !== void 0) process.stdout.write(JSON.stringify(decision) + "\n");
+    } catch {
+      return;
+    }
+  });
+  return hook2;
+}
+
 // src/git/git-executor/git-executor.ts
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -47536,7 +47620,7 @@ var NodeToolProbe = class {
 var nodeToolProbe = new NodeToolProbe();
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.49.0";
+var appVersion = false ? "0.0.0-dev" : "1.50.0";
 
 // src/cli/cli.ts
 function buildTracker(overrideTracker) {
@@ -47607,6 +47691,7 @@ function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = () => ne
   program2.addCommand(createQaCommand(config2, getConfigPath));
   program2.addCommand(createCompetenciesCommand(config2));
   program2.addCommand(createConfigCommand(getConfigStore));
+  program2.addCommand(createHookCommand());
   const probe = () => new NodeToolProbe();
   program2.addCommand(createCheckCommand(config2, tracker, getConfigPath, probe));
   return program2;
