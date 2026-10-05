@@ -1,10 +1,11 @@
 import { Command } from "commander";
 import type { TaskTracker } from "../../task-tracker/task-tracker.js";
 import { resolveBody } from "../resolve-body.js";
+import { portableContextGuard } from "../../portable-context/portable-context.js";
 import { DependencyPlannerService } from "../../dependency-planner/dependency-planner.js";
 
-type CreateInitiativeOptions = { title: string; body?: string; bodyFile?: string };
-type EditInitiativeOptions = { body?: string; bodyFile?: string; title?: string };
+type CreateInitiativeOptions = { title: string; body?: string; bodyFile?: string; allowLocalPaths?: boolean };
+type EditInitiativeOptions = { body?: string; bodyFile?: string; title?: string; allowLocalPaths?: boolean };
 
 export function createInitiativeCommand(getTracker: () => TaskTracker): Command {
   const initiative = new Command("initiative");
@@ -15,10 +16,13 @@ export function createInitiativeCommand(getTracker: () => TaskTracker): Command 
     .requiredOption("--title <title>", "initiative title")
     .option("--body <body>", "initiative body (or use --body-file)")
     .option("--body-file <path>", "read the initiative body from a file")
+    .option("--allow-local-paths", "accept machine-local paths in the body (see docs/layered-body-format.md)")
     .action(async (opts: CreateInitiativeOptions) => {
+      const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
+      portableContextGuard.assertPortable(body, { allowLocalPaths: opts.allowLocalPaths });
       const result = await getTracker().createInitiative({
         title: opts.title,
-        body: resolveBody({ body: opts.body, bodyFile: opts.bodyFile }),
+        body,
       });
       process.stdout.write(JSON.stringify(result) + "\n");
     });
@@ -30,9 +34,12 @@ export function createInitiativeCommand(getTracker: () => TaskTracker): Command 
     .option("--body <body>", "new initiative body (or use --body-file)")
     .option("--body-file <path>", "read the new initiative body from a file")
     .option("--title <title>", "new initiative title (unchanged if omitted)")
+    .option("--allow-local-paths", "accept machine-local paths in the body (see docs/layered-body-format.md)")
     .action(async (id: string, opts: EditInitiativeOptions) => {
+      const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
+      portableContextGuard.assertPortable(body, { allowLocalPaths: opts.allowLocalPaths });
       const result = await getTracker().updateInitiativeDescription(id, {
-        body: resolveBody({ body: opts.body, bodyFile: opts.bodyFile }),
+        body,
         ...(opts.title !== undefined ? { title: opts.title } : {}),
       });
       process.stdout.write(JSON.stringify(result) + "\n");

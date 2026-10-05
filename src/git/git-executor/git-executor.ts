@@ -53,12 +53,12 @@ export class NodeGitExecutor implements GitExecutor {
   }
 
   async commit(message: string, files?: readonly string[]): Promise<void> {
-    // `--only` excludes paths staged by anyone else; git rejects it without a pathspec, hence the fallback.
+    // `--only` needs a pathspec (hence the fallback); `--cleanup=whitespace` stops `commit.cleanup=strip` eating markdown `#` lines.
     if (files !== undefined && files.length > 0) {
-      await this.execFile('git', ['commit', '--only', '-m', message, '--', ...files])
+      await this.execFile('git', ['commit', '--cleanup=whitespace', '--only', '-m', message, '--', ...files])
       return
     }
-    await this.execFile('git', ['commit', '-m', message])
+    await this.execFile('git', ['commit', '--cleanup=whitespace', '-m', message])
   }
 
   async getCommitSha(): Promise<string> {

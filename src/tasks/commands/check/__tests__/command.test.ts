@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createCheckCommand } from "../command.js";
@@ -7,6 +7,7 @@ import type { Config } from "../../../../shared/config.js";
 import type { TaskTracker } from "../../../task-tracker/task-tracker.js";
 import { NodeToolProbe } from "../../../tool-probe/tool-probe.js";
 import type { ToolCheck, ToolProbe } from "../../../tool-probe/tool-probe.js";
+import { QaInstructionsFinder } from "../../../qa-instructions/qa-instructions.js";
 
 const config: Config = {
   tracker: "github",
@@ -53,6 +54,73 @@ describe("check command", () => {
     vi.unstubAllEnvs();
   });
 
+  it("reports discovered QA instructions and tells the probe they exist", async () => {
+    vi.stubEnv("GITHUB_TOKEN", "tok");
+    const repo = mkdtempSync(join(tmpdir(), "fr-check-qa-"));
+    mkdirSync(join(repo, ".git"));
+    writeFileSync(join(repo, "QA.md"), "Log in through the SSO bypass.\n");
+    const finder = new QaInstructionsFinder();
+    const discover = vi
+      .spyOn(finder, "discover")
+      .mockImplementation((input) =>
+        QaInstructionsFinder.prototype.discover.call(finder, {
+          ...input,
+          from: repo,
+        }),
+      );
+    const probe = makeProbe();
+    const output = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+    await createCheckCommand(
+      () => config,
+      () => makeTracker() as TaskTracker,
+      () => join(repo, ".claude", "flight-rules.local.md"),
+      () => probe,
+      () => finder,
+    )
+      .exitOverride()
+      .parseAsync([], { from: "user" });
+
+    expect(discover).toHaveBeenCalled();
+    const qa = lastJson(output).checks.find((c) => c.name === "qa-instructions");
+    expect(qa?.ok).toBe(true);
+    expect(qa?.detail).toBe(join(repo, "QA.md"));
+    expect(probe.probe).toHaveBeenCalledWith({
+      repo: "acme/proj",
+      qaInstructionsFound: true,
+    });
+    output.mockRestore();
+  });
+
+  it("passes when no QA instructions exist, reporting them as optional", async () => {
+    vi.stubEnv("GITHUB_TOKEN", "tok");
+    const finder = new QaInstructionsFinder();
+    vi.spyOn(finder, "discover").mockReturnValue({ found: false, sources: [] });
+    const probe = makeProbe();
+    const output = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+    await createCheckCommand(
+      () => config,
+      () => makeTracker() as TaskTracker,
+      () => "/tmp/does-not-exist/.claude/flight-rules.local.md",
+      () => probe,
+      () => finder,
+    )
+      .exitOverride()
+      .parseAsync([], { from: "user" });
+
+    const parsed = lastJson(output);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.checks.find((c) => c.name === "qa-instructions")?.ok).toBe(false);
+    expect(probe.probe).toHaveBeenCalledWith({
+      repo: "acme/proj",
+      qaInstructionsFound: false,
+    });
+    output.mockRestore();
+  });
+
   it("reports all-ok when config, credentials, and reachability pass", async () => {
     vi.stubEnv("GITHUB_TOKEN", "tok");
     const output = vi
@@ -63,7 +131,11 @@ describe("check command", () => {
     expect(parsed.ok).toBe(true);
     expect(parsed.tracker).toBe("github");
     expect(parsed.repo).toBe("acme/proj");
-    expect(parsed.checks.every((c) => c.ok)).toBe(true);
+    expect(
+      parsed.checks
+        .filter((c) => c.name !== "qa-instructions")
+        .every((c) => c.ok),
+    ).toBe(true);
     output.mockRestore();
   });
 
@@ -133,7 +205,7 @@ describe("check command", () => {
     output.mockRestore();
   });
 
-  it("treats tools:op as required when only an overridden recipe with op:// exists", async () => {
+  it("treats the QA tools as required when only an overridden recipe exists", async () => {
     vi.stubEnv("GITHUB_TOKEN", "tok");
     // A recipe outside the config dir, referenced via qaRecipe; no default
     // flight-rules.qa.md beside the config exists.
@@ -165,11 +237,11 @@ describe("check command", () => {
     ).rejects.toThrow("check failed");
 
     const parsed = lastJson(output);
-    const op = parsed.checks.find((c) => c.name === "tools:op") as
-      | (ToolCheck & { required: boolean })
-      | undefined;
-    expect(op).toBeDefined();
-    expect(op?.required).toBe(true);
+    const playwright = parsed.checks.find(
+      (c) => c.name === "tools:playwright-cli",
+    ) as (ToolCheck & { required: boolean }) | undefined;
+    expect(playwright?.required).toBe(true);
+    expect(parsed.checks.map((c) => c.name)).not.toContain("tools:op");
     output.mockRestore();
   });
 
@@ -236,6 +308,26 @@ describe("check command (jira)", () => {
       parsed.checks.find((c) => c.name === "credentials")?.detail,
     ).toContain("JIRA_TOKEN");
     expect(ping).not.toHaveBeenCalled();
+    output.mockRestore();
+  });
+
+  it("fails credentials when neither JIRA_EMAIL nor jiraEmail is set", async () => {
+    vi.stubEnv("JIRA_TOKEN", "tok");
+    vi.stubEnv("JIRA_EMAIL", undefined);
+    const withoutEmail: Config = { ...jiraConfig };
+    delete withoutEmail.jiraEmail;
+    const output = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+    await expect(run(() => withoutEmail, makeTracker())).rejects.toThrow(
+      "check failed",
+    );
+    const credentials = lastJson(output).checks.find(
+      (c) => c.name === "credentials",
+    );
+    expect(credentials?.ok).toBe(false);
+    expect(credentials?.detail).toContain("JIRA_EMAIL");
+    expect(credentials?.detail).not.toContain("JIRA_TOKEN");
     output.mockRestore();
   });
 });

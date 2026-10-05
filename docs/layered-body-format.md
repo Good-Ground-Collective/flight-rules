@@ -39,6 +39,8 @@ are verbatim.
 
 ## High-level technical writeup
 
+**Context:** <parent initiative · parent epic · design artifact, by key or URL>
+
 <What's being built, at the altitude-appropriate depth.>
 
 <details><summary>Guided Walkthrough</summary>
@@ -60,6 +62,69 @@ size: ticket
 
 </details>
 ```
+
+## Portable context
+
+A ticket is the source of truth for its work. An engineer on another machine runs
+`execute-work` against it with nothing else: a fresh clone, the tracker, and
+whatever the ticket links to. Every fact the work needs must reach them through
+one of three places:
+
+1. **The ticket body.** The contract, the walkthrough, and any decision that
+   shapes this ticket's code.
+2. **The parent epic and initiative bodies.** Shared intent, cross-ticket
+   decisions, and the reasons behind the shape of the breakdown.
+3. **A published technical artifact**, linked by URL. Use it for context too long
+   for a body. `flight-rules tdd create` publishes one: a Confluence page when the
+   tracker is Jira, a GitHub Discussion when it is GitHub. A file committed to the
+   default branch also qualifies, linked by its GitHub URL.
+
+### Allowed references
+
+- Tracker keys and URLs: `FRT-123`, `#45`, an issue or epic link.
+- Confluence, GitHub Discussion, and GitHub file URLs.
+- Repo-relative paths, such as `src/auth/session.ts`, but only for files that
+  exist on the default branch or that this ticket creates.
+
+### Forbidden references
+
+- Absolute and home paths: `/Users/…`, `/home/…`, `C:\Users\…`, `~/…`.
+- `file://` URLs.
+- Untracked, gitignored, or unmerged files: planning notes, `specs/` drafts,
+  `.claude/` scratch, an RFC that exists only in a local `rfcs/` folder.
+- Decisions that live only in a conversation. Write them into the epic body or
+  the technical artifact first, then reference that.
+
+Record decisions under a `### Decisions` heading inside the High-level technical
+writeup, one bullet each, with the choice and its reason. Use level 3: the section
+reader splits the body on level-2 headings, so a `## Decisions` heading would end
+the writeup early.
+
+The CLI enforces the mechanical part. `ticket create`, `ticket edit`,
+`epic create`, `epic edit`, `initiative create`, `initiative edit`, and
+`tdd create` reject a body that contains an absolute home path, a `~/` path, or a
+`file://` URL. The error lists each offending line. A token counts only when it
+starts a word, so `https://example.com/home/docs` passes.
+
+Pass `--allow-local-paths` when the path is the subject of the work, such as a
+ticket that fixes how a tool reads `~/.zshrc`. Never pass it to keep a pointer to
+context; publish the context instead.
+
+The CLI cannot tell whether a repo-relative path exists on the default branch, or
+whether a decision was only ever spoken. `break-down-work` checks both before it
+finishes.
+
+### Context links
+
+Open the High-level technical writeup of every epic and ticket with a
+`**Context:**` line that links its parents and artifacts by key or URL:
+
+```markdown
+**Context:** initiative DISC-12 · epic FRT-340 · design https://acme.atlassian.net/wiki/spaces/ENG/pages/98765
+```
+
+Omit a part that does not exist; a standalone ticket has no parents. `execute-work`
+reads this line to find the initiative, because an epic payload does not name it.
 
 ## Supported markdown
 
@@ -177,3 +242,4 @@ Degradation and normalizations:
   on epics *and* tickets.
 - **A `Bug` ticket uses [the bug report format](./bug-report-format.md) instead of
   this one**, selected by the Jira issue type.
+- **Every reference is portable.** See [Portable context](#portable-context).
