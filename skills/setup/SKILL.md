@@ -1,15 +1,36 @@
 ---
 name: setup
-description: "First-run setup for the flight-rules plugin. Creates .claude/flight-rules.local.md with the correct fields and verifies the environment is ready to use."
+description: "First-run setup for the flight-rules plugin. Writes the flight-rules config — shared values to the user's Claude Code settings, per-project values to the project — and verifies the environment is ready to use."
 ---
 
 # Setup
 
-This skill creates the per-project configuration file for flight-rules and verifies your environment is ready. It takes about two minutes. Run it once per repository you want to use the plugin in.
+This skill writes the flight-rules configuration and verifies your environment is ready. It takes about two minutes the first time, and less in every later repository, because shared values only need setting once.
 
-The config file is `$FLIGHT_RULES_CONFIG` when that variable is set, otherwise `.claude/flight-rules.local.md`. The CLI honours the override, so every read and write below means whichever path is in effect.
+## Where config lives
 
-If that file already exists, read it and show the current values before asking whether to reconfigure.
+The CLI merges config key by key from four layers, lowest precedence first:
+
+| Scope | File | Use it for |
+| --- | --- | --- |
+| `user` | `~/.claude/settings.json` | Values shared by every project: `tracker`, `jiraHost`, `jiraEmail`, `jiraProject`, `jpdProject`, `confluenceSpaceKey`, the status names, `rfcStorage`/`rfcStoragePath`, `defaultLabels` |
+| `project` | `.claude/settings.json` | Per-project values the team shares through git, such as `repo` |
+| `local` | `.claude/settings.local.json` | Per-project values for this machine only |
+| `file` | `$FLIGHT_RULES_CONFIG`, else `.claude/flight-rules.local.md` | The older config file; still read, and it outranks the settings files |
+
+In the settings files the values sit under `pluginConfigs["flight-rules@flight-rules"].options`. Never edit any of these files by hand. Write each value with `flight-rules config set <key> <value…> --scope <scope>`; array keys such as `defaultLabels` take several values.
+
+## Step 0: Read what is already configured
+
+Run:
+
+```bash
+flight-rules config show
+```
+
+It prints the merged `values`, the scope each came from (`sources`), and whether they form a complete config (`valid`, with `error` naming what is missing). Show the user the current values and their scopes. Ask whether to reconfigure or only fill the gaps. When user-scope settings already cover the tracker, skip every question below whose answer is already there; a new repository usually needs only `repo`. When `values` is empty, nothing is configured yet; continue from Step 1.
+
+When writing, offer the scope from the table above as the default for each key, and let the user override it. When a `flight-rules.local.md` already exists, offer to move its values into settings: `config set` each one in its new scope, then delete the file once `config show` reports every key from the new scope.
 
 ---
 
@@ -83,38 +104,19 @@ If they provide labels, split on commas and strip whitespace. If they skip, use 
 
 Remember the answer for Step 7.
 
-## Step 5 (GitHub): Write the config file
+## Step 5 (GitHub): Write the config
 
-Create `.claude/` if it doesn't exist. Write `.claude/flight-rules.local.md`:
+Write each answer with `flight-rules config set`, using the scopes from **Where config lives**:
 
-**Local RFC storage:**
-
-```markdown
----
-tracker: github
-repo: <repo>
-defaultLabels:
-  - <label1>
-  - <label2>
-rfcStorage: local
----
+```bash
+flight-rules config set tracker github --scope user
+flight-rules config set rfcStorage <local|global> --scope user
+flight-rules config set rfcStoragePath <path> --scope user        # global storage only
+flight-rules config set defaultLabels <label1> <label2> --scope user   # only if given
+flight-rules config set repo <owner/repo> --scope project
 ```
 
-**Global RFC storage:**
-
-```markdown
----
-tracker: github
-repo: <repo>
-defaultLabels:
-  - <label1>
-  - <label2>
-rfcStorage: global
-rfcStoragePath: <path>
----
-```
-
-Omit the `defaultLabels` block entirely if the user skipped that step.
+Skip any key Step 0 showed is already set to the right value.
 
 ## Step 6 (GitHub): Smoke test
 
@@ -137,22 +139,25 @@ The command prints a JSON array of `{ accountId, displayName }` pairs — the `a
 
 ## Step 3 (Jira): Check credentials
 
-Jira, Jira Product Discovery, and Confluence all authenticate with one Atlassian API token plus the account email (HTTP Basic auth). Run:
+Jira, Jira Product Discovery, and Confluence all authenticate with one Atlassian API token plus the account email (HTTP Basic auth).
+
+The CLI reads the token from the first of these that is set: `JIRA_TOKEN`, `JIRA_API_TOKEN`, `JIRA_API_KEY`. Any one is enough. Do not ask the user to rename or re-export a token they already have under another of these names. Run:
 
 ```bash
-echo "${JIRA_TOKEN:+token-set} ${JIRA_EMAIL:+email-set}"
+for v in JIRA_TOKEN JIRA_API_TOKEN JIRA_API_KEY; do printenv "$v" >/dev/null && echo "token: $v"; done; echo "email: ${JIRA_EMAIL:+set}"
 ```
 
-If either is missing, tell the user:
+If no `token:` line prints, tell the user:
 
-> "Jira needs an API token and the account email. Export both before continuing:
+> "Jira needs an Atlassian API token (id.atlassian.com → Security → API tokens). Export it under any one of `JIRA_TOKEN`, `JIRA_API_TOKEN`, or `JIRA_API_KEY`, for example:
 > ```bash
-> export JIRA_TOKEN=your_atlassian_api_token   # id.atlassian.com → Security → API tokens
-> export JIRA_EMAIL=you@example.com            # the Atlassian account the token belongs to
+> export JIRA_TOKEN=your_atlassian_api_token
 > ```
 > The same token works for Jira, Jira Product Discovery, and Confluence."
 
-Stop if either is not present.
+Stop if no token is present.
+
+The email does not need to be exported. Step 4 asks for it and writes it to the config as `jiraEmail`. When `JIRA_EMAIL` is set, it overrides the config value, so offer it as the default answer in Step 4.
 
 ## Step 4 (Jira): Collect configuration
 
@@ -160,6 +165,11 @@ Ask each question in order, one at a time.
 
 **Host**
 > "What's your Atlassian Cloud host? Just the domain, e.g. `acme.atlassian.net`."
+
+**Atlassian email**
+> "Which Atlassian account email does the API token belong to?"
+
+Offer `$JIRA_EMAIL` as the default when it is set.
 
 **Jira project key**
 > "Which Jira project key will hold epics and tickets? (e.g. `PROJ`)"
@@ -186,27 +196,26 @@ Ask this even though the tracker is Jira: pull requests always land on GitHub, a
 
 Remember the answer for Step 7.
 
-## Step 5 (Jira): Write the config file
+## Step 5 (Jira): Write the config
 
-Create `.claude/` if it doesn't exist. Write the config file. Jira identifies *work* by project keys, but `repo` is still required — pull requests land on GitHub whichever tracker holds the tickets.
+Jira identifies *work* by project keys, but `repo` is still required, because pull requests land on GitHub whichever tracker holds the tickets. Write each answer with `flight-rules config set`, using the scopes from **Where config lives**:
 
-```markdown
----
-tracker: jira
-jiraHost: <host>
-jiraEmail: <email>
-jiraProject: <project key>
-jpdProject: <jpd project key>
-repo: <owner/repo>
-rfcStorage: local
----
+```bash
+flight-rules config set tracker jira --scope user
+flight-rules config set jiraHost <host> --scope user
+flight-rules config set jiraEmail <email> --scope user
+flight-rules config set jiraProject <project key> --scope user
+flight-rules config set jpdProject <jpd project key> --scope user   # only if given
+flight-rules config set rfcStorage <local|global> --scope user
+flight-rules config set rfcStoragePath <path> --scope user          # global storage only
+flight-rules config set repo <owner/repo> --scope project
 ```
 
-- Omit `jpdProject` if the user skipped it.
-- For global RFC storage, use `rfcStorage: global` and add `rfcStoragePath: <path>` instead of `rfcStorage: local`.
-- Add a `defaultLabels` block only if the user provided labels.
+- Skip any key Step 0 showed is already set to the right value.
+- If this repository uses a different Jira project from the user's other repositories, write `jiraProject` with `--scope project` instead.
+- Add `defaultLabels` only if the user provided labels.
 
-`JIRA_TOKEN` and `JIRA_EMAIL` stay in the environment — never write them into the config file.
+The API token stays in the environment. Never write a token into any config file.
 
 ## Step 6 (Jira): Smoke test
 
@@ -219,7 +228,7 @@ flight-rules check
 - If the JSON report shows `"ok": true`: setup is complete. Tell the user:
   > "Setup complete. `flight-rules` is configured for Jira project `<project key>`. Try `/draft-request-for-comments` to author your first RFC."
 - If a check fails, show the report and explain by failed check:
-  - `credentials` — `JIRA_TOKEN` (or `JIRA_EMAIL`) is not exported in this shell.
+  - `credentials` — the detail names what is missing: no token under `JIRA_TOKEN`, `JIRA_API_TOKEN`, or `JIRA_API_KEY`, or no email in either `JIRA_EMAIL` or the config's `jiraEmail`.
   - `reachable` — 401 means the token/email pair is wrong; 404 means the host or project key is wrong; a network error means the host domain is unreachable.
   - `config` — the config file was written incorrectly; show the file and offer to fix it.
 

@@ -34,8 +34,10 @@ export class DefaultCommitMessageBuilder implements CommitMessageBuilder {
     sections.push(`${headerValidation.data}\n`)
 
 
-    if (input.body !== undefined) {
-      sections.push(`${input.body}\n`)
+    // A blank body would leave an empty paragraph before the trailers.
+    const body = input.body?.trim()
+    if (body !== undefined && body !== '') {
+      sections.push(`${body}\n`)
     }
 
     const trailers: string[] = [];

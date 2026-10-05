@@ -15,7 +15,7 @@ This is the skill that turns a landed bug into a document a human can act on. Yo
 
 - You are handed a **ticket id**.
 - Run everything from the **repo root** of the app under test; the CLI resolves config relative to CWD, and the agent drives that app.
-- **The config file is `$FLIGHT_RULES_CONFIG` when that variable is set, otherwise `.claude/flight-rules.local.md`.** The CLI honours the override, so every read and write below means whichever path is in effect.
+- **Config comes from the CLI.** It merges the user's and project's Claude Code settings with the flight-rules config file; `flight-rules config show` prints the result and where each value came from. Never hand-edit a config file; write with `flight-rules config set`.
 - The tracker is **Jira**. The label lifecycle and the reporter mention are Jira shapes.
 - `flight-rules check` reports `"ok": true`, including the `tools:*` probes for `playwright-cli`, `ffmpeg`, and `gh` that the agent's capture depends on.
 
