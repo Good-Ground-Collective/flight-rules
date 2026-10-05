@@ -15772,7 +15772,7 @@ var recursive = /* @__PURE__ */ new WeakMap();
 var NONE = 0;
 var ASSUMED = 1;
 var PROVEN = 2;
-function isRecursive(inst, stack, resolve2) {
+function isRecursive(inst, stack, resolve3) {
   const cached2 = recursive.get(inst);
   if (cached2 !== void 0)
     return cached2 ? PROVEN : NONE;
@@ -15782,7 +15782,7 @@ function isRecursive(inst, stack, resolve2) {
   let result = NONE;
   const check2 = (child) => {
     if (result !== PROVEN && child?._zod) {
-      const answer = isRecursive(child, stack, resolve2);
+      const answer = isRecursive(child, stack, resolve3);
       if (answer > result)
         result = answer;
     }
@@ -15793,7 +15793,7 @@ function isRecursive(inst, stack, resolve2) {
       const desc = Object.getOwnPropertyDescriptor(sh, key);
       if (spread && !desc.enumerable)
         continue;
-      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve2) : NONE;
+      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve3) : NONE;
       if (child > answer)
         answer = child;
     }
@@ -15860,7 +15860,7 @@ function isRecursive(inst, stack, resolve2) {
       break;
     // `$ZodLazy` caches its inner on the def, so a resolved edge is followed exactly
     case "lazy": {
-      const inner = def._cachedInner ?? (resolve2 ? inst._zod.innerType : void 0);
+      const inner = def._cachedInner ?? (resolve3 ? inst._zod.innerType : void 0);
       merge3(inner ? isRecursive(inner, stack, false) : ASSUMED);
       break;
     }
@@ -30456,7 +30456,7 @@ var ConfigSchema = external_exports.object({
   rfcStorage: external_exports.enum(["local", "global"]).default("local"),
   rfcStoragePath: external_exports.string().optional(),
   qaRecipe: external_exports.string().optional().describe(
-    "Path to the per-repo QA recipe; relative paths resolve against the directory holding this config file; defaults to flight-rules.qa.md beside it"
+    "Deprecated: path to a legacy QA recipe, read only when no QA.md or AGENTS.md QA section exists; relative paths resolve against the directory holding this config file; defaults to flight-rules.qa.md beside it"
   ),
   competencies: external_exports.array(external_exports.string()).default([...seedCompetencies])
 }).superRefine((cfg, ctx) => {
@@ -35611,7 +35611,7 @@ var JiraClient = class {
       const retryAfterSeconds = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : defaultRetryAfterSeconds;
       const jitter = 0.7 + Math.random() * 0.6;
       const delayMs = Math.min(retryAfterSeconds * 1e3 * jitter, maxBackoffMs);
-      await new Promise((resolve2) => setTimeout(resolve2, delayMs));
+      await new Promise((resolve3) => setTimeout(resolve3, delayMs));
       return this.fetchWithRetry(url2, init, attempt + 1);
     }
     return res;
@@ -35663,7 +35663,7 @@ var ConfluenceClient = class {
       const retryAfterSeconds = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : defaultRetryAfterSeconds2;
       const jitter = 0.7 + Math.random() * 0.6;
       const delayMs = Math.min(retryAfterSeconds * 1e3 * jitter, maxBackoffMs2);
-      await new Promise((resolve2) => setTimeout(resolve2, delayMs));
+      await new Promise((resolve3) => setTimeout(resolve3, delayMs));
       return this.fetchWithRetry(url2, init, attempt + 1);
     }
     return res;
@@ -35682,10 +35682,13 @@ var mimeTypesByExtension = {
   gif: "image/gif",
   jpeg: "image/jpeg",
   jpg: "image/jpeg",
+  json: "application/json",
+  log: "text/plain",
   mov: "video/quicktime",
   mp4: "video/mp4",
   png: "image/png",
   svg: "image/svg+xml",
+  txt: "text/plain",
   webm: "video/webm",
   webp: "image/webp"
 };
@@ -38268,10 +38271,10 @@ function resolveAll(constructs2, events, context) {
   const called = [];
   let index2 = -1;
   while (++index2 < constructs2.length) {
-    const resolve2 = constructs2[index2].resolveAll;
-    if (resolve2 && !called.includes(resolve2)) {
-      events = resolve2(events, context);
-      called.push(resolve2);
+    const resolve3 = constructs2[index2].resolveAll;
+    if (resolve3 && !called.includes(resolve3)) {
+      events = resolve3(events, context);
+      called.push(resolve3);
     }
   }
   return events;
@@ -46727,29 +46730,135 @@ function createRfcCommand(getConfig, getCwd = () => process.cwd()) {
   return rfc;
 }
 
+// src/tasks/qa-instructions/qa-instructions.ts
+import { existsSync as existsSync2, readFileSync as readFileSync4, statSync } from "node:fs";
+import { dirname as dirname3, join as join3, resolve as resolve2 } from "node:path";
+var atxHeading = /^ {0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$/;
+var fenceRun2 = /^ {0,3}(`{3,}|~{3,})/;
+var legacyHint = 'Legacy QA recipe in use. Move its content into a QA.md at the repo root (or a "QA" section of AGENTS.md); see docs/qa-instructions.md.';
+var nodeFileSystem = {
+  isFile: (path3) => existsSync2(path3) && statSync(path3).isFile(),
+  exists: (path3) => existsSync2(path3),
+  readFile: (path3) => readFileSync4(path3, "utf8")
+};
+var QaInstructionsFinder = class {
+  fs;
+  constructor(props = {}) {
+    this.fs = props.fs ?? nodeFileSystem;
+  }
+  discover(input2) {
+    const sources = this.levels(input2.from).map((dir) => this.sourceAt(dir)).filter((source) => source !== void 0);
+    if (sources.length > 0) return { found: true, sources };
+    const legacy = this.legacySource(input2.legacyRecipePath);
+    if (legacy !== void 0) return { found: true, sources: [legacy] };
+    return { found: false, sources: [] };
+  }
+  /**
+   * Extracts the body of the first heading whose text is exactly "QA" (any
+   * case, any level), up to the next heading of the same or a higher level.
+   * Headings inside fenced code blocks are ignored. Returns undefined when the
+   * section is absent or empty.
+   */
+  extractQaSection(markdown) {
+    const lines = markdown.split("\n");
+    let openFence = null;
+    let sectionLevel = null;
+    const body = [];
+    for (const line of lines) {
+      const fence = fenceRun2.exec(line)?.[1];
+      if (fence !== void 0) {
+        if (openFence === null) openFence = fence;
+        else if (fence[0] === openFence[0] && fence.length >= openFence.length) openFence = null;
+        if (sectionLevel !== null) body.push(line);
+        continue;
+      }
+      const heading = openFence === null ? atxHeading.exec(line) : null;
+      if (heading !== null) {
+        const level = heading[1]?.length ?? 0;
+        if (sectionLevel !== null && level <= sectionLevel) break;
+        if (sectionLevel === null && (heading[2] ?? "").trim().toLowerCase() === "qa") {
+          sectionLevel = level;
+          continue;
+        }
+      }
+      if (sectionLevel !== null) body.push(line);
+    }
+    const content3 = body.join("\n").trim();
+    return content3.length > 0 ? content3 : void 0;
+  }
+  /** The start directory and each parent up to the repository root; only the start when no root is found. */
+  levels(from) {
+    const absolute = resolve2(from);
+    const start = this.fs.isFile(absolute) ? dirname3(absolute) : absolute;
+    const levels = [];
+    let current = start;
+    for (; ; ) {
+      levels.push(current);
+      if (this.fs.exists(join3(current, ".git"))) return levels;
+      const parent = dirname3(current);
+      if (parent === current) return [start];
+      current = parent;
+    }
+  }
+  sourceAt(dir) {
+    const agentsMd = join3(dir, "AGENTS.md");
+    if (this.fs.isFile(agentsMd)) {
+      const section = this.extractQaSection(this.fs.readFile(agentsMd));
+      if (section !== void 0)
+        return { path: agentsMd, kind: "agents-md-section", dir, content: section };
+    }
+    return this.fileSource(join3(dir, "QA.md"), "qa-md", dir) ?? this.fileSource(join3(dir, ".agents", "QA.md"), "agents-dir-qa-md", dir);
+  }
+  fileSource(path3, kind, dir) {
+    if (!this.fs.isFile(path3)) return void 0;
+    const content3 = this.fs.readFile(path3).trim();
+    return content3.length > 0 ? { path: path3, kind, dir, content: content3 } : void 0;
+  }
+  legacySource(path3) {
+    if (path3 === void 0) return void 0;
+    const source = this.fileSource(path3, "legacy-recipe", dirname3(path3));
+    return source === void 0 ? void 0 : { ...source, legacy: true, hint: legacyHint };
+  }
+};
+
 // src/tasks/commands/qa/command.ts
-import { existsSync as existsSync2, statSync } from "node:fs";
-function createQaCommand(getConfig, getConfigPath) {
+function createQaCommand(getConfig, getConfigPath, getFinder = () => new QaInstructionsFinder()) {
   const qa = new Command("qa");
-  qa.command("recipe").exitOverride().action(() => {
-    const config2 = getConfig();
+  const legacyRecipePath = () => {
+    let config2;
+    try {
+      config2 = getConfig();
+    } catch {
+      return void 0;
+    }
     if (config2.qaRecipe !== void 0 && config2.qaRecipe.trim() === "") {
       throw new Error(
-        "qaRecipe is set to a blank value \u2014 give it a path to the QA recipe file, or remove the key to fall back to the default beside the config"
+        "qaRecipe is set to a blank value \u2014 remove the key and move the recipe into a QA.md (see docs/qa-instructions.md)"
       );
     }
-    const path3 = getQaRecipePath(config2, getConfigPath());
-    if (!existsSync2(path3)) {
+    return getQaRecipePath(config2, getConfigPath());
+  };
+  qa.command("instructions").description("print the QA instructions that apply to a directory, nearest first, as JSON").option("--from <dir>", "directory (or file) to start from; defaults to the working directory").exitOverride().action((opts) => {
+    const result = getFinder().discover({
+      from: opts.from ?? process.cwd(),
+      legacyRecipePath: legacyRecipePath()
+    });
+    process.stdout.write(JSON.stringify(result) + "\n");
+  });
+  qa.command("recipe").description("deprecated: print the path of the nearest QA instructions; use `qa instructions`").exitOverride().action(() => {
+    const [nearest] = getFinder().discover({
+      from: process.cwd(),
+      legacyRecipePath: legacyRecipePath()
+    }).sources;
+    if (nearest === void 0) {
       throw new Error(
-        `QA recipe not found at ${path3} \u2014 run /flight-rules:setup to scaffold it, or set qaRecipe in the config`
+        "No QA instructions found \u2014 add a QA.md at the repo root or a QA section in AGENTS.md (see docs/qa-instructions.md)"
       );
     }
-    if (!statSync(path3).isFile()) {
-      throw new Error(
-        `QA recipe at ${path3} is not a regular file \u2014 set qaRecipe to the recipe file's path`
-      );
-    }
-    process.stdout.write(`${path3}
+    process.stderr.write(
+      "`flight-rules qa recipe` is deprecated; use `flight-rules qa instructions`\n"
+    );
+    process.stdout.write(`${nearest.path}
 `);
   });
   return qa;
@@ -46775,7 +46884,7 @@ function missingCredentials(config2, env) {
     missing.push("JIRA_EMAIL (or jiraEmail in the config)");
   return missing;
 }
-function createCheckCommand(getConfig, getTracker, getConfigPath, getProbe) {
+function createCheckCommand(getConfig, getTracker, getConfigPath, getProbe, getFinder = () => new QaInstructionsFinder()) {
   const check2 = new Command("check");
   check2.exitOverride().action(async () => {
     const checks = [];
@@ -46824,9 +46933,20 @@ function createCheckCommand(getConfig, getTracker, getConfigPath, getProbe) {
         detail: "skipped \u2014 credentials missing"
       });
     }
+    const qa = getFinder().discover({
+      from: process.cwd(),
+      legacyRecipePath: getQaRecipePath(config2, getConfigPath())
+    });
+    const [nearest] = qa.sources;
+    checks.push({
+      name: "qa-instructions",
+      ok: qa.found,
+      detail: nearest === void 0 ? "none found \u2014 add a QA.md or a QA section in AGENTS.md to enable the QA lane" : [nearest.path, ...qa.sources.slice(1).map((s) => s.path)].join(", ") + (nearest.legacy === true ? " (legacy recipe \u2014 migrate to QA.md)" : ""),
+      required: false
+    });
     const tools = await getProbe().probe({
       repo: config2.repo,
-      recipePath: getQaRecipePath(config2, getConfigPath())
+      qaInstructionsFound: qa.found
     });
     checks.push(...tools);
     const ok3 = checks.every((c) => c.ok || c.required === false);
@@ -46959,11 +47079,11 @@ var NodeGitExecutor = class {
 };
 
 // src/git/commands/commit/command.ts
-import { readFileSync as readFileSync5 } from "node:fs";
+import { readFileSync as readFileSync6 } from "node:fs";
 
 // src/git/commit-message-builder/commit-message-builder.ts
-import { readFileSync as readFileSync4 } from "node:fs";
-import { dirname as dirname3, join as join3 } from "node:path";
+import { readFileSync as readFileSync5 } from "node:fs";
+import { dirname as dirname4, join as join4 } from "node:path";
 
 // src/git/commit-message-builder/commit-message.schema.ts
 var CommitMessageInputSchema = external_exports.object({
@@ -47020,8 +47140,8 @@ var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
   }
   static readPluginVersion(binPath) {
     try {
-      const pkgPath = join3(dirname3(binPath), "..", "package.json");
-      const parsed = JSON.parse(readFileSync4(pkgPath, "utf-8"));
+      const pkgPath = join4(dirname4(binPath), "..", "package.json");
+      const parsed = JSON.parse(readFileSync5(pkgPath, "utf-8"));
       if (typeof parsed === "object" && parsed !== null && "version" in parsed && typeof parsed.version === "string") {
         return parsed.version;
       }
@@ -47058,7 +47178,7 @@ function createGitCommand(getExecutor) {
       type: opts.type,
       scope: opts.scope,
       description: opts.description,
-      body: opts.bodyFile !== void 0 ? readFileSync5(opts.bodyFile, "utf8") : opts.body,
+      body: opts.bodyFile !== void 0 ? readFileSync6(opts.bodyFile, "utf8") : opts.body,
       footers: opts.footer,
       model: opts.model ?? void 0
     });
@@ -47099,7 +47219,7 @@ function createGitCommand(getExecutor) {
 import { execFile as execFile2 } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join as join4 } from "node:path";
+import { join as join5 } from "node:path";
 import { promisify as promisify2 } from "node:util";
 
 // src/git/pr-template/pr-template.ts
@@ -47258,8 +47378,8 @@ var GhPullRequestHost = class {
     return { number: Number(match[1]), url: url2 };
   }
   async withBodyFile(body, run2) {
-    const dir = await mkdtemp(join4(tmpdir(), "flight-rules-"));
-    const bodyFile = join4(dir, "body.md");
+    const dir = await mkdtemp(join5(tmpdir(), "flight-rules-"));
+    const bodyFile = join5(dir, "body.md");
     try {
       await writeFile(bodyFile, body, "utf8");
       return await run2(bodyFile);
@@ -47306,7 +47426,6 @@ function createPrCommand(getHost) {
 
 // src/tasks/tool-probe/tool-probe.ts
 import { execFile as execFile3 } from "node:child_process";
-import { existsSync as existsSync3, readFileSync as readFileSync6 } from "node:fs";
 import { promisify as promisify3 } from "node:util";
 var minimumGhVersion = [2, 99, 0];
 var ghVersionLine = /gh version (\d+)\.(\d+)\.(\d+)/;
@@ -47317,8 +47436,7 @@ var NodeToolProbe = class {
     this.execFile = props.execFileFn ?? ((file2, args) => promisified(file2, [...args]));
   }
   async probe(input2) {
-    const recipe = existsSync3(input2.recipePath) ? readFileSync6(input2.recipePath, "utf8") : void 0;
-    const qaRequired = recipe !== void 0;
+    const qaRequired = input2.qaInstructionsFound;
     const ghRequired = input2.repo !== void 0;
     const [gh, ghAuth, ghPush, playwright, ffmpeg, curl] = await Promise.all([
       this.ghVersion(ghRequired),
@@ -47418,7 +47536,7 @@ var NodeToolProbe = class {
 var nodeToolProbe = new NodeToolProbe();
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.48.0";
+var appVersion = false ? "0.0.0-dev" : "1.49.0";
 
 // src/cli/cli.ts
 function buildTracker(overrideTracker) {
