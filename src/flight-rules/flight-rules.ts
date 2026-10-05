@@ -2,7 +2,9 @@ import { FileDocResolver, type DocResolver } from '../bundled-docs/doc-resolver/
 import { NodeGitExecutor, type GitExecutor } from '../git/git-executor/git-executor.js'
 import { GhPullRequestHost } from '../pr/pull-request-host/gh-pull-request-host.js'
 import type { PullRequestHost } from '../pr/pull-request-host/pull-request-host.js'
-import { readConfig, resolveConfigPath, type Config } from '../shared/config.js'
+import type { Config } from '../shared/config.js'
+import { ConfigStore } from '../shared/config-store.js'
+import type { HostSettingsSource } from '../shared/host-settings/host-settings-source.js'
 import { EnvLoader } from '../shared/env.js'
 import { GitHubTaskTracker } from '../tasks/github-task-tracker/github-task-tracker.js'
 import { JiraTaskTracker } from '../tasks/jira-task-tracker/jira-task-tracker.js'
@@ -12,6 +14,7 @@ import { FlightRulesPropsSchema, type FlightRulesProps } from './flight-rules.sc
 
 export interface FlightRules {
   configPath(): string
+  configStore(): ConfigStore
   config(overrideTracker?: string): Config
   tracker(overrideTracker?: string): TaskTracker
   prHost(overrideTracker?: string): PullRequestHost
@@ -25,6 +28,7 @@ export class DefaultFlightRules implements FlightRules {
   private readonly cwd: string
   private readonly env: Record<string, string | undefined>
   private readonly explicitConfigPath: string | undefined
+  private readonly hostSettings: HostSettingsSource | undefined
 
   constructor(props: FlightRulesProps = {}) {
     const parsed = FlightRulesPropsSchema.parse({ ...props, env: props.env === undefined ? undefined : { ...props.env } })
@@ -32,15 +36,21 @@ export class DefaultFlightRules implements FlightRules {
     // Keep the validated input reference: Zod clones records, hiding later environment changes.
     this.env = props.env ?? process.env
     this.explicitConfigPath = parsed.configPath
+    this.hostSettings = props.hostSettings
   }
 
   configPath(): string {
-    return resolveConfigPath(this.cwd, this.explicitConfigPath ?? this.env['FLIGHT_RULES_CONFIG'])
+    return this.configStore().filePath()
+  }
+
+  configStore(): ConfigStore {
+    // An explicit configPath acts as FLIGHT_RULES_CONFIG; otherwise the live env is passed through.
+    const env = this.explicitConfigPath === undefined ? this.env : { ...this.env, FLIGHT_RULES_CONFIG: this.explicitConfigPath }
+    return new ConfigStore({ cwd: this.cwd, env, ...(this.hostSettings !== undefined ? { hostSettings: this.hostSettings } : {}) })
   }
 
   config(overrideTracker?: string): Config {
-    const configPath = this.configPath()
-    const config = readConfig(configPath)
+    const config = this.configStore().load()
     if (overrideTracker === undefined) return config
     if (overrideTracker !== 'github' && overrideTracker !== 'jira') {
       throw new Error(`Invalid --tracker "${overrideTracker}" — expected "github" or "jira"`)
@@ -67,7 +77,8 @@ export class DefaultFlightRules implements FlightRules {
     if (env.jiraToken === undefined) {
       throw new Error('JIRA_TOKEN (or JIRA_API_TOKEN / JIRA_API_KEY) environment variable is required')
     }
-    if (env.jiraEmail === undefined) throw new Error('JIRA_EMAIL environment variable is required')
+    const email = env.jiraEmail ?? config.jiraEmail
+    if (email === undefined) throw new Error('JIRA_EMAIL environment variable or jiraEmail config is required')
 
     const host = env.jiraHost ?? config.jiraHost
     if (host === undefined) throw new Error('JIRA_HOST environment variable or jiraHost config is required')
@@ -76,7 +87,7 @@ export class DefaultFlightRules implements FlightRules {
     return new JiraTaskTracker({
       token: env.jiraToken,
       host,
-      email: env.jiraEmail,
+      email,
       project: config.jiraProject,
       ...(config.jpdProject !== undefined ? { jpdProject: config.jpdProject } : {}),
       ...(config.confluenceSpaceKey !== undefined ? { confluenceSpaceKey: config.confluenceSpaceKey } : {}),

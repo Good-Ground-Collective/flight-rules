@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { Command } from 'commander'
 import {
   DefaultCommitMessageBuilder,
@@ -18,6 +19,7 @@ type GitCommitOptions = {
   description: string
   file: string[]
   body?: string
+  bodyFile?: string
   footer: string[]
   model?: string
 }
@@ -49,7 +51,8 @@ export function createGitCommand(getExecutor: () => GitExecutor): Command {
       collect,
       [],
     )
-    .option('--body <body>', 'commit body')
+    .option('--body <body>', 'commit body (or use --body-file)')
+    .option('--body-file <path>', 'read the commit body from a file; wins over --body')
     .option('--footer <footer>', 'commit footer (repeatable)', collect, [])
     .option('--model <model>', 'model identifier')
     .action(async (opts: GitCommitOptions) => {
@@ -62,7 +65,7 @@ export function createGitCommand(getExecutor: () => GitExecutor): Command {
         type: opts.type,
         scope: opts.scope,
         description: opts.description,
-        body: opts.body ?? undefined,
+        body: opts.bodyFile !== undefined ? readFileSync(opts.bodyFile, 'utf8') : opts.body,
         footers: opts.footer,
         model: opts.model ?? undefined
       })

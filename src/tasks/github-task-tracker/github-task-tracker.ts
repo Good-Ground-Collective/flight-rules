@@ -409,12 +409,12 @@ export class GitHubTaskTracker implements TaskTracker {
     })
     const createData = await this.gql<{
       createDiscussion: {
-        discussion: { number: number; body: string; updatedAt: string }
+        discussion: { number: number; body: string; updatedAt: string; url?: string }
       }
     }>(
       `mutation CreateDiscussion($repositoryId: ID!, $categoryId: ID!, $title: String!, $body: String!) {
         createDiscussion(input: { repositoryId: $repositoryId, categoryId: $categoryId, title: $title, body: $body }) {
-          discussion { number body updatedAt }
+          discussion { number body updatedAt url }
         }
       }`,
       { repositoryId: repoData.repository.id, categoryId, title: input.title, body },
@@ -427,6 +427,7 @@ export class GitHubTaskTracker implements TaskTracker {
     return {
       id: String(discussion.number),
       epicId: input.epicId,
+      ...(discussion.url !== undefined ? { url: discussion.url } : {}),
       body: discussion.body,
       comments: [],
       metadata: this.bodyMetadata.parse(discussion.body),
@@ -441,6 +442,7 @@ export class GitHubTaskTracker implements TaskTracker {
           number: number
           body: string
           updatedAt: string
+          url?: string
           comments: {
             nodes: Array<{
               id: string
@@ -456,7 +458,7 @@ export class GitHubTaskTracker implements TaskTracker {
       `query GetDiscussion($owner: String!, $repo: String!, $number: Int!) {
         repository(owner: $owner, name: $repo) {
           discussion(number: $number) {
-            number body updatedAt
+            number body updatedAt url
             comments(first: 100) {
               nodes { id body author { login } createdAt updatedAt }
             }
@@ -476,6 +478,7 @@ export class GitHubTaskTracker implements TaskTracker {
     return {
       id,
       epicId,
+      ...(discussion.url !== undefined ? { url: discussion.url } : {}),
       body: discussion.body,
       comments: discussion.comments.nodes.map((n) => ({
         id: n.id,

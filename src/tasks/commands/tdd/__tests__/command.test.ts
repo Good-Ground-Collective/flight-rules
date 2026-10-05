@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { CommanderError } from 'commander'
 import type { TaskTracker, TechnicalDesign } from '../../../task-tracker/task-tracker.js'
@@ -66,6 +69,26 @@ describe('tdd command', () => {
     await run(tracker, ['get', '3'])
     expect(tracker.getTechnicalDesign).toHaveBeenCalledWith('3')
     output.mockRestore()
+  })
+
+  it('reads the "create" body from --body-file', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'fr-tdd-'))
+    const bodyFile = join(dir, 'tdd.md')
+    writeFileSync(bodyFile, 'Design from file')
+    const tracker = makeTracker()
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(tracker, ['create', '--title', 'T', '--body-file', bodyFile, '--epic-id', '42'])
+    expect(tracker.createTechnicalDesign).toHaveBeenCalledWith({ title: 'T', body: 'Design from file', epicId: '42' })
+    output.mockRestore()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('rejects "create" when the body references a machine-local path', async () => {
+    const tracker = makeTracker()
+    await expect(
+      run(tracker, ['create', '--title', 'T', '--body', 'Notes: ~/notes.md', '--epic-id', '42']),
+    ).rejects.toThrow('references files on this machine')
+    expect(tracker.createTechnicalDesign).not.toHaveBeenCalled()
   })
 
   it('rejects "create" when --epic-id is missing', async () => {

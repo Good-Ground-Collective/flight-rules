@@ -1,0 +1,19 @@
+{
+  "description": "Route commits through the flight-rules CLI in repos that use flight-rules",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Bash(git *)",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/bin/flight-rules.mjs", "hook", "guard-commit"],
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -4,20 +4,20 @@ import type { Config } from "../../../shared/config.js";
 import { EnvLoader, type Env } from "../../../shared/env.js";
 import type { TaskTracker } from "../../task-tracker/task-tracker.js";
 import type { ToolProbe } from "../../tool-probe/tool-probe.js";
+import { QaInstructionsFinder } from "../../qa-instructions/qa-instructions.js";
 
 type Check = { name: string; ok: boolean; detail: string; required?: boolean };
 
-// eslint-disable-next-line preflight/no-loose-functions -- credentialFor is module-level behaviour awaiting a home on a service; tracked in KAN-39
-function credentialFor(
-  tracker: Config["tracker"],
-  env: Env,
-): { name: string; value: string | undefined } {
-  if (tracker === "github")
-    return { name: "GITHUB_TOKEN", value: env.githubToken };
-  return {
-    name: "JIRA_TOKEN (or JIRA_API_TOKEN / JIRA_API_KEY)",
-    value: env.jiraToken,
-  };
+// eslint-disable-next-line preflight/no-loose-functions -- missingCredentials is module-level behaviour awaiting a home on a service; tracked in KAN-39
+function missingCredentials(config: Config, env: Env): string[] {
+  if (config.tracker === "github")
+    return env.githubToken === undefined ? ["GITHUB_TOKEN"] : [];
+  const missing: string[] = [];
+  if (env.jiraToken === undefined)
+    missing.push("JIRA_TOKEN (or JIRA_API_TOKEN / JIRA_API_KEY)");
+  if ((env.jiraEmail ?? config.jiraEmail) === undefined)
+    missing.push("JIRA_EMAIL (or jiraEmail in the config)");
+  return missing;
 }
 
 export function createCheckCommand(
@@ -25,6 +25,7 @@ export function createCheckCommand(
   getTracker: () => TaskTracker,
   getConfigPath: () => string,
   getProbe: () => ToolProbe,
+  getFinder: () => QaInstructionsFinder = () => new QaInstructionsFinder(),
 ): Command {
   const check = new Command("check");
 
@@ -53,12 +54,12 @@ export function createCheckCommand(
 
     // A loader per run: the cache is per-instance, and `check` reports on the
     // environment as it stands at invocation time.
-    const credential = credentialFor(config.tracker, new EnvLoader().load());
-    const credOk = credential.value !== undefined;
+    const missing = missingCredentials(config, new EnvLoader().load());
+    const credOk = missing.length === 0;
     checks.push({
       name: "credentials",
       ok: credOk,
-      detail: credOk ? "present" : `${credential.name} is not set`,
+      detail: credOk ? "present" : `not set: ${missing.join(", ")}`,
     });
 
     if (credOk) {
@@ -81,10 +82,25 @@ export function createCheckCommand(
       });
     }
 
+    const qa = getFinder().discover({
+      from: process.cwd(),
+      legacyRecipePath: getQaRecipePath(config, getConfigPath()),
+    });
+    const [nearest] = qa.sources;
+    checks.push({
+      name: "qa-instructions",
+      ok: qa.found,
+      detail:
+        nearest === undefined
+          ? "none found — add a QA.md or a QA section in AGENTS.md to enable the QA lane"
+          : [nearest.path, ...qa.sources.slice(1).map((s) => s.path)].join(", ") +
+            (nearest.legacy === true ? " (legacy recipe — migrate to QA.md)" : ""),
+      required: false,
+    });
+
     const tools = await getProbe().probe({
       repo: config.repo,
-      recipePath: getQaRecipePath(config, getConfigPath()),
-      env: process.env,
+      qaInstructionsFound: qa.found,
     });
     checks.push(...tools);
 
