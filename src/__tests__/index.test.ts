@@ -69,6 +69,10 @@ describe('public library surface', () => {
       'sectionSelector',
       'seedCompetencies',
       'semanticTypes',
+      'ClaudeSettingsSource',
+      'ConfigStore',
+      'configScopes',
+      'settingsScopes',
     ].sort())
   })
 
