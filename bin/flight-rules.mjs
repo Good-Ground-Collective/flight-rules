@@ -4001,10 +4001,10 @@ var require_resolve_block_map = __commonJS({
       let offset = bm.offset;
       let commentEnd = null;
       for (const collItem of bm.items) {
-        const { start, key, sep: sep2, value } = collItem;
+        const { start, key, sep: sep3, value } = collItem;
         const keyProps = resolveProps.resolveProps(start, {
           indicator: "explicit-key-ind",
-          next: key ?? sep2?.[0],
+          next: key ?? sep3?.[0],
           offset,
           onError,
           parentIndent: bm.indent,
@@ -4018,7 +4018,7 @@ var require_resolve_block_map = __commonJS({
             else if ("indent" in key && key.indent !== bm.indent)
               onError(offset, "BAD_INDENT", startColMsg);
           }
-          if (!keyProps.anchor && !keyProps.tag && !sep2) {
+          if (!keyProps.anchor && !keyProps.tag && !sep3) {
             commentEnd = keyProps.end;
             if (keyProps.comment) {
               if (map2.comment)
@@ -4042,7 +4042,7 @@ var require_resolve_block_map = __commonJS({
         ctx.atKey = false;
         if (utilMapIncludes.mapIncludes(ctx, map2.items, keyNode))
           onError(keyStart, "DUPLICATE_KEY", "Map keys must be unique");
-        const valueProps = resolveProps.resolveProps(sep2 ?? [], {
+        const valueProps = resolveProps.resolveProps(sep3 ?? [], {
           indicator: "map-value-ind",
           next: value,
           offset: keyNode.range[2],
@@ -4058,7 +4058,7 @@ var require_resolve_block_map = __commonJS({
             if (ctx.options.strict && keyProps.start < valueProps.found.offset - 1024)
               onError(keyNode.range, "KEY_OVER_1024_CHARS", "The : indicator must be at most 1024 chars after the start of an implicit block mapping key");
           }
-          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : composeEmptyNode(ctx, offset, sep2, null, valueProps, onError);
+          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : composeEmptyNode(ctx, offset, sep3, null, valueProps, onError);
           if (ctx.schema.compat)
             utilFlowIndentCheck.flowIndentCheck(bm.indent, value, onError);
           offset = valueNode.range[2];
@@ -4149,7 +4149,7 @@ var require_resolve_end = __commonJS({
       let comment = "";
       if (end) {
         let hasSpace = false;
-        let sep2 = "";
+        let sep3 = "";
         for (const token of end) {
           const { source, type } = token;
           switch (type) {
@@ -4163,13 +4163,13 @@ var require_resolve_end = __commonJS({
               if (!comment)
                 comment = cb;
               else
-                comment += sep2 + cb;
-              sep2 = "";
+                comment += sep3 + cb;
+              sep3 = "";
               break;
             }
             case "newline":
               if (comment)
-                sep2 += source;
+                sep3 += source;
               hasSpace = true;
               break;
             default:
@@ -4212,18 +4212,18 @@ var require_resolve_flow_collection = __commonJS({
       let offset = fc.offset + fc.start.source.length;
       for (let i = 0; i < fc.items.length; ++i) {
         const collItem = fc.items[i];
-        const { start, key, sep: sep2, value } = collItem;
+        const { start, key, sep: sep3, value } = collItem;
         const props = resolveProps.resolveProps(start, {
           flow: fcName,
           indicator: "explicit-key-ind",
-          next: key ?? sep2?.[0],
+          next: key ?? sep3?.[0],
           offset,
           onError,
           parentIndent: fc.indent,
           startOnNewline: false
         });
         if (!props.found) {
-          if (!props.anchor && !props.tag && !sep2 && !value) {
+          if (!props.anchor && !props.tag && !sep3 && !value) {
             if (i === 0 && props.comma)
               onError(props.comma, "UNEXPECTED_TOKEN", `Unexpected , in ${fcName}`);
             else if (i < fc.items.length - 1)
@@ -4277,8 +4277,8 @@ var require_resolve_flow_collection = __commonJS({
             }
           }
         }
-        if (!isMap && !sep2 && !props.found) {
-          const valueNode = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, sep2, null, props, onError);
+        if (!isMap && !sep3 && !props.found) {
+          const valueNode = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, sep3, null, props, onError);
           coll.items.push(valueNode);
           offset = valueNode.range[2];
           if (isBlock(value))
@@ -4290,7 +4290,7 @@ var require_resolve_flow_collection = __commonJS({
           if (isBlock(key))
             onError(keyNode.range, "BLOCK_IN_FLOW", blockMsg);
           ctx.atKey = false;
-          const valueProps = resolveProps.resolveProps(sep2 ?? [], {
+          const valueProps = resolveProps.resolveProps(sep3 ?? [], {
             flow: fcName,
             indicator: "map-value-ind",
             next: value,
@@ -4301,8 +4301,8 @@ var require_resolve_flow_collection = __commonJS({
           });
           if (valueProps.found) {
             if (!isMap && !props.found && ctx.options.strict) {
-              if (sep2)
-                for (const st of sep2) {
+              if (sep3)
+                for (const st of sep3) {
                   if (st === valueProps.found)
                     break;
                   if (st.type === "newline") {
@@ -4319,7 +4319,7 @@ var require_resolve_flow_collection = __commonJS({
             else
               onError(valueProps.start, "MISSING_CHAR", `Missing , or : between ${fcName} items`);
           }
-          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : valueProps.found ? composeEmptyNode(ctx, valueProps.end, sep2, null, valueProps, onError) : null;
+          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : valueProps.found ? composeEmptyNode(ctx, valueProps.end, sep3, null, valueProps, onError) : null;
           if (valueNode) {
             if (isBlock(value))
               onError(valueNode.range, "BLOCK_IN_FLOW", blockMsg);
@@ -4499,7 +4499,7 @@ var require_resolve_block_scalar = __commonJS({
           chompStart = i + 1;
       }
       let value = "";
-      let sep2 = "";
+      let sep3 = "";
       let prevMoreIndented = false;
       for (let i = 0; i < contentStart; ++i)
         value += lines[i][0].slice(trimIndent) + "\n";
@@ -4516,24 +4516,24 @@ var require_resolve_block_scalar = __commonJS({
           indent2 = "";
         }
         if (type === Scalar.Scalar.BLOCK_LITERAL) {
-          value += sep2 + indent2.slice(trimIndent) + content3;
-          sep2 = "\n";
+          value += sep3 + indent2.slice(trimIndent) + content3;
+          sep3 = "\n";
         } else if (indent2.length > trimIndent || content3[0] === "	") {
-          if (sep2 === " ")
-            sep2 = "\n";
-          else if (!prevMoreIndented && sep2 === "\n")
-            sep2 = "\n\n";
-          value += sep2 + indent2.slice(trimIndent) + content3;
-          sep2 = "\n";
+          if (sep3 === " ")
+            sep3 = "\n";
+          else if (!prevMoreIndented && sep3 === "\n")
+            sep3 = "\n\n";
+          value += sep3 + indent2.slice(trimIndent) + content3;
+          sep3 = "\n";
           prevMoreIndented = true;
         } else if (content3 === "") {
-          if (sep2 === "\n")
+          if (sep3 === "\n")
             value += "\n";
           else
-            sep2 = "\n";
+            sep3 = "\n";
         } else {
-          value += sep2 + content3;
-          sep2 = " ";
+          value += sep3 + content3;
+          sep3 = " ";
           prevMoreIndented = false;
         }
       }
@@ -4715,25 +4715,25 @@ var require_resolve_flow_scalar = __commonJS({
       if (!match)
         return source;
       let res = match[1];
-      let sep2 = " ";
+      let sep3 = " ";
       let pos = first.lastIndex;
       line.lastIndex = pos;
       while (match = line.exec(source)) {
         if (match[1] === "") {
-          if (sep2 === "\n")
-            res += sep2;
+          if (sep3 === "\n")
+            res += sep3;
           else
-            sep2 = "\n";
+            sep3 = "\n";
         } else {
-          res += sep2 + match[1];
-          sep2 = " ";
+          res += sep3 + match[1];
+          sep3 = " ";
         }
         pos = line.lastIndex;
       }
       const last = /[ \t]*(.*)/sy;
       last.lastIndex = pos;
       match = last.exec(source);
-      return res + sep2 + (match?.[1] ?? "");
+      return res + sep3 + (match?.[1] ?? "");
     }
     function doubleQuotedValue(source, onError) {
       let res = "";
@@ -5543,14 +5543,14 @@ var require_cst_stringify = __commonJS({
         }
       }
     }
-    function stringifyItem({ start, key, sep: sep2, value }) {
+    function stringifyItem({ start, key, sep: sep3, value }) {
       let res = "";
       for (const st of start)
         res += st.source;
       if (key)
         res += stringifyToken(key);
-      if (sep2)
-        for (const st of sep2)
+      if (sep3)
+        for (const st of sep3)
           res += st.source;
       if (value)
         res += stringifyToken(value);
@@ -6717,18 +6717,18 @@ var require_parser = __commonJS({
         if (this.type === "map-value-ind") {
           const prev = getPrevProps(this.peek(2));
           const start = getFirstKeyStartProps(prev);
-          let sep2;
+          let sep3;
           if (scalar.end) {
-            sep2 = scalar.end;
-            sep2.push(this.sourceToken);
+            sep3 = scalar.end;
+            sep3.push(this.sourceToken);
             delete scalar.end;
           } else
-            sep2 = [this.sourceToken];
+            sep3 = [this.sourceToken];
           const map2 = {
             type: "block-map",
             offset: scalar.offset,
             indent: scalar.indent,
-            items: [{ start, key: scalar, sep: sep2 }]
+            items: [{ start, key: scalar, sep: sep3 }]
           };
           this.onKeyLine = true;
           this.stack[this.stack.length - 1] = map2;
@@ -6881,15 +6881,15 @@ var require_parser = __commonJS({
                 } else if (isFlowToken(it.key) && !includesToken(it.sep, "newline")) {
                   const start2 = getFirstKeyStartProps(it.start);
                   const key = it.key;
-                  const sep2 = it.sep;
-                  sep2.push(this.sourceToken);
+                  const sep3 = it.sep;
+                  sep3.push(this.sourceToken);
                   delete it.key;
                   delete it.sep;
                   this.stack.push({
                     type: "block-map",
                     offset: this.offset,
                     indent: this.indent,
-                    items: [{ start: start2, key, sep: sep2 }]
+                    items: [{ start: start2, key, sep: sep3 }]
                   });
                 } else if (start.length > 0) {
                   it.sep = it.sep.concat(start, this.sourceToken);
@@ -7083,13 +7083,13 @@ var require_parser = __commonJS({
             const prev = getPrevProps(parent);
             const start = getFirstKeyStartProps(prev);
             fixFlowSeqItems(fc);
-            const sep2 = fc.end.splice(1, fc.end.length);
-            sep2.push(this.sourceToken);
+            const sep3 = fc.end.splice(1, fc.end.length);
+            sep3.push(this.sourceToken);
             const map2 = {
               type: "block-map",
               offset: fc.offset,
               indent: fc.indent,
-              items: [{ start, key: fc, sep: sep2 }]
+              items: [{ start, key: fc, sep: sep3 }]
             };
             this.onKeyLine = true;
             this.stack[this.stack.length - 1] = map2;
@@ -10735,10 +10735,10 @@ function useColor() {
 // node_modules/commander/index.js
 var program = new Command();
 
-// src/shared/config-store.ts
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { dirname as dirname2, join as join2 } from "node:path";
+// src/bundled-docs/doc-resolver/doc-resolver.ts
+import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { dirname, join, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 
 // node_modules/zod/v4/classic/external.js
 var external_exports = {};
@@ -15772,7 +15772,7 @@ var recursive = /* @__PURE__ */ new WeakMap();
 var NONE = 0;
 var ASSUMED = 1;
 var PROVEN = 2;
-function isRecursive(inst, stack, resolve3) {
+function isRecursive(inst, stack, resolve4) {
   const cached2 = recursive.get(inst);
   if (cached2 !== void 0)
     return cached2 ? PROVEN : NONE;
@@ -15782,7 +15782,7 @@ function isRecursive(inst, stack, resolve3) {
   let result = NONE;
   const check2 = (child) => {
     if (result !== PROVEN && child?._zod) {
-      const answer = isRecursive(child, stack, resolve3);
+      const answer = isRecursive(child, stack, resolve4);
       if (answer > result)
         result = answer;
     }
@@ -15793,7 +15793,7 @@ function isRecursive(inst, stack, resolve3) {
       const desc = Object.getOwnPropertyDescriptor(sh, key);
       if (spread && !desc.enumerable)
         continue;
-      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve3) : NONE;
+      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve4) : NONE;
       if (child > answer)
         answer = child;
     }
@@ -15860,7 +15860,7 @@ function isRecursive(inst, stack, resolve3) {
       break;
     // `$ZodLazy` caches its inner on the def, so a resolved edge is followed exactly
     case "lazy": {
-      const inner = def._cachedInner ?? (resolve3 ? inst._zod.innerType : void 0);
+      const inner = def._cachedInner ?? (resolve4 ? inst._zod.innerType : void 0);
       merge3(inner ? isRecursive(inner, stack, false) : ASSUMED);
       break;
     }
@@ -30415,8 +30415,83 @@ function date4(params) {
   return _coercedDate(ZodDate, params);
 }
 
+// src/bundled-docs/doc-resolver/doc-resolver.ts
+var DocIdSchema = external_exports.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
+var FileDocResolverPropsSchema = external_exports.object({ docsDir: external_exports.string().min(1) });
+var InstallDocsPropsSchema = external_exports.object({
+  moduleUrl: external_exports.url().refine((value) => value.startsWith("file:")),
+  env: external_exports.record(external_exports.string(), external_exports.string().optional())
+});
+var DocNotFoundPropsSchema = external_exports.object({ id: external_exports.string(), available: external_exports.array(external_exports.string()) });
+var InvalidDocIdError = class extends Error {
+  name = "InvalidDocIdError";
+};
+var DocNotFoundError = class extends Error {
+  name = "DocNotFoundError";
+  available;
+  constructor(props) {
+    const parsed = DocNotFoundPropsSchema.parse(props);
+    super(`Unknown doc "${parsed.id}" \u2014 available: ${parsed.available.join(", ")}`);
+    this.available = parsed.available;
+  }
+};
+var FileDocResolver = class _FileDocResolver {
+  docsDir;
+  constructor(props) {
+    this.docsDir = resolve(FileDocResolverPropsSchema.parse(props).docsDir);
+  }
+  list() {
+    return readdirSync(this.docsDir, { withFileTypes: true }).filter((entry) => entry.isFile() && entry.name.endsWith(".md")).map((entry) => entry.name.slice(0, -3)).sort();
+  }
+  resolve(id) {
+    if (!DocIdSchema.safeParse(id).success) {
+      throw new InvalidDocIdError("Invalid doc id \u2014 use lowercase letters, digits, and single hyphens");
+    }
+    const path3 = join(this.docsDir, `${id}.md`);
+    if (!existsSync(path3) || !statSync(path3).isFile()) {
+      throw new DocNotFoundError({ id, available: this.list() });
+    }
+    const realPath = realpathSync(path3);
+    if (!realPath.startsWith(`${realpathSync(this.docsDir)}${sep}`)) {
+      throw new DocNotFoundError({ id, available: this.list() });
+    }
+    return { id, path: realPath, contents: readFileSync(realPath, "utf8") };
+  }
+  static fromInstall(props) {
+    const { moduleUrl, env } = InstallDocsPropsSchema.parse({ ...props, env: { ...props.env } });
+    const override = env["FLIGHT_RULES_HOME"]?.trim();
+    const home = override || join(dirname(fileURLToPath(moduleUrl)), "..");
+    const docsDir = resolve(home, "docs");
+    if (!existsSync(docsDir) || !statSync(docsDir).isDirectory()) {
+      const source = override ? `FLIGHT_RULES_HOME is set to ${override} but` : "Bundled docs directory";
+      throw new Error(`${source} ${docsDir} does not exist or is not a directory \u2014 point FLIGHT_RULES_HOME at the flight-rules install root`);
+    }
+    return new _FileDocResolver({ docsDir });
+  }
+};
+
+// src/bundled-docs/commands/doc/command.ts
+function createDocCommand(getResolver) {
+  const doc = new Command("doc");
+  doc.exitOverride().argument("<id>", "doc id, the basename of a file in docs/ without .md").option("--path", "print the absolute path instead of the contents").action((id, opts) => {
+    if (!DocIdSchema.safeParse(id).success) {
+      throw new InvalidDocIdError("Invalid doc id \u2014 use lowercase letters, digits, and single hyphens");
+    }
+    const resolved = getResolver().resolve(id);
+    process.stdout.write(opts.path ? `${resolved.path}
+` : resolved.contents.endsWith("\n") ? resolved.contents : `${resolved.contents}
+`);
+  });
+  return doc;
+}
+
+// src/shared/config-store.ts
+import { existsSync as existsSync2, mkdirSync, readFileSync as readFileSync2, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname as dirname3, join as join3 } from "node:path";
+
 // src/shared/config.ts
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname as dirname2, isAbsolute, join as join2, resolve as resolve2 } from "node:path";
 
 // src/tasks/jira-task-tracker/jira-host.ts
 var JiraHostSchema = external_exports.string().transform((host) => host.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, ""));
@@ -30550,12 +30625,12 @@ function getRfcDir(config2, cwd) {
     }
     return config2.rfcStoragePath;
   }
-  return join(cwd, "rfcs");
+  return join2(cwd, "rfcs");
 }
 function getQaRecipePath(config2, configPath) {
   const recipe = config2.qaRecipe ?? "flight-rules.qa.md";
   if (isAbsolute(recipe)) return recipe;
-  return resolve(dirname(configPath), recipe);
+  return resolve2(dirname2(configPath), recipe);
 }
 
 // src/shared/config-store.ts
@@ -30576,16 +30651,16 @@ var ConfigStore = class {
   }
   /** The flight-rules config file path, honouring `FLIGHT_RULES_CONFIG`. */
   filePath() {
-    return this.env["FLIGHT_RULES_CONFIG"] ?? join2(this.cwd, ".claude", "flight-rules.local.md");
+    return this.env["FLIGHT_RULES_CONFIG"] ?? join3(this.cwd, ".claude", "flight-rules.local.md");
   }
   pathFor(scope) {
     switch (scope) {
       case "user":
-        return join2(this.env["CLAUDE_CONFIG_DIR"] ?? join2(this.home, ".claude"), "settings.json");
+        return join3(this.env["CLAUDE_CONFIG_DIR"] ?? join3(this.home, ".claude"), "settings.json");
       case "project":
-        return join2(this.cwd, ".claude", "settings.json");
+        return join3(this.cwd, ".claude", "settings.json");
       case "local":
-        return join2(this.cwd, ".claude", "settings.local.json");
+        return join3(this.cwd, ".claude", "settings.local.json");
       case "file":
         return this.filePath();
     }
@@ -30669,8 +30744,8 @@ var ConfigStore = class {
   }
   readLayer(scope) {
     const path3 = this.pathFor(scope);
-    if (!existsSync(path3)) return { scope, path: path3, present: false, values: {} };
-    const contents = readFileSync(path3, "utf-8");
+    if (!existsSync2(path3)) return { scope, path: path3, present: false, values: {} };
+    const contents = readFileSync2(path3, "utf-8");
     if (scope === "file") return { scope, path: path3, present: true, values: parseFrontmatter(contents) };
     const options = this.pluginOptions(this.parseSettings(path3, contents));
     return { scope, path: path3, present: options !== void 0, values: options ?? {} };
@@ -30695,8 +30770,8 @@ var ConfigStore = class {
   }
   write(scope, update) {
     const path3 = this.pathFor(scope);
-    const contents = existsSync(path3) ? readFileSync(path3, "utf-8") : void 0;
-    mkdirSync(dirname2(path3), { recursive: true });
+    const contents = existsSync2(path3) ? readFileSync2(path3, "utf-8") : void 0;
+    mkdirSync(dirname3(path3), { recursive: true });
     if (scope === "file") {
       const values = update(contents === void 0 ? {} : parseFrontmatter(contents));
       const body = contents?.replace(/^---\n[\s\S]*?\n---\n?/, "") ?? "";
@@ -32052,8 +32127,8 @@ function withCustomRequest(customRequest) {
 
 // node_modules/@octokit/auth-token/dist-bundle/index.js
 var b64url = "(?:[a-zA-Z0-9_-]+)";
-var sep = "\\.";
-var jwtRE = new RegExp(`^${b64url}${sep}${b64url}${sep}${b64url}$`);
+var sep2 = "\\.";
+var jwtRE = new RegExp(`^${b64url}${sep2}${b64url}${sep2}${b64url}$`);
 var isJWT = jwtRE.test.bind(jwtRE);
 async function auth(token) {
   const isApp = isJWT(token);
@@ -35512,7 +35587,7 @@ var GitHubTaskTracker = class {
 };
 
 // src/tasks/jira-task-tracker/jira-task-tracker.ts
-import { readFileSync as readFileSync2 } from "node:fs";
+import { readFileSync as readFileSync3 } from "node:fs";
 import { basename } from "node:path";
 
 // src/tasks/jira-task-tracker/jira-api-error.ts
@@ -35611,7 +35686,7 @@ var JiraClient = class {
       const retryAfterSeconds = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : defaultRetryAfterSeconds;
       const jitter = 0.7 + Math.random() * 0.6;
       const delayMs = Math.min(retryAfterSeconds * 1e3 * jitter, maxBackoffMs);
-      await new Promise((resolve3) => setTimeout(resolve3, delayMs));
+      await new Promise((resolve4) => setTimeout(resolve4, delayMs));
       return this.fetchWithRetry(url2, init, attempt + 1);
     }
     return res;
@@ -35663,7 +35738,7 @@ var ConfluenceClient = class {
       const retryAfterSeconds = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : defaultRetryAfterSeconds2;
       const jitter = 0.7 + Math.random() * 0.6;
       const delayMs = Math.min(retryAfterSeconds * 1e3 * jitter, maxBackoffMs2);
-      await new Promise((resolve3) => setTimeout(resolve3, delayMs));
+      await new Promise((resolve4) => setTimeout(resolve4, delayMs));
       return this.fetchWithRetry(url2, init, attempt + 1);
     }
     return res;
@@ -38271,10 +38346,10 @@ function resolveAll(constructs2, events, context) {
   const called = [];
   let index2 = -1;
   while (++index2 < constructs2.length) {
-    const resolve3 = constructs2[index2].resolveAll;
-    if (resolve3 && !called.includes(resolve3)) {
-      events = resolve3(events, context);
-      called.push(resolve3);
+    const resolve4 = constructs2[index2].resolveAll;
+    if (resolve4 && !called.includes(resolve4)) {
+      events = resolve4(events, context);
+      called.push(resolve4);
     }
   }
   return events;
@@ -45852,7 +45927,7 @@ var JiraTaskTracker = class {
    */
   async addAttachment(ticketId, filePath) {
     const filename = basename(filePath);
-    const file2 = new File([readFileSync2(filePath)], filename, { type: this.mimeTypes.forFilename(filename) });
+    const file2 = new File([readFileSync3(filePath)], filename, { type: this.mimeTypes.forFilename(filename) });
     const uploaded = JiraUploadedAttachmentsSchema.parse(
       await this.client.upload(`/issue/${ticketId}/attachments`, [file2])
     );
@@ -46100,9 +46175,9 @@ var JiraTaskTracker = class {
 };
 
 // src/tasks/commands/resolve-body.ts
-import { readFileSync as readFileSync3 } from "node:fs";
+import { readFileSync as readFileSync4 } from "node:fs";
 function resolveBody(opts) {
-  if (opts.bodyFile !== void 0) return readFileSync3(opts.bodyFile, "utf8");
+  if (opts.bodyFile !== void 0) return readFileSync4(opts.bodyFile, "utf8");
   if (opts.body !== void 0) return opts.body;
   throw new Error("one of --body or --body-file is required");
 }
@@ -46704,11 +46779,11 @@ function createUsersCommand(getTracker) {
 }
 
 // src/tasks/commands/rfc/command.ts
-import { readdirSync } from "node:fs";
+import { readdirSync as readdirSync2 } from "node:fs";
 function getNextRfcId(rfcDir) {
   let files;
   try {
-    files = readdirSync(rfcDir);
+    files = readdirSync2(rfcDir);
   } catch {
     return "RFC-001";
   }
@@ -46731,15 +46806,15 @@ function createRfcCommand(getConfig, getCwd = () => process.cwd()) {
 }
 
 // src/tasks/qa-instructions/qa-instructions.ts
-import { existsSync as existsSync2, readFileSync as readFileSync4, statSync } from "node:fs";
-import { dirname as dirname3, join as join3, resolve as resolve2 } from "node:path";
+import { existsSync as existsSync3, readFileSync as readFileSync5, statSync as statSync2 } from "node:fs";
+import { dirname as dirname4, join as join4, resolve as resolve3 } from "node:path";
 var atxHeading = /^ {0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$/;
 var fenceRun2 = /^ {0,3}(`{3,}|~{3,})/;
 var legacyHint = 'Legacy QA recipe in use. Move its content into a QA.md at the repo root (or a "QA" section of AGENTS.md); see docs/qa-instructions.md.';
 var nodeFileSystem = {
-  isFile: (path3) => existsSync2(path3) && statSync(path3).isFile(),
-  exists: (path3) => existsSync2(path3),
-  readFile: (path3) => readFileSync4(path3, "utf8")
+  isFile: (path3) => existsSync3(path3) && statSync2(path3).isFile(),
+  exists: (path3) => existsSync3(path3),
+  readFile: (path3) => readFileSync5(path3, "utf8")
 };
 var QaInstructionsFinder = class {
   fs;
@@ -46788,26 +46863,26 @@ var QaInstructionsFinder = class {
   }
   /** The start directory and each parent up to the repository root; only the start when no root is found. */
   levels(from) {
-    const absolute = resolve2(from);
-    const start = this.fs.isFile(absolute) ? dirname3(absolute) : absolute;
+    const absolute = resolve3(from);
+    const start = this.fs.isFile(absolute) ? dirname4(absolute) : absolute;
     const levels = [];
     let current = start;
     for (; ; ) {
       levels.push(current);
-      if (this.fs.exists(join3(current, ".git"))) return levels;
-      const parent = dirname3(current);
+      if (this.fs.exists(join4(current, ".git"))) return levels;
+      const parent = dirname4(current);
       if (parent === current) return [start];
       current = parent;
     }
   }
   sourceAt(dir) {
-    const agentsMd = join3(dir, "AGENTS.md");
+    const agentsMd = join4(dir, "AGENTS.md");
     if (this.fs.isFile(agentsMd)) {
       const section = this.extractQaSection(this.fs.readFile(agentsMd));
       if (section !== void 0)
         return { path: agentsMd, kind: "agents-md-section", dir, content: section };
     }
-    return this.fileSource(join3(dir, "QA.md"), "qa-md", dir) ?? this.fileSource(join3(dir, ".agents", "QA.md"), "agents-dir-qa-md", dir);
+    return this.fileSource(join4(dir, "QA.md"), "qa-md", dir) ?? this.fileSource(join4(dir, ".agents", "QA.md"), "agents-dir-qa-md", dir);
   }
   fileSource(path3, kind, dir) {
     if (!this.fs.isFile(path3)) return void 0;
@@ -46816,7 +46891,7 @@ var QaInstructionsFinder = class {
   }
   legacySource(path3) {
     if (path3 === void 0) return void 0;
-    const source = this.fileSource(path3, "legacy-recipe", dirname3(path3));
+    const source = this.fileSource(path3, "legacy-recipe", dirname4(path3));
     return source === void 0 ? void 0 : { ...source, legacy: true, hint: legacyHint };
   }
 };
@@ -47163,11 +47238,11 @@ var NodeGitExecutor = class {
 };
 
 // src/git/commands/commit/command.ts
-import { readFileSync as readFileSync6 } from "node:fs";
+import { readFileSync as readFileSync7 } from "node:fs";
 
 // src/git/commit-message-builder/commit-message-builder.ts
-import { readFileSync as readFileSync5 } from "node:fs";
-import { dirname as dirname4, join as join4 } from "node:path";
+import { readFileSync as readFileSync6 } from "node:fs";
+import { dirname as dirname5, join as join5 } from "node:path";
 
 // src/git/commit-message-builder/commit-message.schema.ts
 var CommitMessageInputSchema = external_exports.object({
@@ -47224,8 +47299,8 @@ var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
   }
   static readPluginVersion(binPath) {
     try {
-      const pkgPath = join4(dirname4(binPath), "..", "package.json");
-      const parsed = JSON.parse(readFileSync5(pkgPath, "utf-8"));
+      const pkgPath = join5(dirname5(binPath), "..", "package.json");
+      const parsed = JSON.parse(readFileSync6(pkgPath, "utf-8"));
       if (typeof parsed === "object" && parsed !== null && "version" in parsed && typeof parsed.version === "string") {
         return parsed.version;
       }
@@ -47262,7 +47337,7 @@ function createGitCommand(getExecutor) {
       type: opts.type,
       scope: opts.scope,
       description: opts.description,
-      body: opts.bodyFile !== void 0 ? readFileSync6(opts.bodyFile, "utf8") : opts.body,
+      body: opts.bodyFile !== void 0 ? readFileSync7(opts.bodyFile, "utf8") : opts.body,
       footers: opts.footer,
       model: opts.model ?? void 0
     });
@@ -47303,7 +47378,7 @@ function createGitCommand(getExecutor) {
 import { execFile as execFile2 } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join as join5 } from "node:path";
+import { join as join6 } from "node:path";
 import { promisify as promisify2 } from "node:util";
 
 // src/git/pr-template/pr-template.ts
@@ -47462,8 +47537,8 @@ var GhPullRequestHost = class {
     return { number: Number(match[1]), url: url2 };
   }
   async withBodyFile(body, run2) {
-    const dir = await mkdtemp(join5(tmpdir(), "flight-rules-"));
-    const bodyFile = join5(dir, "body.md");
+    const dir = await mkdtemp(join6(tmpdir(), "flight-rules-"));
+    const bodyFile = join6(dir, "body.md");
     try {
       await writeFile(bodyFile, body, "utf8");
       return await run2(bodyFile);
@@ -47692,6 +47767,7 @@ function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = () => ne
   program2.addCommand(createCompetenciesCommand(config2));
   program2.addCommand(createConfigCommand(getConfigStore));
   program2.addCommand(createHookCommand());
+  program2.addCommand(createDocCommand(() => FileDocResolver.fromInstall({ moduleUrl: import.meta.url, env: process.env })));
   const probe = () => new NodeToolProbe();
   program2.addCommand(createCheckCommand(config2, tracker, getConfigPath, probe));
   return program2;
