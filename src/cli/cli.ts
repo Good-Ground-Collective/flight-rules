@@ -14,6 +14,7 @@ import { createQaCommand } from '../tasks/commands/qa/command.js'
 import { createCompetenciesCommand } from '../tasks/commands/competencies/command.js'
 import { createCheckCommand } from '../tasks/commands/check/command.js'
 import { createConfigCommand } from '../tasks/commands/config/command.js'
+import { createHookCommand } from '../hooks/commands/hook/command.js'
 import type { TaskTracker } from '../tasks/task-tracker/task-tracker.js'
 import { NodeGitExecutor } from '../git/git-executor/git-executor.js'
 import { createGitCommand } from '../git/commands/commit/command.js'
@@ -117,6 +118,7 @@ export function buildProgram(
   program.addCommand(createQaCommand(config, getConfigPath))
   program.addCommand(createCompetenciesCommand(config))
   program.addCommand(createConfigCommand(getConfigStore))
+  program.addCommand(createHookCommand())
   const probe = (): ToolProbe => new NodeToolProbe()
   program.addCommand(createCheckCommand(config, tracker, getConfigPath, probe))
   return program
