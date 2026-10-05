@@ -74,6 +74,14 @@ describe("initiative command", () => {
     output.mockRestore();
   });
 
+  it('rejects "create" when the body references a machine-local path', async () => {
+    const tracker = makeTracker();
+    await expect(
+      run(tracker, ["create", "--title", "T", "--body", "Plan in /home/pm/plan.md"]),
+    ).rejects.toThrow("references files on this machine");
+    expect(tracker.createInitiative).not.toHaveBeenCalled();
+  });
+
   it('calls getInitiative and prints JSON for "get"', async () => {
     const tracker = makeTracker();
     const output = vi.spyOn(process.stdout, "write").mockImplementation(() => true);

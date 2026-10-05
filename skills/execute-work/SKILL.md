@@ -15,7 +15,7 @@ This is the skill that builds the thing. You are handed a **ticket id**; you han
 
 - You are handed a **ticket id**, and optionally a **base branch**. `execute-wave` supplies the base when it drives you as one ticket of a wave; a human invoking you directly normally doesn't.
 - Run everything from the **repo root** (the `flight-rules` CLI resolves config relative to CWD).
-- Run `flight-rules config path`. Read and write the file it prints; `$FLIGHT_RULES_CONFIG` overrides the default. Reading one path and writing another strands your answers where nothing looks for them.
+- **Read and write config only through the CLI.** Config can live in several places that the CLI merges key by key: the user's `~/.claude/settings.json`, the project's `.claude/settings.json` and `.claude/settings.local.json` (each under `pluginConfigs["flight-rules@flight-rules"].options`), and the config file that `flight-rules config path` prints. `flight-rules config show` prints the merged values and where each came from; `flight-rules config set` writes one. Never hand-edit any of these files — a value written to the wrong layer is shadowed by another and silently ignored.
 - `flight-rules check` reports `"ok": true`. If it doesn't, fix the environment first — the run mutates tracker state, and a half-configured CLI fails partway through.
 - Config carries a **`repo`** field (`owner/repo`). `flight-rules pr create` needs it regardless of tracker — the PR always lands on GitHub — and it throws before parsing a single option when it is missing. On a Jira-tracked repo `repo` is often absent, because the tracker doesn't need it and `skills/setup/SKILL.md` doesn't ask for it. **Step 2 discovers and stores it**, and it must be settled _before_ the loop runs: reaching step 7 without it means a pushed branch and no PR.
 - The **working tree is clean**. A dirty tree stops the run _before any mutation_: the commit step commits by explicit path, so pre-existing edits to a file the implementer also touched would be swept into the commit silently.
@@ -53,6 +53,14 @@ Also note the ticket's title (for the branch slug), its labels, and its `metadat
 
 **If the contract section for this format is missing or empty — Acceptance Criteria on a layered body, Fixed When on a bug report — stop and ask the user.** Never infer the contract from the Problem Statement or the Symptom, and never write criteria yourself — a fabricated contract makes the verifier's PASS meaningless. A ticket with no contract isn't ready; say so and stop.
 
+**The ticket is the source of truth.** Run as if you were on a fresh machine with only this repo's clone, the tracker, and the URLs the ticket links to. Your context comes from the ticket, its parent epic and initiative, and the published artifacts they link (step 5). Nothing else. Scan the body for a reference that does not resolve that way:
+
+- an absolute or home path (`/Users/…`, `/home/…`, `~/…`) or a `file://` URL;
+- a repo-relative path that neither exists in this clone nor is a file the ticket asks you to create;
+- a pointer to something unwritten: "per the planning doc", "see decisions.md", or a decision ID that no body or artifact defines.
+
+**On any of these, stop and report a ticket defect.** Name each unresolvable reference and say the ticket needs it inlined or published (see the Portable context section of `flight-rules doc layered-body-format`). Do not look for the file on this machine, even if it happens to exist. A run that works only on the author's laptop hides the defect from the next engineer.
+
 If the ticket carries the `sharpen-the-saw` label, stop and point the user at `/sharpen-the-saw` instead. That work is reserved for a human.
 
 Confirm the working tree is clean before going further:
@@ -69,7 +77,7 @@ Three config values decide whether step 7 can finish, and none of them is guaran
 
 This step is **discover → ask → store**, and it is interactive **once per repo**. After the first run it is a silent config read.
 
-**Read** the config file resolved by `flight-rules config path`. If `inProgressStatus`, `inReviewStatus` and `repo` are all present, use them and move on.
+**Read** the merged config with `flight-rules config show`. If `values.inProgressStatus`, `values.inReviewStatus` and `values.repo` are all present, use them and move on.
 
 **Discover** the reachable statuses when either status is missing:
 
@@ -95,21 +103,17 @@ gh repo view --json nameWithOwner --jq .nameWithOwner
 
 Questions to ask: "Which status means work has started?", "Which status means a PR is open and awaiting review? (it may not appear in the list — the tracker only reports statuses reachable from where the ticket sits now)", and "PRs will be opened against `<owner/repo>` — is that right?"
 
-**Store** all the answers in **one** `Write` of the config file resolved by `flight-rules config path`, exactly as `skills/setup/SKILL.md` does — one write, not one per field. The new keys go **inside the `---` frontmatter fences**, alongside the existing fields, which you preserve verbatim. Write the whole file:
+**Store** each answer with `flight-rules config set`, one call per field:
 
-```markdown
----
-tracker: <existing value>
-<every other existing field, unchanged>
-repo: <owner/repo>
-inProgressStatus: <the chosen in-progress status>
-inReviewStatus: <the chosen in-review status>
----
+```bash
+flight-rules config set repo "<owner/repo>"
+flight-rules config set inProgressStatus "<the chosen in-progress status>"
+flight-rules config set inReviewStatus "<the chosen in-review status>"
 ```
 
-A key that was already present and correct needs no new value — carry it through unchanged. This is about which keys you _add_, not which keys survive: every existing field stays in the file, and no key appears twice.
+Without `--scope`, each value lands where the key already lives, else in the config file when one exists, else in `.claude/settings.local.json`. That default is right for `repo`, which is per project. Status names belong to the board, and a board is usually shared across repos, so when no layer holds them yet, ask the user whether to store them for every project (`--scope user`) or just this one. If the command's JSON carries a `warning`, a higher-precedence layer still holds an older value — show the warning and offer to `flight-rules config unset <key> --scope <that scope>`.
 
-The delimiters matter. The config loader reads only the block between the **first** `---` pair at the very start of the file, and the schema is non-strict — so anything written after the closing `---` is silently dropped with no error, and this step would then re-prompt on every single run instead of once.
+Confirm with `flight-rules config show` that the merged values are the ones you stored; a re-prompt on the next run means the write was shadowed.
 
 Later runs in this repo are then fully non-interactive.
 
@@ -164,6 +168,14 @@ Build the brief you will hand `code-implementation`. It gets exactly:
   ```
 
   On GitHub the epic payload already carries `tdd`, so no second call is needed. Include only the parts that bear on this ticket.
+
+- **The parent initiative and any other linked artifact.** The epic payload does not name its initiative. Find it on the `**Context:**` line that opens the High-level technical writeup of the ticket or epic, then read it:
+
+  ```bash
+  flight-rules initiative get <initiativeId>
+  ```
+
+  Fetch any other artifact that line links: a design by `flight-rules tdd get <id>`, a GitHub file or Discussion URL with `gh`. Include only what bears on this ticket. When a link cannot be fetched, stop and report it the way step 1 reports a ticket defect.
 
 Do not include your own opinion on how to build it. The walkthrough and the charter are the guidance; anything you add is a third voice the agent has to reconcile.
 
@@ -245,9 +257,9 @@ Three iterations is a **hard ceiling**, not a target. Do not restart the count, 
 
 Only once `verified: true`.
 
-**Capture the evidence.** Decide whether this change has a visible surface. Read the ticket's Solution, its contract items, and its Guided Walkthrough or Reproduction Notes, and look at the union of `filesChanged[].path`: client or UI paths, or a contract item that names something a user sees, mean yes. A backend change still counts when its consequence renders somewhere — an endpoint that now returns a differently formatted string has a visible surface on the page that shows it, so that page is what you capture. Write two or three lines of **capture directions**: which screen, what to do, and whether the take is before-and-after (a bug) or after-only (a story).
+**Capture the evidence.** Decide whether this change has a visible surface. Read the ticket's Solution, its contract items, and its Guided Walkthrough or Reproduction Notes, and look at the union of `filesChanged[].path`: client or UI paths, or a contract item that names something a user sees, mean yes. A backend change still counts when its consequence renders somewhere — an endpoint that now returns a differently formatted string has a visible surface on the page that shows it, so that page is what you capture. The repo's QA instructions often say which page shows which backend change; read them with `flight-rules qa instructions --from <directory of the changed code>`. When they report `"found": false`, or describe no web surface for this change, there is nothing to capture. Write two or three lines of **capture directions**: which screen, what to do, and whether the take is before-and-after (a bug) or after-only (a story).
 
-When there is a visible surface, invoke the `capture-evidence` skill with the directions and the ticket id. It drives the app, writes screenshots and video under `.claude/evidence/<ticket>/`, and returns an evidence manifest: one entry per file with `path`, `kind` (`image` or `video`), `phase` (`before` or `after`), and `caption`. Keep the manifest; step 7 hands it to the PR body and the ticket comment, and step 9 reports it.
+When there is a visible surface, invoke the `capture-evidence` skill with the directions, the ticket id, and the directory of the changed code as `from`. It drives the app, writes screenshots and video under `.claude/evidence/<ticket>/`, and returns an evidence manifest: one entry per file with `path`, `kind` (`image` or `video`), `phase` (`before` or `after`), and `caption`. Keep the manifest; step 7 hands it to the PR body and the ticket comment, and step 9 reports it.
 
 When there is no visible surface, write one line instead: `No visual evidence: <reason>` — for example `No visual evidence: API-only change with no UI consequence.` That line travels everywhere the manifest would have.
 
@@ -255,10 +267,12 @@ When capture fails on a visible change, write `No visual evidence: capture faile
 
 `.claude/` is gitignored, so nothing under `.claude/evidence/` shows in `git status --porcelain` and nothing from it ever goes in the `--file` set below.
 
-**Commit.** Stage by explicit path. Passing any `--file` scopes the commit to exactly those paths, so an unrelated stray edit cannot ride along; **omitting `--file` entirely commits the whole index**, which is why you always pass it. Repeat `--file` once per path:
+**Commit.** Stage by explicit path. Passing any `--file` scopes the commit to exactly those paths, so an unrelated stray edit cannot ride along; **omitting `--file` entirely commits the whole index**, which is why you always pass it. Repeat `--file` once per path.
+
+**Always write a body.** A squash merge builds the PR's merge message from the commit messages, so a commit with no body reaches the default branch as a subject and a pile of `Flight-Rules-Version` trailers. Write the body to a file outside the repo, for example `$TMPDIR/<id>-commit.md`, and pass it with `--body-file`. Use a file rather than `--body "…"` so newlines, backticks, and `$` survive without shell escaping. The body says what changed and why, in a few short paragraphs or a bullet list: the behaviour the ticket asked for, the approach and any non-obvious choice, and the ticket id. Take it from the ticket and the implementer's report. Do not paste the diff or the verifier's checklist. Do not add trailers to the file either; the CLI appends them.
 
 ```bash
-flight-rules git commit --type <type> --scope <id> --description "<description>" --file <path> --file <path>
+flight-rules git commit --type <type> --scope <id> --description "<description>" --body-file "$TMPDIR/<id>-commit.md" --file <path> --file <path>
 ```
 
 `<description>` is **prose, not the kebab slug from step 4** — an imperative phrase like `add ticket transitions command`, matching the commit history. `feat(KAN-35): add-execute-work-orchestrator` is the shape to avoid; the branch is the only place kebab belongs.
@@ -382,7 +396,7 @@ Give the user, in this order:
 - **Never let an unverified change reach a PR.** `verified: true` is the only key that unlocks step 7.
 - **The autonomous review's verdict gates nothing.** `ESCALATE` does not reopen the implement/verify loop, `CLEAR` does not approve anything, and neither changes where this skill stops. Acting on a review finding here would put an unverified edit on the branch after the verifier signed off.
 - **Never tick contract checkboxes.** The `items[].done` flags are read-only to this skill; the verifier's itemized verdict is the record of what passed. A ticked box in a tracker is a claim nobody checked.
-- **All git and tracker mutations go through `flight-rules`.** Never hand-rolled `git commit`/`checkout`/`push`, never Claude Code auto-generated commits, never native tracker APIs (`gh issue edit`, the Jira REST API) for state changes. Read-only inspection with plain `git` or `gh` is fine.
+- **All git and tracker mutations go through `flight-rules`.** Never hand-rolled `git commit`/`checkout`/`push`, never Claude Code auto-generated commits, never native tracker APIs (`gh issue edit`, the Jira REST API) for state changes. Read-only inspection with plain `git` or `gh` is fine. The plugin's commit guard hook blocks a raw `git commit` in any repo with flight-rules config. When it fires, switch to `flight-rules git commit`; do not reach for the `FLIGHT_RULES_RAW_GIT=1` bypass during a run.
 - **`openQuestions` and `UNVERIFIABLE` always reach the user, unanswered.** The agents ask when they are genuinely unsure. Answering on their behalf converts a flagged unknown into a silent guess — which is the exact failure the loop exists to prevent.
 - **Never overrule the verifier.** A FAIL you disagree with is still a FAIL. Feed it back to the implementer or stop.
 
@@ -390,13 +404,14 @@ Give the user, in this order:
 
 - **Dirty working tree** → stop before mutating anything. Report the dirty paths and ask the user to commit or stash. No branch, no transition, no dispatch.
 - **Missing or empty contract section** (Acceptance Criteria, or Fixed When on a bug report) → stop and ask. Never invent the contract.
+- **Ticket references something a fresh clone can't resolve** (step 1 or step 5) → stop before mutating anything and report a ticket defect, listing each reference. Don't search this machine for the file. The fix belongs in the ticket, so the next engineer gets it too.
 - **`flight-rules check` fails** → stop and show the report. Fix config or credentials before running.
-- **`ticket status` reports the transition is unreachable** → the CLI's error carries an `available:` list. Show it to the user, ask which status they meant, then **write the corrected value back** into the config file resolved by `flight-rules config path` so the next run doesn't repeat the mistake. Don't retry blind.
+- **`ticket status` reports the transition is unreachable** → the CLI's error carries an `available:` list. Show it to the user, ask which status they meant, then **store the corrected value** with `flight-rules config set inReviewStatus "<status>"` (or `inProgressStatus`) so the next run doesn't repeat the mistake. Don't retry blind.
 - **Verifier returns `UNVERIFIABLE`** → do not treat it as PASS and do not treat it as FAIL, and **do not iterate**. Stop before spending another iteration, surface the criterion and the verifier's question to the user, and ask how to proceed. An untestable criterion is usually a ticket bug, not a code bug — another implementation pass cannot fix it. This takes precedence over any FAIL in the same result.
 - **Either agent returns `openQuestions`** → surface them unanswered, alongside whatever else that iteration produced.
 - **Third consecutive FAIL** → stop. Present the itemized evidence from the final verification, state that three iterations were used, and **leave the branch intact** with the work in place so a human can pick it up. Do not commit, do not push, do not open a PR, and do not move the ticket to in-review. Leave it in the in-progress status — that is now true.
 - **`git push` rejected** → stop and report. There is no force flag, and inventing one with raw git is not the fix.
-- **`pr create` fails on `repo`** — either `repo (owner/repo) is required in config to create pull requests` or `Invalid repo format …`. This is a config error, not a work error, and by the time you see it **the commit has landed and the branch is pushed**. So: fix `repo` in the config file resolved by `flight-rules config path` (confirm the value with the user first) and re-run **only** the `pr create` command, then carry on to the in-review transition. Do **not** redo the implement/verify loop, do not re-commit, and do **not** fall back to raw `gh pr create` — that bypasses the PR template, so the body would lose the authored What/Why sections, the OTS Materials block and the ticket link, which is the whole point of routing through the CLI. Re-run `pr create` with the same authored fields the tech-writer produced and the same `--attach` set — don't re-summon the agent and don't hand-write a body. If the user can't supply a valid `owner/repo`, stop and report the branch name and commit sha so the PR can be opened by hand.
+- **`pr create` fails on `repo`** — either `repo (owner/repo) is required in config to create pull requests` or `Invalid repo format …`. This is a config error, not a work error, and by the time you see it **the commit has landed and the branch is pushed**. So: fix `repo` with `flight-rules config set repo "<owner/repo>"` (confirm the value with the user first) and re-run **only** the `pr create` command, then carry on to the in-review transition. Do **not** redo the implement/verify loop, do not re-commit, and do **not** fall back to raw `gh pr create` — that bypasses the PR template, so the body would lose the authored What/Why sections, the OTS Materials block and the ticket link, which is the whole point of routing through the CLI. Re-run `pr create` with the same authored fields the tech-writer produced and the same `--attach` set — don't re-summon the agent and don't hand-write a body. If the user can't supply a valid `owner/repo`, stop and report the branch name and commit sha so the PR can be opened by hand.
 - **`pr create` exits non-zero but printed a PR URL** → a partial attachment upload. The PR exists, with the files that did upload. Do **not** run `pr create` again — that opens a duplicate. Record the URL, note which attachments failed for the step 9 report, and carry on to the in-review transition. The missing images can be attached to the PR later by hand.
 - **`ticket comment` fails** → report it in step 9 and finish the run. The PR is open, the work is verified, and the ticket has moved; the comment is the only thing missing, and it can be posted by hand from the manifest. Do not roll the ticket status back and do not retry the loop.
 - **`autonomous-code-review` fails to post** → report it in step 9 and finish the run. By this point the PR is open, the work is verified and the ticket has moved, so the review is the only thing missing and it can be re-run against the PR at any time. Do not retry the implement/verify loop, do not roll the ticket status back, and do not withhold the run summary.
@@ -410,7 +425,7 @@ A reviewer can grade a run against this list:
 - The commit contains exactly the union of the paths the implementer reported across all iterations: nothing unrelated rode along, and nothing the verifier passed was left behind. The working tree is clean afterwards.
 - A visible change produced evidence under `.claude/evidence/<ticket>/`, or the run recorded `No visual evidence: <reason>`; nothing from that directory was committed.
 - The ticket carries a comment linking the PR and, for a visible change, the same evidence the PR shows; it was posted after the in-review transition.
-- The PR body matches the full output of `flight-rules doc pr-body-format`: tech-writer-authored What/Why sections, the ticket linked, and — when present — an OTS Materials block whose images and video render from GitHub-hosted assets, not relative paths, or which states `No visual evidence: <reason>`.
+- The PR body matches `docs/pr-body-format.md`: tech-writer-authored What/Why sections, the ticket linked, and — when present — an OTS Materials block whose images and video render from GitHub-hosted assets, not relative paths, or which states `No visual evidence: <reason>`.
 - The ticket's status trail reads to-do → in-progress → in-review, with the in-review transition happening *after* the PR exists.
 - No contract item — acceptance criterion or Fixed When item — shipped without a PASS verdict backed by evidence, and no checkbox was ticked.
 - The run summary states the iteration count, and every `charterConcerns` and `openQuestions` entry reached the user.

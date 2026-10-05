@@ -1,9 +1,9 @@
 # Evidence Capture — Protocol and Manifest
 
 How a web-client capture is taken, verified, and handed downstream. This file is
-tool-generic: it names `playwright-cli`, `ffmpeg`, and `op`, but no hosts,
-selectors, endpoints, or credentials. Those live in the per-repo QA recipe. A
-skill reaches this file with `flight-rules doc evidence-capture`.
+tool-generic: it names `playwright-cli` and `ffmpeg`, but no hosts, selectors,
+endpoints, or credentials. Those live in the repo's QA instructions
+(`docs/qa-instructions.md`). A skill reaches this file with `flight-rules doc evidence-capture`.
 
 ## 1. Purpose
 
@@ -16,8 +16,7 @@ attach the evidence to a ticket or a pull request.
 
 - `playwright-cli` 0.1.17 or later on `PATH` (`npm install -g @playwright/cli`).
 - `ffmpeg` and `ffprobe` on `PATH`, for frame extraction and dimension checks.
-- `op`, the 1Password command-line interface (CLI), only when a recipe carries
-  `op://` references.
+- Whatever the QA instructions name for access, such as a secrets-manager CLI.
 
 `flight-rules check` reports whether these are present and at which version. This
 file installs nothing and assumes `check` already passed.
@@ -44,8 +43,8 @@ Re-plan a failed take from the beginning. Do not patch it mid-recording.
 
 ## 5. Recording a take
 
-The complete script. Login steps come from the recipe; the credential contract is
-Section 8.
+The complete script. Login steps come from the QA instructions; the credential
+rules are Section 8.
 
 ```bash
 #!/usr/bin/env bash
@@ -57,8 +56,8 @@ PW="playwright-cli -s=fr-${TICKET}"
 $PW open
 $PW resize 1920 1080
 $PW goto "$APP_URL"
-# login steps come from the recipe; credentials arrive as
-# $FLIGHT_RULES_QA_USERNAME / $FLIGHT_RULES_QA_PASSWORD
+# login steps come from the QA instructions; credentials arrive as
+# environment variables the instructions name, e.g. "$ACME_QA_EMAIL"
 $PW state-save "$OUT/auth.json"
 
 $PW screenshot --filename="$OUT/before.png"
@@ -119,31 +118,32 @@ which call to inspect.
 
 ## 8. Credentials
 
-The credential contract is three environment variables:
+The QA instructions name each credential and where it comes from: an environment
+variable, a secrets-manager item, or a human. The take script reads credentials
+from the environment and never echoes them.
 
-- `FLIGHT_RULES_QA_USERNAME`
-- `FLIGHT_RULES_QA_PASSWORD`
-- `FLIGHT_RULES_QA_TOTP_SECRET` (optional, for a time-based one-time password)
-
-The script reads them from the environment and never echoes them. When a recipe
-supplies `op://` references, write an env file of `VAR=op://vault/item/field`
-lines and run the take through it:
+When the instructions use a secrets manager, write an env file of reference
+lines, never resolved values, and run the take inside the manager's wrapper. For
+1Password:
 
 ```bash
 op run --env-file=qa.env -- bash take.sh "$TICKET" "$APP_URL"
 ```
 
-The secrets exist only inside that subprocess. Headless `op` needs
-`OP_SERVICE_ACCOUNT_TOKEN`; the desktop-app integration needs a terminal and
-fails without one. Confirm authentication with `op whoami --format=json`, which
-exits non-zero when nothing is signed in.
+The secrets exist only inside that subprocess. Do not pre-check the manager's
+sign-in state: `op whoami` blocks on an unlock prompt when no terminal is
+attached. Let the wrapped take fail and report its error.
+
+When a credential the take needs is missing and the instructions say a human
+supplies it, the capture stops with `No visual evidence: needs: <what to
+provide>`. A QA skill never prompts.
 
 ## 9. Output layout
 
 Every file lands under `.claude/evidence/<ticket>/`: `before.png` and
 `after.png` for the bracketing frames, `take.webm` for the run, `frame-2s.png`
 for the extracted verification frame, `auth.json` for saved storage state,
-`qa.env` for `op://` references (never resolved secrets), `take.sh` for the
+`qa.env` for secrets-manager references (never resolved secrets), `take.sh` for the
 script that produced the take, and `manifest.json` for the manifest (Section
 10).
 
@@ -164,7 +164,7 @@ Top-level fields:
 | --- | --- | --- |
 | `version` | number | Manifest schema version. `1`. |
 | `ticket` | string | Tracker id the capture belongs to. |
-| `recipe` | string | Path to the per-repo QA recipe that drove the take. |
+| `instructions` | string[] | Absolute paths of the QA instruction sources that drove the take, nearest first. |
 | `capturedAt` | string | Capture time as an ISO 8601 timestamp in UTC. |
 | `items` | array | One entry per captured file. |
 
@@ -173,12 +173,14 @@ Each `items` entry:
 | Field | Type | Rule |
 | --- | --- | --- |
 | `path` | string | Absolute path to the file. |
-| `kind` | string | `image` or `video`, derived from the extension. |
+| `kind` | string | `image`, `video`, or `text`, derived from the extension. |
 | `phase` | string | `before` or `after`. |
 | `caption` | string | One sentence a reviewer reads with the attachment. |
 
 Derive `kind` from the file extension, never by hand. `png`, `jpg`, `jpeg`,
-`gif`, `webp`, and `svg` are `image`; `webm`, `mp4`, and `mov` are `video`.
+`gif`, `webp`, and `svg` are `image`; `webm`, `mp4`, and `mov` are `video`;
+`txt`, `log`, and `json` are `text`. Text evidence comes from a check that has no
+browser surface: a request and response, a command's output, a log line.
 
 `phase` is `before` or `after`. A capture with no before frame uses `after`
 alone.
@@ -189,7 +191,7 @@ A complete manifest:
 {
   "version": 1,
   "ticket": "PROJ-123",
-  "recipe": "/repo/.agents/flight-rules.qa.md",
+  "instructions": ["/repo/QA.md"],
   "capturedAt": "2026-09-10T03:00:00Z",
   "items": [
     { "path": "/repo/.claude/evidence/PROJ-123/before.png", "kind": "image", "phase": "before", "caption": "Score reads 0% FAIL on a passing section" },
@@ -207,7 +209,8 @@ A complete manifest:
   runs share one session. Pass `-s=fr-<ticket>`.
 - **A black take.** Recording started before the page painted. Gate
   `video-start` on a `find` for a real element first.
-- **The login form is not found.** Selectors belong to the recipe. Confirm them
-  against the live page with `snapshot`.
-- **`interactive IO not available` from `op`.** No terminal is attached. Use a
-  service-account token in `OP_SERVICE_ACCOUNT_TOKEN`.
+- **The login form is not found.** Selectors belong to the QA instructions.
+  Confirm them against the live page with `snapshot`.
+- **`interactive IO not available` from `op`.** No terminal is attached. Report
+  `needs:` a service-account token in `OP_SERVICE_ACCOUNT_TOKEN`, or another
+  credential route the QA instructions allow.

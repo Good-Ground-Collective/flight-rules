@@ -133,9 +133,11 @@ own.
 
 ## Q-10 — A surface the harness cannot reach is a failure with a reason
 
-When the harness cannot exercise a surface, take the failure path and state
-the reason. This covers native mobile UI, offline mode, and gestures a web
-client cannot send.
+The harness reaches what the repo's QA instructions describe: a browser, and
+any API, CLI, org, or cloud account they give access to. When the harness
+cannot exercise a surface, take the failure path and state the reason. This
+covers native mobile UI, offline mode, gestures a web client cannot send, and
+access the QA instructions do not provide.
 
 Write: "FAIL: this flow needs a native swipe gesture; the harness drives a
 browser and cannot send one." Not a guess dressed up as a reproduction.
