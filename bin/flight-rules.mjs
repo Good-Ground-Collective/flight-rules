@@ -46596,8 +46596,7 @@ function createCheckCommand(getConfig, getTracker, getConfigPath, getProbe) {
     }
     const tools = await getProbe().probe({
       repo: config2.repo,
-      recipePath: getQaRecipePath(config2, getConfigPath()),
-      env: process.env
+      recipePath: getQaRecipePath(config2, getConfigPath())
     });
     checks.push(...tools);
     const ok3 = checks.every((c) => c.ok || c.required === false);
@@ -47052,19 +47051,16 @@ var NodeToolProbe = class {
   async probe(input2) {
     const recipe = existsSync2(input2.recipePath) ? readFileSync5(input2.recipePath, "utf8") : void 0;
     const qaRequired = recipe !== void 0;
-    const opRequired = qaRequired && recipe.includes("op://");
     const ghRequired = input2.repo !== void 0;
-    const env = input2.env ?? {};
-    const [gh, ghAuth, ghPush, playwright, ffmpeg, curl, op] = await Promise.all([
+    const [gh, ghAuth, ghPush, playwright, ffmpeg, curl] = await Promise.all([
       this.ghVersion(ghRequired),
       this.ghAuth(ghRequired),
       this.ghPush(input2.repo, ghRequired),
       this.present("tools:playwright-cli", "playwright-cli", ["--version"], qaRequired),
       this.present("tools:ffmpeg", "ffmpeg", ["-version"], qaRequired),
-      this.present("tools:curl", "curl", ["--version"], qaRequired),
-      this.op(env, opRequired)
+      this.present("tools:curl", "curl", ["--version"], qaRequired)
     ]);
-    return [gh, ghAuth, ghPush, playwright, ffmpeg, curl, op];
+    return [gh, ghAuth, ghPush, playwright, ffmpeg, curl];
   }
   async ghVersion(required2) {
     try {
@@ -47129,24 +47125,6 @@ var NodeToolProbe = class {
       return { name, ok: false, detail, required: required2 };
     }
   }
-  async op(env, required2) {
-    try {
-      await this.execFile("op", ["--version"]);
-    } catch (err) {
-      const detail = this.isMissingBinary(err) ? "not installed" : this.stderrOf(err);
-      return { name: "tools:op", ok: false, detail, required: required2 };
-    }
-    if (env["OP_SERVICE_ACCOUNT_TOKEN"] !== void 0) {
-      return { name: "tools:op", ok: true, detail: "authenticated via OP_SERVICE_ACCOUNT_TOKEN", required: required2 };
-    }
-    try {
-      await this.execFile("op", ["whoami", "--format=json"]);
-      return { name: "tools:op", ok: true, detail: "authenticated via op whoami", required: required2 };
-    } catch (err) {
-      const detail = this.isMissingBinary(err) ? "not installed" : this.stderrOf(err);
-      return { name: "tools:op", ok: false, detail: `not signed in \u2014 ${detail}`, required: required2 };
-    }
-  }
   /** True when `version` is at least `minimum`, comparing major, minor, then patch. */
   meetsMinimumVersion(version2, minimum) {
     for (let i = 0; i < minimum.length; i++) {
@@ -47172,7 +47150,7 @@ var NodeToolProbe = class {
 var nodeToolProbe = new NodeToolProbe();
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.47.1";
+var appVersion = false ? "0.0.0-dev" : "1.47.2";
 
 // src/cli/cli.ts
 function buildTracker(overrideTracker) {
