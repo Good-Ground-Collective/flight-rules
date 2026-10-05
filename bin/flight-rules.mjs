@@ -47130,6 +47130,34 @@ function createCheckCommand(getConfig, getTracker, getConfigPath, getProbe, getF
 // src/hooks/commands/hook/command.ts
 import { text as text4 } from "node:stream/consumers";
 
+// src/shared/attribution-stripper/attribution-stripper.ts
+var trailerText = String.raw`(?:Co-Authored-By:[^\n"']*(?:Claude|anthropic\.com)[^\n"']*|Claude-Session:[^\n"']*|https://claude\.ai/code/session_[A-Za-z0-9_-]+)`;
+var lineEnd = String.raw`(?=["']?[ \t]*(?:\r?\n|$))`;
+var closingBlock = new RegExp(
+  String.raw`(?:\r?\n[ \t]*)+${trailerText}(?:\r?\n[ \t]*${trailerText})*(?=["'](?:\s|$)|$)`,
+  "gi"
+);
+var attributionLine = new RegExp(String.raw`(?:^|\r?\n)[ \t]*${trailerText}${lineEnd}`, "gi");
+var messageCommand = /(^|[\s;&|(])(?:git\b[^\n;&|]*\bcommit\b|gh\s+pr\s+(?:create|edit)\b|flight-rules\s+(?:git\s+commit|pr\s+create)\b)/;
+var AttributionStripper = class {
+  strip(text5) {
+    const stripped = text5.replace(closingBlock, "").replace(attributionLine, "");
+    if (stripped === text5) return text5;
+    return stripped.replace(/\n{3,}/g, "\n\n");
+  }
+  /** The command with attribution removed, or undefined when it writes no message or carries none. */
+  stripCommand(command) {
+    if (!messageCommand.test(command)) return void 0;
+    const stripped = this.strip(command);
+    return stripped === command ? void 0 : stripped;
+  }
+  /** True when a single trailer line, such as one `--footer` value, is Claude attribution. */
+  isAttribution(line) {
+    return this.strip(`
+${line.trim()}`) === "";
+  }
+};
+
 // src/hooks/commit-guard/commit-guard.ts
 var PreToolUseInputSchema = external_exports.looseObject({
   tool_name: external_exports.string().optional(),
@@ -47144,7 +47172,10 @@ var CommitGuard = class {
   env;
   constructor(props = {}) {
     this.env = props.env ?? process.env;
-    this.isConfigured = props.isConfigured ?? ((dir) => Object.keys(new ConfigStore({ cwd: dir, env: this.env }).inspect().values).length > 0);
+    this.isConfigured = props.isConfigured ?? ((dir) => (
+      // User-scope config applies to every repo, so it alone doesn't count.
+      new ConfigStore({ cwd: dir, env: this.env }).inspect().layers.some((layer) => layer.present && layer.scope !== "user")
+    ));
   }
   decide(payload) {
     const parsed = PreToolUseInputSchema.safeParse(payload);
@@ -47197,13 +47228,42 @@ var CommitGuard = class {
   }
 };
 
+// src/hooks/pre-bash/pre-bash.ts
+var PreBashHook = class {
+  guard;
+  stripper;
+  constructor(props = {}) {
+    this.guard = props.guard ?? new CommitGuard();
+    this.stripper = props.stripper ?? new AttributionStripper();
+  }
+  handle(payload) {
+    const denied = this.guard.decide(payload);
+    if (denied !== void 0) return denied;
+    const parsed = PreToolUseInputSchema.safeParse(payload);
+    if (!parsed.success || parsed.data.tool_name !== "Bash") return void 0;
+    const toolInput = parsed.data.tool_input;
+    const command = toolInput?.command;
+    if (toolInput === void 0 || command === void 0) return void 0;
+    const stripped = this.stripper.stripCommand(command);
+    if (stripped === void 0) return void 0;
+    return {
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        updatedInput: { ...toolInput, command: stripped }
+      }
+    };
+  }
+};
+
 // src/hooks/commands/hook/command.ts
-function createHookCommand(getGuard = () => new CommitGuard(), readStdin = () => text4(process.stdin)) {
+function createHookCommand(getHandler = () => new PreBashHook(), readStdin = () => text4(process.stdin)) {
   const hook2 = new Command("hook").description("handlers for the plugin's Claude Code hooks");
-  hook2.command("guard-commit").description("PreToolUse(Bash): block a hand-written `git commit` in a flight-rules repo").exitOverride().action(async () => {
+  hook2.command("pre-bash").alias("guard-commit").description(
+    "PreToolUse(Bash): block a hand-written `git commit` in a flight-rules repo, and strip Claude's attribution trailers from commit and PR commands"
+  ).exitOverride().action(async () => {
     try {
-      const decision = getGuard().decide(JSON.parse(await readStdin()));
-      if (decision !== void 0) process.stdout.write(JSON.stringify(decision) + "\n");
+      const output2 = getHandler().handle(JSON.parse(await readStdin()));
+      if (output2 !== void 0) process.stdout.write(JSON.stringify(output2) + "\n");
     } catch {
       return;
     }
@@ -47324,6 +47384,7 @@ var CommitMessageBuilderPropsSchema = external_exports.object({
 var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
   pluginVersion;
   harnessVersion;
+  stripper = new AttributionStripper();
   constructor(props) {
     const parsed = CommitMessageBuilderPropsSchema.parse(props);
     this.pluginVersion = _DefaultCommitMessageBuilder.readPluginVersion(parsed.binPath);
@@ -47337,13 +47398,13 @@ var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
     if (!headerValidation.success) throw headerValidation.error;
     sections.push(`${headerValidation.data}
 `);
-    const body = input2.body?.trim();
+    const body = input2.body === void 0 ? void 0 : this.stripper.strip(input2.body).trim();
     if (body !== void 0 && body !== "") {
       sections.push(`${body}
 `);
     }
     const trailers = [];
-    if (input2.footers) trailers.push(...input2.footers);
+    if (input2.footers) trailers.push(...input2.footers.filter((footer) => !this.stripper.isAttribution(footer)));
     trailers.push(
       `Flight-Rules-Version: ${this.pluginVersion}`,
       ...this.harnessVersion !== void 0 ? [`Harness-Version: ${this.harnessVersion}`] : [],
@@ -47750,7 +47811,7 @@ var NodeToolProbe = class {
 var nodeToolProbe = new NodeToolProbe();
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.50.0";
+var appVersion = false ? "0.0.0-dev" : "1.52.0";
 
 // src/cli/cli.ts
 function buildTracker(overrideTracker) {

@@ -17,7 +17,7 @@ export interface PreToolUseDecision {
 }
 
 export interface CommitGuardProps {
-  /** Reports whether a directory has flight-rules config; defaults to `ConfigStore.inspect()`. */
+  /** Reports whether a directory has project-level flight-rules config; defaults to the `ConfigStore` layers. */
   isConfigured?: (dir: string) => boolean;
   env?: Record<string, string | undefined>;
 }
@@ -45,7 +45,11 @@ export class CommitGuard {
     this.env = props.env ?? process.env;
     this.isConfigured =
       props.isConfigured ??
-      ((dir) => Object.keys(new ConfigStore({ cwd: dir, env: this.env }).inspect().values).length > 0);
+      ((dir) =>
+        // User-scope config applies to every repo, so it alone doesn't count.
+        new ConfigStore({ cwd: dir, env: this.env })
+          .inspect()
+          .layers.some((layer) => layer.present && layer.scope !== "user"));
   }
 
   decide(payload: unknown): PreToolUseDecision | undefined {
