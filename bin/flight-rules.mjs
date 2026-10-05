@@ -10735,9 +10735,10 @@ function useColor() {
 // node_modules/commander/index.js
 var program = new Command();
 
-// src/shared/config.ts
-import { readFileSync } from "node:fs";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+// src/shared/config-store.ts
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname as dirname2, join as join2 } from "node:path";
 
 // node_modules/zod/v4/classic/external.js
 var external_exports = {};
@@ -30414,6 +30415,9 @@ function date4(params) {
   return _coercedDate(ZodDate, params);
 }
 
+// src/shared/config.ts
+import { dirname, isAbsolute, join, resolve } from "node:path";
+
 // src/tasks/jira-task-tracker/jira-host.ts
 var JiraHostSchema = external_exports.string().transform((host) => host.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, ""));
 
@@ -30539,11 +30543,6 @@ function parseFrontmatter(contents) {
   }
   return data;
 }
-function readConfig(configPath) {
-  const contents = readFileSync(configPath, "utf-8");
-  const data = parseFrontmatter(contents);
-  return ConfigSchema.parse(data);
-}
 function getRfcDir(config2, cwd) {
   if (config2.rfcStorage === "global") {
     if (config2.rfcStoragePath === void 0) {
@@ -30553,14 +30552,194 @@ function getRfcDir(config2, cwd) {
   }
   return join(cwd, "rfcs");
 }
-function resolveConfigPath(cwd, override) {
-  return override ?? join(cwd, ".claude", "flight-rules.local.md");
-}
 function getQaRecipePath(config2, configPath) {
   const recipe = config2.qaRecipe ?? "flight-rules.qa.md";
   if (isAbsolute(recipe)) return recipe;
   return resolve(dirname(configPath), recipe);
 }
+
+// src/shared/config-store.ts
+var configScopes = ["user", "project", "local", "file"];
+var pluginId = "flight-rules@flight-rules";
+var pluginKeyPattern = /^flight-rules(@.+)?$/;
+var SettingsSchema = external_exports.looseObject({
+  pluginConfigs: external_exports.record(external_exports.string(), external_exports.looseObject({ options: external_exports.record(external_exports.string(), external_exports.unknown()).optional() })).optional()
+});
+var ConfigStore = class {
+  cwd;
+  env;
+  home;
+  constructor(props) {
+    this.cwd = props.cwd;
+    this.env = props.env ?? process.env;
+    this.home = props.home ?? homedir();
+  }
+  /** The flight-rules config file path, honouring `FLIGHT_RULES_CONFIG`. */
+  filePath() {
+    return this.env["FLIGHT_RULES_CONFIG"] ?? join2(this.cwd, ".claude", "flight-rules.local.md");
+  }
+  pathFor(scope) {
+    switch (scope) {
+      case "user":
+        return join2(this.env["CLAUDE_CONFIG_DIR"] ?? join2(this.home, ".claude"), "settings.json");
+      case "project":
+        return join2(this.cwd, ".claude", "settings.json");
+      case "local":
+        return join2(this.cwd, ".claude", "settings.local.json");
+      case "file":
+        return this.filePath();
+    }
+  }
+  layers() {
+    return configScopes.map((scope) => this.readLayer(scope));
+  }
+  load() {
+    return this.report().config;
+  }
+  report() {
+    const { values, sources, layers } = this.merge();
+    if (Object.keys(values).length === 0) {
+      throw new Error(
+        `No flight-rules config found. Run /flight-rules:setup, or set pluginConfigs["${pluginId}"].options in ${this.pathFor("user")}, ${this.pathFor("project")}, or ${this.pathFor("local")}`
+      );
+    }
+    return { config: ConfigSchema.parse(values), sources, layers };
+  }
+  inspect() {
+    const merged = this.merge();
+    const result = ConfigSchema.safeParse(merged.values);
+    if (result.success) return { valid: true, ...merged, values: result.data };
+    const error62 = Object.keys(merged.values).length === 0 ? "no flight-rules config found" : result.error.issues.map((i) => `${i.path.join(".") || "config"}: ${i.message}`).join("; ");
+    return { valid: false, error: error62, ...merged };
+  }
+  /**
+   * The scope a write lands in when the caller names none: wherever the key
+   * is set now, else the config file when one exists, else `local`.
+   */
+  defaultScopeFor(key) {
+    const layers = this.layers();
+    const owner = [...layers].reverse().find((layer) => key in layer.values);
+    if (owner !== void 0) return owner.scope;
+    return this.layer(layers, "file").present ? "file" : "local";
+  }
+  set(key, rawValues, scope) {
+    const value = this.coerce(key, rawValues);
+    this.write(scope, (values) => ({ ...values, [key]: value }));
+    return scope;
+  }
+  unset(key, scope) {
+    this.assertKnownKey(key);
+    this.write(scope, (values) => {
+      const next = { ...values };
+      delete next[key];
+      return next;
+    });
+  }
+  /**
+   * The highest-precedence scope that sets `key`, when it outranks `scope`.
+   * A write to `scope` would then not take effect.
+   */
+  shadowingScope(key, scope) {
+    const rank = configScopes.indexOf(scope);
+    return [...this.layers()].reverse().find((layer) => configScopes.indexOf(layer.scope) > rank && key in layer.values)?.scope;
+  }
+  merge() {
+    const layers = this.layers();
+    if (this.env["FLIGHT_RULES_CONFIG"] !== void 0 && !this.layer(layers, "file").present) {
+      throw new Error(`FLIGHT_RULES_CONFIG points at ${this.filePath()}, which does not exist`);
+    }
+    const values = {};
+    const sources = {};
+    for (const layer of layers) {
+      for (const [key, value] of Object.entries(layer.values)) {
+        values[key] = value;
+        sources[key] = { scope: layer.scope, path: layer.path };
+      }
+    }
+    return {
+      values,
+      sources,
+      layers: layers.map(({ scope, path: path3, present }) => ({ scope, path: path3, present }))
+    };
+  }
+  layer(layers, scope) {
+    const found = layers.find((l) => l.scope === scope);
+    if (found === void 0) throw new Error(`unknown config scope ${scope}`);
+    return found;
+  }
+  readLayer(scope) {
+    const path3 = this.pathFor(scope);
+    if (!existsSync(path3)) return { scope, path: path3, present: false, values: {} };
+    const contents = readFileSync(path3, "utf-8");
+    if (scope === "file") return { scope, path: path3, present: true, values: parseFrontmatter(contents) };
+    const options = this.pluginOptions(this.parseSettings(path3, contents));
+    return { scope, path: path3, present: options !== void 0, values: options ?? {} };
+  }
+  parseSettings(path3, contents) {
+    let json2;
+    try {
+      json2 = JSON.parse(contents);
+    } catch (err) {
+      throw new Error(`${path3} is not valid JSON`, { cause: err });
+    }
+    return SettingsSchema.parse(json2);
+  }
+  pluginKey(settings) {
+    const keys = Object.keys(settings.pluginConfigs ?? {}).filter((k) => pluginKeyPattern.test(k));
+    return keys.includes(pluginId) ? pluginId : keys.sort()[0];
+  }
+  pluginOptions(settings) {
+    const key = this.pluginKey(settings);
+    if (key === void 0) return void 0;
+    return settings.pluginConfigs?.[key]?.options;
+  }
+  write(scope, update) {
+    const path3 = this.pathFor(scope);
+    const contents = existsSync(path3) ? readFileSync(path3, "utf-8") : void 0;
+    mkdirSync(dirname2(path3), { recursive: true });
+    if (scope === "file") {
+      const values = update(contents === void 0 ? {} : parseFrontmatter(contents));
+      const body = contents?.replace(/^---\n[\s\S]*?\n---\n?/, "") ?? "";
+      writeFileSync(path3, `${this.toFrontmatter(values)}${body}`);
+      return;
+    }
+    const settings = contents === void 0 ? {} : this.parseSettings(path3, contents);
+    const key = this.pluginKey(settings) ?? pluginId;
+    const pluginConfigs = { ...settings.pluginConfigs };
+    const entry = pluginConfigs[key] ?? {};
+    pluginConfigs[key] = { ...entry, options: update(entry.options ?? {}) };
+    writeFileSync(path3, `${JSON.stringify({ ...settings, pluginConfigs }, null, 2)}
+`);
+  }
+  toFrontmatter(values) {
+    const lines = Object.entries(values).flatMap(
+      ([key, value]) => Array.isArray(value) ? [`${key}:`, ...value.map((item) => `  - ${String(item)}`)] : [`${key}: ${String(value)}`]
+    );
+    return `---
+${lines.join("\n")}
+---
+`;
+  }
+  assertKnownKey(key) {
+    if (!(key in ConfigSchema.shape)) {
+      throw new Error(
+        `Unknown config key "${key}" \u2014 expected one of: ${Object.keys(ConfigSchema.shape).join(", ")}`
+      );
+    }
+  }
+  coerce(key, rawValues) {
+    this.assertKnownKey(key);
+    const field = Object.entries(ConfigSchema.shape).find(([name]) => name === key)?.[1];
+    if (field === void 0) return void 0;
+    const isArray = field.safeParse([]).success && !field.safeParse("").success;
+    const value = isArray ? [...rawValues] : rawValues.join(" ");
+    const result = field.safeParse(value);
+    if (!result.success) {
+      throw new Error(`Invalid value for ${key}: ${result.error.issues.map((i) => i.message).join("; ")}`);
+    }
+    return value;
+  }
+};
 
 // src/shared/env.ts
 var EnvSchema = external_exports.object({
@@ -35158,7 +35337,7 @@ var GitHubTaskTracker = class {
     const createData = await this.gql(
       `mutation CreateDiscussion($repositoryId: ID!, $categoryId: ID!, $title: String!, $body: String!) {
         createDiscussion(input: { repositoryId: $repositoryId, categoryId: $categoryId, title: $title, body: $body }) {
-          discussion { number body updatedAt }
+          discussion { number body updatedAt url }
         }
       }`,
       { repositoryId: repoData.repository.id, categoryId, title: input2.title, body }
@@ -35168,6 +35347,7 @@ var GitHubTaskTracker = class {
     return {
       id: String(discussion.number),
       epicId: input2.epicId,
+      ...discussion.url !== void 0 ? { url: discussion.url } : {},
       body: discussion.body,
       comments: [],
       metadata: this.bodyMetadata.parse(discussion.body),
@@ -35179,7 +35359,7 @@ var GitHubTaskTracker = class {
       `query GetDiscussion($owner: String!, $repo: String!, $number: Int!) {
         repository(owner: $owner, name: $repo) {
           discussion(number: $number) {
-            number body updatedAt
+            number body updatedAt url
             comments(first: 100) {
               nodes { id body author { login } createdAt updatedAt }
             }
@@ -35197,6 +35377,7 @@ var GitHubTaskTracker = class {
     return {
       id,
       epicId,
+      ...discussion.url !== void 0 ? { url: discussion.url } : {},
       body: discussion.body,
       comments: discussion.comments.nodes.map((n) => ({
         id: n.id,
@@ -45923,6 +46104,40 @@ function resolveBody(opts) {
   throw new Error("one of --body or --body-file is required");
 }
 
+// src/tasks/portable-context/portable-context.ts
+var tokenStart = String.raw`(?:^|(?<=[\s(\[<{"'\x60=,:;|]))`;
+var localReferencePatterns = [
+  /file:\/\/\S*/g,
+  new RegExp(`${tokenStart}/(?:Users|home)/[^\\s/)\\]>"'\\x60]+\\S*`, "g"),
+  new RegExp(`${tokenStart}~/\\S*`, "g"),
+  /\b[A-Za-z]:\\Users\\\S*/g
+];
+var trailingPunctuation = /[`.,;:!?)\]>"']+$/;
+var maxReported = 5;
+var RegexPortableContextGuard = class {
+  find(body) {
+    return body.split("\n").flatMap(
+      (text4, index2) => localReferencePatterns.flatMap(
+        (pattern) => [...text4.matchAll(pattern)].map((m) => ({ line: index2 + 1, match: m[0].replace(trailingPunctuation, "") }))
+      )
+    );
+  }
+  assertPortable(body, opts = {}) {
+    if (opts.allowLocalPaths === true) return;
+    const found = this.find(body);
+    if (found.length === 0) return;
+    const listed = found.slice(0, maxReported).map((ref) => `  line ${ref.line}: ${ref.match}`).join("\n");
+    const more = found.length > maxReported ? `
+  \u2026and ${found.length - maxReported} more` : "";
+    throw new Error(
+      `body references files on this machine, which nobody else can open:
+${listed}${more}
+A tracker body must stand on its own for an engineer on a fresh clone. Inline the content, link a published artifact (\`flight-rules tdd create\`, a tracker issue, or a file on the default branch by URL), or use a repo-relative path for code that exists on the default branch. Pass --allow-local-paths only when the path is the subject of the work, not a pointer to context.`
+    );
+  }
+};
+var portableContextGuard = new RegexPortableContextGuard();
+
 // src/tasks/dependency-planner/dependency-planner.ts
 var DependencyPlannerService = class {
   plan(tickets) {
@@ -45964,17 +46179,21 @@ var DependencyPlannerService = class {
 // src/tasks/commands/epic/command.ts
 function createEpicCommand(getTracker) {
   const epic = new Command("epic");
-  epic.command("create").exitOverride().requiredOption("--title <title>", "epic title").option("--body <body>", "epic body (or use --body-file)").option("--body-file <path>", "read the epic body from a file").option("--labels <labels>", "comma-separated labels").action(async (opts) => {
+  epic.command("create").exitOverride().requiredOption("--title <title>", "epic title").option("--body <body>", "epic body (or use --body-file)").option("--body-file <path>", "read the epic body from a file").option("--labels <labels>", "comma-separated labels").option("--allow-local-paths", "accept machine-local paths in the body (see docs/layered-body-format.md)").action(async (opts) => {
+    const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
+    portableContextGuard.assertPortable(body, { allowLocalPaths: opts.allowLocalPaths });
     const result = await getTracker().createEpic({
       title: opts.title,
-      body: resolveBody({ body: opts.body, bodyFile: opts.bodyFile }),
+      body,
       labels: opts.labels !== void 0 ? opts.labels.split(",") : []
     });
     process.stdout.write(JSON.stringify(result) + "\n");
   });
-  epic.command("edit").exitOverride().argument("<id>", "epic id").option("--body <body>", "new epic body (or use --body-file)").option("--body-file <path>", "read the new epic body from a file").option("--title <title>", "new epic title (unchanged if omitted)").option("--labels <labels>", "comma-separated labels replacing existing free-form labels").action(async (id, opts) => {
+  epic.command("edit").exitOverride().argument("<id>", "epic id").option("--body <body>", "new epic body (or use --body-file)").option("--body-file <path>", "read the new epic body from a file").option("--title <title>", "new epic title (unchanged if omitted)").option("--labels <labels>", "comma-separated labels replacing existing free-form labels").option("--allow-local-paths", "accept machine-local paths in the body (see docs/layered-body-format.md)").action(async (id, opts) => {
+    const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
+    portableContextGuard.assertPortable(body, { allowLocalPaths: opts.allowLocalPaths });
     const result = await getTracker().updateEpicDescription(id, {
-      body: resolveBody({ body: opts.body, bodyFile: opts.bodyFile }),
+      body,
       ...opts.title !== void 0 ? { title: opts.title } : {},
       ...opts.labels !== void 0 ? { labels: opts.labels.split(",") } : {}
     });
@@ -46008,16 +46227,20 @@ function createEpicCommand(getTracker) {
 // src/tasks/commands/initiative/command.ts
 function createInitiativeCommand(getTracker) {
   const initiative = new Command("initiative");
-  initiative.command("create").exitOverride().requiredOption("--title <title>", "initiative title").option("--body <body>", "initiative body (or use --body-file)").option("--body-file <path>", "read the initiative body from a file").action(async (opts) => {
+  initiative.command("create").exitOverride().requiredOption("--title <title>", "initiative title").option("--body <body>", "initiative body (or use --body-file)").option("--body-file <path>", "read the initiative body from a file").option("--allow-local-paths", "accept machine-local paths in the body (see docs/layered-body-format.md)").action(async (opts) => {
+    const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
+    portableContextGuard.assertPortable(body, { allowLocalPaths: opts.allowLocalPaths });
     const result = await getTracker().createInitiative({
       title: opts.title,
-      body: resolveBody({ body: opts.body, bodyFile: opts.bodyFile })
+      body
     });
     process.stdout.write(JSON.stringify(result) + "\n");
   });
-  initiative.command("edit").exitOverride().argument("<id>", "initiative id").option("--body <body>", "new initiative body (or use --body-file)").option("--body-file <path>", "read the new initiative body from a file").option("--title <title>", "new initiative title (unchanged if omitted)").action(async (id, opts) => {
+  initiative.command("edit").exitOverride().argument("<id>", "initiative id").option("--body <body>", "new initiative body (or use --body-file)").option("--body-file <path>", "read the new initiative body from a file").option("--title <title>", "new initiative title (unchanged if omitted)").option("--allow-local-paths", "accept machine-local paths in the body (see docs/layered-body-format.md)").action(async (id, opts) => {
+    const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
+    portableContextGuard.assertPortable(body, { allowLocalPaths: opts.allowLocalPaths });
     const result = await getTracker().updateInitiativeDescription(id, {
-      body: resolveBody({ body: opts.body, bodyFile: opts.bodyFile }),
+      body,
       ...opts.title !== void 0 ? { title: opts.title } : {}
     });
     process.stdout.write(JSON.stringify(result) + "\n");
@@ -46375,10 +46598,12 @@ var TrackerEvidenceService = class {
 // src/tasks/commands/ticket/command.ts
 function createTicketCommand(getTracker) {
   const ticket = new Command("ticket");
-  ticket.command("create").exitOverride().requiredOption("--title <title>", "ticket title").option("--body <body>", "ticket body (or use --body-file)").option("--body-file <path>", "read the ticket body from a file").option("--epic-id <id>", "parent epic id; omit to create a standalone ticket").option("--labels <labels>", "comma-separated labels").option("--assignee <user>", "assignee login").action(async (opts) => {
+  ticket.command("create").exitOverride().requiredOption("--title <title>", "ticket title").option("--body <body>", "ticket body (or use --body-file)").option("--body-file <path>", "read the ticket body from a file").option("--epic-id <id>", "parent epic id; omit to create a standalone ticket").option("--labels <labels>", "comma-separated labels").option("--assignee <user>", "assignee login").option("--allow-local-paths", "accept machine-local paths in the body (see docs/layered-body-format.md)").action(async (opts) => {
+    const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
+    portableContextGuard.assertPortable(body, { allowLocalPaths: opts.allowLocalPaths });
     const input2 = {
       title: opts.title,
-      body: resolveBody({ body: opts.body, bodyFile: opts.bodyFile }),
+      body,
       labels: opts.labels !== void 0 ? opts.labels.split(",") : [],
       ...opts.epicId !== void 0 ? { epicId: opts.epicId } : {},
       ...opts.assignee !== void 0 ? { assignee: opts.assignee } : {}
@@ -46386,10 +46611,11 @@ function createTicketCommand(getTracker) {
     const result = await getTracker().createTicket(input2);
     process.stdout.write(JSON.stringify(result) + "\n");
   });
-  ticket.command("edit").exitOverride().argument("<id>", "ticket id").option("--body <body>", "new ticket body (or use --body-file)").option("--body-file <path>", "read the new ticket body from a file").option("--title <title>", "new ticket title (unchanged if omitted)").option("--labels <labels>", "comma-separated labels replacing existing free-form labels").option("--attach <spec>", "file to attach, as <path>#<caption> (repeatable)", collect, []).action(async (id, opts) => {
+  ticket.command("edit").exitOverride().argument("<id>", "ticket id").option("--body <body>", "new ticket body (or use --body-file)").option("--body-file <path>", "read the new ticket body from a file").option("--title <title>", "new ticket title (unchanged if omitted)").option("--labels <labels>", "comma-separated labels replacing existing free-form labels").option("--attach <spec>", "file to attach, as <path>#<caption> (repeatable)", collect, []).option("--allow-local-paths", "accept machine-local paths in the body (see docs/layered-body-format.md)").action(async (id, opts) => {
     const tracker = getTracker();
     const raw = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
     const body = opts.attach.length === 0 ? raw : (await new TrackerEvidenceService({ tracker }).attach({ ticketId: id, body: raw, specs: opts.attach })).body;
+    portableContextGuard.assertPortable(body, { allowLocalPaths: opts.allowLocalPaths });
     const result = await tracker.updateTicketDescription(id, {
       body,
       ...opts.title !== void 0 ? { title: opts.title } : {},
@@ -46447,10 +46673,12 @@ function createTicketCommand(getTracker) {
 // src/tasks/commands/tdd/command.ts
 function createTddCommand(getTracker) {
   const tdd = new Command("tdd");
-  tdd.command("create").exitOverride().requiredOption("--title <title>", "tdd title").requiredOption("--body <body>", "tdd body").requiredOption("--epic-id <id>", "parent epic id").action(async (opts) => {
+  tdd.command("create").exitOverride().requiredOption("--title <title>", "tdd title").option("--body <body>", "tdd body (or use --body-file)").option("--body-file <path>", "read the tdd body from a file").requiredOption("--epic-id <id>", "parent epic id").option("--allow-local-paths", "accept machine-local paths in the body (see docs/layered-body-format.md)").action(async (opts) => {
+    const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
+    portableContextGuard.assertPortable(body, { allowLocalPaths: opts.allowLocalPaths });
     const result = await getTracker().createTechnicalDesign({
       title: opts.title,
-      body: opts.body,
+      body,
       epicId: opts.epicId
     });
     process.stdout.write(JSON.stringify(result) + "\n");
@@ -46500,7 +46728,7 @@ function createRfcCommand(getConfig, getCwd = () => process.cwd()) {
 }
 
 // src/tasks/commands/qa/command.ts
-import { existsSync, statSync } from "node:fs";
+import { existsSync as existsSync2, statSync } from "node:fs";
 function createQaCommand(getConfig, getConfigPath) {
   const qa = new Command("qa");
   qa.command("recipe").exitOverride().action(() => {
@@ -46511,7 +46739,7 @@ function createQaCommand(getConfig, getConfigPath) {
       );
     }
     const path3 = getQaRecipePath(config2, getConfigPath());
-    if (!existsSync(path3)) {
+    if (!existsSync2(path3)) {
       throw new Error(
         `QA recipe not found at ${path3} \u2014 run /flight-rules:setup to scaffold it, or set qaRecipe in the config`
       );
@@ -46615,6 +46843,40 @@ function createCheckCommand(getConfig, getTracker, getConfigPath, getProbe) {
   return check2;
 }
 
+// src/tasks/commands/config/command.ts
+var scopeHelp = "where to write: user (~/.claude/settings.json), project (.claude/settings.json), local (.claude/settings.local.json), or file (the flight-rules config file)";
+function createConfigCommand(getStore) {
+  const config2 = new Command("config");
+  config2.command("show").description("print the merged config, which file each value came from, and whether it is valid").exitOverride().action(() => {
+    process.stdout.write(JSON.stringify(getStore().inspect()) + "\n");
+  });
+  config2.command("set").description("write one config value; array keys take several values").argument("<key>").argument("<values...>").addOption(new Option("--scope <scope>", scopeHelp).choices(configScopes)).exitOverride().action((key, values, opts) => {
+    const store = getStore();
+    const scope = opts.scope ?? store.defaultScopeFor(key);
+    store.set(key, values, scope);
+    const shadowedBy = store.shadowingScope(key, scope);
+    process.stdout.write(
+      JSON.stringify({
+        key,
+        scope,
+        path: store.pathFor(scope),
+        ...shadowedBy !== void 0 ? {
+          warning: `${key} is also set in ${shadowedBy} scope (${store.pathFor(shadowedBy)}), which takes precedence`
+        } : {}
+      }) + "\n"
+    );
+  });
+  config2.command("unset").description("remove one config value from a scope").argument("<key>").addOption(new Option("--scope <scope>", scopeHelp).choices(configScopes)).exitOverride().action((key, opts) => {
+    const store = getStore();
+    const scope = opts.scope ?? store.defaultScopeFor(key);
+    store.unset(key, scope);
+    process.stdout.write(
+      JSON.stringify({ key, scope, path: store.pathFor(scope) }) + "\n"
+    );
+  });
+  return config2;
+}
+
 // src/git/git-executor/git-executor.ts
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -46701,7 +46963,7 @@ import { readFileSync as readFileSync5 } from "node:fs";
 
 // src/git/commit-message-builder/commit-message-builder.ts
 import { readFileSync as readFileSync4 } from "node:fs";
-import { dirname as dirname2, join as join2 } from "node:path";
+import { dirname as dirname3, join as join3 } from "node:path";
 
 // src/git/commit-message-builder/commit-message.schema.ts
 var CommitMessageInputSchema = external_exports.object({
@@ -46758,7 +47020,7 @@ var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
   }
   static readPluginVersion(binPath) {
     try {
-      const pkgPath = join2(dirname2(binPath), "..", "package.json");
+      const pkgPath = join3(dirname3(binPath), "..", "package.json");
       const parsed = JSON.parse(readFileSync4(pkgPath, "utf-8"));
       if (typeof parsed === "object" && parsed !== null && "version" in parsed && typeof parsed.version === "string") {
         return parsed.version;
@@ -46837,7 +47099,7 @@ function createGitCommand(getExecutor) {
 import { execFile as execFile2 } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join as join3 } from "node:path";
+import { join as join4 } from "node:path";
 import { promisify as promisify2 } from "node:util";
 
 // src/git/pr-template/pr-template.ts
@@ -46996,8 +47258,8 @@ var GhPullRequestHost = class {
     return { number: Number(match[1]), url: url2 };
   }
   async withBodyFile(body, run2) {
-    const dir = await mkdtemp(join3(tmpdir(), "flight-rules-"));
-    const bodyFile = join3(dir, "body.md");
+    const dir = await mkdtemp(join4(tmpdir(), "flight-rules-"));
+    const bodyFile = join4(dir, "body.md");
     try {
       await writeFile(bodyFile, body, "utf8");
       return await run2(bodyFile);
@@ -47044,7 +47306,7 @@ function createPrCommand(getHost) {
 
 // src/tasks/tool-probe/tool-probe.ts
 import { execFile as execFile3 } from "node:child_process";
-import { existsSync as existsSync2, readFileSync as readFileSync6 } from "node:fs";
+import { existsSync as existsSync3, readFileSync as readFileSync6 } from "node:fs";
 import { promisify as promisify3 } from "node:util";
 var minimumGhVersion = [2, 99, 0];
 var ghVersionLine = /gh version (\d+)\.(\d+)\.(\d+)/;
@@ -47055,7 +47317,7 @@ var NodeToolProbe = class {
     this.execFile = props.execFileFn ?? ((file2, args) => promisified(file2, [...args]));
   }
   async probe(input2) {
-    const recipe = existsSync2(input2.recipePath) ? readFileSync6(input2.recipePath, "utf8") : void 0;
+    const recipe = existsSync3(input2.recipePath) ? readFileSync6(input2.recipePath, "utf8") : void 0;
     const qaRequired = recipe !== void 0;
     const ghRequired = input2.repo !== void 0;
     const [gh, ghAuth, ghPush, playwright, ffmpeg, curl] = await Promise.all([
@@ -47156,7 +47418,7 @@ var NodeToolProbe = class {
 var nodeToolProbe = new NodeToolProbe();
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.47.3";
+var appVersion = false ? "0.0.0-dev" : "1.48.0";
 
 // src/cli/cli.ts
 function buildTracker(overrideTracker) {
@@ -47196,15 +47458,14 @@ function buildPrHost(overrideTracker) {
   return new GhPullRequestHost({ repo: config2.repo });
 }
 function getConfigFromEnv(overrideTracker) {
-  const configPath = resolveConfigPath(process.cwd(), process.env["FLIGHT_RULES_CONFIG"]);
-  const config2 = readConfig(configPath);
+  const config2 = new ConfigStore({ cwd: process.cwd() }).load();
   if (overrideTracker === void 0) return config2;
   if (overrideTracker !== "github" && overrideTracker !== "jira") {
     throw new Error(`Invalid --tracker "${overrideTracker}" \u2014 expected "github" or "jira"`);
   }
   return { ...config2, tracker: overrideTracker };
 }
-function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = () => resolveConfigPath(process.cwd(), process.env["FLIGHT_RULES_CONFIG"])) {
+function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = () => new ConfigStore({ cwd: process.cwd() }).filePath(), getConfigStore = () => new ConfigStore({ cwd: process.cwd() })) {
   const program2 = new Command("flight-rules");
   program2.version(appVersion);
   program2.exitOverride();
@@ -47227,6 +47488,7 @@ function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = () => re
   program2.addCommand(createRfcCommand(config2));
   program2.addCommand(createQaCommand(config2, getConfigPath));
   program2.addCommand(createCompetenciesCommand(config2));
+  program2.addCommand(createConfigCommand(getConfigStore));
   const probe = () => new NodeToolProbe();
   program2.addCommand(createCheckCommand(config2, tracker, getConfigPath, probe));
   return program2;
@@ -47236,7 +47498,7 @@ async function run(argv) {
     buildTracker,
     getConfigFromEnv,
     buildPrHost,
-    () => resolveConfigPath(process.cwd(), process.env["FLIGHT_RULES_CONFIG"])
+    () => new ConfigStore({ cwd: process.cwd() }).filePath()
   ).parseAsync(argv, {
     from: "user"
   });
