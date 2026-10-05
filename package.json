@@ -1,12 +1,18 @@
 {
   "name": "@good-ground-collective/flight-rules",
-  "version": "1.50.0",
+  "version": "1.51.0",
   "description": "Claude Code Skills for the Good Ground Collective org",
   "license": "MIT",
   "author": "",
   "type": "module",
   "main": "index.js",
-  "files": ["bin/", "docs/", "skills/", "agents/", ".claude-plugin/"],
+  "files": [
+    "bin/",
+    "docs/",
+    "skills/",
+    "agents/",
+    ".claude-plugin/"
+  ],
   "bin": {
     "flight-rules": "bin/flight-rules.mjs"
   },

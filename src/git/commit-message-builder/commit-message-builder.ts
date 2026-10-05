@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { AttributionStripper } from '../../shared/attribution-stripper/attribution-stripper.js'
 import {
   CommitMessageBuilderPropsSchema,
   CommitMessageHeaderSchema,
@@ -16,6 +17,7 @@ export interface CommitMessageBuilder {
 export class DefaultCommitMessageBuilder implements CommitMessageBuilder {
   private readonly pluginVersion: string
   private readonly harnessVersion: string | undefined
+  private readonly stripper = new AttributionStripper()
 
   constructor(props: CommitMessageBuilderProps) {
     const parsed = CommitMessageBuilderPropsSchema.parse(props)
@@ -34,14 +36,15 @@ export class DefaultCommitMessageBuilder implements CommitMessageBuilder {
     sections.push(`${headerValidation.data}\n`)
 
 
-    // A blank body would leave an empty paragraph before the trailers.
-    const body = input.body?.trim()
+    // A blank body would leave an empty paragraph before the trailers, and
+    // Claude Code's own attribution trailers are never carried into history.
+    const body = input.body === undefined ? undefined : this.stripper.strip(input.body).trim()
     if (body !== undefined && body !== '') {
       sections.push(`${body}\n`)
     }
 
     const trailers: string[] = [];
-    if (input.footers) trailers.push(...input.footers)
+    if (input.footers) trailers.push(...input.footers.filter((footer) => !this.stripper.isAttribution(footer)))
     trailers.push(
       `Flight-Rules-Version: ${this.pluginVersion}`,
       ...(this.harnessVersion !== undefined ? [`Harness-Version: ${this.harnessVersion}`] : []),
