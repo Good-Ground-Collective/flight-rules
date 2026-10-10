@@ -23,7 +23,7 @@ import type {
 import {
   PacketIdSchema,
   PacketInputSchema,
-  PacketSchema,
+  PacketResponseSchema,
   PacketUpdateSchema,
   ReviewerListResponseSchema,
 } from "./review-packet.schema.js";
@@ -123,20 +123,20 @@ export class AriadneClient {
   /** POST /v1/review-packets: ids are global; replaying an id and body is idempotent, a different body is 409 `packet_exists`, another author's id is 409 `packet_id_taken`. */
   async createPacket(input: unknown): Promise<Packet> {
     const body = this.validate(PacketInputSchema, input, "packet");
-    return this.request("POST", "/v1/review-packets", PacketSchema, body);
+    return this.request("POST", "/v1/review-packets", PacketResponseSchema, body);
   }
 
   /** PUT /v1/review-packets/{id}: a stale `expectedRevision` is 409 `revision_conflict`; a repeated `operationId` is replayed. */
   async updatePacket(id: string, input: unknown): Promise<Packet> {
     const packetId = this.validate(PacketIdSchema, id, "packet id");
     const body = this.validate(PacketUpdateSchema, input, "packet update");
-    return this.request("PUT", `/v1/review-packets/${encodeURIComponent(packetId)}`, PacketSchema, body);
+    return this.request("PUT", `/v1/review-packets/${encodeURIComponent(packetId)}`, PacketResponseSchema, body);
   }
 
   /** GET /v1/review-packets/{id}. */
   async getPacket(id: string): Promise<Packet> {
     const packetId = this.validate(PacketIdSchema, id, "packet id");
-    return this.request("GET", `/v1/review-packets/${encodeURIComponent(packetId)}`, PacketSchema);
+    return this.request("GET", `/v1/review-packets/${encodeURIComponent(packetId)}`, PacketResponseSchema);
   }
 
   /** GET /v1/review-packets/reviewers: active members with a linked GitHub login. */

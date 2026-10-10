@@ -1056,7 +1056,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.63.0";
+var appVersion = false ? "0.0.0-dev" : "1.64.0";
 
 // src/shared/ariadne/review-packet.schema.ts
 import { z as z11 } from "zod";
@@ -1087,7 +1087,15 @@ var PacketAnchorSchema = z11.strictObject({
   line: PositiveIntSchema,
   startLine: optionalSchema(PositiveIntSchema),
   side: z11.enum(anchorSides)
+}).refine((anchor) => anchor.startLine === void 0 || anchor.startLine < anchor.line, {
+  path: ["startLine"],
+  message: "must be before line"
 });
+var SignOffTimeSchema = z11.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/, "must be an ISO 8601 UTC time ending in Z").refine((value) => {
+  const [year = 0, month = 0, day = 0] = value.slice(0, 10).split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+}, "must be a real calendar date");
 var FocusAreaSchema = z11.strictObject({
   id: AgentRecordIdSchema,
   kind: z11.enum(focusAreaKinds),
@@ -1101,7 +1109,7 @@ var PacketPrSchema = z11.strictObject({
   headSha: HeadShaSchema,
   title: oneLineTextSchema(packetLimits.title),
   ticket: optionalSchema(oneLineTextSchema(packetLimits.ticket)),
-  signOff: z11.strictObject({ at: textSchema(64), headSha: HeadShaSchema }).nullable(),
+  signOff: z11.strictObject({ at: SignOffTimeSchema, headSha: HeadShaSchema }).nullable().optional(),
   focusAreas: z11.array(FocusAreaSchema).max(packetLimits.focusAreas, `up to ${packetLimits.focusAreas} focus areas per PR`)
 });
 var PacketInputSchema = z11.strictObject({
@@ -1117,7 +1125,7 @@ var PacketInputSchema = z11.strictObject({
 var PacketUpdateSchema = z11.strictObject({
   expectedRevision: z11.number().int().nonnegative(),
   operationId: OperationIdSchema,
-  packet: PacketInputSchema
+  packet: PacketInputSchema.omit({ id: true })
 });
 var GithubSnapshotSchema = z11.looseObject({ id: z11.union([z11.string(), z11.number()]), login: z11.string() });
 var PacketSchema = z11.looseObject({
@@ -1133,6 +1141,7 @@ var PacketSchema = z11.looseObject({
   updatedAt: z11.string()
 });
 var ReviewerSchema = z11.looseObject({ id: z11.string(), name: z11.string(), github: GithubSnapshotSchema });
+var PacketResponseSchema = z11.looseObject({ packet: PacketSchema }).transform((response) => response.packet);
 var ReviewerListResponseSchema = z11.looseObject({ reviewers: z11.array(ReviewerSchema) });
 
 // src/shared/ariadne/ariadne-transport.ts
@@ -1197,18 +1206,18 @@ var AriadneClient = class {
   /** POST /v1/review-packets: ids are global; replaying an id and body is idempotent, a different body is 409 `packet_exists`, another author's id is 409 `packet_id_taken`. */
   async createPacket(input) {
     const body = this.validate(PacketInputSchema, input, "packet");
-    return this.request("POST", "/v1/review-packets", PacketSchema, body);
+    return this.request("POST", "/v1/review-packets", PacketResponseSchema, body);
   }
   /** PUT /v1/review-packets/{id}: a stale `expectedRevision` is 409 `revision_conflict`; a repeated `operationId` is replayed. */
   async updatePacket(id, input) {
     const packetId = this.validate(PacketIdSchema, id, "packet id");
     const body = this.validate(PacketUpdateSchema, input, "packet update");
-    return this.request("PUT", `/v1/review-packets/${encodeURIComponent(packetId)}`, PacketSchema, body);
+    return this.request("PUT", `/v1/review-packets/${encodeURIComponent(packetId)}`, PacketResponseSchema, body);
   }
   /** GET /v1/review-packets/{id}. */
   async getPacket(id) {
     const packetId = this.validate(PacketIdSchema, id, "packet id");
-    return this.request("GET", `/v1/review-packets/${encodeURIComponent(packetId)}`, PacketSchema);
+    return this.request("GET", `/v1/review-packets/${encodeURIComponent(packetId)}`, PacketResponseSchema);
   }
   /** GET /v1/review-packets/reviewers: active members with a linked GitHub login. */
   async listReviewers() {

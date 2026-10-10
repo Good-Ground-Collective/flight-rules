@@ -148,6 +148,54 @@ describe('pr list command', () => {
   })
 })
 
+describe('pr required values and strict numbers', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  const quietly = async (host: PullRequestHost, args: string[]) => {
+    const errOutput = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+    try {
+      return await run(host, args).then(
+        () => undefined,
+        (err: unknown) => err,
+      )
+    } finally {
+      errOutput.mockRestore()
+    }
+  }
+
+  it('pr list without --ticket exits 1 and calls no host method', async () => {
+    const host = makeMockHost()
+    const error = await quietly(host, ['list'])
+    expect(error).toBeInstanceOf(CommanderError)
+    expect((error as CommanderError).exitCode).toBe(1)
+    expect(vi.mocked(host.listOpenPullRequestsForTickets)).not.toHaveBeenCalled()
+  })
+
+  it('pr request-review without --reviewer exits 1 and calls no host method', async () => {
+    const host = makeMockHost()
+    const error = await quietly(host, ['request-review', '5'])
+    expect(error).toBeInstanceOf(CommanderError)
+    expect((error as CommanderError).exitCode).toBe(1)
+    expect(vi.mocked(host.requestReviewers)).not.toHaveBeenCalled()
+  })
+
+  it.each(['', '0', '-1', '0x3', '1e2', '1.5', 'abc'])('rejects the PR number %j before any request', async (value) => {
+    const host = makeMockHost()
+    expect(await quietly(host, ['request-review', value, '--reviewer', 'alice'])).toBeInstanceOf(CommanderError)
+    expect(await quietly(host, ['comment', value, '--body', 'x'])).toBeInstanceOf(CommanderError)
+    expect(vi.mocked(host.requestReviewers)).not.toHaveBeenCalled()
+    expect(vi.mocked(host.commentOnPullRequest)).not.toHaveBeenCalled()
+  })
+
+  it('accepts a plain decimal PR number', async () => {
+    const host = makeMockHost()
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(host, ['request-review', '105', '--reviewer', 'alice'])
+    expect(vi.mocked(host.requestReviewers)).toHaveBeenCalledWith(105, ['alice'])
+    output.mockRestore()
+  })
+})
+
 describe('pr request-review command', () => {
   beforeEach(() => vi.clearAllMocks())
 

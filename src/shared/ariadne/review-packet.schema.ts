@@ -42,12 +42,26 @@ const GithubLoginSchema = z
   .string()
   .regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/, "must be a GitHub login");
 
-export const PacketAnchorSchema = z.strictObject({
-  path: textSchema(packetLimits.path),
-  line: PositiveIntSchema,
-  startLine: optionalSchema(PositiveIntSchema),
-  side: z.enum(anchorSides),
-});
+export const PacketAnchorSchema = z
+  .strictObject({
+    path: textSchema(packetLimits.path),
+    line: PositiveIntSchema,
+    startLine: optionalSchema(PositiveIntSchema),
+    side: z.enum(anchorSides),
+  })
+  .refine((anchor) => anchor.startLine === undefined || anchor.startLine < anchor.line, {
+    path: ["startLine"],
+    message: "must be before line",
+  });
+
+const SignOffTimeSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/, "must be an ISO 8601 UTC time ending in Z")
+  .refine((value) => {
+    const [year = 0, month = 0, day = 0] = value.slice(0, 10).split("-").map(Number);
+    const date = new Date(Date.UTC(year, month - 1, day));
+    return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+  }, "must be a real calendar date");
 
 export const FocusAreaSchema = z.strictObject({
   id: AgentRecordIdSchema,
@@ -63,7 +77,7 @@ export const PacketPrSchema = z.strictObject({
   headSha: HeadShaSchema,
   title: oneLineTextSchema(packetLimits.title),
   ticket: optionalSchema(oneLineTextSchema(packetLimits.ticket)),
-  signOff: z.strictObject({ at: textSchema(64), headSha: HeadShaSchema }).nullable(),
+  signOff: z.strictObject({ at: SignOffTimeSchema, headSha: HeadShaSchema }).nullable().optional(),
   focusAreas: z.array(FocusAreaSchema).max(packetLimits.focusAreas, `up to ${packetLimits.focusAreas} focus areas per PR`),
 });
 
@@ -90,7 +104,7 @@ export const PacketInputSchema = z.strictObject({
 export const PacketUpdateSchema = z.strictObject({
   expectedRevision: z.number().int().nonnegative(),
   operationId: OperationIdSchema,
-  packet: PacketInputSchema,
+  packet: PacketInputSchema.omit({ id: true }),
 });
 
 const GithubSnapshotSchema = z.looseObject({ id: z.union([z.string(), z.number()]), login: z.string() });
@@ -109,6 +123,9 @@ export const PacketSchema = z.looseObject({
 });
 
 export const ReviewerSchema = z.looseObject({ id: z.string(), name: z.string(), github: GithubSnapshotSchema });
+
+/** Create, read and replace answer `{packet}`; the client hands back the packet itself. */
+export const PacketResponseSchema = z.looseObject({ packet: PacketSchema }).transform((response) => response.packet);
 
 export const ReviewerListResponseSchema = z.looseObject({ reviewers: z.array(ReviewerSchema) });
 

@@ -1,19 +1,20 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { Command } from "commander";
 import { z } from "zod";
 import type { AriadnePackets } from "../../ariadne/ariadne-packets.js";
 import { packetIdGenerator } from "../../ariadne/packet-id-generator.js";
+import { decimalIntegers } from "../../decimal-integer.js";
 
 interface FileOptions {
   file: string;
 }
 
 interface UpdateOptions extends FileOptions {
-  expectedRevision?: string;
+  expectedRevision?: number;
 }
 
 /** Fields the server owns; `packet get` output carries them and an update must not send them back. */
-const serverOwnedFields: ReadonlySet<string> = new Set(["authorId", "status", "revision", "createdAt", "updatedAt"]);
+const serverOwnedFields: ReadonlySet<string> = new Set(["id", "authorId", "status", "revision", "createdAt", "updatedAt"]);
 
 const ReviewerEntrySchema = z.union([
   z.string(),
@@ -26,8 +27,9 @@ const ReviewerEntrySchema = z.union([
  * logins an update sends.
  */
 const UpdateFileSchema = z
-  .looseObject({ revision: z.number().int().optional(), reviewers: z.array(ReviewerEntrySchema).optional() })
+  .looseObject({ id: z.string().optional(), revision: z.number().int().optional(), reviewers: z.array(ReviewerEntrySchema).optional() })
   .transform((file) => ({
+    id: file.id,
     revision: file.revision,
     packet: {
       ...Object.fromEntries(Object.entries(file).filter(([key]) => !serverOwnedFields.has(key))),
@@ -35,7 +37,7 @@ const UpdateFileSchema = z
     },
   }));
 
-/** Reads a packet JSON file. */
+/** A packet JSON file. */
 class PacketFile {
   constructor(private readonly path: string) {}
 
@@ -54,7 +56,16 @@ class PacketFile {
     }
   }
 
-  readForUpdate(): { packet: unknown; revision: number | undefined } {
+  /** Writes the file back as `JSON.stringify(value, null, 2)` plus a newline. */
+  write(value: unknown): void {
+    try {
+      writeFileSync(this.path, JSON.stringify(value, null, 2) + "\n");
+    } catch (err) {
+      throw new Error(`cannot write ${this.path}: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
+    }
+  }
+
+  readForUpdate(): { id: string | undefined; packet: unknown; revision: number | undefined } {
     const parsed = UpdateFileSchema.safeParse(this.read());
     if (parsed.success) return parsed.data;
     throw new Error(
@@ -92,12 +103,18 @@ export class PacketCommandFactory {
     packet
       .command("create")
       .description(
-        "publish a packet from a JSON file; prints the stored packet. An id is generated from the title when the file has none. Safe to repeat with the same id: create is idempotent",
+        "publish a packet from a JSON file; prints the stored packet. An id is generated from the title when the file has none, and the published id is written back into the file so a re-run replays instead of creating a second packet",
       )
       .requiredOption("--file <path>", "the packet JSON")
       .exitOverride()
       .action(async (opts: FileOptions) => {
-        print(await getPackets().create(new PacketFile(opts.file).read()));
+        const packetFile = new PacketFile(opts.file);
+        const input = packetFile.read();
+        const published = await getPackets().create(input);
+        if (typeof input === "object" && input !== null && !Array.isArray(input) && (input as { id?: unknown }).id !== published.id) {
+          packetFile.write({ ...input, id: published.id });
+        }
+        print(published);
       });
 
     packet
@@ -114,11 +131,18 @@ export class PacketCommandFactory {
       .description("revise a packet from a JSON file; a stale revision fails with 409 revision_conflict")
       .argument("<id>", "the packet id")
       .requiredOption("--file <path>", "the packet JSON; `packet get` output works, and its revision is used")
-      .option("--expected-revision <n>", "the revision you read; defaults to the file's `revision`")
+      .option(
+        "--expected-revision <n>",
+        "the revision you read, in decimal digits; defaults to the file's `revision`",
+        (value: string) => decimalIntegers.nonNegative(value),
+      )
       .exitOverride()
       .action(async (id: string, opts: UpdateOptions) => {
         const file = new PacketFile(opts.file).readForUpdate();
-        const expectedRevision = opts.expectedRevision !== undefined ? Number(opts.expectedRevision) : file.revision;
+        if (file.id !== undefined && file.id !== id) {
+          throw new Error(`${opts.file} holds packet ${file.id} but the command names ${id}; nothing was sent`);
+        }
+        const expectedRevision = opts.expectedRevision ?? file.revision;
         if (expectedRevision === undefined || !Number.isInteger(expectedRevision) || expectedRevision < 0) {
           throw new Error(
             "no expected revision: pass --expected-revision <n>, or use a file with a numeric `revision` such as `flight-rules packet get` output; nothing was sent",

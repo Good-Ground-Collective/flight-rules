@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AriadnePacketError, AriadnePackets } from "../ariadne-packets.js";
 import { AriadneTokenStore } from "../ariadne-token-store.js";
 import { defaultAriadneUrl } from "../ariadne.schema.js";
-import { FakeTransport, agentToken, packetContract } from "./fake-transport.js";
+import { FakeTransport, agentToken, packetContract, packetEnvelope, storedPacket } from "./fake-transport.js";
 
 describe("AriadnePackets", () => {
   let home: string;
@@ -45,7 +45,7 @@ describe("AriadnePackets", () => {
   };
 
   it("publishes with the author's token to the default API", async () => {
-    const transport = new FakeTransport(FakeTransport.json(200, packetContract.storedPacket));
+    const transport = new FakeTransport(FakeTransport.json(200, packetEnvelope));
     await packets(transport).create(packetContract.createRequest);
     expect(transport.requests[0]?.url).toBe(`${defaultAriadneUrl}/v1/review-packets`);
     expect(transport.requests[0]?.headers["Authorization"]).toBe(`Bearer ${agentToken}`);
@@ -53,7 +53,7 @@ describe("AriadnePackets", () => {
 
   it("throws, naming the login command, when there is no token", async () => {
     const transport = new FakeTransport();
-    const error = await failure(packets(transport, { env: {} }).get("wave-2-checkout"));
+    const error = await failure(packets(transport, { env: {} }).get("rp-frt-2400"));
     expect(error.message).toContain("flight-rules board login");
     expect(error.message).toContain("ARIADNE_AGENT_TOKEN");
     expect(transport.requests).toHaveLength(0);
@@ -77,9 +77,9 @@ describe("AriadnePackets", () => {
   });
 
   it("generates an operationId for an update when none is given", async () => {
-    const transport = new FakeTransport(FakeTransport.json(200, packetContract.storedPacket));
+    const transport = new FakeTransport(FakeTransport.json(200, packetEnvelope));
     const { packet } = packetContract.updateRequest;
-    await packets(transport).update("wave-2-checkout", { packet, expectedRevision: 3 });
+    await packets(transport).update("rp-frt-2400", { packet, expectedRevision: 3 });
     const body = transport.bodies()[0] as { operationId: string; expectedRevision: number };
     expect(body.operationId).toMatch(/^[0-9a-f]{32}$/);
     expect(body.expectedRevision).toBe(3);
@@ -94,7 +94,7 @@ describe("AriadnePackets", () => {
     [422, "reviewer_not_found", "flight-rules packet reviewers"],
   ])("maps %s %s to a next step", async (status, code, step) => {
     const transport = new FakeTransport(FakeTransport.json(status, packetContract.errors[code]));
-    const error = await failure(packets(transport).get("wave-2-checkout"));
+    const error = await failure(packets(transport).get("rp-frt-2400"));
     expect(error.message).toContain(code);
     expect(error.message).toContain(step);
   });
@@ -105,20 +105,20 @@ describe("AriadnePackets", () => {
     const sentIds = (transport: FakeTransport) => transport.bodies().map((body) => (body as { id: string }).id);
 
     it("generates an id from the title when the packet has none", async () => {
-      const transport = new FakeTransport(FakeTransport.json(200, packetContract.storedPacket));
+      const transport = new FakeTransport(FakeTransport.json(200, packetEnvelope));
       await packets(transport).create(withoutId);
       expect(sentIds(transport)).toHaveLength(1);
-      expect(sentIds(transport)[0]).toMatch(/^checkout-rewrite-wave-2-[0-9a-f]{8}$/);
+      expect(sentIds(transport)[0]).toMatch(/^review-packets-api-store-and-routes-[0-9a-f]{8}$/);
     });
 
     it("keeps the id the packet already has", async () => {
-      const transport = new FakeTransport(FakeTransport.json(200, packetContract.storedPacket));
+      const transport = new FakeTransport(FakeTransport.json(200, packetEnvelope));
       await packets(transport).create(packetContract.createRequest);
-      expect(sentIds(transport)).toEqual(["wave-2-checkout"]);
+      expect(sentIds(transport)).toEqual(["rp-frt-2400"]);
     });
 
     it("resends the same id and body when a 5xx is retried", async () => {
-      const transport = new FakeTransport(FakeTransport.json(503, {}), FakeTransport.json(200, packetContract.storedPacket));
+      const transport = new FakeTransport(FakeTransport.json(503, {}), FakeTransport.json(200, packetEnvelope));
       await packets(transport).create(withoutId);
       const [first, second] = sentIds(transport);
       expect(transport.requests).toHaveLength(2);
@@ -126,27 +126,27 @@ describe("AriadnePackets", () => {
     });
 
     it("regenerates the suffix once after packet_id_taken and returns the stored packet", async () => {
-      const stored = { ...packetContract.storedPacket, id: "ignored" };
-      const transport = new FakeTransport(taken(), FakeTransport.json(200, stored));
+      const stored = { ...storedPacket, id: "ignored" };
+      const transport = new FakeTransport(taken(), FakeTransport.json(200, { packet: stored }));
       const result = await packets(transport).create(withoutId);
       const [first, second] = sentIds(transport);
       expect(sentIds(transport)).toHaveLength(2);
-      expect(first).toMatch(/^checkout-rewrite-wave-2-[0-9a-f]{8}$/);
-      expect(second).toMatch(/^checkout-rewrite-wave-2-[0-9a-f]{8}$/);
+      expect(first).toMatch(/^review-packets-api-store-and-routes-[0-9a-f]{8}$/);
+      expect(second).toMatch(/^review-packets-api-store-and-routes-[0-9a-f]{8}$/);
       expect(second).not.toBe(first);
       expect(result).toEqual(stored);
     });
 
     it("keeps the slug of a file-supplied id when regenerating", async () => {
-      const transport = new FakeTransport(taken(), FakeTransport.json(200, packetContract.storedPacket));
+      const transport = new FakeTransport(taken(), FakeTransport.json(200, packetEnvelope));
       await packets(transport).create(packetContract.createRequest);
       const [first, second] = sentIds(transport);
-      expect(first).toBe("wave-2-checkout");
-      expect(second).toMatch(/^wave-2-checkout-[0-9a-f]{8}$/);
+      expect(first).toBe("rp-frt-2400");
+      expect(second).toMatch(/^rp-frt-2400-[0-9a-f]{8}$/);
     });
 
     it("fails on a second packet_id_taken, naming the ids tried", async () => {
-      const transport = new FakeTransport(taken(), taken(), FakeTransport.json(200, packetContract.storedPacket));
+      const transport = new FakeTransport(taken(), taken(), FakeTransport.json(200, packetEnvelope));
       const error = await failure(packets(transport).create(withoutId));
       const [first, second] = sentIds(transport);
       expect(transport.requests).toHaveLength(2);
@@ -178,13 +178,13 @@ describe("AriadnePackets", () => {
 
   it("explains a network failure", async () => {
     const down = new Error("fetch failed");
-    const error = await failure(packets(new FakeTransport(down, down)).get("wave-2-checkout"));
+    const error = await failure(packets(new FakeTransport(down, down)).get("rp-frt-2400"));
     expect(error.message).toContain("could not reach Ariadne");
   });
 
   it("never lets the token into an error", async () => {
     const transport = new FakeTransport(FakeTransport.json(400, { error: "bad", message: `echo ${agentToken}` }));
-    const error = await failure(packets(transport).get("wave-2-checkout"));
+    const error = await failure(packets(transport).get("rp-frt-2400"));
     expect(error.message).not.toContain(agentToken);
     expect(error.message).toContain("[redacted]");
   });
