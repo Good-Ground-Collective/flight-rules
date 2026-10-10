@@ -5,6 +5,7 @@ import type { Config } from '../shared/config.js';
 import { ConfigStore } from '../shared/config-store.js';
 import { EvidenceLocation } from '../tasks/evidence/evidence-location.js';
 import { AriadneBoard } from '../shared/ariadne/ariadne-board.js';
+import { AriadnePackets } from '../shared/ariadne/ariadne-packets.js';
 import { AriadneTokenStore } from '../shared/ariadne/ariadne-token-store.js';
 import { BoardSessionStore } from '../shared/ariadne/board-session-store.js';
 import type { TaskTracker } from '../tasks/task-tracker/task-tracker.js';
@@ -24,6 +25,7 @@ export interface FlightRules {
     docs(): DocResolver;
     /** Ariadne's Agents page reporter; reads only the `ariadne.*` keys from user and local scope, so it works without a valid tracker config. */
     board(): AriadneBoard;
+    packets(): AriadnePackets;
     ariadneTokens(): AriadneTokenStore;
     /** The last heartbeat each session's skill posted, outside every repo; read by the heartbeat hook. */
     boardSessions(): BoardSessionStore;
@@ -48,6 +50,7 @@ export declare class DefaultFlightRules implements FlightRules {
     probe(): ToolProbe;
     docs(): DocResolver;
     board(): AriadneBoard;
+    packets(): AriadnePackets;
     ariadneTokens(): AriadneTokenStore;
     boardSessions(): BoardSessionStore;
 }

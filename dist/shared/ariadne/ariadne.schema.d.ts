@@ -26,6 +26,8 @@ export declare const agentLimits: {
     readonly text: 500;
     readonly branch: 255;
 };
+/** Optional fields may be omitted, null or "". */
+export declare const optionalSchema: <T extends z.ZodType>(schema: T) => z.ZodPreprocess<z.ZodOptional<T>, unknown>;
 export declare const AgentSessionIdSchema: z.ZodString;
 /** A record's own id (`--id`), the same alphabet as a session id. */
 export declare const AgentRecordIdSchema: z.ZodString;

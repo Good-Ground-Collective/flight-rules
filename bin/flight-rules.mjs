@@ -31445,6 +31445,82 @@ var EnvLoader = class {
 // src/version.ts
 var appVersion = false ? "0.0.0-dev" : "1.60.0";
 
+// src/shared/ariadne/review-packet.schema.ts
+var packetLimits = {
+  title: 200,
+  objective: 600,
+  highlight: 200,
+  highlights: 5,
+  prs: 30,
+  focusAreas: 10,
+  rationale: 2e3,
+  anchors: 10,
+  path: 400,
+  reviewers: 10,
+  ticket: 100
+};
+var focusAreaKinds = ["design-pattern", "business-logic", "data-schema", "other"];
+var anchorSides = ["LEFT", "RIGHT"];
+var textSchema = (max) => external_exports.string().min(1, "must not be blank").max(max, `must be at most ${max} characters`);
+var oneLineTextSchema = (max) => textSchema(max).refine((value) => !/[\r\n]/.test(value), "must be one line");
+var PositiveIntSchema = external_exports.number().int().positive();
+var PacketIdSchema = AgentRecordIdSchema;
+var OperationIdSchema = external_exports.string().regex(/^[A-Za-z0-9_-]{16,80}$/, "must be 16\u201380 letters, digits, underscores or hyphens");
+var HeadShaSchema = external_exports.string().regex(/^[0-9a-f]{40}$/, "must be a 40-character lowercase hex commit sha");
+var GithubLoginSchema = external_exports.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/, "must be a GitHub login");
+var PacketAnchorSchema = external_exports.strictObject({
+  path: textSchema(packetLimits.path),
+  line: PositiveIntSchema,
+  startLine: optionalSchema(PositiveIntSchema),
+  side: external_exports.enum(anchorSides)
+});
+var FocusAreaSchema = external_exports.strictObject({
+  id: AgentRecordIdSchema,
+  kind: external_exports.enum(focusAreaKinds),
+  title: oneLineTextSchema(packetLimits.title),
+  rationale: textSchema(packetLimits.rationale),
+  anchors: external_exports.array(PacketAnchorSchema).max(packetLimits.anchors, `up to ${packetLimits.anchors} anchors`)
+});
+var PacketPrSchema = external_exports.strictObject({
+  repo: external_exports.string().regex(/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9_.-]{1,100}$/, "must be owner/name"),
+  number: PositiveIntSchema,
+  headSha: HeadShaSchema,
+  title: oneLineTextSchema(packetLimits.title),
+  ticket: optionalSchema(oneLineTextSchema(packetLimits.ticket)),
+  signOff: external_exports.strictObject({ at: textSchema(64), headSha: HeadShaSchema }).nullable(),
+  focusAreas: external_exports.array(FocusAreaSchema).max(packetLimits.focusAreas, `up to ${packetLimits.focusAreas} focus areas per PR`)
+});
+var PacketInputSchema = external_exports.strictObject({
+  id: PacketIdSchema,
+  title: oneLineTextSchema(packetLimits.title),
+  overview: external_exports.strictObject({
+    objective: textSchema(packetLimits.objective),
+    highlights: external_exports.array(oneLineTextSchema(packetLimits.highlight)).min(1, "at least 1 highlight").max(packetLimits.highlights, `up to ${packetLimits.highlights} highlights`)
+  }),
+  prs: external_exports.array(PacketPrSchema).min(1, "at least 1 PR").max(packetLimits.prs, `up to ${packetLimits.prs} PRs`),
+  reviewers: external_exports.array(GithubLoginSchema).min(1, "at least 1 reviewer").max(packetLimits.reviewers, `up to ${packetLimits.reviewers} reviewers`)
+});
+var PacketUpdateSchema = external_exports.strictObject({
+  expectedRevision: external_exports.number().int().nonnegative(),
+  operationId: OperationIdSchema,
+  packet: PacketInputSchema
+});
+var GithubSnapshotSchema = external_exports.looseObject({ id: external_exports.union([external_exports.string(), external_exports.number()]), login: external_exports.string() });
+var PacketSchema = external_exports.looseObject({
+  id: external_exports.string(),
+  authorId: external_exports.string(),
+  title: external_exports.string(),
+  overview: external_exports.looseObject({ objective: external_exports.string(), highlights: external_exports.array(external_exports.string()) }),
+  prs: external_exports.array(external_exports.looseObject({ repo: external_exports.string(), number: external_exports.number() })),
+  reviewers: external_exports.array(external_exports.looseObject({ id: external_exports.string(), github: GithubSnapshotSchema })),
+  status: external_exports.enum(["open", "closed"]),
+  revision: external_exports.number().int(),
+  createdAt: external_exports.string(),
+  updatedAt: external_exports.string()
+});
+var ReviewerSchema = external_exports.looseObject({ id: external_exports.string(), name: external_exports.string(), github: GithubSnapshotSchema });
+var ReviewerListResponseSchema = external_exports.looseObject({ reviewers: external_exports.array(ReviewerSchema) });
+
 // src/shared/ariadne/ariadne-transport.ts
 var FetchAriadneTransport = class {
   async send(request2) {
@@ -31503,6 +31579,26 @@ var AriadneClient = class {
   async listItems(session) {
     const id = this.validate(AgentSessionIdSchema, session, "session");
     return this.request("GET", `/v1/agents/items?session=${encodeURIComponent(id)}`, ItemListResponseSchema);
+  }
+  /** POST /v1/review-packets: idempotent on the packet id; the same id with a different body is 409 `packet_exists`. */
+  async createPacket(input2) {
+    const body = this.validate(PacketInputSchema, input2, "packet");
+    return this.request("POST", "/v1/review-packets", PacketSchema, body);
+  }
+  /** PUT /v1/review-packets/{id}: a stale `expectedRevision` is 409 `revision_conflict`; a repeated `operationId` is replayed. */
+  async updatePacket(id, input2) {
+    const packetId = this.validate(PacketIdSchema, id, "packet id");
+    const body = this.validate(PacketUpdateSchema, input2, "packet update");
+    return this.request("PUT", `/v1/review-packets/${encodeURIComponent(packetId)}`, PacketSchema, body);
+  }
+  /** GET /v1/review-packets/{id}. */
+  async getPacket(id) {
+    const packetId = this.validate(PacketIdSchema, id, "packet id");
+    return this.request("GET", `/v1/review-packets/${encodeURIComponent(packetId)}`, PacketSchema);
+  }
+  /** GET /v1/review-packets/reviewers: active members with a linked GitHub login. */
+  async listReviewers() {
+    return this.request("GET", "/v1/review-packets/reviewers", ReviewerListResponseSchema);
   }
   validate(schema, input2, what) {
     const result = schema.safeParse(input2);
@@ -31794,6 +31890,113 @@ var AriadneBoard = class {
   /** Belt and braces: no message may ever carry the token. */
   redact(message, token) {
     return token === void 0 || token === "" ? message : message.split(token).join("[redacted]");
+  }
+};
+
+// src/shared/ariadne/ariadne-packets.ts
+import { randomUUID } from "node:crypto";
+var AriadnePacketError = class extends Error {
+  name = "AriadnePacketError";
+};
+var personalScopes2 = /* @__PURE__ */ new Set(["user", "local"]);
+var urlKey2 = "ariadne.url";
+var AriadnePackets = class {
+  readLayers;
+  tokens;
+  transport;
+  timeoutMs;
+  constructor(props) {
+    this.readLayers = props.readLayers;
+    this.tokens = props.tokens;
+    this.transport = props.transport;
+    this.timeoutMs = props.timeoutMs;
+  }
+  async create(packet) {
+    return this.call((client) => client.createPacket(packet));
+  }
+  async update(id, input2) {
+    const operationId = input2.operationId ?? randomUUID().replaceAll("-", "");
+    return this.call(
+      (client) => client.updatePacket(id, { expectedRevision: input2.expectedRevision, operationId, packet: input2.packet })
+    );
+  }
+  async get(id) {
+    return this.call((client) => client.getPacket(id));
+  }
+  async reviewers() {
+    return this.call((client) => client.listReviewers());
+  }
+  /**
+   * `ariadne.url` (default: production) read only from the user and local
+   * layers, local winning. A URL that is not https (or http on localhost)
+   * throws, so the token never goes to it.
+   */
+  url() {
+    let raw;
+    for (const layer of this.readLayers()) {
+      if (!personalScopes2.has(layer.scope)) continue;
+      const value = layer.values[urlKey2];
+      if (value !== void 0 && value !== null && value !== "") raw = value;
+    }
+    if (raw === void 0) return defaultAriadneUrl;
+    const parsed = AriadneUrlSchema.safeParse(raw);
+    if (parsed.success) return parsed.data;
+    throw new AriadnePacketError(
+      `ariadne.url is invalid (${parsed.error.issues.map((i) => i.message).join("; ")}); fix it with \`flight-rules config set ariadne.url <https url> --scope user\``
+    );
+  }
+  token() {
+    const resolved = this.tokens.resolve();
+    if (resolved !== void 0) return resolved.token;
+    throw new AriadnePacketError(
+      "no Ariadne token; set ARIADNE_AGENT_TOKEN, or run `flight-rules board login` with an agent token from Ariadne \u203A Settings \u203A Connections"
+    );
+  }
+  async call(run2) {
+    const url2 = this.url();
+    const token = this.token();
+    const client = new AriadneClient({
+      baseUrl: url2,
+      token,
+      ...this.transport !== void 0 ? { transport: this.transport } : {},
+      ...this.timeoutMs !== void 0 ? { timeoutMs: this.timeoutMs } : {}
+    });
+    try {
+      return await run2(client);
+    } catch (err) {
+      throw new AriadnePacketError(this.redact(this.describe(err, url2), token), { cause: err });
+    }
+  }
+  describe(err, url2) {
+    if (!(err instanceof AriadneError)) return err instanceof Error ? err.message : String(err);
+    if (err.failure === "invalid-input") return `${err.message}; fix the packet file and retry, nothing was sent`;
+    if (err.failure === "network") {
+      return `could not reach Ariadne at ${url2}: ${err.message}; check the network and \`ariadne.url\`, then retry`;
+    }
+    if (err.status === 401 && err.code === "agent_token_expired") {
+      return "Ariadne agent token expired (401 agent_token_expired); create a new one in Ariadne \u203A Settings \u203A Connections and run `flight-rules board login`";
+    }
+    if (err.status === 401) {
+      return "Ariadne did not accept the token (401 unauthorized); it may be revoked or mistyped. Create a new one in Ariadne \u203A Settings \u203A Connections and set ARIADNE_AGENT_TOKEN or run `flight-rules board login`";
+    }
+    if (err.code === "agents_opt_in_required") {
+      return "Agents access is off for you (403 agents_opt_in_required); turn on Agents in Ariadne \u203A Settings \u203A Connections and retry";
+    }
+    if (err.code === "revision_conflict") {
+      return "the packet changed since you read it (409 revision_conflict); re-read with `flight-rules packet get <id>` and retry";
+    }
+    if (err.code === "packet_exists") {
+      return "a packet with this id already exists with different content (409 packet_exists); use `flight-rules packet update <id>` to revise it, or choose a new id";
+    }
+    if (err.code === "reviewer_not_found") {
+      return `a reviewer is not an active Ariadne member with a linked GitHub login (422 reviewer_not_found): ${err.message}; list valid logins with \`flight-rules packet reviewers\``;
+    }
+    if (err.failure === "http") return `Ariadne returned ${err.message}; check the packet and retry`;
+    return `Ariadne request failed: ${err.message}`;
+  }
+  /** Belt and braces: no message may ever carry the token. */
+  redact(message, token) {
+    return token === "" ? message : message.split(token).join("[redacted]");
   }
 };
 
@@ -47482,6 +47685,12 @@ var DefaultFlightRules = class {
       sessions: this.boardSessions()
     });
   }
+  packets() {
+    return new AriadnePackets({
+      readLayers: () => this.configStore().layers(),
+      tokens: this.ariadneTokens()
+    });
+  }
   ariadneTokens() {
     return new AriadneTokenStore({ env: this.env });
   }
@@ -47698,10 +47907,92 @@ function createBoardCommand(getBoard, getTokens = () => new AriadneTokenStore(),
   return board;
 }
 
-// src/tasks/commands/resolve-body.ts
+// src/shared/commands/packet/command.ts
 import { readFileSync as readFileSync8 } from "node:fs";
+var serverOwnedFields = /* @__PURE__ */ new Set(["authorId", "status", "revision", "createdAt", "updatedAt"]);
+var ReviewerEntrySchema = external_exports.union([
+  external_exports.string(),
+  external_exports.looseObject({ github: external_exports.looseObject({ login: external_exports.string() }) }).transform((reviewer) => reviewer.github.login)
+]);
+var UpdateFileSchema = external_exports.looseObject({ revision: external_exports.number().int().optional(), reviewers: external_exports.array(ReviewerEntrySchema).optional() }).transform((file2) => ({
+  revision: file2.revision,
+  packet: {
+    ...Object.fromEntries(Object.entries(file2).filter(([key]) => !serverOwnedFields.has(key))),
+    ...file2.reviewers !== void 0 ? { reviewers: file2.reviewers } : {}
+  }
+}));
+var PacketFile = class {
+  constructor(path3) {
+    this.path = path3;
+  }
+  path;
+  /** The file's JSON exactly as written; strict validation happens before anything is sent. */
+  read() {
+    let text6;
+    try {
+      text6 = readFileSync8(this.path, "utf8");
+    } catch (err) {
+      throw new Error(`cannot read ${this.path}: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
+    }
+    try {
+      return JSON.parse(text6);
+    } catch (err) {
+      throw new Error(`${this.path} is not valid JSON: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
+    }
+  }
+  readForUpdate() {
+    const parsed = UpdateFileSchema.safeParse(this.read());
+    if (parsed.success) return parsed.data;
+    throw new Error(
+      `${this.path} must hold one packet object: ${parsed.error.issues.map((issue2) => `${issue2.path.join(".") || "file"}: ${issue2.message}`).join("; ")}`
+    );
+  }
+};
+var PacketCommandFactory = class {
+  create(getPackets) {
+    const packet = new Command("packet").description("publish and revise a Review Packet in Ariadne, as its author").addHelpText(
+      "after",
+      [
+        "",
+        "Token: $ARIADNE_AGENT_TOKEN, then $ARIADNE_TOKEN, then the file `board login` saves.",
+        "Config: ariadne.url (https; http only for localhost), read only from user or local scope.",
+        "A packet carries titles, annotations and anchors (path and line) only; code and diffs",
+        "are rejected locally, as is over-long text. Every failure exits 1 with a next step.",
+        "See docs/review-packets.md."
+      ].join("\n")
+    );
+    packet.exitOverride();
+    const print = (value) => {
+      process.stdout.write(JSON.stringify(value) + "\n");
+    };
+    packet.command("create").description("publish a packet from a JSON file; prints the stored packet. Safe to repeat: create is idempotent on the packet id").requiredOption("--file <path>", "the packet JSON").exitOverride().action(async (opts) => {
+      print(await getPackets().create(new PacketFile(opts.file).read()));
+    });
+    packet.command("update").description("revise a packet from a JSON file; a stale revision fails with 409 revision_conflict").argument("<id>", "the packet id").requiredOption("--file <path>", "the packet JSON; `packet get` output works, and its revision is used").option("--expected-revision <n>", "the revision you read; defaults to the file's `revision`").exitOverride().action(async (id, opts) => {
+      const file2 = new PacketFile(opts.file).readForUpdate();
+      const expectedRevision = opts.expectedRevision !== void 0 ? Number(opts.expectedRevision) : file2.revision;
+      if (expectedRevision === void 0 || !Number.isInteger(expectedRevision) || expectedRevision < 0) {
+        throw new Error(
+          "no expected revision: pass --expected-revision <n>, or use a file with a numeric `revision` such as `flight-rules packet get` output; nothing was sent"
+        );
+      }
+      print(await getPackets().update(id, { packet: file2.packet, expectedRevision }));
+    });
+    packet.command("get").description("print a packet, including its revision").argument("<id>", "the packet id").exitOverride().action(async (id) => {
+      print(await getPackets().get(id));
+    });
+    packet.command("reviewers").description("list the Ariadne members you can name as reviewers: {id, name, github: {id, login}}").exitOverride().action(async () => {
+      print(await getPackets().reviewers());
+    });
+    return packet;
+  }
+};
+var createPacketCommand = (getPackets) => new PacketCommandFactory().create(getPackets);
+
+// src/tasks/commands/resolve-body.ts
+import { readFileSync as readFileSync9 } from "node:fs";
 function resolveBody(opts) {
-  if (opts.bodyFile !== void 0) return readFileSync8(opts.bodyFile, "utf8");
+  if (opts.bodyFile !== void 0) return readFileSync9(opts.bodyFile, "utf8");
   if (opts.body !== void 0) return opts.body;
   throw new Error("one of --body or --body-file is required");
 }
@@ -48325,7 +48616,7 @@ function createRfcCommand(getConfig, getCwd = () => process.cwd()) {
 }
 
 // src/tasks/qa-instructions/qa-instructions.ts
-import { existsSync as existsSync7, readFileSync as readFileSync9, statSync as statSync3 } from "node:fs";
+import { existsSync as existsSync7, readFileSync as readFileSync10, statSync as statSync3 } from "node:fs";
 import { dirname as dirname8, join as join8, resolve as resolve3 } from "node:path";
 var atxHeading = /^ {0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$/;
 var fenceRun2 = /^ {0,3}(`{3,}|~{3,})/;
@@ -48333,7 +48624,7 @@ var legacyHint = 'Legacy QA recipe in use. Move its content into a QA.md at the 
 var nodeFileSystem = {
   isFile: (path3) => existsSync7(path3) && statSync3(path3).isFile(),
   exists: (path3) => existsSync7(path3),
-  readFile: (path3) => readFileSync9(path3, "utf8")
+  readFile: (path3) => readFileSync10(path3, "utf8")
 };
 var QaInstructionsFinder = class {
   fs;
@@ -48629,7 +48920,7 @@ ${line.trim()}`) === "";
 };
 
 // src/hooks/commit-guard/commit-guard.ts
-import { readFileSync as readFileSync10 } from "node:fs";
+import { readFileSync as readFileSync11 } from "node:fs";
 import { isAbsolute as isAbsolute2, resolve as resolve4 } from "node:path";
 var PreToolUseInputSchema = external_exports.looseObject({
   tool_name: external_exports.string().optional(),
@@ -48722,7 +49013,7 @@ var CommitGuard = class {
     const unquoted = file2.replace(/^["']|["']$/g, "");
     if (unquoted === "-" || !isAbsolute2(unquoted) && cwd === void 0) return false;
     try {
-      const contents = readFileSync10(isAbsolute2(unquoted) ? unquoted : resolve4(cwd ?? "", unquoted), "utf8");
+      const contents = readFileSync11(isAbsolute2(unquoted) ? unquoted : resolve4(cwd ?? "", unquoted), "utf8");
       return /^Flight-Rules-Version: /m.test(contents);
     } catch {
       return false;
@@ -48800,10 +49091,10 @@ function createHookCommand(getHandler = () => new PreBashHook(), readStdin = () 
 }
 
 // src/git/commands/commit/command.ts
-import { readFileSync as readFileSync12 } from "node:fs";
+import { readFileSync as readFileSync13 } from "node:fs";
 
 // src/git/commit-message-builder/commit-message-builder.ts
-import { readFileSync as readFileSync11 } from "node:fs";
+import { readFileSync as readFileSync12 } from "node:fs";
 import { dirname as dirname9, join as join9 } from "node:path";
 
 // src/git/commit-message-builder/commit-message.schema.ts
@@ -48863,7 +49154,7 @@ var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
   static readPluginVersion(binPath) {
     try {
       const pkgPath = join9(dirname9(binPath), "..", "package.json");
-      const parsed = JSON.parse(readFileSync11(pkgPath, "utf-8"));
+      const parsed = JSON.parse(readFileSync12(pkgPath, "utf-8"));
       if (typeof parsed === "object" && parsed !== null && "version" in parsed && typeof parsed.version === "string") {
         return parsed.version;
       }
@@ -48900,7 +49191,7 @@ function createGitCommand(getExecutor) {
       type: opts.type,
       scope: opts.scope,
       description: opts.description,
-      body: opts.bodyFile !== void 0 ? readFileSync12(opts.bodyFile, "utf8") : opts.body,
+      body: opts.bodyFile !== void 0 ? readFileSync13(opts.bodyFile, "utf8") : opts.body,
       footers: opts.footer,
       model: opts.model ?? void 0
     });
@@ -48938,7 +49229,7 @@ function createGitCommand(getExecutor) {
 }
 
 // src/git/commands/message/command.ts
-import { mkdtempSync, readFileSync as readFileSync13, writeFileSync as writeFileSync5 } from "node:fs";
+import { mkdtempSync, readFileSync as readFileSync14, writeFileSync as writeFileSync5 } from "node:fs";
 import { tmpdir as tmpdir2 } from "node:os";
 import { join as join10 } from "node:path";
 function createCommitMessageCommand() {
@@ -48947,7 +49238,7 @@ function createCommitMessageCommand() {
       type: opts.type,
       scope: opts.scope,
       description: opts.description,
-      body: opts.bodyFile !== void 0 ? readFileSync13(opts.bodyFile, "utf8") : opts.body,
+      body: opts.bodyFile !== void 0 ? readFileSync14(opts.bodyFile, "utf8") : opts.body,
       footers: opts.footer,
       model: opts.model
     });
@@ -49049,6 +49340,7 @@ function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = () => cr
   program2.addCommand(createDocCommand(() => services.docs()));
   program2.addCommand(createCheckCommand(config2, tracker, getConfigPath, () => services.probe()));
   program2.addCommand(createBoardCommand(() => services.board(), () => services.ariadneTokens()));
+  program2.addCommand(createPacketCommand(() => services.packets()));
   return program2;
 }
 async function run(argv, flightRules = createFlightRules()) {

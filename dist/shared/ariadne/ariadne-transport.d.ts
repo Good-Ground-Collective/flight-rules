@@ -1,5 +1,5 @@
 export interface AriadneRequest {
-    method: "GET" | "POST";
+    method: "GET" | "POST" | "PUT";
     url: string;
     headers: Record<string, string>;
     body?: string;

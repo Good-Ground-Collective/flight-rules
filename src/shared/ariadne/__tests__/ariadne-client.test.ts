@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { AriadneClient, AriadneError } from "../ariadne-client.js";
 import { defaultAriadneUrl } from "../ariadne.schema.js";
-import { FakeTransport, agentToken, contract } from "./fake-transport.js";
+import { FakeTransport, agentToken, contract, packetContract } from "./fake-transport.js";
 
 // Payloads and paths are pinned to think-lp/ariadne docs/agents-api.md,
 // contract version 1. The request examples below are the contract's own.
@@ -251,5 +251,99 @@ describe("AriadneClient failures", () => {
   it("reports a 2xx body it cannot read", async () => {
     const error = await rejection(client(new FakeTransport({ status: 200, body: "<html>" })).listItems("s1"));
     expect(error.failure).toBe("bad-response");
+  });
+});
+
+describe("AriadneClient review packets", () => {
+  const base = `${defaultAriadneUrl}/v1/review-packets`;
+  const create = packetContract.createRequest;
+  const update = packetContract.updateRequest;
+  const withField = (record: Record<string, unknown>, extra: Record<string, unknown>) => ({ ...record, ...extra });
+
+  it("creates with POST and the exact body, returning the stored packet", async () => {
+    const transport = new FakeTransport(FakeTransport.json(200, packetContract.storedPacket));
+    const response = await client(transport).createPacket(create);
+
+    expect(response).toMatchObject({ id: "wave-2-checkout", revision: 3 });
+    expect(transport.requests[0]).toMatchObject({ method: "POST", url: base });
+    expect(transport.requests[0]?.headers).toMatchObject({
+      Authorization: `Bearer ${agentToken}`,
+      "Content-Type": "application/json",
+    });
+    expect(transport.bodies()[0]).toEqual(create);
+  });
+
+  it("updates with PUT to the packet's own path", async () => {
+    const transport = new FakeTransport(FakeTransport.json(200, packetContract.storedPacket));
+    await client(transport).updatePacket("wave-2-checkout", update);
+
+    expect(transport.requests[0]).toMatchObject({ method: "PUT", url: `${base}/wave-2-checkout` });
+    expect(transport.bodies()[0]).toEqual(update);
+  });
+
+  it("gets a packet and lists reviewers with no body", async () => {
+    const transport = new FakeTransport(
+      FakeTransport.json(200, packetContract.storedPacket),
+      FakeTransport.json(200, packetContract.reviewerList),
+    );
+    await client(transport).getPacket("wave-2-checkout");
+    const list = await client(transport).listReviewers();
+
+    expect(transport.requests.map((r) => `${r.method} ${r.url}`)).toEqual([
+      `GET ${base}/wave-2-checkout`,
+      `GET ${base}/reviewers`,
+    ]);
+    expect(transport.requests.every((r) => r.body === undefined)).toBe(true);
+    expect(list.reviewers[0]).toMatchObject({ id: "member-1", name: "Octo Cat", github: { id: 583231, login: "octocat" } });
+  });
+
+  it("rejects an unknown field such as diff or snippet without sending anything", async () => {
+    const transport = new FakeTransport();
+    const error = await rejection(client(transport).createPacket(withField(create, { diff: "--- a/x" })));
+    expect(error.failure).toBe("invalid-input");
+    expect(error.message).toContain("diff");
+
+    const prs = [{ ...(create["prs"] as Record<string, unknown>[])[0], snippet: "const a = 1" }];
+    await rejection(client(transport).createPacket(withField(create, { prs })));
+    expect(transport.requests).toHaveLength(0);
+  });
+
+  it("rejects an over-long rationale instead of cutting it, listing every issue", async () => {
+    const transport = new FakeTransport();
+    const prs = (create["prs"] as Record<string, unknown>[]).map((pr, index) =>
+      index === 0
+        ? { ...pr, focusAreas: [{ id: "fa-1", kind: "other", title: "t", rationale: "x".repeat(2001), anchors: [] }] }
+        : pr,
+    );
+    const error = await rejection(client(transport).createPacket(withField(create, { prs, title: "y".repeat(201) })));
+
+    expect(error.message).toContain("rationale: must be at most 2000 characters");
+    expect(error.message).toContain("title: must be at most 200 characters");
+    expect(transport.requests).toHaveLength(0);
+  });
+
+  it("rejects a malformed packet id before building a path", async () => {
+    const transport = new FakeTransport();
+    await rejection(client(transport).getPacket("../etc"));
+    await rejection(client(transport).updatePacket("a/b", update));
+    expect(transport.requests).toHaveLength(0);
+  });
+
+  it("retries once after a 5xx and never after a 4xx", async () => {
+    const retried = new FakeTransport(FakeTransport.json(503, { error: "unavailable" }), FakeTransport.json(200, packetContract.storedPacket));
+    await client(retried).updatePacket("wave-2-checkout", update);
+    expect(retried.requests).toHaveLength(2);
+    expect(retried.bodies()[1]).toEqual(retried.bodies()[0]);
+
+    const conflict = new FakeTransport(FakeTransport.json(409, packetContract.errors["revision_conflict"]));
+    const error = await rejection(client(conflict).updatePacket("wave-2-checkout", update));
+    expect(error).toMatchObject({ failure: "http", status: 409, code: "revision_conflict" });
+    expect(conflict.requests).toHaveLength(1);
+  });
+
+  it("exposes no way to resolve, answer or decide on a packet", () => {
+    const methods = Object.getOwnPropertyNames(AriadneClient.prototype);
+    expect(["createPacket", "updatePacket", "getPacket", "listReviewers"].every((name) => methods.includes(name))).toBe(true);
+    expect(methods.some((name) => /resolve|answer|decide/i.test(name))).toBe(false);
   });
 });

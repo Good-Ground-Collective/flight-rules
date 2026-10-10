@@ -1,0 +1,106 @@
+{
+  "_source": "Derived from the epic #198 'Packet contract v1 (summary)' pending think-lp/ariadne#103 (docs/review-packets-api.md). Replace these records word for word with the doc's examples when it lands.",
+  "createRequest": {
+    "id": "wave-2-checkout",
+    "title": "Checkout rewrite, wave 2",
+    "overview": {
+      "objective": "Moves checkout onto the new payment service in three dependent PRs.",
+      "highlights": ["Adds the payment client", "Swaps the cart totals calculation", "Removes the legacy checkout route"]
+    },
+    "prs": [
+      {
+        "repo": "think-lp/shop",
+        "number": 41,
+        "headSha": "0123456789abcdef0123456789abcdef01234567",
+        "title": "Add the payment client",
+        "ticket": "FRT-101",
+        "signOff": { "at": "2026-10-10T12:00:00Z", "headSha": "0123456789abcdef0123456789abcdef01234567" },
+        "focusAreas": [
+          {
+            "id": "fa-1",
+            "kind": "design-pattern",
+            "title": "Client is an interface plus class",
+            "rationale": "The payment client follows interface, class, singleton.\nCheck the retry rules.",
+            "anchors": [
+              { "path": "src/payments/client.ts", "line": 42, "startLine": 30, "side": "RIGHT" },
+              { "path": "src/payments/legacy.ts", "line": 7, "side": "LEFT" }
+            ]
+          }
+        ]
+      },
+      {
+        "repo": "think-lp/shop",
+        "number": 42,
+        "headSha": "89abcdef0123456789abcdef0123456789abcdef",
+        "title": "Swap the cart totals calculation",
+        "signOff": null,
+        "focusAreas": []
+      }
+    ],
+    "reviewers": ["octocat", "hubot"]
+  },
+  "storedPacket": {
+    "id": "wave-2-checkout",
+    "authorId": "member-author-1",
+    "title": "Checkout rewrite, wave 2",
+    "overview": {
+      "objective": "Moves checkout onto the new payment service in three dependent PRs.",
+      "highlights": ["Adds the payment client", "Swaps the cart totals calculation", "Removes the legacy checkout route"]
+    },
+    "prs": [
+      {
+        "repo": "think-lp/shop",
+        "number": 41,
+        "headSha": "0123456789abcdef0123456789abcdef01234567",
+        "title": "Add the payment client",
+        "ticket": "FRT-101",
+        "signOff": { "at": "2026-10-10T12:00:00Z", "headSha": "0123456789abcdef0123456789abcdef01234567" },
+        "focusAreas": []
+      }
+    ],
+    "reviewers": [
+      { "id": "member-1", "github": { "id": 583231, "login": "octocat" } },
+      { "id": "member-2", "github": { "id": 9919, "login": "hubot" } }
+    ],
+    "status": "open",
+    "revision": 3,
+    "createdAt": "2026-10-10T12:01:00Z",
+    "updatedAt": "2026-10-10T13:00:00Z"
+  },
+  "updateRequest": {
+    "expectedRevision": 3,
+    "operationId": "0f9a7c4e1b2d4c5e8a6b7c8d9e0f1a2b",
+    "packet": {
+      "id": "wave-2-checkout",
+      "title": "Checkout rewrite, wave 2 (revised)",
+      "overview": {
+        "objective": "Moves checkout onto the new payment service in three dependent PRs.",
+        "highlights": ["Adds the payment client"]
+      },
+      "prs": [
+        {
+          "repo": "think-lp/shop",
+          "number": 41,
+          "headSha": "0123456789abcdef0123456789abcdef01234567",
+          "title": "Add the payment client",
+          "signOff": null,
+          "focusAreas": []
+        }
+      ],
+      "reviewers": ["octocat"]
+    }
+  },
+  "reviewerList": {
+    "reviewers": [
+      { "id": "member-1", "name": "Octo Cat", "github": { "id": 583231, "login": "octocat" } },
+      { "id": "member-2", "name": "Hub Ot", "github": { "id": 9919, "login": "hubot" } }
+    ]
+  },
+  "errors": {
+    "revision_conflict": { "error": "revision_conflict", "message": "The packet is at revision 4, not 3." },
+    "packet_exists": { "error": "packet_exists", "message": "A packet with this id already exists with a different body." },
+    "reviewer_not_found": { "error": "reviewer_not_found", "message": "No active member has the GitHub login nobody." },
+    "agents_opt_in_required": { "error": "agents_opt_in_required", "message": "Turn on Agents in Settings." },
+    "agent_token_expired": { "error": "agent_token_expired", "message": "The agent token has expired." }
+  }
+}
