@@ -16,6 +16,7 @@ const makeMockHost = (
   createPullRequest: vi.fn().mockResolvedValue(created),
   commentOnPullRequest: vi.fn().mockResolvedValue(comment),
   listOpenPullRequestsForTickets: vi.fn().mockResolvedValue([]),
+  defaultBranch: vi.fn().mockResolvedValue('main'),
   requestReviewers: vi.fn().mockResolvedValue({ number: 7, requested: [], failed: [] }),
 })
 

@@ -30765,6 +30765,18 @@ var GhPullRequestHost = class {
       return open2.filter((candidate) => branch.test(candidate.headRefName) || titleScope.test(candidate.title)).map((candidate) => ({ ticket, ...candidate }));
     });
   }
+  async defaultBranch() {
+    const { stdout } = await this.execFile("gh", [
+      "repo",
+      "view",
+      this.repo,
+      "--json",
+      "defaultBranchRef",
+      "--jq",
+      ".defaultBranchRef.name"
+    ]);
+    return stdout.trim();
+  }
   async requestReviewers(number4, logins) {
     const result = { number: number4, requested: [], failed: [] };
     for (const login of logins) {
@@ -48031,6 +48043,77 @@ A tracker body must stand on its own for an engineer on a fresh clone. Inline th
 };
 var portableContextGuard = new RegexPortableContextGuard();
 
+// src/tasks/review-plan/review-plan.ts
+var maxSimplePrCount = 4;
+var ReviewRouteClassifier = class {
+  classify(blocked, defaultBranch) {
+    const reasons = [];
+    const pullRequests = blocked.flatMap((entry) => entry.pr === null ? [] : [entry.pr]);
+    const waveCount = new Set(blocked.map((entry) => entry.wave)).size;
+    if (waveCount > 1) {
+      reasons.push(`spans more than one wave (${waveCount} waves)`);
+    }
+    const stacked = pullRequests.filter((pr) => pr.baseRefName !== defaultBranch);
+    if (stacked.length > 0) {
+      const bases = [...new Set(stacked.map((pr) => pr.baseRefName))].join(", ");
+      reasons.push(`stacked base: a PR targets ${bases} instead of ${defaultBranch}`);
+    }
+    if (pullRequests.length > maxSimplePrCount) {
+      reasons.push(`more than ${maxSimplePrCount} PRs (${pullRequests.length} PRs)`);
+    }
+    return { route: reasons.length > 0 ? "complex" : "simple", reasons };
+  }
+};
+var ReviewPlanService = class {
+  classifier = new ReviewRouteClassifier();
+  /** Tracker statuses are display names on some trackers, so "In Review" and "in-review" must match. */
+  normalizeStatus(status) {
+    return status.trim().toLowerCase().replace(/[\s-]+/g, "-");
+  }
+  isInReview(status, inReviewStatus) {
+    const normalized = this.normalizeStatus(status);
+    return normalized === "in-review" || inReviewStatus !== void 0 && normalized === this.normalizeStatus(inReviewStatus);
+  }
+  /** Ids of open tickets in review, in plan order. */
+  inReviewTicketIds(plan, inReviewStatus) {
+    return plan.waves.flat().filter((t) => this.isInReview(t.status, inReviewStatus)).map((t) => t.id);
+  }
+  build(input2) {
+    const titles = new Map(input2.tickets.map((ticket) => [ticket.id, ticket.title]));
+    const blocked = [];
+    const missingPrReasons = [];
+    input2.plan.waves.forEach((wave, waveIndex) => {
+      for (const planned of wave) {
+        if (!this.isInReview(planned.status, input2.inReviewStatus)) continue;
+        const found = input2.pullRequests.find((pr) => pr.ticket === planned.id);
+        blocked.push({
+          ticketId: planned.id,
+          title: titles.get(planned.id) ?? "",
+          wave: waveIndex,
+          blockedBy: planned.blockedBy,
+          pr: found === void 0 ? null : { number: found.number, url: found.url, headRefName: found.headRefName, baseRefName: found.baseRefName }
+        });
+        if (found === void 0) missingPrReasons.push(`ticket ${planned.id} is in review but has no open PR`);
+      }
+    });
+    const decision = this.classifier.classify(blocked, input2.defaultBranch);
+    return {
+      route: decision.route,
+      reasons: [...decision.reasons, ...missingPrReasons],
+      blocked,
+      unblocksOnMerge: this.unblockedOnMerge(input2.plan, blocked)
+    };
+  }
+  unblockedOnMerge(plan, blocked) {
+    const blockedIds = new Set(blocked.map((entry) => entry.ticketId));
+    const openIds = new Set(plan.waves.flat().map((t) => t.id));
+    return plan.waves.flat().filter((t) => !blockedIds.has(t.id)).filter((t) => {
+      const openBlockers = t.blockedBy.filter((id) => openIds.has(id));
+      return openBlockers.some((id) => blockedIds.has(id)) && openBlockers.every((id) => blockedIds.has(id));
+    }).map((t) => t.id);
+  }
+};
+
 // src/tasks/dependency-planner/dependency-planner.ts
 var DependencyPlannerService = class {
   plan(tickets) {
@@ -48070,7 +48153,7 @@ var DependencyPlannerService = class {
 };
 
 // src/tasks/commands/epic/command.ts
-function createEpicCommand(getTracker) {
+function createEpicCommand(getTracker, getPrHost, getConfig = () => ({})) {
   const epic = new Command("epic");
   epic.command("create").exitOverride().requiredOption("--title <title>", "epic title").option("--body <body>", "epic body (or use --body-file)").option("--body-file <path>", "read the epic body from a file").option("--labels <labels>", "comma-separated labels").option("--allow-local-paths", "accept machine-local paths in the body (see docs/layered-body-format.md)").action(async (opts) => {
     const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
@@ -48107,6 +48190,42 @@ function createEpicCommand(getTracker) {
       }))
     );
     process.stdout.write(JSON.stringify(plan) + "\n");
+    if (plan.cycles.length > 0) {
+      throw new Error(`dependency cycle detected among tickets: ${plan.cycles.join(", ")}`);
+    }
+  });
+  epic.command("review-plan").exitOverride().argument("<id>", "epic id").action(async (id) => {
+    const epicData = await getTracker().getEpic(id);
+    const plan = new DependencyPlannerService().plan(
+      epicData.childIssues.map((ticket) => ({
+        id: ticket.id,
+        status: ticket.status,
+        blockedBy: ticket.blockedBy
+      }))
+    );
+    const { inReviewStatus } = getConfig();
+    const reviewPlan = new ReviewPlanService();
+    const inReviewIds = reviewPlan.inReviewTicketIds(plan, inReviewStatus);
+    const host = getPrHost();
+    const pullRequests = inReviewIds.length > 0 ? await host.listOpenPullRequestsForTickets(inReviewIds) : [];
+    const defaultBranch = await host.defaultBranch();
+    const result = reviewPlan.build({
+      plan,
+      tickets: epicData.childIssues,
+      pullRequests,
+      defaultBranch,
+      inReviewStatus
+    });
+    process.stdout.write(
+      JSON.stringify({
+        epic: { id: epicData.id, title: epicData.title },
+        defaultBranch,
+        route: result.route,
+        reasons: result.reasons,
+        blocked: result.blocked,
+        unblocksOnMerge: result.unblocksOnMerge
+      }) + "\n"
+    );
     if (plan.cycles.length > 0) {
       throw new Error(`dependency cycle detected among tickets: ${plan.cycles.join(", ")}`);
     }
@@ -49317,7 +49436,7 @@ function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = () => cr
   const tracker = () => getTracker(overrideTracker);
   const config2 = () => getConfig(overrideTracker);
   const prHost = () => getPrHost(overrideTracker);
-  program2.addCommand(createEpicCommand(tracker));
+  program2.addCommand(createEpicCommand(tracker, prHost, config2));
   program2.addCommand(createInitiativeCommand(tracker));
   program2.addCommand(createTicketCommand(tracker));
   program2.addCommand(createTddCommand(tracker));

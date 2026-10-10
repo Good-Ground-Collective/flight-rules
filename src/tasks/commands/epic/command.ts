@@ -2,6 +2,9 @@ import { Command } from 'commander'
 import type { TaskTracker } from '../../task-tracker/task-tracker.js'
 import { resolveBody } from '../resolve-body.js'
 import { portableContextGuard } from '../../portable-context/portable-context.js'
+import type { PullRequestHost } from '../../../pr/pull-request-host/pull-request-host.js'
+import type { Config } from '../../../shared/config.js'
+import { ReviewPlanService } from '../../review-plan/review-plan.js'
 import { DependencyPlannerService } from '../../dependency-planner/dependency-planner.js'
 
 type CreateEpicOptions = {
@@ -20,7 +23,11 @@ type EditEpicOptions = {
   allowLocalPaths?: boolean
 }
 
-export function createEpicCommand(getTracker: () => TaskTracker): Command {
+export function createEpicCommand(
+  getTracker: () => TaskTracker,
+  getPrHost: () => PullRequestHost,
+  getConfig: () => Pick<Config, 'inReviewStatus'> = () => ({}),
+): Command {
   const epic = new Command('epic')
 
   epic
@@ -86,6 +93,49 @@ export function createEpicCommand(getTracker: () => TaskTracker): Command {
         })),
       )
       process.stdout.write(JSON.stringify(plan) + '\n')
+      if (plan.cycles.length > 0) {
+        throw new Error(`dependency cycle detected among tickets: ${plan.cycles.join(', ')}`)
+      }
+    })
+
+  epic
+    .command('review-plan')
+    .exitOverride()
+    .argument('<id>', 'epic id')
+    .action(async (id: string) => {
+      const epicData = await getTracker().getEpic(id)
+      const plan = new DependencyPlannerService().plan(
+        epicData.childIssues.map((ticket) => ({
+          id: ticket.id,
+          status: ticket.status,
+          blockedBy: ticket.blockedBy,
+        })),
+      )
+      const { inReviewStatus } = getConfig()
+      const reviewPlan = new ReviewPlanService()
+      const inReviewIds = reviewPlan.inReviewTicketIds(plan, inReviewStatus)
+
+      const host = getPrHost()
+      const pullRequests = inReviewIds.length > 0 ? await host.listOpenPullRequestsForTickets(inReviewIds) : []
+      const defaultBranch = await host.defaultBranch()
+
+      const result = reviewPlan.build({
+        plan,
+        tickets: epicData.childIssues,
+        pullRequests,
+        defaultBranch,
+        inReviewStatus,
+      })
+      process.stdout.write(
+        JSON.stringify({
+          epic: { id: epicData.id, title: epicData.title },
+          defaultBranch,
+          route: result.route,
+          reasons: result.reasons,
+          blocked: result.blocked,
+          unblocksOnMerge: result.unblocksOnMerge,
+        }) + '\n',
+      )
       if (plan.cycles.length > 0) {
         throw new Error(`dependency cycle detected among tickets: ${plan.cycles.join(', ')}`)
       }

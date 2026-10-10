@@ -41,6 +41,8 @@ export interface PullRequestHost {
   commentOnPullRequest(number: number, body: string, options?: PullRequestAttachOptions): Promise<PullRequestComment>
   /** Returns every open PR matched to each ticket id, so a ticket with several PRs shows all of them. */
   listOpenPullRequestsForTickets(ticketIds: readonly string[]): Promise<OpenPullRequest[]>
+  /** Name of the repository's default branch, the base a non-stacked PR targets. */
+  defaultBranch(): Promise<string>
   /** Attempts every login and reports each outcome rather than stopping at the first failure. */
   requestReviewers(number: number, logins: readonly string[]): Promise<ReviewerRequestResult>
 }

@@ -305,3 +305,12 @@ describe('GhPullRequestHost.requestReviewers', () => {
     expect(result.failed).toEqual([{ login: 'alice', error: 'boom' }])
   })
 })
+
+describe('GhPullRequestHost.defaultBranch', () => {
+  it('reads the default branch name through gh repo view', async () => {
+    const execFileFn = vi.fn(async () => ({ stdout: 'main\n', stderr: '' }))
+    const host = new GhPullRequestHost({ repo: 'o/r', execFileFn })
+    expect(await host.defaultBranch()).toBe('main')
+    expect(execFileFn).toHaveBeenCalledWith('gh', expect.arrayContaining(['repo', 'view', 'o/r', 'defaultBranchRef']))
+  })
+})

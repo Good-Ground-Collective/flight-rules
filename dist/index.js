@@ -356,6 +356,18 @@ var GhPullRequestHost = class {
       return open.filter((candidate) => branch.test(candidate.headRefName) || titleScope.test(candidate.title)).map((candidate) => ({ ticket, ...candidate }));
     });
   }
+  async defaultBranch() {
+    const { stdout } = await this.execFile("gh", [
+      "repo",
+      "view",
+      this.repo,
+      "--json",
+      "defaultBranchRef",
+      "--jq",
+      ".defaultBranchRef.name"
+    ]);
+    return stdout.trim();
+  }
   async requestReviewers(number, logins) {
     const result = { number, requested: [], failed: [] };
     for (const login of logins) {
@@ -1044,7 +1056,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.60.0";
+var appVersion = false ? "0.0.0-dev" : "1.61.0";
 
 // src/shared/ariadne/review-packet.schema.ts
 import { z as z11 } from "zod";

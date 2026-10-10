@@ -31,6 +31,7 @@ export declare class GhPullRequestHost implements PullRequestHost {
     createPullRequest(input: PullRequestTemplate, options?: PullRequestAttachOptions): Promise<CreatedPullRequest>;
     commentOnPullRequest(number: number, body: string, options?: PullRequestAttachOptions): Promise<PullRequestComment>;
     listOpenPullRequestsForTickets(ticketIds: readonly string[]): Promise<OpenPullRequest[]>;
+    defaultBranch(): Promise<string>;
     requestReviewers(number: number, logins: readonly string[]): Promise<ReviewerRequestResult>;
     private describeFailure;
     private escapeRegExp;
