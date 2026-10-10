@@ -1056,7 +1056,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.64.0";
+var appVersion = false ? "0.0.0-dev" : "1.64.1";
 
 // src/shared/ariadne/review-packet.schema.ts
 import { z as z11 } from "zod";

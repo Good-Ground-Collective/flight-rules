@@ -103,6 +103,18 @@ describe('ReviewPlanService.build', () => {
     expect(result.route).toBe('complex')
   })
 
+  it('is incomplete and lists missing tickets when an in-review ticket has no PR', () => {
+    const result = build({ waves: [[planned('1'), planned('2')]], cycles: [] }, [pr('2')])
+    expect(result.route).toBe('incomplete')
+    expect(result.missing).toEqual(['1'])
+    expect(result.reasons).toHaveLength(1)
+    expect(result.reasons[0]).toContain('no open PR')
+  })
+
+  it('has an empty missing list when every blocked ticket has a PR', () => {
+    expect(build({ waves: [[planned('1')]], cycles: [] }, [pr('1')]).missing).toEqual([])
+  })
+
   it('gives pr null and a reason for an in-review ticket without a PR', () => {
     const result = build({ waves: [[planned('1')]], cycles: [] }, [])
     expect(result.blocked[0]?.pr).toBeNull()

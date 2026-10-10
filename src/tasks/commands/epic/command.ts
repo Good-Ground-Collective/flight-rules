@@ -132,6 +132,7 @@ export function createEpicCommand(
           defaultBranch,
           route: result.route,
           reasons: result.reasons,
+          missing: result.missing,
           blocked: result.blocked,
           unblocksOnMerge: result.unblocksOnMerge,
         }) + '\n',

@@ -48227,10 +48227,21 @@ var ReviewPlanService = class {
         if (found === void 0) missingPrReasons.push(`ticket ${planned.id} is in review but has no open PR`);
       }
     });
+    const missing = blocked.filter((entry) => entry.pr === null).map((entry) => entry.ticketId);
+    if (missing.length > 0) {
+      return {
+        route: "incomplete",
+        reasons: missingPrReasons,
+        missing,
+        blocked,
+        unblocksOnMerge: this.unblockedOnMerge(input2.plan, blocked)
+      };
+    }
     const decision = this.classifier.classify(blocked, input2.defaultBranch);
     return {
       route: decision.route,
-      reasons: [...decision.reasons, ...missingPrReasons],
+      reasons: decision.reasons,
+      missing,
       blocked,
       unblocksOnMerge: this.unblockedOnMerge(input2.plan, blocked)
     };
@@ -48353,6 +48364,7 @@ function createEpicCommand(getTracker, getPrHost, getConfig = () => ({})) {
         defaultBranch,
         route: result.route,
         reasons: result.reasons,
+        missing: result.missing,
         blocked: result.blocked,
         unblocksOnMerge: result.unblocksOnMerge
       }) + "\n"
@@ -48368,7 +48380,7 @@ function createEpicCommand(getTracker, getPrHost, getConfig = () => ({})) {
 }
 
 // src/tasks/commands/initiative/command.ts
-function createInitiativeCommand(getTracker) {
+function createInitiativeCommand(getTracker, getPrHost, getConfig = () => ({})) {
   const initiative = new Command("initiative");
   initiative.command("create").exitOverride().requiredOption("--title <title>", "initiative title").option("--body <body>", "initiative body (or use --body-file)").option("--body-file <path>", "read the initiative body from a file").option("--allow-local-paths", "accept machine-local paths in the body (see docs/layered-body-format.md)").action(async (opts) => {
     const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
@@ -48405,6 +48417,40 @@ function createInitiativeCommand(getTracker) {
       }))
     );
     process.stdout.write(JSON.stringify(plan) + "\n");
+    if (plan.cycles.length > 0) {
+      throw new Error(`dependency cycle detected among tickets: ${plan.cycles.join(", ")}`);
+    }
+  });
+  initiative.command("review-plan").exitOverride().argument("<id>", "initiative id").action(async (id) => {
+    const tracker = getTracker();
+    const initiativeData = await tracker.getInitiative(id);
+    const epics = await Promise.all(initiativeData.epics.map((e) => tracker.getEpic(e.id)));
+    const tickets = epics.flatMap((e) => e.childIssues);
+    const plan = new DependencyPlannerService().plan(
+      tickets.map((ticket) => ({
+        id: ticket.id,
+        status: ticket.status,
+        blockedBy: ticket.blockedBy
+      }))
+    );
+    const { inReviewStatus } = getConfig();
+    const reviewPlan = new ReviewPlanService();
+    const inReviewIds = reviewPlan.inReviewTicketIds(plan, inReviewStatus);
+    const host = getPrHost();
+    const pullRequests = inReviewIds.length > 0 ? await host.listOpenPullRequestsForTickets(inReviewIds) : [];
+    const defaultBranch = await host.defaultBranch();
+    const result = reviewPlan.build({ plan, tickets, pullRequests, defaultBranch, inReviewStatus });
+    process.stdout.write(
+      JSON.stringify({
+        initiative: { id: initiativeData.id, title: initiativeData.title },
+        defaultBranch,
+        route: result.route,
+        reasons: result.reasons,
+        missing: result.missing,
+        blocked: result.blocked,
+        unblocksOnMerge: result.unblocksOnMerge
+      }) + "\n"
+    );
     if (plan.cycles.length > 0) {
       throw new Error(`dependency cycle detected among tickets: ${plan.cycles.join(", ")}`);
     }
@@ -49570,7 +49616,7 @@ function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = () => cr
   const config2 = () => getConfig(overrideTracker);
   const prHost = () => getPrHost(overrideTracker);
   program2.addCommand(createEpicCommand(tracker, prHost, config2));
-  program2.addCommand(createInitiativeCommand(tracker));
+  program2.addCommand(createInitiativeCommand(tracker, prHost, config2));
   program2.addCommand(createTicketCommand(tracker));
   program2.addCommand(createTddCommand(tracker));
   program2.addCommand(createGitCommand(() => services.git()));

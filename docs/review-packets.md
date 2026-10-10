@@ -7,7 +7,7 @@ Unlike `flight-rules board`, which stays quiet so a hook can never fail, every `
 ## Commands
 
 ```bash
-flight-rules packet new-id --title <title>
+flight-rules packet new-id --title "<title>"
 flight-rules packet create --file <packet.json>
 flight-rules packet update <id> --file <packet.json> [--expected-revision <n>]
 flight-rules packet get <id>
@@ -19,6 +19,18 @@ flight-rules packet reviewers
 - `update` sends `PUT /v1/review-packets/{id}` with `{expectedRevision, operationId, packet}`. The `operationId` is generated for you. `expectedRevision` comes from `--expected-revision`, or from the file's `revision` field. The output of `packet get` carries one, so the usual flow is `packet get <id> > p.json`, edit, `packet update <id> --file p.json`. The server-owned fields in that output (`authorId`, `status`, `revision`, `createdAt`, `updatedAt`) are not sent back, and reviewers shown as `{id, github: {login}}` are sent as their logins. A file with no revision and no flag exits 1 before anything is sent.
 - `get` prints the packet, including its `revision`.
 - `reviewers` prints `{reviewers: [{id, name, github: {id, login}}]}`: the members you can name. Packets name reviewers by GitHub login.
+
+## Review plans
+
+`flight-rules epic review-plan <id>` and `flight-rules initiative review-plan <id>` tell an orchestrator how to hand off the PRs it is blocked on. The initiative verb plans across every epic in one graph, so dependencies between epics are kept and the route rule is applied once to the whole set.
+
+The output carries `route`, `reasons`, `missing`, `blocked` and `unblocksOnMerge`. `route` is one of:
+
+- `simple`: plain review requests are enough.
+- `complex`: the set spans more than one wave, stacks on a branch other than the default, or has more than 4 PRs. Build a Review Packet.
+- `incomplete`: a blocked ticket has no open PR. `missing` lists those tickets and the route is not decided until their PRs exist. Report them and stop.
+
+A `blocked` entry has `pr: null` when no open PR matched its ticket. Skills skip such entries rather than failing.
 
 ## Packet ids
 
