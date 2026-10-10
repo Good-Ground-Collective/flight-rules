@@ -31455,7 +31455,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.64.1";
+var appVersion = false ? "0.0.0-dev" : "1.64.2";
 
 // src/shared/ariadne/review-packet.schema.ts
 var packetLimits = {
