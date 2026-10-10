@@ -69,6 +69,20 @@ describe("config command", () => {
     expect(result["warning"]).toContain("local scope");
   });
 
+  it("writes the Ariadne keys to user scope by default, with enabled as a boolean", async () => {
+    writeFileSync(join(project, ".claude", "flight-rules.local.md"), "---\ntracker: github\nrepo: acme/proj\n---\n");
+    expect(await run(["set", "ariadne.url", "http://localhost:8080"])).toMatchObject({ scope: "user" });
+    expect(await run(["set", "ariadne.enabled", "false"])).toMatchObject({ scope: "user" });
+    const report = await run(["show"]);
+    expect(report["values"]).toMatchObject({ "ariadne.url": "http://localhost:8080", "ariadne.enabled": false });
+    expect(report["valid"]).toBe(true);
+  });
+
+  it("rejects an Ariadne URL or enabled value that is not one", async () => {
+    await expect(run(["set", "ariadne.url", "not a url"])).rejects.toThrow("Invalid value for ariadne.url");
+    await expect(run(["set", "ariadne.enabled", "maybe"])).rejects.toThrow("Invalid value for ariadne.enabled");
+  });
+
   it("unset removes the key from a scope", async () => {
     await run(["set", "repo", "acme/override", "--scope", "local"]);
     await run(["unset", "repo", "--scope", "local"]);

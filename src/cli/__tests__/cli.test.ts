@@ -178,6 +178,7 @@ describe('injected core', () => {
     const core: FlightRules = {
       configPath: vi.fn(), config: vi.fn(), tracker: vi.fn(), prHost: vi.fn(),
       git: vi.fn(), probe: vi.fn(), docs: vi.fn(), configStore: vi.fn(), mainCheckout: vi.fn(), evidence: vi.fn(),
+      board: vi.fn(), ariadneTokens: vi.fn(),
     }
     const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
     try {

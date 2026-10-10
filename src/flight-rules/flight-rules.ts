@@ -8,6 +8,8 @@ import type { HostSettingsSource } from '../shared/host-settings/host-settings-s
 import { WorktreeLocator } from '../git/worktree-locator/worktree-locator.js'
 import { EvidenceLocation } from '../tasks/evidence/evidence-location.js'
 import { EnvLoader } from '../shared/env.js'
+import { AriadneBoard } from '../shared/ariadne/ariadne-board.js'
+import { AriadneTokenStore } from '../shared/ariadne/ariadne-token-store.js'
 import { GitHubTaskTracker } from '../tasks/github-task-tracker/github-task-tracker.js'
 import { JiraTaskTracker } from '../tasks/jira-task-tracker/jira-task-tracker.js'
 import type { TaskTracker } from '../tasks/task-tracker/task-tracker.js'
@@ -26,6 +28,9 @@ export interface FlightRules {
   git(): GitExecutor
   probe(): ToolProbe
   docs(): DocResolver
+  /** Ariadne's Agents page reporter; reads only the `ariadne.*` keys, so it works without a valid tracker config. */
+  board(): AriadneBoard
+  ariadneTokens(): AriadneTokenStore
 }
 
 /** Constructs services on demand so config and credentials are only required by their consumers. */
@@ -137,6 +142,14 @@ export class DefaultFlightRules implements FlightRules {
 
   docs(): DocResolver {
     return FileDocResolver.fromInstall({ moduleUrl: import.meta.url, env: this.env })
+  }
+
+  board(): AriadneBoard {
+    return new AriadneBoard({ readConfig: () => this.configStore().inspect().values, tokens: this.ariadneTokens(), env: this.env })
+  }
+
+  ariadneTokens(): AriadneTokenStore {
+    return new AriadneTokenStore({ env: this.env })
   }
 }
 

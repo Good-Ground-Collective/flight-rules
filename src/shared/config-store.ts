@@ -14,6 +14,9 @@ import type { HostSettingsSource } from "./host-settings/host-settings-source.js
 export const configScopes = ["user", "project", "local", "file"] as const;
 export type ConfigScope = (typeof configScopes)[number];
 
+/** Keys that describe the person rather than the project, so a write defaults to user scope. */
+const userScopedKeys: ReadonlySet<string> = new Set(["ariadne.url", "ariadne.enabled"]);
+
 export interface ConfigLayer {
   scope: ConfigScope;
   path: string;
@@ -127,12 +130,14 @@ export class ConfigStore {
 
   /**
    * The scope a write lands in when the caller names none: wherever the key
-   * is set now, else the config file when one exists, else `local`.
+   * is set now, else `user` for a person-level key such as `ariadne.url`,
+   * else the config file when one exists, else `local`.
    */
   defaultScopeFor(key: string): ConfigScope {
     const layers = this.layers();
     const owner = [...layers].reverse().find((layer) => key in layer.values);
     if (owner !== undefined) return owner.scope;
+    if (userScopedKeys.has(key)) return "user";
     return this.layer(layers, "file").present ? "file" : "local";
   }
 
@@ -236,9 +241,16 @@ export class ConfigStore {
     const field = Object.entries(ConfigSchema.shape).find(([name]) => name === key)?.[1];
     if (field === undefined) return undefined;
     // Array fields (defaultLabels, competencies) accept a list and reject a
-    // bare string; every other field is a scalar string.
+    // bare string; boolean fields (ariadne.enabled) take true or false; every
+    // other field is a scalar string.
     const isArray = field.safeParse([]).success && !field.safeParse("").success;
-    const value = isArray ? [...rawValues] : rawValues.join(" ");
+    const isBoolean = field.safeParse(true).success && !field.safeParse("").success;
+    const joined = rawValues.join(" ");
+    const value = isArray
+      ? [...rawValues]
+      : isBoolean && (joined === "true" || joined === "false")
+        ? joined === "true"
+        : joined;
     const result = field.safeParse(value);
     if (!result.success) {
       throw new Error(`Invalid value for ${key}: ${result.error.issues.map((i) => i.message).join("; ")}`);

@@ -1,0 +1,39 @@
+{
+  "session": {
+    "id": "0f9a7c4e-1",
+    "ownerId": "alice",
+    "ticket": "FRT-1234",
+    "repo": "think-lp/ariadne",
+    "branch": "feat/FRT-1234-agents",
+    "skill": "flight-rules:execute-work",
+    "step": "verify 1/3",
+    "state": "caution",
+    "detail": null,
+    "lastHeartbeat": "2026-10-09T12:00:00.000Z",
+    "running": true
+  },
+  "item": {
+    "id": "gate-1",
+    "session": "0f9a7c4e-1",
+    "ownerId": "alice",
+    "kind": "wave-gate",
+    "ticket": "FRT-1200",
+    "title": "Wave 2 merged 4 of 4; wave 3 can start 3 tickets",
+    "detail": null,
+    "options": ["Start wave", "Review wave"],
+    "status": "resolved",
+    "chosenOption": "Start wave",
+    "createdAt": "2026-10-09T12:00:00.000Z",
+    "resolvedAt": "2026-10-09T12:05:00.000Z",
+    "resolvedBy": "bob"
+  },
+  "activity": {
+    "id": "a1",
+    "at": "2026-10-09T12:00:00.000Z",
+    "session": "0f9a7c4e-1",
+    "ownerId": "alice",
+    "ticket": "FRT-1234",
+    "level": "success",
+    "text": "Opened PR #86"
+  }
+}

@@ -3,6 +3,7 @@ import { Command } from 'commander'
 import { createDocCommand } from '../bundled-docs/commands/doc/command.js'
 import type { Config } from '../shared/config.js'
 import { createConfigCommand } from '../shared/commands/config/command.js'
+import { createBoardCommand } from '../shared/commands/board/command.js'
 import { createEpicCommand } from '../tasks/commands/epic/command.js'
 import { createInitiativeCommand } from '../tasks/commands/initiative/command.js'
 import { createTicketCommand } from '../tasks/commands/ticket/command.js'
@@ -25,7 +26,7 @@ export function buildProgram(
   getConfig: (overrideTracker?: string) => Config,
   getPrHost: (overrideTracker?: string) => PullRequestHost,
   getConfigPath: () => string = () => createFlightRules().configPath(),
-  services: Pick<FlightRules, 'git' | 'probe' | 'docs' | 'configStore' | 'evidence'> = createFlightRules(),
+  services: Pick<FlightRules, 'git' | 'probe' | 'docs' | 'configStore' | 'evidence' | 'board' | 'ariadneTokens'> = createFlightRules(),
 ): Command {
   const program = new Command('flight-rules')
   program.version(appVersion)
@@ -58,6 +59,7 @@ export function buildProgram(
   program.addCommand(createCompetenciesCommand(config))
   program.addCommand(createDocCommand(() => services.docs()))
   program.addCommand(createCheckCommand(config, tracker, getConfigPath, () => services.probe()))
+  program.addCommand(createBoardCommand(() => services.board(), () => services.ariadneTokens()))
   return program
 }
 

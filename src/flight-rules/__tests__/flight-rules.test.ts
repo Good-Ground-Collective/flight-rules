@@ -127,3 +127,19 @@ describe('createFlightRules', () => {
     expect(() => core.docs()).toThrow('does not exist or is not a directory')
   })
 })
+
+describe('board', () => {
+  it('reads only the ariadne keys, so a repo without a tracker config can still report', () => {
+    mkdirSync(join(cwd, '.claude'), { recursive: true })
+    writeFileSync(join(cwd, '.claude', 'flight-rules.local.md'), '---\nariadne.url: http://localhost:8080\nariadne.enabled: false\n---\n')
+    const core = createFlightRules({ cwd, env: { CLAUDE_CONFIG_DIR: join(cwd, 'no-user-settings') } })
+    expect(() => core.config()).toThrow()
+    expect(core.board().settings()).toEqual({ url: 'http://localhost:8080', enabled: false })
+  })
+
+  it('skips silently with no config and no token', async () => {
+    const env = { CLAUDE_CONFIG_DIR: join(cwd, 'no-user-settings'), CLAUDE_CODE_SESSION_ID: 's1' }
+    const outcome = await createFlightRules({ cwd, env }).board().heartbeat({ ticket: 'FRT-1', step: 'pr', state: 'nominal' })
+    expect(outcome).toEqual({ status: 'skipped', reason: 'no-token' })
+  })
+})
