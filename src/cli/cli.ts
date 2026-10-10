@@ -45,7 +45,7 @@ export function buildProgram(
   const config = (): Config => getConfig(overrideTracker)
   const prHost = (): PullRequestHost => getPrHost(overrideTracker)
 
-  program.addCommand(createEpicCommand(tracker))
+  program.addCommand(createEpicCommand(tracker, prHost, config))
   program.addCommand(createInitiativeCommand(tracker))
   program.addCommand(createTicketCommand(tracker))
   program.addCommand(createTddCommand(tracker))

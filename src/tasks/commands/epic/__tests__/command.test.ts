@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { CommanderError } from 'commander'
 import type { TaskTracker, Epic, Ticket } from '../../../task-tracker/task-tracker.js'
+import type { PullRequestHost, OpenPullRequest } from '../../../../pr/pull-request-host/pull-request-host.js'
 import { createEpicCommand } from '../command.js'
 
 const mockEpic: Epic = {
@@ -63,8 +64,16 @@ const makeTracker = (): TaskTracker => ({
   ping: vi.fn(),
 })
 
-const run = (tracker: TaskTracker, args: string[]) =>
-  createEpicCommand(() => tracker).exitOverride().parseAsync(args, { from: 'user' })
+const makeHost = (open: OpenPullRequest[] = []): PullRequestHost => ({
+  createPullRequest: vi.fn(),
+  commentOnPullRequest: vi.fn(),
+  listOpenPullRequestsForTickets: vi.fn().mockResolvedValue(open),
+  defaultBranch: vi.fn().mockResolvedValue('main'),
+  requestReviewers: vi.fn(),
+})
+
+const run = (tracker: TaskTracker, args: string[], host: PullRequestHost = makeHost()) =>
+  createEpicCommand(() => tracker, () => host).exitOverride().parseAsync(args, { from: 'user' })
 
 describe('epic command', () => {
   beforeEach(() => vi.clearAllMocks())
@@ -179,6 +188,55 @@ describe('epic command', () => {
     await expect(run(tracker, ['plan', '42'])).rejects.toThrow('dependency cycle')
 
     expect(output).toHaveBeenCalled() // JSON still printed before throwing
+    output.mockRestore()
+  })
+
+  it('prints the review hand-off for "review-plan"', async () => {
+    const tracker = makeTracker()
+    vi.mocked(tracker.getEpic).mockResolvedValue({
+      ...mockEpic,
+      childIssues: [child('1', [], 'In Review'), child('2', ['1']), child('3', [], 'closed')],
+    })
+    const host = makeHost([
+      { ticket: '1', number: 7, url: 'https://x/pull/7', headRefName: 'feat/1-a', baseRefName: 'main', title: 'feat(1): a' },
+    ])
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+
+    await run(tracker, ['review-plan', '42'], host)
+
+    expect(host.listOpenPullRequestsForTickets).toHaveBeenCalledWith(['1'])
+    expect(output).toHaveBeenCalledWith(
+      JSON.stringify({
+        epic: { id: '42', title: 'My Epic' },
+        defaultBranch: 'main',
+        route: 'simple',
+        reasons: [],
+        blocked: [
+          {
+            ticketId: '1',
+            title: 'Ticket 1',
+            wave: 0,
+            blockedBy: [],
+            pr: { number: 7, url: 'https://x/pull/7', headRefName: 'feat/1-a', baseRefName: 'main' },
+          },
+        ],
+        unblocksOnMerge: ['2'],
+      }) + '\n',
+    )
+    output.mockRestore()
+  })
+
+  it('throws after printing when "review-plan" finds a cycle', async () => {
+    const tracker = makeTracker()
+    vi.mocked(tracker.getEpic).mockResolvedValue({
+      ...mockEpic,
+      childIssues: [child('1', ['2']), child('2', ['1'])],
+    })
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+
+    await expect(run(tracker, ['review-plan', '42'])).rejects.toThrow('dependency cycle')
+
+    expect(output).toHaveBeenCalled()
     output.mockRestore()
   })
 

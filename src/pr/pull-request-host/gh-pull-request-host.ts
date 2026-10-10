@@ -135,6 +135,19 @@ export class GhPullRequestHost implements PullRequestHost {
     })
   }
 
+  async defaultBranch(): Promise<string> {
+    const { stdout } = await this.execFile('gh', [
+      'repo',
+      'view',
+      this.repo,
+      '--json',
+      'defaultBranchRef',
+      '--jq',
+      '.defaultBranchRef.name',
+    ])
+    return stdout.trim()
+  }
+
   async requestReviewers(number: number, logins: readonly string[]): Promise<ReviewerRequestResult> {
     const result: ReviewerRequestResult = { number, requested: [], failed: [] }
 
