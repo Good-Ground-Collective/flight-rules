@@ -389,11 +389,123 @@ import { dirname as dirname4 } from "node:path";
 // src/shared/config.ts
 import { existsSync as existsSync2, readFileSync as readFileSync2, statSync as statSync2 } from "node:fs";
 import { dirname as dirname2, isAbsolute, join as join3, resolve as resolve2 } from "node:path";
-import { z as z7 } from "zod";
+import { z as z8 } from "zod";
 
 // src/tasks/jira-task-tracker/jira-host.ts
 import { z as z6 } from "zod";
 var JiraHostSchema = z6.string().transform((host) => host.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, ""));
+
+// src/shared/ariadne/ariadne.schema.ts
+import { z as z7 } from "zod";
+var defaultAriadneUrl = "https://ariadne-api-xohlbba2ea-uc.a.run.app";
+var loopbackHosts = /* @__PURE__ */ new Set(["localhost", "127.0.0.1"]);
+var AriadneUrlSchema = z7.url().refine((value) => {
+  if (!URL.canParse(value)) return false;
+  const url = new URL(value);
+  return url.protocol === "https:" || url.protocol === "http:" && loopbackHosts.has(url.hostname);
+}, "must be https (http only for localhost or 127.0.0.1)");
+var agentStates = ["nominal", "caution", "abort", "hold"];
+var agentItemKinds = ["question", "blocker", "testable", "wave-gate"];
+var agentActivityLevels = ["info", "success", "caution", "abort"];
+var agentLimits = {
+  step: 60,
+  heartbeatDetail: 500,
+  title: 200,
+  itemDetail: 2e3,
+  option: 60,
+  options: 6,
+  text: 500,
+  branch: 255
+};
+var AgentTextNormalizer = class {
+  /** Whitespace runs collapse to a space and control characters go. */
+  oneLine(value, max) {
+    return this.cut(value.replace(/[\x00-\x08\x0e-\x1f\x7f]/g, "").replace(/\s+/g, " ").trim(), max);
+  }
+  /** Line feeds stay; tabs become spaces and other control characters go. */
+  multiLine(value, max) {
+    const normalized = value.replace(/\r\n?/g, "\n").replace(/\t/g, " ").replace(/[\x00-\x09\x0b-\x1f\x7f]/g, "").trim();
+    return this.cut(normalized, max);
+  }
+  /** Overlong text ends in an ellipsis, never in half a surrogate pair. */
+  cut(value, max) {
+    if (value.length <= max) return value;
+    const head = value.slice(0, max - 1).replace(/[\uD800-\uDBFF]$/, "");
+    return `${head.trimEnd()}\u2026`;
+  }
+};
+var normalizer = new AgentTextNormalizer();
+var oneLineSchema = (max) => z7.string().transform((value) => normalizer.oneLine(value, max)).pipe(z7.string().min(1, "must not be blank"));
+var multiLineSchema = (max) => z7.string().transform((value) => normalizer.multiLine(value, max)).pipe(z7.string().min(1, "must not be blank"));
+var optionalSchema = (schema) => z7.preprocess((value) => value === "" || value === null ? void 0 : value, schema.optional());
+var AgentSessionIdSchema = z7.string().regex(/^[A-Za-z0-9_-]{1,80}$/, "must be 1\u201380 letters, digits, underscores or hyphens");
+var AgentRecordIdSchema = AgentSessionIdSchema;
+var TicketKeySchema = z7.string().transform((value) => value.trim().toUpperCase()).pipe(z7.string().regex(/^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,8}$/, "must be a Jira issue key: project key, hyphen, number"));
+var RepoSchema = z7.string().regex(/^(?:[A-Za-z0-9][A-Za-z0-9-]{0,38}\/)?[A-Za-z0-9_.-]{1,100}$/, "must be owner/name or name").refine((value) => !value.includes(".."), "must not contain ..");
+var BranchSchema = z7.string().regex(/^[A-Za-z0-9_+@][A-Za-z0-9._/+@-]{0,254}$/, "must be a branch name as git prints it").refine((value) => !value.includes(".."), "must not contain ..");
+var SkillSchema = z7.string().regex(/^[A-Za-z0-9:._-]{1,80}$/, "must be up to 80 of A-Z a-z 0-9 : . _ -");
+var HeartbeatInputSchema = z7.strictObject({
+  session: AgentSessionIdSchema,
+  step: oneLineSchema(agentLimits.step),
+  state: z7.enum(agentStates),
+  ticket: optionalSchema(TicketKeySchema),
+  repo: optionalSchema(RepoSchema),
+  branch: optionalSchema(BranchSchema),
+  skill: optionalSchema(SkillSchema),
+  detail: optionalSchema(oneLineSchema(agentLimits.heartbeatDetail))
+});
+var ItemInputSchema = z7.strictObject({
+  session: AgentSessionIdSchema,
+  kind: z7.enum(agentItemKinds),
+  title: oneLineSchema(agentLimits.title),
+  ticket: optionalSchema(TicketKeySchema),
+  detail: optionalSchema(multiLineSchema(agentLimits.itemDetail)),
+  options: z7.array(oneLineSchema(agentLimits.option)).max(agentLimits.options, `up to ${agentLimits.options} options`).refine((labels) => new Set(labels).size === labels.length, "options must be distinct").optional(),
+  id: optionalSchema(AgentRecordIdSchema)
+});
+var ActivityInputSchema = z7.strictObject({
+  session: AgentSessionIdSchema,
+  text: oneLineSchema(agentLimits.text),
+  level: optionalSchema(z7.enum(agentActivityLevels)),
+  ticket: optionalSchema(TicketKeySchema),
+  id: optionalSchema(AgentRecordIdSchema)
+});
+var AgentSessionSchema = z7.looseObject({
+  id: z7.string(),
+  ownerId: z7.string(),
+  ticket: z7.string().nullable(),
+  step: z7.string(),
+  state: z7.string(),
+  lastHeartbeat: z7.string(),
+  running: z7.boolean()
+});
+var AgentItemSchema = z7.looseObject({
+  id: z7.string(),
+  session: z7.string(),
+  kind: z7.string(),
+  ticket: z7.string().nullable(),
+  title: z7.string(),
+  detail: z7.string().nullable(),
+  options: z7.array(z7.string()),
+  status: z7.string(),
+  chosenOption: z7.string().nullable(),
+  createdAt: z7.string(),
+  resolvedAt: z7.string().nullable(),
+  resolvedBy: z7.string().nullable()
+});
+var AgentActivitySchema = z7.looseObject({
+  id: z7.string(),
+  at: z7.string(),
+  session: z7.string(),
+  ticket: z7.string().nullable(),
+  level: z7.string(),
+  text: z7.string()
+});
+var HeartbeatResponseSchema = z7.looseObject({ session: AgentSessionSchema });
+var ItemResponseSchema = z7.looseObject({ item: AgentItemSchema, created: z7.boolean() });
+var ActivityResponseSchema = z7.looseObject({ activity: AgentActivitySchema, created: z7.boolean() });
+var ItemListResponseSchema = z7.looseObject({ items: z7.array(AgentItemSchema) });
+var AgentErrorBodySchema = z7.looseObject({ error: z7.string(), message: z7.string().optional() });
 
 // src/shared/config.ts
 var seedCompetencies = [
@@ -410,29 +522,35 @@ var seedCompetencies = [
   "async-coordination",
   "auth-check"
 ];
-var ConfigSchema = z7.object({
-  tracker: z7.enum(["github", "jira"]),
-  repo: z7.string().optional().describe("GitHub owner/repo; required when tracker is github"),
+var ConfigSchema = z8.object({
+  tracker: z8.enum(["github", "jira"]),
+  repo: z8.string().optional().describe("GitHub owner/repo; required when tracker is github"),
   jiraHost: JiraHostSchema.optional().describe(
     "Atlassian Cloud host, e.g. acme.atlassian.net"
   ),
-  jiraEmail: z7.string().optional().describe("Atlassian account email for Basic auth"),
-  jiraProject: z7.string().optional().describe("Jira project key holding epics and tickets"),
-  jpdProject: z7.string().optional().describe("Jira Product Discovery project key holding initiatives"),
-  confluenceSpaceKey: z7.string().optional().describe("Confluence space key holding technical design docs"),
-  inProgressStatus: z7.string().optional().describe(
+  jiraEmail: z8.string().optional().describe("Atlassian account email for Basic auth"),
+  jiraProject: z8.string().optional().describe("Jira project key holding epics and tickets"),
+  jpdProject: z8.string().optional().describe("Jira Product Discovery project key holding initiatives"),
+  confluenceSpaceKey: z8.string().optional().describe("Confluence space key holding technical design docs"),
+  inProgressStatus: z8.string().optional().describe(
     "Tracker status meaning work has started; discovered and stored on first run"
   ),
-  inReviewStatus: z7.string().optional().describe(
+  inReviewStatus: z8.string().optional().describe(
     "Tracker status meaning a PR is open; discovered and stored on first run"
   ),
-  defaultLabels: z7.array(z7.string()).default([]),
-  rfcStorage: z7.enum(["local", "global"]).default("local"),
-  rfcStoragePath: z7.string().optional(),
-  qaRecipe: z7.string().optional().describe(
+  defaultLabels: z8.array(z8.string()).default([]),
+  rfcStorage: z8.enum(["local", "global"]).default("local"),
+  rfcStoragePath: z8.string().optional(),
+  qaRecipe: z8.string().optional().describe(
     "Deprecated: path to a legacy QA recipe, read only when no QA.md or AGENTS.md QA section exists; relative paths resolve against the directory holding this config file; defaults to flight-rules.qa.md beside it"
   ),
-  competencies: z7.array(z7.string()).default([...seedCompetencies])
+  competencies: z8.array(z8.string()).default([...seedCompetencies]),
+  "ariadne.url": AriadneUrlSchema.optional().describe(
+    "Ariadne API base URL for `flight-rules board`; https only (http for localhost); read only from user or local scope; defaults to the production Ariadne API"
+  ),
+  "ariadne.enabled": z8.boolean().optional().describe(
+    "Set false to stop `flight-rules board` reporting even when an Ariadne token is set; read only from user or local scope; defaults to true"
+  )
 }).superRefine((cfg, ctx) => {
   if (cfg.tracker === "github" && cfg.repo === void 0) {
     ctx.addIssue({
@@ -561,11 +679,11 @@ function getQaRecipePath(config, configPath) {
 import { existsSync as existsSync3, mkdirSync, readFileSync as readFileSync3, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname as dirname3, join as join4 } from "node:path";
-import { z as z8 } from "zod";
+import { z as z9 } from "zod";
 var pluginId = "flight-rules@flight-rules";
 var pluginKeyPattern = /^flight-rules(@.+)?$/;
-var SettingsSchema = z8.looseObject({
-  pluginConfigs: z8.record(z8.string(), z8.looseObject({ options: z8.record(z8.string(), z8.unknown()).optional() })).optional()
+var SettingsSchema = z9.looseObject({
+  pluginConfigs: z9.record(z9.string(), z9.looseObject({ options: z9.record(z9.string(), z9.unknown()).optional() })).optional()
 });
 var ClaudeSettingsSource = class {
   host = "claude";
@@ -633,6 +751,7 @@ var ClaudeSettingsSource = class {
 
 // src/shared/config-store.ts
 var configScopes = ["user", "project", "local", "file"];
+var userScopedKeys = /* @__PURE__ */ new Set(["ariadne.url", "ariadne.enabled"]);
 var ConfigStore = class {
   cwd;
   env;
@@ -686,12 +805,14 @@ var ConfigStore = class {
   }
   /**
    * The scope a write lands in when the caller names none: wherever the key
-   * is set now, else the config file when one exists, else `local`.
+   * is set now, else `user` for a person-level key such as `ariadne.url`,
+   * else the config file when one exists, else `local`.
    */
   defaultScopeFor(key) {
     const layers = this.layers();
     const owner = [...layers].reverse().find((layer) => key in layer.values);
     if (owner !== void 0) return owner.scope;
+    if (userScopedKeys.has(key)) return "user";
     return this.layer(layers, "file").present ? "file" : "local";
   }
   set(key, rawValues, scope) {
@@ -781,7 +902,9 @@ ${lines.join("\n")}
     const field = Object.entries(ConfigSchema.shape).find(([name]) => name === key)?.[1];
     if (field === void 0) return void 0;
     const isArray = field.safeParse([]).success && !field.safeParse("").success;
-    const value = isArray ? [...rawValues] : rawValues.join(" ");
+    const isBoolean = field.safeParse(true).success && !field.safeParse("").success;
+    const joined = rawValues.join(" ");
+    const value = isArray ? [...rawValues] : isBoolean && (joined === "true" || joined === "false") ? joined === "true" : joined;
     const result = field.safeParse(value);
     if (!result.success) {
       throw new Error(`Invalid value for ${key}: ${result.error.issues.map((i) => i.message).join("; ")}`);
@@ -841,11 +964,11 @@ var EvidenceLocation = class {
 };
 
 // src/shared/env.ts
-import { z as z9 } from "zod";
-var EnvSchema = z9.object({
-  githubToken: z9.string().optional(),
-  jiraToken: z9.string().optional(),
-  jiraEmail: z9.string().optional(),
+import { z as z10 } from "zod";
+var EnvSchema = z10.object({
+  githubToken: z10.string().optional(),
+  jiraToken: z10.string().optional(),
+  jiraEmail: z10.string().optional(),
   jiraHost: JiraHostSchema.optional()
 });
 var EnvLoader = class {
@@ -870,6 +993,374 @@ var EnvLoader = class {
   }
 };
 
+// src/version.ts
+var appVersion = false ? "0.0.0-dev" : "1.56.0";
+
+// src/shared/ariadne/ariadne-transport.ts
+var FetchAriadneTransport = class {
+  async send(request) {
+    const response = await fetch(request.url, {
+      method: request.method,
+      headers: request.headers,
+      ...request.body !== void 0 ? { body: request.body } : {},
+      signal: AbortSignal.timeout(request.timeoutMs)
+    });
+    return { status: response.status, body: await response.text() };
+  }
+};
+
+// src/shared/ariadne/ariadne-client.ts
+var AriadneError = class extends Error {
+  failure;
+  status;
+  code;
+  constructor(props) {
+    super(props.message, props.cause === void 0 ? void 0 : { cause: props.cause });
+    this.name = "AriadneError";
+    this.failure = props.failure;
+    this.status = props.status;
+    this.code = props.code;
+  }
+};
+var ariadneTimeoutMs = 5e3;
+var ariadneAttempts = 2;
+var AriadneClient = class {
+  baseUrl;
+  token;
+  transport;
+  timeoutMs;
+  constructor(props) {
+    this.baseUrl = props.baseUrl.replace(/\/+$/, "");
+    this.token = props.token;
+    this.transport = props.transport ?? new FetchAriadneTransport();
+    this.timeoutMs = props.timeoutMs ?? ariadneTimeoutMs;
+  }
+  /** POST /v1/agents/heartbeat: creates or updates the session. */
+  async heartbeat(input) {
+    const body = this.validate(HeartbeatInputSchema, input, "heartbeat");
+    return this.request("POST", "/v1/agents/heartbeat", HeartbeatResponseSchema, body);
+  }
+  /** POST /v1/agents/items: 404 `session_not_found` until the session has a heartbeat. */
+  async postItem(input) {
+    const body = this.validate(ItemInputSchema, input, "item");
+    return this.request("POST", "/v1/agents/items", ItemResponseSchema, body);
+  }
+  /** POST /v1/agents/activity: 404 `session_not_found` until the session has a heartbeat. */
+  async postActivity(input) {
+    const body = this.validate(ActivityInputSchema, input, "activity");
+    return this.request("POST", "/v1/agents/activity", ActivityResponseSchema, body);
+  }
+  /** GET /v1/agents/items?session=…: every item of the session, open and resolved, oldest first. */
+  async listItems(session) {
+    const id = this.validate(AgentSessionIdSchema, session, "session");
+    return this.request("GET", `/v1/agents/items?session=${encodeURIComponent(id)}`, ItemListResponseSchema);
+  }
+  validate(schema, input, what) {
+    const result = schema.safeParse(input);
+    if (result.success) return result.data;
+    const detail = result.error.issues.map((issue) => `${issue.path.join(".") || what}: ${issue.message}`).join("; ");
+    throw new AriadneError({ failure: "invalid-input", message: `invalid ${what}: ${detail}` });
+  }
+  async request(method, path, schema, body) {
+    const request = {
+      method,
+      url: `${this.baseUrl}${path}`,
+      headers: {
+        Accept: "application/json",
+        "User-Agent": `flight-rules/${appVersion}`,
+        ...this.token !== void 0 ? { Authorization: `Bearer ${this.token}` } : {},
+        ...body !== void 0 ? { "Content-Type": "application/json" } : {}
+      },
+      ...body !== void 0 ? { body: JSON.stringify(body) } : {},
+      timeoutMs: this.timeoutMs
+    };
+    const response = await this.send(request);
+    if (response.status < 200 || response.status > 299) throw this.httpError(response);
+    let json;
+    try {
+      json = JSON.parse(response.body);
+    } catch (err) {
+      throw new AriadneError({ failure: "bad-response", message: `${method} ${path} returned a body that is not JSON`, cause: err });
+    }
+    const parsed = schema.safeParse(json);
+    if (!parsed.success) {
+      throw new AriadneError({
+        failure: "bad-response",
+        message: `${method} ${path} returned an unexpected shape: ${parsed.error.issues.map((i) => i.path.join(".")).join(", ")}`
+      });
+    }
+    return parsed.data;
+  }
+  async send(request) {
+    let lastError;
+    for (let attempt = 1; attempt <= ariadneAttempts; attempt++) {
+      try {
+        const response = await this.transport.send(request);
+        if (response.status < 500 || attempt === ariadneAttempts) return response;
+      } catch (err) {
+        lastError = err;
+      }
+    }
+    throw new AriadneError({
+      failure: "network",
+      message: `no response from ${this.baseUrl} after ${ariadneAttempts} attempts (${this.describeNetworkError(lastError)})`,
+      cause: lastError
+    });
+  }
+  describeNetworkError(err) {
+    if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) {
+      return `timed out after ${this.timeoutMs / 1e3} s`;
+    }
+    const cause = err instanceof Error && err.cause instanceof Error ? `: ${err.cause.message}` : "";
+    return err instanceof Error ? `${err.message}${cause}` : String(err);
+  }
+  httpError(response) {
+    let parsed;
+    try {
+      const result = AgentErrorBodySchema.safeParse(JSON.parse(response.body));
+      parsed = result.success ? result.data : void 0;
+    } catch {
+      parsed = void 0;
+    }
+    const code = parsed?.error;
+    const reason = parsed?.message ?? (code === void 0 ? "no error body" : "");
+    return new AriadneError({
+      failure: "http",
+      status: response.status,
+      ...code !== void 0 ? { code } : {},
+      message: [`${response.status}`, code, reason].filter((part) => part !== void 0 && part !== "").join(" ")
+    });
+  }
+};
+
+// src/shared/ariadne/ariadne-board.ts
+var claudeSessionEnv = "CLAUDE_CODE_SESSION_ID";
+var bootstrapStep = "started";
+var personalScopes = /* @__PURE__ */ new Set(["user", "local"]);
+var scopeLabels = {
+  user: "user settings",
+  project: "project settings",
+  local: "local settings",
+  file: "the flight-rules config file"
+};
+var urlKey = "ariadne.url";
+var enabledKey = "ariadne.enabled";
+var AriadneBoard = class {
+  readLayers;
+  tokens;
+  env;
+  transport;
+  timeoutMs;
+  constructor(props) {
+    this.readLayers = props.readLayers;
+    this.tokens = props.tokens;
+    this.env = props.env ?? process.env;
+    this.transport = props.transport;
+    this.timeoutMs = props.timeoutMs;
+  }
+  /**
+   * `ariadne.url` (default: production) and `ariadne.enabled` (default:
+   * true), read only from the user and local layers, local winning. Project
+   * and file layers are ignored with a notice. A URL that is not https (or
+   * http on localhost) leaves `url` undefined, so nothing is ever sent to it.
+   */
+  settings() {
+    const notices = [];
+    let rawUrl;
+    let rawEnabled;
+    for (const layer of this.readLayers()) {
+      for (const key of [urlKey, enabledKey]) {
+        if (!(key in layer.values)) continue;
+        const value = layer.values[key];
+        if (!personalScopes.has(layer.scope)) {
+          notices.push(`ignored ${key} from ${scopeLabels[layer.scope]}; set it in user scope`);
+          continue;
+        }
+        if (value === void 0 || value === null || value === "") continue;
+        if (key === urlKey) rawUrl = { value, scope: layer.scope };
+        else rawEnabled = { value, scope: layer.scope };
+      }
+    }
+    let url = defaultAriadneUrl;
+    if (rawUrl !== void 0) {
+      const parsed = AriadneUrlSchema.safeParse(rawUrl.value);
+      url = parsed.success ? parsed.data : void 0;
+      if (!parsed.success) {
+        notices.push(
+          `ignored ${urlKey} from ${scopeLabels[rawUrl.scope]}: ${parsed.error.issues.map((i) => i.message).join("; ")}; nothing is sent until it is fixed`
+        );
+      }
+    }
+    let enabled = true;
+    if (rawEnabled !== void 0) {
+      const value = rawEnabled.value;
+      if (value === true || value === "true") enabled = true;
+      else if (value === false || value === "false") enabled = false;
+      else {
+        enabled = false;
+        notices.push(`ignored ${enabledKey} from ${scopeLabels[rawEnabled.scope]}: expected true or false; reporting is off until it is fixed`);
+      }
+    }
+    return { url, enabled, notices };
+  }
+  /** The Claude Code session id, when this process runs inside a session. */
+  defaultSession() {
+    const value = this.env[claudeSessionEnv]?.trim();
+    return value === void 0 || value === "" ? void 0 : value;
+  }
+  async heartbeat(input, options = {}) {
+    return this.call(options, input.session, (client, session) => client.heartbeat({ ...input, session }));
+  }
+  /**
+   * Posts an item. A session that has never sent a heartbeat (or has aged
+   * out) gets one first, with step `started` and state `nominal`, and the item
+   * is posted again. A live session's step is never overwritten this way.
+   */
+  async item(input, options = {}) {
+    return this.call(
+      options,
+      input.session,
+      (client, session) => this.withSession(client, session, input.ticket, () => client.postItem({ ...input, session }))
+    );
+  }
+  /** Posts one activity line, creating the session first as `item` does. */
+  async activity(input, options = {}) {
+    return this.call(
+      options,
+      input.session,
+      (client, session) => this.withSession(client, session, input.ticket, () => client.postActivity({ ...input, session }))
+    );
+  }
+  /** Every item of one of the caller's sessions, open and resolved, with any chosen option. */
+  async items(session, options = {}) {
+    return this.call(options, session, (client, id) => client.listItems(id));
+  }
+  async withSession(client, session, ticket, post) {
+    try {
+      return await post();
+    } catch (err) {
+      if (!(err instanceof AriadneError) || err.code !== "session_not_found") throw err;
+    }
+    await client.heartbeat({ session, ticket, step: bootstrapStep, state: "nominal" });
+    return post();
+  }
+  async call(options, requestedSession, run) {
+    let settings;
+    try {
+      settings = this.settings();
+    } catch (err) {
+      return { status: "failed", message: err instanceof Error ? err.message : String(err) };
+    }
+    const noted = (outcome) => settings.notices.length > 0 ? { ...outcome, notices: settings.notices } : outcome;
+    const url = settings.url;
+    if (!settings.enabled) return noted({ status: "skipped", reason: "disabled" });
+    if (url === void 0) return noted({ status: "skipped", reason: "invalid-url" });
+    let token;
+    try {
+      token = this.tokens.resolve()?.token;
+    } catch (err) {
+      return noted({ status: "failed", message: err instanceof Error ? err.message : String(err) });
+    }
+    if (token === void 0 && options.strict !== true) return noted({ status: "skipped", reason: "no-token" });
+    const session = requestedSession ?? this.defaultSession();
+    if (session === void 0) {
+      return noted({
+        status: "failed",
+        message: `no session id: pass --session, or run inside Claude Code so ${claudeSessionEnv} is set`
+      });
+    }
+    const client = new AriadneClient({
+      baseUrl: url,
+      token,
+      ...this.transport !== void 0 ? { transport: this.transport } : {},
+      ...this.timeoutMs !== void 0 ? { timeoutMs: this.timeoutMs } : {}
+    });
+    try {
+      return noted({ status: "posted", value: await run(client, session) });
+    } catch (err) {
+      return noted({ status: "failed", message: this.redact(this.describe(err, url, token !== void 0), token) });
+    }
+  }
+  describe(err, url, hasToken) {
+    if (!(err instanceof AriadneError)) return err instanceof Error ? err.message : String(err);
+    if (err.status === 401 && err.code === "agent_token_expired") {
+      return "Ariadne agent token expired (401 agent_token_expired) \u2014 create a new one in Ariadne \u203A Settings \u203A Connections and run `flight-rules board login`";
+    }
+    if (err.status === 401) {
+      return hasToken ? "Ariadne agent token not recognised (401 unauthorized); it may be revoked or mistyped. Create a new one in Ariadne \u203A Settings \u203A Connections and set ARIADNE_AGENT_TOKEN or run `flight-rules board login`" : "no Ariadne token (401 unauthorized). Set ARIADNE_AGENT_TOKEN, or run `flight-rules board login` with an agent token from Ariadne \u203A Settings \u203A Connections";
+    }
+    if (err.code === "agents_opt_in_required") {
+      return "Agents reporting is off for you (403 agents_opt_in_required). Turn on Agents in Ariadne \u203A Settings \u203A Connections";
+    }
+    if (err.failure === "network") return `could not reach Ariadne at ${url}: ${err.message}`;
+    return `Ariadne ${err.failure === "http" ? "returned" : "request failed:"} ${err.message}`;
+  }
+  /** Belt and braces: no message may ever carry the token. */
+  redact(message, token) {
+    return token === void 0 || token === "" ? message : message.split(token).join("[redacted]");
+  }
+};
+
+// src/shared/ariadne/ariadne-token-store.ts
+import { chmodSync, existsSync as existsSync5, mkdirSync as mkdirSync3, readFileSync as readFileSync5, rmSync, writeFileSync as writeFileSync3 } from "node:fs";
+import { homedir as homedir2 } from "node:os";
+import { dirname as dirname7, join as join6 } from "node:path";
+var agentTokenPattern = /^ariadne_agent_[0-9a-f]{16}_[A-Za-z0-9_-]{43}$/;
+var ariadneTokenEnvNames = ["ARIADNE_AGENT_TOKEN", "ARIADNE_TOKEN"];
+var AriadneTokenStore = class {
+  env;
+  home;
+  constructor(props = {}) {
+    this.env = props.env ?? process.env;
+    this.home = props.home ?? homedir2();
+  }
+  isAgentToken(value) {
+    return agentTokenPattern.test(value);
+  }
+  /** `$XDG_CONFIG_HOME/flight-rules/ariadne-token`, else `~/.config/flight-rules/ariadne-token`. */
+  path() {
+    const configHome = this.env["XDG_CONFIG_HOME"];
+    const base = configHome !== void 0 && configHome !== "" ? configHome : join6(this.home, ".config");
+    return join6(base, "flight-rules", "ariadne-token");
+  }
+  resolve() {
+    for (const name of ariadneTokenEnvNames) {
+      const value2 = this.env[name]?.trim();
+      if (value2 !== void 0 && value2 !== "") return { token: value2, source: name };
+    }
+    const path = this.path();
+    if (!existsSync5(path)) return void 0;
+    const value = readFileSync5(path, "utf-8").trim();
+    return value === "" ? void 0 : { token: value, source: "file" };
+  }
+  /** The environment variable that would win over a saved file, if one is set. */
+  shadowingEnv() {
+    return ariadneTokenEnvNames.find((name) => (this.env[name]?.trim() ?? "") !== "");
+  }
+  /** Saves an agent token with mode 0600 and returns the path. Rejects anything that is not one. */
+  save(token) {
+    const value = token.trim();
+    if (!this.isAgentToken(value)) {
+      throw new Error(
+        "That is not an Ariadne agent token (expected ariadne_agent_<16 hex>_<43 characters>). Create one in Ariadne \u203A Settings \u203A Connections."
+      );
+    }
+    const path = this.path();
+    mkdirSync3(dirname7(path), { recursive: true, mode: 448 });
+    writeFileSync3(path, `${value}
+`, { mode: 384 });
+    chmodSync(path, 384);
+    return path;
+  }
+  /** Deletes the saved token; returns whether one existed. */
+  remove() {
+    const path = this.path();
+    if (!existsSync5(path)) return false;
+    rmSync(path);
+    return true;
+  }
+};
+
 // src/tasks/github-task-tracker/github-task-tracker.ts
 import { Octokit } from "@octokit/rest";
 import { graphql } from "@octokit/graphql";
@@ -878,116 +1369,116 @@ import { graphql } from "@octokit/graphql";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
 // src/tasks/task-tracker/task-tracker.ts
-import { z as z10 } from "zod";
-var TrackerUserSchema = z10.object({
-  accountId: z10.string(),
-  displayName: z10.string()
+import { z as z11 } from "zod";
+var TrackerUserSchema = z11.object({
+  accountId: z11.string(),
+  displayName: z11.string()
 });
-var EntityMetadataSchema = z10.object({
-  tddId: z10.number().optional(),
-  epicId: z10.number().optional(),
-  notes: z10.string().optional(),
+var EntityMetadataSchema = z11.object({
+  tddId: z11.number().optional(),
+  epicId: z11.number().optional(),
+  notes: z11.string().optional(),
   /** Explicit body-format override read first by BodyFormatDetector (docs/bug-report-format.md). */
-  kind: z10.enum(["bug", "story"]).optional()
+  kind: z11.enum(["bug", "story"]).optional()
 }).passthrough();
-var CommentSchema = z10.object({
-  id: z10.string(),
-  body: z10.string(),
-  author: z10.string(),
-  createdAt: z10.string(),
-  updatedAt: z10.string()
+var CommentSchema = z11.object({
+  id: z11.string(),
+  body: z11.string(),
+  author: z11.string(),
+  createdAt: z11.string(),
+  updatedAt: z11.string()
 });
-var AttachmentSchema = z10.object({
-  id: z10.string(),
-  filename: z10.string(),
-  mimeType: z10.string(),
-  size: z10.number().optional(),
-  mediaUuid: z10.string().optional()
+var AttachmentSchema = z11.object({
+  id: z11.string(),
+  filename: z11.string(),
+  mimeType: z11.string(),
+  size: z11.number().optional(),
+  mediaUuid: z11.string().optional()
 });
-var TechnicalDesignSchema = z10.object({
-  id: z10.string(),
-  epicId: z10.string(),
-  url: z10.string().optional(),
-  body: z10.string(),
-  comments: z10.array(CommentSchema),
+var TechnicalDesignSchema = z11.object({
+  id: z11.string(),
+  epicId: z11.string(),
+  url: z11.string().optional(),
+  body: z11.string(),
+  comments: z11.array(CommentSchema),
   metadata: EntityMetadataSchema.default({}),
-  updatedAt: z10.string()
+  updatedAt: z11.string()
 });
-var TicketSchema = z10.object({
-  id: z10.string(),
-  size: z10.literal("ticket"),
-  status: z10.string(),
-  labels: z10.array(z10.string()),
-  title: z10.string(),
-  body: z10.string(),
-  comments: z10.array(CommentSchema),
-  assignee: z10.string().nullable(),
-  attachments: z10.array(AttachmentSchema).default([]),
-  reporter: z10.string().nullable().default(null),
-  issueType: z10.string().default("unknown"),
-  blockedBy: z10.array(z10.string()).default([]),
-  blocking: z10.array(z10.string()).default([]),
+var TicketSchema = z11.object({
+  id: z11.string(),
+  size: z11.literal("ticket"),
+  status: z11.string(),
+  labels: z11.array(z11.string()),
+  title: z11.string(),
+  body: z11.string(),
+  comments: z11.array(CommentSchema),
+  assignee: z11.string().nullable(),
+  attachments: z11.array(AttachmentSchema).default([]),
+  reporter: z11.string().nullable().default(null),
+  issueType: z11.string().default("unknown"),
+  blockedBy: z11.array(z11.string()).default([]),
+  blocking: z11.array(z11.string()).default([]),
   metadata: EntityMetadataSchema.default({}),
-  updatedAt: z10.string()
+  updatedAt: z11.string()
 });
-var EpicSchema = z10.object({
-  id: z10.string(),
-  size: z10.literal("epic"),
-  status: z10.string(),
-  labels: z10.array(z10.string()),
-  title: z10.string(),
-  body: z10.string(),
-  childIssues: z10.array(TicketSchema),
-  comments: z10.array(CommentSchema),
+var EpicSchema = z11.object({
+  id: z11.string(),
+  size: z11.literal("epic"),
+  status: z11.string(),
+  labels: z11.array(z11.string()),
+  title: z11.string(),
+  body: z11.string(),
+  childIssues: z11.array(TicketSchema),
+  comments: z11.array(CommentSchema),
   tdd: TechnicalDesignSchema.optional(),
   metadata: EntityMetadataSchema.default({}),
-  updatedAt: z10.string()
+  updatedAt: z11.string()
 });
-var CreateEpicInputSchema = z10.object({
-  title: z10.string(),
-  body: z10.string(),
-  labels: z10.array(z10.string()).default([]),
+var CreateEpicInputSchema = z11.object({
+  title: z11.string(),
+  body: z11.string(),
+  labels: z11.array(z11.string()).default([]),
   metadata: EntityMetadataSchema.partial().optional()
 });
-var CreateTicketInputSchema = z10.object({
-  title: z10.string(),
-  body: z10.string(),
+var CreateTicketInputSchema = z11.object({
+  title: z11.string(),
+  body: z11.string(),
   /** Absent for a standalone ticket: a ticket-sized RFC has no epic to parent to. */
-  epicId: z10.string().optional(),
-  labels: z10.array(z10.string()).default([]),
-  assignee: z10.string().optional(),
+  epicId: z11.string().optional(),
+  labels: z11.array(z11.string()).default([]),
+  assignee: z11.string().optional(),
   metadata: EntityMetadataSchema.partial().optional()
 });
-var CreateTechnicalDesignInputSchema = z10.object({
-  title: z10.string(),
-  body: z10.string(),
-  epicId: z10.string(),
+var CreateTechnicalDesignInputSchema = z11.object({
+  title: z11.string(),
+  body: z11.string(),
+  epicId: z11.string(),
   metadata: EntityMetadataSchema.partial().optional()
 });
-var UpdateEpicInputSchema = z10.object({
-  body: z10.string(),
-  title: z10.string().optional(),
-  labels: z10.array(z10.string()).optional()
+var UpdateEpicInputSchema = z11.object({
+  body: z11.string(),
+  title: z11.string().optional(),
+  labels: z11.array(z11.string()).optional()
 });
-var UpdateTicketInputSchema = z10.object({
-  body: z10.string(),
-  title: z10.string().optional(),
-  labels: z10.array(z10.string()).optional()
+var UpdateTicketInputSchema = z11.object({
+  body: z11.string(),
+  title: z11.string().optional(),
+  labels: z11.array(z11.string()).optional()
 });
-var UpdateInitiativeInputSchema = z10.object({
-  body: z10.string(),
-  title: z10.string().optional()
+var UpdateInitiativeInputSchema = z11.object({
+  body: z11.string(),
+  title: z11.string().optional()
 });
-var InitiativeSchema = z10.object({
-  id: z10.string(),
-  size: z10.literal("initiative"),
-  title: z10.string(),
-  body: z10.string(),
-  epics: z10.array(z10.object({ id: z10.string(), title: z10.string() })).default([])
+var InitiativeSchema = z11.object({
+  id: z11.string(),
+  size: z11.literal("initiative"),
+  title: z11.string(),
+  body: z11.string(),
+  epics: z11.array(z11.object({ id: z11.string(), title: z11.string() })).default([])
 });
-var CreateInitiativeInputSchema = z10.object({
-  title: z10.string(),
-  body: z10.string()
+var CreateInitiativeInputSchema = z11.object({
+  title: z11.string(),
+  body: z11.string()
 });
 
 // src/tasks/body-metadata/body-metadata.ts
@@ -1035,14 +1526,14 @@ ${block}`;
 };
 
 // src/tasks/github-task-tracker/github-task-tracker.ts
-import { z as z12 } from "zod";
+import { z as z13 } from "zod";
 
 // src/tasks/task-tracker/unsupported-tracker-operation-error.ts
-import { z as z11 } from "zod";
-var UnsupportedTrackerOperationPropsSchema = z11.object({
-  tracker: z11.string().min(1),
-  operation: z11.string().min(1),
-  remedy: z11.string().min(1).optional()
+import { z as z12 } from "zod";
+var UnsupportedTrackerOperationPropsSchema = z12.object({
+  tracker: z12.string().min(1),
+  operation: z12.string().min(1),
+  remedy: z12.string().min(1).optional()
 });
 var UnsupportedTrackerOperationError = class extends Error {
   tracker;
@@ -1059,7 +1550,7 @@ var UnsupportedTrackerOperationError = class extends Error {
 };
 
 // src/tasks/github-task-tracker/github-task-tracker.ts
-var IssueRefListSchema = z12.array(z12.object({ number: z12.number() }));
+var IssueRefListSchema = z13.array(z13.object({ number: z13.number() }));
 var GitHubTaskTracker = class {
   octokit;
   gql;
@@ -1571,12 +2062,12 @@ var GitHubTaskTracker = class {
 };
 
 // src/tasks/jira-task-tracker/jira-task-tracker.ts
-import { readFileSync as readFileSync5 } from "node:fs";
+import { readFileSync as readFileSync6 } from "node:fs";
 import { basename as basename2 } from "node:path";
-import { z as z16 } from "zod";
+import { z as z17 } from "zod";
 
 // src/tasks/jira-task-tracker/jira-client.ts
-import { z as z13 } from "zod";
+import { z as z14 } from "zod";
 
 // src/tasks/jira-task-tracker/jira-api-error.ts
 var JiraApiError = class extends Error {
@@ -1599,11 +2090,11 @@ var defaultRetryAfterSeconds = 2;
 var maxBackoffMs = 3e4;
 var attachmentXsrfHeader = "no-check";
 var redirectStatuses = /* @__PURE__ */ new Set([301, 302, 303, 307, 308]);
-var JiraErrorBodySchema = z13.object({
-  errorMessages: z13.array(z13.string()).optional(),
+var JiraErrorBodySchema = z14.object({
+  errorMessages: z14.array(z14.string()).optional(),
   // Caught per-field so an off-contract `errors` map cannot discard a valid sibling `errorMessages`.
-  errors: z13.record(z13.string(), z13.string()).optional().catch(void 0),
-  message: z13.string().optional()
+  errors: z14.record(z14.string(), z14.string()).optional().catch(void 0),
+  message: z14.string().optional()
 });
 var JiraClient = class {
   baseUrl;
@@ -1689,13 +2180,13 @@ var JiraClient = class {
 };
 
 // src/tasks/jira-task-tracker/confluence-client.ts
-import { z as z14 } from "zod";
+import { z as z15 } from "zod";
 var maxRetries2 = 4;
 var defaultRetryAfterSeconds2 = 2;
 var maxBackoffMs2 = 3e4;
-var ConfluenceErrorBodySchema = z14.object({
-  errors: z14.array(z14.object({ title: z14.string().optional(), detail: z14.string().optional() })).optional().catch(void 0),
-  message: z14.string().optional()
+var ConfluenceErrorBodySchema = z15.object({
+  errors: z15.array(z15.object({ title: z15.string().optional(), detail: z15.string().optional() })).optional().catch(void 0),
+  message: z15.string().optional()
 });
 var ConfluenceClient = class {
   siteBaseUrl;
@@ -1770,14 +2261,14 @@ import { fromMarkdown } from "mdast-util-from-markdown";
 import { gfmFromMarkdown } from "mdast-util-gfm";
 import { gfm } from "micromark-extension-gfm";
 import { decodeString } from "micromark-util-decode-string";
-import { z as z15 } from "zod";
-var MediaRefSchema = z15.object({
-  mediaUuid: z15.string().min(1),
-  collection: z15.string().default(""),
-  width: z15.number().int().positive().optional(),
-  height: z15.number().int().positive().optional()
+import { z as z16 } from "zod";
+var MediaRefSchema = z16.object({
+  mediaUuid: z16.string().min(1),
+  collection: z16.string().default(""),
+  width: z16.number().int().positive().optional(),
+  height: z16.number().int().positive().optional()
 });
-var MediaLookupSchema = z15.record(z15.string(), MediaRefSchema);
+var MediaLookupSchema = z16.record(z16.string(), MediaRefSchema);
 var attachmentPrefix = /^attachment:/;
 var externalTarget = /^[a-zA-Z][a-zA-Z0-9+.-]*:|^\/\//;
 var detailsOpen = /^<details>/;
@@ -2770,13 +3261,13 @@ var deliveryLinkOutward = "implements";
 var tddMetadataPropertyKey = "flight-rules-metadata";
 var mediaFilePath = /^\/file\/([0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12})\/binary$/;
 var mediaLocationBase = "https://media.invalid/";
-var JiraUploadedAttachmentSchema = z16.object({
-  id: z16.union([z16.string(), z16.number()]).transform(String),
-  filename: z16.string(),
-  mimeType: z16.string(),
-  size: z16.number().optional()
+var JiraUploadedAttachmentSchema = z17.object({
+  id: z17.union([z17.string(), z17.number()]).transform(String),
+  filename: z17.string(),
+  mimeType: z17.string(),
+  size: z17.number().optional()
 });
-var JiraUploadedAttachmentsSchema = z16.array(JiraUploadedAttachmentSchema);
+var JiraUploadedAttachmentsSchema = z17.array(JiraUploadedAttachmentSchema);
 var JiraTaskTracker = class {
   client;
   confluence;
@@ -3030,7 +3521,7 @@ var JiraTaskTracker = class {
    */
   async addAttachment(ticketId, filePath) {
     const filename = basename2(filePath);
-    const file = new File([readFileSync5(filePath)], filename, { type: this.mimeTypes.forFilename(filename) });
+    const file = new File([readFileSync6(filePath)], filename, { type: this.mimeTypes.forFilename(filename) });
     const uploaded = JiraUploadedAttachmentsSchema.parse(
       await this.client.upload(`/issue/${ticketId}/attachments`, [file])
     );
@@ -3389,11 +3880,11 @@ var NodeToolProbe = class {
 var nodeToolProbe = new NodeToolProbe();
 
 // src/flight-rules/flight-rules.schema.ts
-import { z as z17 } from "zod";
-var FlightRulesPropsSchema = z17.object({
-  cwd: z17.string().optional().describe("Directory used for config discovery; defaults to process.cwd()"),
-  env: z17.record(z17.string(), z17.string().optional()).optional().describe("Live environment record; defaults to process.env"),
-  configPath: z17.string().optional().describe("Explicit config file, taking precedence over FLIGHT_RULES_CONFIG and discovery")
+import { z as z18 } from "zod";
+var FlightRulesPropsSchema = z18.object({
+  cwd: z18.string().optional().describe("Directory used for config discovery; defaults to process.cwd()"),
+  env: z18.record(z18.string(), z18.string().optional()).optional().describe("Live environment record; defaults to process.env"),
+  configPath: z18.string().optional().describe("Explicit config file, taking precedence over FLIGHT_RULES_CONFIG and discovery")
 });
 
 // src/flight-rules/flight-rules.ts
@@ -3484,14 +3975,20 @@ var DefaultFlightRules = class {
   docs() {
     return FileDocResolver.fromInstall({ moduleUrl: import.meta.url, env: this.env });
   }
+  board() {
+    return new AriadneBoard({ readLayers: () => this.configStore().layers(), tokens: this.ariadneTokens(), env: this.env });
+  }
+  ariadneTokens() {
+    return new AriadneTokenStore({ env: this.env });
+  }
 };
 function createFlightRules(props = {}) {
   return new DefaultFlightRules(props);
 }
 
 // src/git/commit-message-builder/commit-message-builder.ts
-import { readFileSync as readFileSync6 } from "node:fs";
-import { dirname as dirname7, join as join6 } from "node:path";
+import { readFileSync as readFileSync7 } from "node:fs";
+import { dirname as dirname8, join as join7 } from "node:path";
 
 // src/shared/attribution-stripper/attribution-stripper.ts
 var trailerText = String.raw`(?:Co-Authored-By:[^\n"']*(?:Claude|anthropic\.com)[^\n"']*|Claude-Session:[^\n"']*|https://claude\.ai/code/session_[A-Za-z0-9_-]+)`;
@@ -3522,25 +4019,25 @@ ${line.trim()}`) === "";
 };
 
 // src/git/commit-message-builder/commit-message.schema.ts
-import { z as z18 } from "zod";
-var CommitMessageInputSchema = z18.object({
+import { z as z19 } from "zod";
+var CommitMessageInputSchema = z19.object({
   type: SemanticTypeSchema,
   // Bare issue numbers make one-character scopes legitimate; 32 clears a 10-character tracker key plus a six-digit number.
-  scope: z18.string().min(1).max(32),
-  description: z18.string().min(2).max(50),
-  body: z18.string().optional(),
-  model: z18.string().max(72).optional(),
-  footers: z18.array(z18.string().regex(/^[a-zA-Z0-9-]+(: |=).*$/)).default([])
+  scope: z19.string().min(1).max(32),
+  description: z19.string().min(2).max(50),
+  body: z19.string().optional(),
+  model: z19.string().max(72).optional(),
+  footers: z19.array(z19.string().regex(/^[a-zA-Z0-9-]+(: |=).*$/)).default([])
 });
-var CommitMessageHeaderSchema = z18.preprocess(
+var CommitMessageHeaderSchema = z19.preprocess(
   (arg) => {
-    return z18.string({ error: "Git Commit headers should be 72 characters or less" }).max(72).parse(arg);
+    return z19.string({ error: "Git Commit headers should be 72 characters or less" }).max(72).parse(arg);
   },
-  z18.templateLiteral([SemanticTypeSchema, "(", z18.string(), "): ", z18.string()])
+  z19.templateLiteral([SemanticTypeSchema, "(", z19.string(), "): ", z19.string()])
 );
-var CommitMessageBuilderPropsSchema = z18.object({
-  binPath: z18.string().min(1),
-  agentEnv: z18.string().optional()
+var CommitMessageBuilderPropsSchema = z19.object({
+  binPath: z19.string().min(1),
+  agentEnv: z19.string().optional()
 });
 
 // src/git/commit-message-builder/commit-message-builder.ts
@@ -3578,8 +4075,8 @@ var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
   }
   static readPluginVersion(binPath) {
     try {
-      const pkgPath = join6(dirname7(binPath), "..", "package.json");
-      const parsed = JSON.parse(readFileSync6(pkgPath, "utf-8"));
+      const pkgPath = join7(dirname8(binPath), "..", "package.json");
+      const parsed = JSON.parse(readFileSync7(pkgPath, "utf-8"));
       if (typeof parsed === "object" && parsed !== null && "version" in parsed && typeof parsed.version === "string") {
         return parsed.version;
       }
@@ -3833,12 +4330,12 @@ var bodyFormatDetector = new PrecedenceBodyFormatDetector();
 
 // src/tasks/evidence/evidence.ts
 import { basename as basename3 } from "node:path/posix";
-import { z as z19 } from "zod";
+import { z as z20 } from "zod";
 var mediaReference = /(!?)\[([^\]]*)\]\(\s*<?([^\s()<>]+)>?(?:\s+"[^"]*")?\s*\)/g;
 var absoluteTarget = /^[a-zA-Z][a-zA-Z0-9+.-]*:|^\/\/|^#/;
 var localPrefix = /^(?:\.\/)+/;
 var fenceRun = /^ {0,3}(`{3,}|~{3,})(.*)$/;
-var AttachmentSpecSchema = z19.string().min(1).transform((spec) => {
+var AttachmentSpecSchema = z20.string().min(1).transform((spec) => {
   const hash = spec.lastIndexOf("#");
   const path = hash > 0 ? spec.slice(0, hash) : spec;
   const caption = hash > 0 ? spec.slice(hash + 1).trim() : "";
@@ -3959,35 +4456,32 @@ var TrackerEvidenceService = class {
 // src/shared/host-settings/host-settings-source.ts
 var settingsScopes = ["user", "project", "local"];
 
-// src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.55.0";
-
 // src/agents/agent-frontmatter/agent-frontmatter.schema.ts
-import { z as z20 } from "zod";
+import { z as z21 } from "zod";
 var agentCapabilities = ["read", "edit", "shell", "web", "spawn", "ask"];
 var modelTiers = ["standard", "escalated", "expert"];
 var reasoningLevels = ["low", "medium", "high"];
 var claudeAgentColors = ["red", "blue", "green", "yellow", "purple", "orange", "pink", "cyan"];
-var AgentCapabilitySchema = z20.enum(agentCapabilities);
-var ModelTierSchema = z20.enum(modelTiers);
-var AgentFrontmatterSchema = z20.strictObject({
-  name: z20.string().regex(/^[a-z][a-z0-9-]*$/),
-  description: z20.string().min(1),
-  capabilities: z20.array(AgentCapabilitySchema).min(1).refine(
+var AgentCapabilitySchema = z21.enum(agentCapabilities);
+var ModelTierSchema = z21.enum(modelTiers);
+var AgentFrontmatterSchema = z21.strictObject({
+  name: z21.string().regex(/^[a-z][a-z0-9-]*$/),
+  description: z21.string().min(1),
+  capabilities: z21.array(AgentCapabilitySchema).min(1).refine(
     (capabilities) => new Set(capabilities).size === capabilities.length,
     { message: "duplicate capability" }
   ),
   model: ModelTierSchema,
-  reasoning: z20.enum(reasoningLevels).optional(),
-  sandbox: z20.strictObject({
-    fs: z20.enum(["read-only", "workspace-write"]),
-    network: z20.enum(["none", "enabled"])
+  reasoning: z21.enum(reasoningLevels).optional(),
+  sandbox: z21.strictObject({
+    fs: z21.enum(["read-only", "workspace-write"]),
+    network: z21.enum(["none", "enabled"])
   }).optional(),
-  dispatch: z20.strictObject({
-    maxConcurrent: z20.int().positive(),
-    maxDepth: z20.int().positive()
+  dispatch: z21.strictObject({
+    maxConcurrent: z21.int().positive(),
+    maxDepth: z21.int().positive()
   }).optional(),
-  "x-claude": z20.strictObject({ color: z20.enum(claudeAgentColors).optional() }).optional()
+  "x-claude": z21.strictObject({ color: z21.enum(claudeAgentColors).optional() }).optional()
 });
 
 // src/agents/agent-frontmatter/agent-frontmatter.ts

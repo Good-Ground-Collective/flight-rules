@@ -74,7 +74,8 @@ export declare class ConfigStore {
     inspect(): ConfigInspection;
     /**
      * The scope a write lands in when the caller names none: wherever the key
-     * is set now, else the config file when one exists, else `local`.
+     * is set now, else `user` for a person-level key such as `ariadne.url`,
+     * else the config file when one exists, else `local`.
      */
     defaultScopeFor(key: string): ConfigScope;
     set(key: string, rawValues: readonly string[], scope: ConfigScope): ConfigScope;

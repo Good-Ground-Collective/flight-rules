@@ -275,3 +275,23 @@ Visible surfaces: <which page shows which backend change>.
 In a `QA.md`, use `# QA` as the top heading. Subprojects that verify differently can add their own `QA.md` later; the nearest one wins. Tell the user which parts they must fill in before a capture can run: environments and access.
 
 Re-run `flight-rules qa instructions`. It reports the new source.
+
+---
+
+## Step 8: Report runs to Ariadne (optional)
+
+This step is shared by both branches. Ask:
+
+> "Do you want flight-rules runs to show on Ariadne's Agents page?"
+
+If not, skip this step; every `flight-rules board` command stays silent without a token. Otherwise run `flight-rules doc ariadne-board` and read the output, then tell the user:
+
+> "In Ariadne, open Settings › Connections, turn on Agents and create an agent token for this machine (each machine needs its own). Then either export it as `ARIADNE_AGENT_TOKEN`, or run `flight-rules board login` in your own terminal and paste it at the hidden prompt."
+
+Never ask the user to paste the token into this conversation, and never print it. Once they say it is set, check it:
+
+```bash
+flight-rules board post heartbeat --ticket <any Jira key> --step setup --state nominal --session setup-check --strict
+```
+
+Exit 0 means reporting works. Otherwise show the one-line reason it printed; `agents_opt_in_required` means Agents is still off in Ariadne, and `401` means the token is missing, expired or not recognised.

@@ -4,6 +4,8 @@ import type { PullRequestHost } from '../pr/pull-request-host/pull-request-host.
 import type { Config } from '../shared/config.js';
 import { ConfigStore } from '../shared/config-store.js';
 import { EvidenceLocation } from '../tasks/evidence/evidence-location.js';
+import { AriadneBoard } from '../shared/ariadne/ariadne-board.js';
+import { AriadneTokenStore } from '../shared/ariadne/ariadne-token-store.js';
 import type { TaskTracker } from '../tasks/task-tracker/task-tracker.js';
 import { type ToolProbe } from '../tasks/tool-probe/tool-probe.js';
 import { type FlightRulesProps } from './flight-rules.schema.js';
@@ -19,6 +21,9 @@ export interface FlightRules {
     git(): GitExecutor;
     probe(): ToolProbe;
     docs(): DocResolver;
+    /** Ariadne's Agents page reporter; reads only the `ariadne.*` keys from user and local scope, so it works without a valid tracker config. */
+    board(): AriadneBoard;
+    ariadneTokens(): AriadneTokenStore;
 }
 /** Constructs services on demand so config and credentials are only required by their consumers. */
 export declare class DefaultFlightRules implements FlightRules {
@@ -39,5 +44,7 @@ export declare class DefaultFlightRules implements FlightRules {
     git(): GitExecutor;
     probe(): ToolProbe;
     docs(): DocResolver;
+    board(): AriadneBoard;
+    ariadneTokens(): AriadneTokenStore;
 }
 export declare function createFlightRules(props?: FlightRulesProps): FlightRules;

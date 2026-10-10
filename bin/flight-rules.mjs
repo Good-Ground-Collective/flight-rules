@@ -1005,14 +1005,14 @@ var require_foldFlowLines = __commonJS({
     var FOLD_FLOW = "flow";
     var FOLD_BLOCK = "block";
     var FOLD_QUOTED = "quoted";
-    function foldFlowLines(text5, indent2, mode = "flow", { indentAtStart, lineWidth = 80, minContentWidth = 20, onFold, onOverflow } = {}) {
+    function foldFlowLines(text6, indent2, mode = "flow", { indentAtStart, lineWidth = 80, minContentWidth = 20, onFold, onOverflow } = {}) {
       if (!lineWidth || lineWidth < 0)
-        return text5;
+        return text6;
       if (lineWidth < minContentWidth)
         minContentWidth = 0;
       const endStep = Math.max(1 + minContentWidth, 1 + lineWidth - indent2.length);
-      if (text5.length <= endStep)
-        return text5;
+      if (text6.length <= endStep)
+        return text6;
       const folds = [];
       const escapedFolds = {};
       let end = lineWidth - indent2.length;
@@ -1029,14 +1029,14 @@ var require_foldFlowLines = __commonJS({
       let escStart = -1;
       let escEnd = -1;
       if (mode === FOLD_BLOCK) {
-        i = consumeMoreIndentedLines(text5, i, indent2.length);
+        i = consumeMoreIndentedLines(text6, i, indent2.length);
         if (i !== -1)
           end = i + endStep;
       }
-      for (let ch; ch = text5[i += 1]; ) {
+      for (let ch; ch = text6[i += 1]; ) {
         if (mode === FOLD_QUOTED && ch === "\\") {
           escStart = i;
-          switch (text5[i + 1]) {
+          switch (text6[i + 1]) {
             case "x":
               i += 3;
               break;
@@ -1053,12 +1053,12 @@ var require_foldFlowLines = __commonJS({
         }
         if (ch === "\n") {
           if (mode === FOLD_BLOCK)
-            i = consumeMoreIndentedLines(text5, i, indent2.length);
+            i = consumeMoreIndentedLines(text6, i, indent2.length);
           end = i + indent2.length + endStep;
           split = void 0;
         } else {
           if (ch === " " && prev && prev !== " " && prev !== "\n" && prev !== "	") {
-            const next = text5[i + 1];
+            const next = text6[i + 1];
             if (next && next !== " " && next !== "\n" && next !== "	")
               split = i;
           }
@@ -1070,12 +1070,12 @@ var require_foldFlowLines = __commonJS({
             } else if (mode === FOLD_QUOTED) {
               while (prev === " " || prev === "	") {
                 prev = ch;
-                ch = text5[i += 1];
+                ch = text6[i += 1];
                 overflow = true;
               }
               const j = i > escEnd + 1 ? i - 2 : escStart - 1;
               if (escapedFolds[j])
-                return text5;
+                return text6;
               folds.push(j);
               escapedFolds[j] = true;
               end = j + endStep;
@@ -1090,39 +1090,39 @@ var require_foldFlowLines = __commonJS({
       if (overflow && onOverflow)
         onOverflow();
       if (folds.length === 0)
-        return text5;
+        return text6;
       if (onFold)
         onFold();
-      let res = text5.slice(0, folds[0]);
+      let res = text6.slice(0, folds[0]);
       for (let i2 = 0; i2 < folds.length; ++i2) {
         const fold = folds[i2];
-        const end2 = folds[i2 + 1] || text5.length;
+        const end2 = folds[i2 + 1] || text6.length;
         if (fold === 0)
           res = `
-${indent2}${text5.slice(0, end2)}`;
+${indent2}${text6.slice(0, end2)}`;
         else {
           if (mode === FOLD_QUOTED && escapedFolds[fold])
-            res += `${text5[fold]}\\`;
+            res += `${text6[fold]}\\`;
           res += `
-${indent2}${text5.slice(fold + 1, end2)}`;
+${indent2}${text6.slice(fold + 1, end2)}`;
         }
       }
       return res;
     }
-    function consumeMoreIndentedLines(text5, i, indent2) {
+    function consumeMoreIndentedLines(text6, i, indent2) {
       let end = i;
       let start = i + 1;
-      let ch = text5[start];
+      let ch = text6[start];
       while (ch === " " || ch === "	") {
         if (i < start + indent2) {
-          ch = text5[++i];
+          ch = text6[++i];
         } else {
           do {
-            ch = text5[++i];
+            ch = text6[++i];
           } while (ch && ch !== "\n");
           end = i;
           start = i + 1;
-          ch = text5[start];
+          ch = text6[start];
         }
       }
       return end;
@@ -10497,9 +10497,9 @@ Expecting one of '${allowedValues.join("', '")}'`);
       helpWidth: context.helpWidth,
       outputHasColors: context.hasColors
     });
-    const text5 = helper.formatHelp(this, helper);
-    if (context.hasColors) return text5;
-    return this._outputConfiguration.stripColor(text5);
+    const text6 = helper.formatHelp(this, helper);
+    if (context.hasColors) return text6;
+    return this._outputConfiguration.stripColor(text6);
   }
   /**
    * @typedef HelpContext
@@ -10659,7 +10659,7 @@ Expecting one of '${allowedValues.join("', '")}'`);
    * @param {(string | Function)} text - string to add, or a function returning a string
    * @return {Command} `this` command for chaining
    */
-  addHelpText(position2, text5) {
+  addHelpText(position2, text6) {
     const allowedValues = ["beforeAll", "before", "after", "afterAll"];
     if (!allowedValues.includes(position2)) {
       throw new Error(`Unexpected value for position to addHelpText.
@@ -10668,10 +10668,10 @@ Expecting one of '${allowedValues.join("', '")}'`);
     const helpEvent = `${position2}Help`;
     this.on(helpEvent, (context) => {
       let helpStr;
-      if (typeof text5 === "function") {
-        helpStr = text5({ error: context.error, command: context.command });
+      if (typeof text6 === "function") {
+        helpStr = text6({ error: context.error, command: context.command });
       } else {
-        helpStr = text5;
+        helpStr = text6;
       }
       if (helpStr) {
         context.write(`${helpStr}
@@ -20026,8 +20026,8 @@ function ko_default() {
 }
 
 // node_modules/zod/v4/locales/lt.js
-var capitalizeFirstCharacter = (text5) => {
-  return text5.charAt(0).toUpperCase() + text5.slice(1);
+var capitalizeFirstCharacter = (text6) => {
+  return text6.charAt(0).toUpperCase() + text6.slice(1);
 };
 function getUnitTypeFromNumber(number4) {
   const abs = Math.abs(number4);
@@ -30802,6 +30802,117 @@ import { dirname as dirname2, isAbsolute, join as join3, resolve as resolve2 } f
 // src/tasks/jira-task-tracker/jira-host.ts
 var JiraHostSchema = external_exports.string().transform((host) => host.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, ""));
 
+// src/shared/ariadne/ariadne.schema.ts
+var defaultAriadneUrl = "https://ariadne-api-xohlbba2ea-uc.a.run.app";
+var loopbackHosts = /* @__PURE__ */ new Set(["localhost", "127.0.0.1"]);
+var AriadneUrlSchema = external_exports.url().refine((value) => {
+  if (!URL.canParse(value)) return false;
+  const url2 = new URL(value);
+  return url2.protocol === "https:" || url2.protocol === "http:" && loopbackHosts.has(url2.hostname);
+}, "must be https (http only for localhost or 127.0.0.1)");
+var agentStates = ["nominal", "caution", "abort", "hold"];
+var agentItemKinds = ["question", "blocker", "testable", "wave-gate"];
+var agentActivityLevels = ["info", "success", "caution", "abort"];
+var agentLimits = {
+  step: 60,
+  heartbeatDetail: 500,
+  title: 200,
+  itemDetail: 2e3,
+  option: 60,
+  options: 6,
+  text: 500,
+  branch: 255
+};
+var AgentTextNormalizer = class {
+  /** Whitespace runs collapse to a space and control characters go. */
+  oneLine(value, max) {
+    return this.cut(value.replace(/[\x00-\x08\x0e-\x1f\x7f]/g, "").replace(/\s+/g, " ").trim(), max);
+  }
+  /** Line feeds stay; tabs become spaces and other control characters go. */
+  multiLine(value, max) {
+    const normalized = value.replace(/\r\n?/g, "\n").replace(/\t/g, " ").replace(/[\x00-\x09\x0b-\x1f\x7f]/g, "").trim();
+    return this.cut(normalized, max);
+  }
+  /** Overlong text ends in an ellipsis, never in half a surrogate pair. */
+  cut(value, max) {
+    if (value.length <= max) return value;
+    const head = value.slice(0, max - 1).replace(/[\uD800-\uDBFF]$/, "");
+    return `${head.trimEnd()}\u2026`;
+  }
+};
+var normalizer = new AgentTextNormalizer();
+var oneLineSchema = (max) => external_exports.string().transform((value) => normalizer.oneLine(value, max)).pipe(external_exports.string().min(1, "must not be blank"));
+var multiLineSchema = (max) => external_exports.string().transform((value) => normalizer.multiLine(value, max)).pipe(external_exports.string().min(1, "must not be blank"));
+var optionalSchema = (schema) => external_exports.preprocess((value) => value === "" || value === null ? void 0 : value, schema.optional());
+var AgentSessionIdSchema = external_exports.string().regex(/^[A-Za-z0-9_-]{1,80}$/, "must be 1\u201380 letters, digits, underscores or hyphens");
+var AgentRecordIdSchema = AgentSessionIdSchema;
+var TicketKeySchema = external_exports.string().transform((value) => value.trim().toUpperCase()).pipe(external_exports.string().regex(/^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,8}$/, "must be a Jira issue key: project key, hyphen, number"));
+var RepoSchema = external_exports.string().regex(/^(?:[A-Za-z0-9][A-Za-z0-9-]{0,38}\/)?[A-Za-z0-9_.-]{1,100}$/, "must be owner/name or name").refine((value) => !value.includes(".."), "must not contain ..");
+var BranchSchema = external_exports.string().regex(/^[A-Za-z0-9_+@][A-Za-z0-9._/+@-]{0,254}$/, "must be a branch name as git prints it").refine((value) => !value.includes(".."), "must not contain ..");
+var SkillSchema = external_exports.string().regex(/^[A-Za-z0-9:._-]{1,80}$/, "must be up to 80 of A-Z a-z 0-9 : . _ -");
+var HeartbeatInputSchema = external_exports.strictObject({
+  session: AgentSessionIdSchema,
+  step: oneLineSchema(agentLimits.step),
+  state: external_exports.enum(agentStates),
+  ticket: optionalSchema(TicketKeySchema),
+  repo: optionalSchema(RepoSchema),
+  branch: optionalSchema(BranchSchema),
+  skill: optionalSchema(SkillSchema),
+  detail: optionalSchema(oneLineSchema(agentLimits.heartbeatDetail))
+});
+var ItemInputSchema = external_exports.strictObject({
+  session: AgentSessionIdSchema,
+  kind: external_exports.enum(agentItemKinds),
+  title: oneLineSchema(agentLimits.title),
+  ticket: optionalSchema(TicketKeySchema),
+  detail: optionalSchema(multiLineSchema(agentLimits.itemDetail)),
+  options: external_exports.array(oneLineSchema(agentLimits.option)).max(agentLimits.options, `up to ${agentLimits.options} options`).refine((labels) => new Set(labels).size === labels.length, "options must be distinct").optional(),
+  id: optionalSchema(AgentRecordIdSchema)
+});
+var ActivityInputSchema = external_exports.strictObject({
+  session: AgentSessionIdSchema,
+  text: oneLineSchema(agentLimits.text),
+  level: optionalSchema(external_exports.enum(agentActivityLevels)),
+  ticket: optionalSchema(TicketKeySchema),
+  id: optionalSchema(AgentRecordIdSchema)
+});
+var AgentSessionSchema = external_exports.looseObject({
+  id: external_exports.string(),
+  ownerId: external_exports.string(),
+  ticket: external_exports.string().nullable(),
+  step: external_exports.string(),
+  state: external_exports.string(),
+  lastHeartbeat: external_exports.string(),
+  running: external_exports.boolean()
+});
+var AgentItemSchema = external_exports.looseObject({
+  id: external_exports.string(),
+  session: external_exports.string(),
+  kind: external_exports.string(),
+  ticket: external_exports.string().nullable(),
+  title: external_exports.string(),
+  detail: external_exports.string().nullable(),
+  options: external_exports.array(external_exports.string()),
+  status: external_exports.string(),
+  chosenOption: external_exports.string().nullable(),
+  createdAt: external_exports.string(),
+  resolvedAt: external_exports.string().nullable(),
+  resolvedBy: external_exports.string().nullable()
+});
+var AgentActivitySchema = external_exports.looseObject({
+  id: external_exports.string(),
+  at: external_exports.string(),
+  session: external_exports.string(),
+  ticket: external_exports.string().nullable(),
+  level: external_exports.string(),
+  text: external_exports.string()
+});
+var HeartbeatResponseSchema = external_exports.looseObject({ session: AgentSessionSchema });
+var ItemResponseSchema = external_exports.looseObject({ item: AgentItemSchema, created: external_exports.boolean() });
+var ActivityResponseSchema = external_exports.looseObject({ activity: AgentActivitySchema, created: external_exports.boolean() });
+var ItemListResponseSchema = external_exports.looseObject({ items: external_exports.array(AgentItemSchema) });
+var AgentErrorBodySchema = external_exports.looseObject({ error: external_exports.string(), message: external_exports.string().optional() });
+
 // src/shared/config.ts
 var seedCompetencies = [
   "define-a-schema",
@@ -30839,7 +30950,13 @@ var ConfigSchema = external_exports.object({
   qaRecipe: external_exports.string().optional().describe(
     "Deprecated: path to a legacy QA recipe, read only when no QA.md or AGENTS.md QA section exists; relative paths resolve against the directory holding this config file; defaults to flight-rules.qa.md beside it"
   ),
-  competencies: external_exports.array(external_exports.string()).default([...seedCompetencies])
+  competencies: external_exports.array(external_exports.string()).default([...seedCompetencies]),
+  "ariadne.url": AriadneUrlSchema.optional().describe(
+    "Ariadne API base URL for `flight-rules board`; https only (http for localhost); read only from user or local scope; defaults to the production Ariadne API"
+  ),
+  "ariadne.enabled": external_exports.boolean().optional().describe(
+    "Set false to stop `flight-rules board` reporting even when an Ariadne token is set; read only from user or local scope; defaults to true"
+  )
 }).superRefine((cfg, ctx) => {
   if (cfg.tracker === "github" && cfg.repo === void 0) {
     ctx.addIssue({
@@ -31034,6 +31151,7 @@ var ClaudeSettingsSource = class {
 
 // src/shared/config-store.ts
 var configScopes = ["user", "project", "local", "file"];
+var userScopedKeys = /* @__PURE__ */ new Set(["ariadne.url", "ariadne.enabled"]);
 var ConfigStore = class {
   cwd;
   env;
@@ -31087,12 +31205,14 @@ var ConfigStore = class {
   }
   /**
    * The scope a write lands in when the caller names none: wherever the key
-   * is set now, else the config file when one exists, else `local`.
+   * is set now, else `user` for a person-level key such as `ariadne.url`,
+   * else the config file when one exists, else `local`.
    */
   defaultScopeFor(key) {
     const layers = this.layers();
     const owner = [...layers].reverse().find((layer) => key in layer.values);
     if (owner !== void 0) return owner.scope;
+    if (userScopedKeys.has(key)) return "user";
     return this.layer(layers, "file").present ? "file" : "local";
   }
   set(key, rawValues, scope) {
@@ -31182,7 +31302,9 @@ ${lines.join("\n")}
     const field = Object.entries(ConfigSchema.shape).find(([name]) => name === key)?.[1];
     if (field === void 0) return void 0;
     const isArray = field.safeParse([]).success && !field.safeParse("").success;
-    const value = isArray ? [...rawValues] : rawValues.join(" ");
+    const isBoolean = field.safeParse(true).success && !field.safeParse("").success;
+    const joined = rawValues.join(" ");
+    const value = isArray ? [...rawValues] : isBoolean && (joined === "true" || joined === "false") ? joined === "true" : joined;
     const result = field.safeParse(value);
     if (!result.success) {
       throw new Error(`Invalid value for ${key}: ${result.error.issues.map((i) => i.message).join("; ")}`);
@@ -31267,6 +31389,374 @@ var EnvLoader = class {
       ...this.overrides
     };
     return this.cachedEnv;
+  }
+};
+
+// src/version.ts
+var appVersion = false ? "0.0.0-dev" : "1.56.0";
+
+// src/shared/ariadne/ariadne-transport.ts
+var FetchAriadneTransport = class {
+  async send(request2) {
+    const response = await fetch(request2.url, {
+      method: request2.method,
+      headers: request2.headers,
+      ...request2.body !== void 0 ? { body: request2.body } : {},
+      signal: AbortSignal.timeout(request2.timeoutMs)
+    });
+    return { status: response.status, body: await response.text() };
+  }
+};
+
+// src/shared/ariadne/ariadne-client.ts
+var AriadneError = class extends Error {
+  failure;
+  status;
+  code;
+  constructor(props) {
+    super(props.message, props.cause === void 0 ? void 0 : { cause: props.cause });
+    this.name = "AriadneError";
+    this.failure = props.failure;
+    this.status = props.status;
+    this.code = props.code;
+  }
+};
+var ariadneTimeoutMs = 5e3;
+var ariadneAttempts = 2;
+var AriadneClient = class {
+  baseUrl;
+  token;
+  transport;
+  timeoutMs;
+  constructor(props) {
+    this.baseUrl = props.baseUrl.replace(/\/+$/, "");
+    this.token = props.token;
+    this.transport = props.transport ?? new FetchAriadneTransport();
+    this.timeoutMs = props.timeoutMs ?? ariadneTimeoutMs;
+  }
+  /** POST /v1/agents/heartbeat: creates or updates the session. */
+  async heartbeat(input2) {
+    const body = this.validate(HeartbeatInputSchema, input2, "heartbeat");
+    return this.request("POST", "/v1/agents/heartbeat", HeartbeatResponseSchema, body);
+  }
+  /** POST /v1/agents/items: 404 `session_not_found` until the session has a heartbeat. */
+  async postItem(input2) {
+    const body = this.validate(ItemInputSchema, input2, "item");
+    return this.request("POST", "/v1/agents/items", ItemResponseSchema, body);
+  }
+  /** POST /v1/agents/activity: 404 `session_not_found` until the session has a heartbeat. */
+  async postActivity(input2) {
+    const body = this.validate(ActivityInputSchema, input2, "activity");
+    return this.request("POST", "/v1/agents/activity", ActivityResponseSchema, body);
+  }
+  /** GET /v1/agents/items?session=…: every item of the session, open and resolved, oldest first. */
+  async listItems(session) {
+    const id = this.validate(AgentSessionIdSchema, session, "session");
+    return this.request("GET", `/v1/agents/items?session=${encodeURIComponent(id)}`, ItemListResponseSchema);
+  }
+  validate(schema, input2, what) {
+    const result = schema.safeParse(input2);
+    if (result.success) return result.data;
+    const detail = result.error.issues.map((issue2) => `${issue2.path.join(".") || what}: ${issue2.message}`).join("; ");
+    throw new AriadneError({ failure: "invalid-input", message: `invalid ${what}: ${detail}` });
+  }
+  async request(method, path3, schema, body) {
+    const request2 = {
+      method,
+      url: `${this.baseUrl}${path3}`,
+      headers: {
+        Accept: "application/json",
+        "User-Agent": `flight-rules/${appVersion}`,
+        ...this.token !== void 0 ? { Authorization: `Bearer ${this.token}` } : {},
+        ...body !== void 0 ? { "Content-Type": "application/json" } : {}
+      },
+      ...body !== void 0 ? { body: JSON.stringify(body) } : {},
+      timeoutMs: this.timeoutMs
+    };
+    const response = await this.send(request2);
+    if (response.status < 200 || response.status > 299) throw this.httpError(response);
+    let json2;
+    try {
+      json2 = JSON.parse(response.body);
+    } catch (err) {
+      throw new AriadneError({ failure: "bad-response", message: `${method} ${path3} returned a body that is not JSON`, cause: err });
+    }
+    const parsed = schema.safeParse(json2);
+    if (!parsed.success) {
+      throw new AriadneError({
+        failure: "bad-response",
+        message: `${method} ${path3} returned an unexpected shape: ${parsed.error.issues.map((i) => i.path.join(".")).join(", ")}`
+      });
+    }
+    return parsed.data;
+  }
+  async send(request2) {
+    let lastError;
+    for (let attempt = 1; attempt <= ariadneAttempts; attempt++) {
+      try {
+        const response = await this.transport.send(request2);
+        if (response.status < 500 || attempt === ariadneAttempts) return response;
+      } catch (err) {
+        lastError = err;
+      }
+    }
+    throw new AriadneError({
+      failure: "network",
+      message: `no response from ${this.baseUrl} after ${ariadneAttempts} attempts (${this.describeNetworkError(lastError)})`,
+      cause: lastError
+    });
+  }
+  describeNetworkError(err) {
+    if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) {
+      return `timed out after ${this.timeoutMs / 1e3} s`;
+    }
+    const cause = err instanceof Error && err.cause instanceof Error ? `: ${err.cause.message}` : "";
+    return err instanceof Error ? `${err.message}${cause}` : String(err);
+  }
+  httpError(response) {
+    let parsed;
+    try {
+      const result = AgentErrorBodySchema.safeParse(JSON.parse(response.body));
+      parsed = result.success ? result.data : void 0;
+    } catch {
+      parsed = void 0;
+    }
+    const code2 = parsed?.error;
+    const reason = parsed?.message ?? (code2 === void 0 ? "no error body" : "");
+    return new AriadneError({
+      failure: "http",
+      status: response.status,
+      ...code2 !== void 0 ? { code: code2 } : {},
+      message: [`${response.status}`, code2, reason].filter((part) => part !== void 0 && part !== "").join(" ")
+    });
+  }
+};
+
+// src/shared/ariadne/ariadne-board.ts
+var claudeSessionEnv = "CLAUDE_CODE_SESSION_ID";
+var bootstrapStep = "started";
+var personalScopes = /* @__PURE__ */ new Set(["user", "local"]);
+var scopeLabels = {
+  user: "user settings",
+  project: "project settings",
+  local: "local settings",
+  file: "the flight-rules config file"
+};
+var urlKey = "ariadne.url";
+var enabledKey = "ariadne.enabled";
+var AriadneBoard = class {
+  readLayers;
+  tokens;
+  env;
+  transport;
+  timeoutMs;
+  constructor(props) {
+    this.readLayers = props.readLayers;
+    this.tokens = props.tokens;
+    this.env = props.env ?? process.env;
+    this.transport = props.transport;
+    this.timeoutMs = props.timeoutMs;
+  }
+  /**
+   * `ariadne.url` (default: production) and `ariadne.enabled` (default:
+   * true), read only from the user and local layers, local winning. Project
+   * and file layers are ignored with a notice. A URL that is not https (or
+   * http on localhost) leaves `url` undefined, so nothing is ever sent to it.
+   */
+  settings() {
+    const notices = [];
+    let rawUrl;
+    let rawEnabled;
+    for (const layer of this.readLayers()) {
+      for (const key of [urlKey, enabledKey]) {
+        if (!(key in layer.values)) continue;
+        const value = layer.values[key];
+        if (!personalScopes.has(layer.scope)) {
+          notices.push(`ignored ${key} from ${scopeLabels[layer.scope]}; set it in user scope`);
+          continue;
+        }
+        if (value === void 0 || value === null || value === "") continue;
+        if (key === urlKey) rawUrl = { value, scope: layer.scope };
+        else rawEnabled = { value, scope: layer.scope };
+      }
+    }
+    let url2 = defaultAriadneUrl;
+    if (rawUrl !== void 0) {
+      const parsed = AriadneUrlSchema.safeParse(rawUrl.value);
+      url2 = parsed.success ? parsed.data : void 0;
+      if (!parsed.success) {
+        notices.push(
+          `ignored ${urlKey} from ${scopeLabels[rawUrl.scope]}: ${parsed.error.issues.map((i) => i.message).join("; ")}; nothing is sent until it is fixed`
+        );
+      }
+    }
+    let enabled = true;
+    if (rawEnabled !== void 0) {
+      const value = rawEnabled.value;
+      if (value === true || value === "true") enabled = true;
+      else if (value === false || value === "false") enabled = false;
+      else {
+        enabled = false;
+        notices.push(`ignored ${enabledKey} from ${scopeLabels[rawEnabled.scope]}: expected true or false; reporting is off until it is fixed`);
+      }
+    }
+    return { url: url2, enabled, notices };
+  }
+  /** The Claude Code session id, when this process runs inside a session. */
+  defaultSession() {
+    const value = this.env[claudeSessionEnv]?.trim();
+    return value === void 0 || value === "" ? void 0 : value;
+  }
+  async heartbeat(input2, options = {}) {
+    return this.call(options, input2.session, (client, session) => client.heartbeat({ ...input2, session }));
+  }
+  /**
+   * Posts an item. A session that has never sent a heartbeat (or has aged
+   * out) gets one first, with step `started` and state `nominal`, and the item
+   * is posted again. A live session's step is never overwritten this way.
+   */
+  async item(input2, options = {}) {
+    return this.call(
+      options,
+      input2.session,
+      (client, session) => this.withSession(client, session, input2.ticket, () => client.postItem({ ...input2, session }))
+    );
+  }
+  /** Posts one activity line, creating the session first as `item` does. */
+  async activity(input2, options = {}) {
+    return this.call(
+      options,
+      input2.session,
+      (client, session) => this.withSession(client, session, input2.ticket, () => client.postActivity({ ...input2, session }))
+    );
+  }
+  /** Every item of one of the caller's sessions, open and resolved, with any chosen option. */
+  async items(session, options = {}) {
+    return this.call(options, session, (client, id) => client.listItems(id));
+  }
+  async withSession(client, session, ticket, post) {
+    try {
+      return await post();
+    } catch (err) {
+      if (!(err instanceof AriadneError) || err.code !== "session_not_found") throw err;
+    }
+    await client.heartbeat({ session, ticket, step: bootstrapStep, state: "nominal" });
+    return post();
+  }
+  async call(options, requestedSession, run2) {
+    let settings;
+    try {
+      settings = this.settings();
+    } catch (err) {
+      return { status: "failed", message: err instanceof Error ? err.message : String(err) };
+    }
+    const noted = (outcome) => settings.notices.length > 0 ? { ...outcome, notices: settings.notices } : outcome;
+    const url2 = settings.url;
+    if (!settings.enabled) return noted({ status: "skipped", reason: "disabled" });
+    if (url2 === void 0) return noted({ status: "skipped", reason: "invalid-url" });
+    let token;
+    try {
+      token = this.tokens.resolve()?.token;
+    } catch (err) {
+      return noted({ status: "failed", message: err instanceof Error ? err.message : String(err) });
+    }
+    if (token === void 0 && options.strict !== true) return noted({ status: "skipped", reason: "no-token" });
+    const session = requestedSession ?? this.defaultSession();
+    if (session === void 0) {
+      return noted({
+        status: "failed",
+        message: `no session id: pass --session, or run inside Claude Code so ${claudeSessionEnv} is set`
+      });
+    }
+    const client = new AriadneClient({
+      baseUrl: url2,
+      token,
+      ...this.transport !== void 0 ? { transport: this.transport } : {},
+      ...this.timeoutMs !== void 0 ? { timeoutMs: this.timeoutMs } : {}
+    });
+    try {
+      return noted({ status: "posted", value: await run2(client, session) });
+    } catch (err) {
+      return noted({ status: "failed", message: this.redact(this.describe(err, url2, token !== void 0), token) });
+    }
+  }
+  describe(err, url2, hasToken) {
+    if (!(err instanceof AriadneError)) return err instanceof Error ? err.message : String(err);
+    if (err.status === 401 && err.code === "agent_token_expired") {
+      return "Ariadne agent token expired (401 agent_token_expired) \u2014 create a new one in Ariadne \u203A Settings \u203A Connections and run `flight-rules board login`";
+    }
+    if (err.status === 401) {
+      return hasToken ? "Ariadne agent token not recognised (401 unauthorized); it may be revoked or mistyped. Create a new one in Ariadne \u203A Settings \u203A Connections and set ARIADNE_AGENT_TOKEN or run `flight-rules board login`" : "no Ariadne token (401 unauthorized). Set ARIADNE_AGENT_TOKEN, or run `flight-rules board login` with an agent token from Ariadne \u203A Settings \u203A Connections";
+    }
+    if (err.code === "agents_opt_in_required") {
+      return "Agents reporting is off for you (403 agents_opt_in_required). Turn on Agents in Ariadne \u203A Settings \u203A Connections";
+    }
+    if (err.failure === "network") return `could not reach Ariadne at ${url2}: ${err.message}`;
+    return `Ariadne ${err.failure === "http" ? "returned" : "request failed:"} ${err.message}`;
+  }
+  /** Belt and braces: no message may ever carry the token. */
+  redact(message, token) {
+    return token === void 0 || token === "" ? message : message.split(token).join("[redacted]");
+  }
+};
+
+// src/shared/ariadne/ariadne-token-store.ts
+import { chmodSync, existsSync as existsSync5, mkdirSync as mkdirSync3, readFileSync as readFileSync5, rmSync, writeFileSync as writeFileSync3 } from "node:fs";
+import { homedir as homedir2 } from "node:os";
+import { dirname as dirname7, join as join6 } from "node:path";
+var agentTokenPattern = /^ariadne_agent_[0-9a-f]{16}_[A-Za-z0-9_-]{43}$/;
+var ariadneTokenEnvNames = ["ARIADNE_AGENT_TOKEN", "ARIADNE_TOKEN"];
+var AriadneTokenStore = class {
+  env;
+  home;
+  constructor(props = {}) {
+    this.env = props.env ?? process.env;
+    this.home = props.home ?? homedir2();
+  }
+  isAgentToken(value) {
+    return agentTokenPattern.test(value);
+  }
+  /** `$XDG_CONFIG_HOME/flight-rules/ariadne-token`, else `~/.config/flight-rules/ariadne-token`. */
+  path() {
+    const configHome = this.env["XDG_CONFIG_HOME"];
+    const base = configHome !== void 0 && configHome !== "" ? configHome : join6(this.home, ".config");
+    return join6(base, "flight-rules", "ariadne-token");
+  }
+  resolve() {
+    for (const name of ariadneTokenEnvNames) {
+      const value2 = this.env[name]?.trim();
+      if (value2 !== void 0 && value2 !== "") return { token: value2, source: name };
+    }
+    const path3 = this.path();
+    if (!existsSync5(path3)) return void 0;
+    const value = readFileSync5(path3, "utf-8").trim();
+    return value === "" ? void 0 : { token: value, source: "file" };
+  }
+  /** The environment variable that would win over a saved file, if one is set. */
+  shadowingEnv() {
+    return ariadneTokenEnvNames.find((name) => (this.env[name]?.trim() ?? "") !== "");
+  }
+  /** Saves an agent token with mode 0600 and returns the path. Rejects anything that is not one. */
+  save(token) {
+    const value = token.trim();
+    if (!this.isAgentToken(value)) {
+      throw new Error(
+        "That is not an Ariadne agent token (expected ariadne_agent_<16 hex>_<43 characters>). Create one in Ariadne \u203A Settings \u203A Connections."
+      );
+    }
+    const path3 = this.path();
+    mkdirSync3(dirname7(path3), { recursive: true, mode: 448 });
+    writeFileSync3(path3, `${value}
+`, { mode: 384 });
+    chmodSync(path3, 384);
+    return path3;
+  }
+  /** Deletes the saved token; returns whether one existed. */
+  remove() {
+    const path3 = this.path();
+    if (!existsSync5(path3)) return false;
+    rmSync(path3);
+    return true;
   }
 };
 
@@ -32126,8 +32616,8 @@ var convertMarkedBigIntsReviver = (key, value, context, userReviver) => {
   if (!hasUserReviver) return value;
   return userReviver(key, value, context);
 };
-var JSONParseV2 = (text5, reviver) => {
-  return JSON.parse(text5, (key, value, context) => {
+var JSONParseV2 = (text6, reviver) => {
+  return JSON.parse(text6, (key, value, context) => {
     const isNumber = typeof value === "number";
     const isOutOfBounds = value > Number.MAX_SAFE_INTEGER || value < Number.MIN_SAFE_INTEGER;
     const isBigNumber = isNumber && isOutOfBounds;
@@ -32185,8 +32675,8 @@ var applyReviverIteratively = (parsed, userReviver) => {
   }
   return rootHolder[""];
 };
-var serializeBigInts = (text5) => {
-  return text5.replace(
+var serializeBigInts = (text6) => {
+  return text6.replace(
     stringsOrLargeNumbers,
     (match, digits, fractional, exponential) => {
       const isString = match[0] === '"';
@@ -32200,18 +32690,18 @@ var serializeBigInts = (text5) => {
     }
   );
 };
-var JSONParse = (text5, reviver) => {
-  if (!text5) return originalParse(text5, reviver);
+var JSONParse = (text6, reviver) => {
+  if (!text6) return originalParse(text6, reviver);
   try {
-    if (isContextSourceSupported()) return JSONParseV2(text5, reviver);
-    const serializedData = serializeBigInts(text5);
+    if (isContextSourceSupported()) return JSONParseV2(text6, reviver);
+    const serializedData = serializeBigInts(text6);
     return originalParse(
       serializedData,
       (key, value, context) => convertMarkedBigIntsReviver(key, value, context, reviver)
     );
   } catch (error62) {
     if (error62 instanceof RangeError) {
-      const serializedData = serializeBigInts(text5);
+      const serializedData = serializeBigInts(text6);
       const parsed = originalParse(serializedData);
       return applyReviverIteratively(parsed, reviver);
     }
@@ -32379,12 +32869,12 @@ async function getResponseData(response) {
   }
   const mimetype = parse4(contentType);
   if (isJSONResponse(mimetype)) {
-    let text5 = "";
+    let text6 = "";
     try {
-      text5 = await response.text();
-      return JSONParse(text5);
+      text6 = await response.text();
+      return JSONParse(text6);
     } catch (err) {
-      return text5;
+      return text6;
     }
   } else if (mimetype.type.startsWith("text/") || // `application/octet-stream` is the canonical "arbitrary binary" type
   // (RFC 2046) and must never be decoded as text, even when the response
@@ -36012,7 +36502,7 @@ var GitHubTaskTracker = class {
 };
 
 // src/tasks/jira-task-tracker/jira-task-tracker.ts
-import { readFileSync as readFileSync5 } from "node:fs";
+import { readFileSync as readFileSync6 } from "node:fs";
 import { basename as basename2 } from "node:path";
 
 // src/tasks/jira-task-tracker/jira-api-error.ts
@@ -36058,8 +36548,8 @@ var JiraClient = class {
       ...body !== void 0 ? { body: JSON.stringify(body) } : {}
     });
     if (!res.ok) await this.throwApiError(res);
-    const text5 = await res.text();
-    const data = text5.length > 0 ? JSON.parse(text5) : void 0;
+    const text6 = await res.text();
+    const data = text6.length > 0 ? JSON.parse(text6) : void 0;
     return data;
   }
   /**
@@ -36080,8 +36570,8 @@ var JiraClient = class {
       body: form
     });
     if (!res.ok) await this.throwApiError(res);
-    const text5 = await res.text();
-    const data = text5.length > 0 ? JSON.parse(text5) : void 0;
+    const text6 = await res.text();
+    const data = text6.length > 0 ? JSON.parse(text6) : void 0;
     return data;
   }
   /**
@@ -36151,8 +36641,8 @@ var ConfluenceClient = class {
       ...body !== void 0 ? { body: JSON.stringify(body) } : {}
     });
     if (!res.ok) await this.throwApiError(res);
-    const text5 = await res.text();
-    const data = text5.length > 0 ? JSON.parse(text5) : void 0;
+    const text6 = await res.text();
+    const data = text6.length > 0 ? JSON.parse(text6) : void 0;
     return data;
   }
   async fetchWithRetry(url2, init, attempt = 0) {
@@ -38790,7 +39280,7 @@ function resolveAllAttention(events, context) {
   let index2 = -1;
   let open2;
   let group;
-  let text5;
+  let text6;
   let openingSequence;
   let closingSequence;
   let use;
@@ -38828,7 +39318,7 @@ function resolveAllAttention(events, context) {
             },
             end
           };
-          text5 = {
+          text6 = {
             type: use > 1 ? "strongText" : "emphasisText",
             start: {
               ...events[open2][1].end
@@ -38856,9 +39346,9 @@ function resolveAllAttention(events, context) {
           if (events[open2][1].end.offset - events[open2][1].start.offset) {
             nextEvents = push(nextEvents, [["enter", events[open2][1], context], ["exit", events[open2][1], context]]);
           }
-          nextEvents = push(nextEvents, [["enter", group, context], ["enter", openingSequence, context], ["exit", openingSequence, context], ["enter", text5, context]]);
+          nextEvents = push(nextEvents, [["enter", group, context], ["enter", openingSequence, context], ["exit", openingSequence, context], ["enter", text6, context]]);
           nextEvents = push(nextEvents, resolveAll(context.parser.constructs.insideSpan.null, events.slice(open2 + 1, index2), context));
-          nextEvents = push(nextEvents, [["exit", text5, context], ["enter", closingSequence, context], ["exit", closingSequence, context], ["exit", group, context]]);
+          nextEvents = push(nextEvents, [["exit", text6, context], ["enter", closingSequence, context], ["exit", closingSequence, context], ["exit", group, context]]);
           if (events[index2][1].end.offset - events[index2][1].start.offset) {
             offset = 2;
             nextEvents = push(nextEvents, [["enter", events[index2][1], context], ["exit", events[index2][1], context]]);
@@ -40306,7 +40796,7 @@ function resolveHeadingAtx(events, context) {
   let contentEnd = events.length - 2;
   let contentStart = 3;
   let content3;
-  let text5;
+  let text6;
   if (events[contentStart][1].type === "whitespace") {
     contentStart += 2;
   }
@@ -40322,13 +40812,13 @@ function resolveHeadingAtx(events, context) {
       start: events[contentStart][1].start,
       end: events[contentEnd][1].end
     };
-    text5 = {
+    text6 = {
       type: "chunkText",
       start: events[contentStart][1].start,
       end: events[contentEnd][1].end,
       contentType: "text"
     };
-    splice(events, contentStart, contentEnd - contentStart + 1, [["enter", content3, context], ["enter", text5, context], ["exit", text5, context], ["exit", content3, context]]);
+    splice(events, contentStart, contentEnd - contentStart + 1, [["enter", content3, context], ["enter", text6, context], ["exit", text6, context], ["exit", content3, context]]);
   }
   return events;
 }
@@ -41218,7 +41708,7 @@ function resolveToLabelEnd(events, context) {
       ...events[close][1].end
     }
   };
-  const text5 = {
+  const text6 = {
     type: "labelText",
     start: {
       ...events[open2 + offset + 2][1].end
@@ -41229,9 +41719,9 @@ function resolveToLabelEnd(events, context) {
   };
   media = [["enter", group, context], ["enter", label, context]];
   media = push(media, events.slice(open2 + 1, open2 + offset + 3));
-  media = push(media, [["enter", text5, context]]);
+  media = push(media, [["enter", text6, context]]);
   media = push(media, resolveAll(context.parser.constructs.insideSpan.null, events.slice(open2 + offset + 4, close - 3), context));
-  media = push(media, [["exit", text5, context], events[close - 2], events[close - 1], ["exit", label, context]]);
+  media = push(media, [["exit", text6, context], events[close - 2], events[close - 1], ["exit", label, context]]);
   media = push(media, events.slice(close + 1));
   media = push(media, [["exit", group, context]]);
   splice(events, open2, events.length, media);
@@ -41611,7 +42101,7 @@ var setextUnderline = {
 function resolveToSetextUnderline(events, context) {
   let index2 = events.length;
   let content3;
-  let text5;
+  let text6;
   let definition2;
   while (index2--) {
     if (events[index2][0] === "enter") {
@@ -41620,7 +42110,7 @@ function resolveToSetextUnderline(events, context) {
         break;
       }
       if (events[index2][1].type === "paragraph") {
-        text5 = index2;
+        text6 = index2;
       }
     } else {
       if (events[index2][1].type === "content") {
@@ -41640,9 +42130,9 @@ function resolveToSetextUnderline(events, context) {
       ...events[events.length - 1][1].end
     }
   };
-  events[text5][1].type = "setextHeadingText";
+  events[text6][1].type = "setextHeadingText";
   if (definition2) {
-    events.splice(text5, 0, ["enter", heading, context]);
+    events.splice(text6, 0, ["enter", heading, context]);
     events.splice(definition2 + 1, 0, ["exit", events[content3][1], context]);
     events[content3][1].end = {
       ...events[definition2][1].end
@@ -41746,10 +42236,10 @@ function initializeFactory(field) {
   function initializeText(effects) {
     const self = this;
     const constructs2 = this.parser.constructs[field];
-    const text5 = effects.attempt(constructs2, start, notText);
+    const text6 = effects.attempt(constructs2, start, notText);
     return start;
     function start(code2) {
-      return atBreak(code2) ? text5(code2) : notText(code2);
+      return atBreak(code2) ? text6(code2) : notText(code2);
     }
     function notText(code2) {
       if (code2 === null) {
@@ -41763,7 +42253,7 @@ function initializeFactory(field) {
     function data(code2) {
       if (atBreak(code2)) {
         effects.exit("data");
-        return text5(code2);
+        return text6(code2);
       }
       effects.consume(code2);
       return data;
@@ -42811,7 +43301,7 @@ function compiler(options) {
     const siblings = node3.children;
     let tail = siblings[siblings.length - 1];
     if (!tail || tail.type !== "text") {
-      tail = text5();
+      tail = text6();
       tail.position = {
         start: point2(token.start),
         // @ts-expect-error: we’ll add `end` later.
@@ -43056,7 +43546,7 @@ function compiler(options) {
       children: []
     };
   }
-  function text5() {
+  function text6() {
     return {
       type: "text",
       value: ""
@@ -44447,17 +44937,17 @@ function gfmStrikethrough(options) {
               start: Object.assign({}, events[open2][1].start),
               end: Object.assign({}, events[index2][1].end)
             };
-            const text5 = {
+            const text6 = {
               type: "strikethroughText",
               start: Object.assign({}, events[open2][1].end),
               end: Object.assign({}, events[index2][1].start)
             };
-            const nextEvents = [["enter", strikethrough, context], ["enter", events[open2][1], context], ["exit", events[open2][1], context], ["enter", text5, context]];
+            const nextEvents = [["enter", strikethrough, context], ["enter", events[open2][1], context], ["exit", events[open2][1], context], ["enter", text6, context]];
             const insideSpan2 = context.parser.constructs.insideSpan.null;
             if (insideSpan2) {
               splice(nextEvents, nextEvents.length, 0, resolveAll(insideSpan2, events.slice(open2 + 1, index2), context));
             }
-            splice(nextEvents, nextEvents.length, 0, [["exit", text5, context], ["enter", events[index2][1], context], ["exit", events[index2][1], context], ["exit", strikethrough, context]]);
+            splice(nextEvents, nextEvents.length, 0, [["exit", text6, context], ["enter", events[index2][1], context], ["exit", events[index2][1], context], ["exit", strikethrough, context]]);
             splice(events, open2 - 1, index2 - open2 + 3, nextEvents);
             index2 = open2 + nextEvents.length - 2;
             break;
@@ -45316,9 +45806,9 @@ var LayeredBodyAdfConverter = class {
   alertType(node3) {
     const first = node3.children[0];
     if (first === void 0 || first.type !== "paragraph") return void 0;
-    const text5 = first.children[0];
-    if (text5 === void 0 || text5.type !== "text") return void 0;
-    return alertMarker.exec(text5.value)?.[1];
+    const text6 = first.children[0];
+    if (text6 === void 0 || text6.type !== "text") return void 0;
+    return alertMarker.exec(text6.value)?.[1];
   }
   /**
    * Returns the blockquote's children with the admonition marker (and its trailing
@@ -45329,10 +45819,10 @@ var LayeredBodyAdfConverter = class {
   stripAlertMarker(children) {
     const [first, ...rest] = children;
     if (first === void 0 || first.type !== "paragraph") return children;
-    const [text5, ...moreInline] = first.children;
-    if (text5 === void 0 || text5.type !== "text") return children;
-    const stripped = text5.value.replace(alertMarker, "");
-    const inline = stripped === "" ? moreInline : [{ ...text5, value: stripped }, ...moreInline];
+    const [text6, ...moreInline] = first.children;
+    if (text6 === void 0 || text6.type !== "text") return children;
+    const stripped = text6.value.replace(alertMarker, "");
+    const inline = stripped === "" ? moreInline : [{ ...text6, value: stripped }, ...moreInline];
     if (inline.length === 0) return rest;
     return [{ ...first, children: inline }, ...rest];
   }
@@ -45632,12 +46122,12 @@ var LayeredBodyAdfConverter = class {
    * task list would accrete a `>` on every round trip.
    */
   literalBlock(node3, source, stripEnclosingQuote = false) {
-    const text5 = this.literal(node3, source);
-    const inner = stripEnclosingQuote ? this.stripEnclosingQuote(text5) : text5;
+    const text6 = this.literal(node3, source);
+    const inner = stripEnclosingQuote ? this.stripEnclosingQuote(text6) : text6;
     return { type: "paragraph", content: this.textSegments(inner, []) };
   }
-  stripEnclosingQuote(text5) {
-    return text5.split("\n").map((line, index2) => index2 === 0 ? line : line.replace(/^> ?/, "")).join("\n");
+  stripEnclosingQuote(text6) {
+    return text6.split("\n").map((line, index2) => index2 === 0 ? line : line.replace(/^> ?/, "")).join("\n");
   }
   literal(node3, source) {
     return source.slice(node3.position?.start.offset ?? 0, node3.position?.end.offset ?? 0);
@@ -45652,9 +46142,9 @@ var LayeredBodyAdfConverter = class {
         return this.inlineToMarkdown(node3.content ?? [], names);
       case "codeBlock": {
         const language = typeof node3.attrs?.["language"] === "string" ? node3.attrs["language"] : "";
-        const text5 = (node3.content ?? []).map((child) => child.text ?? "").join("");
+        const text6 = (node3.content ?? []).map((child) => child.text ?? "").join("");
         return `\`\`\`${language}
-${text5}
+${text6}
 \`\`\``;
       }
       case "taskList":
@@ -45833,7 +46323,7 @@ ${indent2}`)}`;
       if (node3.text === void 0) {
         closeFrom(0);
         const inner = node3.content !== void 0 ? this.inlineToMarkdown(node3.content, names) : "";
-        out += [...node3.marks ?? []].reverse().reduce((text6, mark) => this.applyMark(text6, mark), inner);
+        out += [...node3.marks ?? []].reverse().reduce((text7, mark) => this.applyMark(text7, mark), inner);
         continue;
       }
       const marks = node3.marks ?? [];
@@ -45854,12 +46344,12 @@ ${indent2}`)}`;
       }
       closeFrom(common);
       const opening = marks.slice(common);
-      let text5 = node3.text;
+      let text6 = node3.text;
       if (common === 0 && opening.length > 0 && opening.every((mark) => this.isEmphasis(mark))) {
-        const lead = /^\s+/.exec(text5)?.[0];
-        if (lead !== void 0 && lead.length < text5.length) {
+        const lead = /^\s+/.exec(text6)?.[0];
+        if (lead !== void 0 && lead.length < text6.length) {
           out += lead;
-          text5 = text5.slice(lead.length);
+          text6 = text6.slice(lead.length);
         }
       }
       for (let k = common; k < marks.length; k++) {
@@ -45868,7 +46358,7 @@ ${indent2}`)}`;
         out += this.markOpen(mark);
         open2.push(mark);
       }
-      out += this.escapeText(text5, open2.some((mark) => mark.type === "code"));
+      out += this.escapeText(text6, open2.some((mark) => mark.type === "code"));
     }
     closeFrom(0);
     return out;
@@ -45884,8 +46374,8 @@ ${indent2}`)}`;
    */
   mentionToMarkdown(node3) {
     const id = typeof node3.attrs?.["id"] === "string" ? node3.attrs["id"] : "";
-    const text5 = node3.attrs?.["text"];
-    const display = typeof text5 === "string" ? text5.startsWith("@") ? text5.slice(1) : text5 : "";
+    const text6 = node3.attrs?.["text"];
+    const display = typeof text6 === "string" ? text6.startsWith("@") ? text6.slice(1) : text6 : "";
     return `@{${id}|${this.escapeMentionDisplay(display)}}`;
   }
   /**
@@ -45901,20 +46391,20 @@ ${indent2}`)}`;
    * Wraps text in the markdown for one mark, innermost-first. Only used for the
    * rare content-bearing inline node; the main text path coalesces marks instead.
    */
-  applyMark(text5, mark) {
+  applyMark(text6, mark) {
     switch (mark.type) {
       case "code":
-        return `\`${text5}\``;
+        return `\`${text6}\``;
       case "em":
-        return `*${text5}*`;
+        return `*${text6}*`;
       case "strong":
-        return `**${text5}**`;
+        return `**${text6}**`;
       case "strike":
-        return `~~${text5}~~`;
+        return `~~${text6}~~`;
       case "link":
-        return this.linkToMarkdown(text5, mark);
+        return this.linkToMarkdown(text6, mark);
       default:
-        return text5;
+        return text6;
     }
   }
   markOpen(mark) {
@@ -45966,22 +46456,22 @@ ${indent2}`)}`;
    * but only when the destination needs no escaping and there's no title — so the
    * autolink re-parses to the same href. Otherwise the caller emits `[text](dest)`.
    */
-  tryBareUrl(text5, mark) {
+  tryBareUrl(text6, mark) {
     if (mark.type !== "link") return void 0;
     const href = mark.attrs?.["href"];
     if (typeof href !== "string") return void 0;
     if (typeof mark.attrs?.["title"] === "string") return void 0;
-    if (text5 !== href || this.encodeDestination(href) !== href) return void 0;
+    if (text6 !== href || this.encodeDestination(href) !== href) return void 0;
     return href;
   }
-  linkToMarkdown(text5, mark) {
+  linkToMarkdown(text6, mark) {
     const href = mark.attrs?.["href"];
-    if (typeof href !== "string") return text5;
-    const bare = this.tryBareUrl(text5, mark);
+    if (typeof href !== "string") return text6;
+    const bare = this.tryBareUrl(text6, mark);
     if (bare !== void 0) return bare;
     const title = mark.attrs?.["title"];
     const suffix = typeof title === "string" ? ` "${this.encodeTitle(title)}"` : "";
-    return `[${text5}](${this.encodeDestination(href)}${suffix})`;
+    return `[${text6}](${this.encodeDestination(href)}${suffix})`;
   }
   /**
    * Escapes a link destination so it re-parses to the same string: literal `\`
@@ -46012,9 +46502,9 @@ ${indent2}`)}`;
    * text node that itself reads as a mention token (`@{id|name}`) is escaped to
    * `\@{…}` so it re-parses as text rather than a mention.
    */
-  escapeText(text5, insideCode) {
-    if (insideCode) return text5;
-    const escaped = text5.replace(/[\\*`]/g, (ch) => `\\${ch}`);
+  escapeText(text6, insideCode) {
+    if (insideCode) return text6;
+    const escaped = text6.replace(/[\\*`]/g, (ch) => `\\${ch}`);
     return escaped.replace(this.mentionToken(), (full) => `\\${full}`);
   }
 };
@@ -46025,18 +46515,18 @@ var import_yaml2 = __toESM(require_dist(), 1);
 
 // src/tasks/jira-task-tracker/adf.ts
 var DefaultAdfBuilder = class {
-  doc(text5) {
+  doc(text6) {
     return {
       version: 1,
       type: "doc",
-      content: [{ type: "paragraph", content: [{ type: "text", text: text5 }] }]
+      content: [{ type: "paragraph", content: [{ type: "text", text: text6 }] }]
     };
   }
-  codeBlock(text5, language = "yaml") {
+  codeBlock(text6, language = "yaml") {
     return {
       type: "codeBlock",
       attrs: { language },
-      content: [{ type: "text", text: text5 }]
+      content: [{ type: "text", text: text6 }]
     };
   }
   expand(title, child) {
@@ -46072,9 +46562,9 @@ var JiraAdfMetadataService = class {
   readMetadataYaml(doc) {
     const expand2 = doc.content.find((n) => this.isMetadataExpand(n));
     const codeBlock = expand2?.content?.find((n) => n.type === "codeBlock");
-    const text5 = codeBlock?.content?.find((n) => n.type === "text")?.text;
-    if (text5 === void 0 || text5.trim() === "") return void 0;
-    return text5;
+    const text6 = codeBlock?.content?.find((n) => n.type === "text")?.text;
+    if (text6 === void 0 || text6.trim() === "") return void 0;
+    return text6;
   }
   isMetadataExpand(node3) {
     return node3.type === "expand" && node3.attrs?.["title"] === metadataTitle;
@@ -46352,7 +46842,7 @@ var JiraTaskTracker = class {
    */
   async addAttachment(ticketId, filePath) {
     const filename = basename2(filePath);
-    const file2 = new File([readFileSync5(filePath)], filename, { type: this.mimeTypes.forFilename(filename) });
+    const file2 = new File([readFileSync6(filePath)], filename, { type: this.mimeTypes.forFilename(filename) });
     const uploaded = JiraUploadedAttachmentsSchema.parse(
       await this.client.upload(`/issue/${ticketId}/attachments`, [file2])
     );
@@ -46805,6 +47295,12 @@ var DefaultFlightRules = class {
   docs() {
     return FileDocResolver.fromInstall({ moduleUrl: import.meta.url, env: this.env });
   }
+  board() {
+    return new AriadneBoard({ readLayers: () => this.configStore().layers(), tokens: this.ariadneTokens(), env: this.env });
+  }
+  ariadneTokens() {
+    return new AriadneTokenStore({ env: this.env });
+  }
 };
 function createFlightRules(props = {}) {
   return new DefaultFlightRules(props);
@@ -46864,10 +47360,161 @@ function createConfigCommand(getStore) {
   return config2;
 }
 
+// src/shared/commands/board/command.ts
+import { createInterface } from "node:readline";
+import { text as text4 } from "node:stream/consumers";
+import { Writable } from "node:stream";
+
+// src/shared/collect.ts
+function collect(value, previous3) {
+  return [...previous3, value];
+}
+
+// src/shared/commands/board/command.ts
+var HiddenPrompt = class {
+  async read(label) {
+    if (process.stdin.isTTY !== true) return text4(process.stdin);
+    process.stderr.write(label);
+    const muted = new Writable({ write: (_chunk, _encoding, done) => done() });
+    const prompt = createInterface({ input: process.stdin, output: muted, terminal: true });
+    try {
+      return await new Promise((resolve5) => prompt.once("line", resolve5));
+    } finally {
+      prompt.close();
+      process.stderr.write("\n");
+    }
+  }
+};
+var ticketHelp = "Jira issue key";
+var sessionHelp = "session id; defaults to the Claude Code session ($CLAUDE_CODE_SESSION_ID)";
+var strictHelp = "exit 1 when the post fails, and post even without a token so a missing one fails with 401";
+function createBoardCommand(getBoard, getTokens = () => new AriadneTokenStore(), readSecret = () => new HiddenPrompt().read("Ariadne agent token: ")) {
+  const board = new Command("board").description("report this run to Ariadne's Agents page (opt-in; silent unless an Ariadne token is set)").addHelpText(
+    "after",
+    [
+      "",
+      "Token: $ARIADNE_AGENT_TOKEN, then $ARIADNE_TOKEN, then the file `board login` saves.",
+      "There is no fallback to the ariadne CLI's Keychain session, so each machine needs its",
+      "own agent token from Ariadne \u203A Settings \u203A Connections.",
+      "Config: ariadne.url (https; http only for localhost) and ariadne.enabled, read only from",
+      "user or local scope; project settings and the config file cannot set them.",
+      "Not configured or disabled: prints nothing, exits 0. A failure is one stderr line and",
+      "exit 0; --strict makes it exit 1. `board items` is read-only; answer items in Ariadne."
+    ].join("\n")
+  );
+  board.exitOverride();
+  const withReportOptions = (command, jsonHelp) => command.option("--session <id>", sessionHelp).option("--strict", strictHelp).option("--json", jsonHelp).exitOverride();
+  const finish = (outcome, opts, print, loud = opts.strict === true) => {
+    if (loud) for (const notice of outcome.notices ?? []) process.stderr.write(`flight-rules board: ${notice}
+`);
+    if (outcome.status === "skipped") return;
+    if (outcome.status === "failed") {
+      if (opts.strict === true) throw new Error(`flight-rules board: ${outcome.message}`);
+      process.stderr.write(`flight-rules board: ${outcome.message}
+`);
+      return;
+    }
+    print(outcome.value);
+  };
+  const printJson = (opts) => (value) => {
+    if (opts.json === true) process.stdout.write(JSON.stringify(value) + "\n");
+  };
+  const describeItem = (item) => {
+    const answer = item.chosenOption !== null ? ` -> ${item.chosenOption}` : item.options.length > 0 ? ` [${item.options.join(" | ")}]` : "";
+    return `${item.status}	${item.kind}	${item.ticket ?? "-"}	${item.id}	${item.title}${answer}`;
+  };
+  const post = new Command("post").description("send a heartbeat, an item that needs a person, or an activity line");
+  post.exitOverride();
+  withReportOptions(
+    post.command("heartbeat").description("create or update this session: ticket, step and state").requiredOption("--ticket <key>", ticketHelp).requiredOption("--step <step>", "one line up to 60 characters: implement, verify 2/3, pr, qa").addOption(new Option("--state <state>", "how the run is going").choices(agentStates).makeOptionMandatory()).option("--branch <branch>", "the branch as git prints it").option("--repo <repo>", "owner/name").option("--skill <skill>", "the skill reporting, e.g. flight-rules:execute-work").option("--detail <line>", "one line up to 500 characters"),
+    "print the API response {session} as JSON"
+  ).action(async (opts) => {
+    const outcome = await getBoard().heartbeat(
+      {
+        session: opts.session,
+        ticket: opts.ticket,
+        step: opts.step,
+        state: opts.state,
+        branch: opts.branch,
+        repo: opts.repo,
+        skill: opts.skill,
+        detail: opts.detail
+      },
+      { strict: opts.strict === true }
+    );
+    finish(outcome, opts, printJson(opts));
+  });
+  withReportOptions(
+    post.command("item").description("ask a person for something: a question, blocker, testable or wave gate, with up to 6 options").addOption(new Option("--kind <kind>", "what the person is asked for").choices(agentItemKinds).makeOptionMandatory()).requiredOption("--ticket <key>", ticketHelp).requiredOption("--title <text>", "one line up to 200 characters").option("--detail <text>", "up to 2,000 characters; line breaks allowed").option("--option <label>", "an answer the person can choose (repeatable, up to 6)", collect, []).option("--id <id>", "client id; reposting the same id returns the stored item and its chosenOption"),
+    "print the API response {item, created} as JSON, including any chosenOption"
+  ).action(async (opts) => {
+    const outcome = await getBoard().item(
+      {
+        session: opts.session,
+        kind: opts.kind,
+        ticket: opts.ticket,
+        title: opts.title,
+        detail: opts.detail,
+        ...opts.option.length > 0 ? { options: opts.option } : {},
+        id: opts.id
+      },
+      { strict: opts.strict === true }
+    );
+    finish(outcome, opts, printJson(opts));
+  });
+  withReportOptions(
+    post.command("activity").description("add one line to the session's activity stream").requiredOption("--ticket <key>", ticketHelp).requiredOption("--text <line>", "one line up to 500 characters").addOption(new Option("--level <level>", "defaults to info").choices(agentActivityLevels)).option("--id <id>", "client id; reposting the same id stores nothing new"),
+    "print the API response {activity, created} as JSON"
+  ).action(async (opts) => {
+    const outcome = await getBoard().activity(
+      { session: opts.session, ticket: opts.ticket, text: opts.text, level: opts.level, id: opts.id },
+      { strict: opts.strict === true }
+    );
+    finish(outcome, opts, printJson(opts));
+  });
+  board.addCommand(post);
+  withReportOptions(
+    board.command("items").description("list a session's items, open and resolved, with any chosen option"),
+    "print {items} as JSON"
+  ).action(async (opts) => {
+    const outcome = await getBoard().items(opts.session, { strict: opts.strict === true });
+    finish(
+      outcome,
+      opts,
+      ({ items }) => {
+        if (opts.json === true) {
+          process.stdout.write(JSON.stringify({ items }) + "\n");
+          return;
+        }
+        process.stdout.write(items.map((item) => describeItem(item) + "\n").join(""));
+      },
+      true
+    );
+  });
+  board.command("login").description(
+    "save this machine's Ariadne agent token (each machine needs its own, from Ariadne \u203A Settings \u203A Connections), read from stdin or a hidden prompt, with mode 0600"
+  ).exitOverride().action(async () => {
+    const tokens = getTokens();
+    const path3 = tokens.save(await readSecret());
+    const shadowedBy = tokens.shadowingEnv();
+    process.stdout.write(
+      JSON.stringify({
+        saved: path3,
+        ...shadowedBy !== void 0 ? { warning: `$${shadowedBy} is set and takes precedence over the saved token` } : {}
+      }) + "\n"
+    );
+  });
+  board.command("logout").description("delete the agent token saved by `board login`").exitOverride().action(() => {
+    const tokens = getTokens();
+    process.stdout.write(JSON.stringify({ removed: tokens.remove(), path: tokens.path() }) + "\n");
+  });
+  return board;
+}
+
 // src/tasks/commands/resolve-body.ts
-import { readFileSync as readFileSync6 } from "node:fs";
+import { readFileSync as readFileSync7 } from "node:fs";
 function resolveBody(opts) {
-  if (opts.bodyFile !== void 0) return readFileSync6(opts.bodyFile, "utf8");
+  if (opts.bodyFile !== void 0) return readFileSync7(opts.bodyFile, "utf8");
   if (opts.body !== void 0) return opts.body;
   throw new Error("one of --body or --body-file is required");
 }
@@ -46885,8 +47532,8 @@ var maxReported = 5;
 var RegexPortableContextGuard = class {
   find(body) {
     return body.split("\n").flatMap(
-      (text5, index2) => localReferencePatterns.flatMap(
-        (pattern) => [...text5.matchAll(pattern)].map((m) => ({ line: index2 + 1, match: m[0].replace(trailingPunctuation, "") }))
+      (text6, index2) => localReferencePatterns.flatMap(
+        (pattern) => [...text6.matchAll(pattern)].map((m) => ({ line: index2 + 1, match: m[0].replace(trailingPunctuation, "") }))
       )
     );
   }
@@ -47104,7 +47751,7 @@ var BlobSectionSource = class {
       if (current !== void 0) raw[current]?.push(line);
       i++;
     }
-    const text5 = (key) => {
+    const text6 = (key) => {
       const joined = (raw[key] ?? []).join("\n").trim();
       return joined.length > 0 ? joined : void 0;
     };
@@ -47114,7 +47761,7 @@ var BlobSectionSource = class {
       fixedWhenItems: this.checklistItems(raw.fixedWhen)
     };
     for (const key of stringSectionKeys) {
-      const value = text5(key);
+      const value = text6(key);
       if (value !== void 0) sections[key] = value;
     }
     return sections;
@@ -47233,11 +47880,6 @@ var PrecedenceBodyFormatDetector = class {
   }
 };
 var bodyFormatDetector = new PrecedenceBodyFormatDetector();
-
-// src/shared/collect.ts
-function collect(value, previous3) {
-  return [...previous3, value];
-}
 
 // src/tasks/evidence/evidence.ts
 import { basename as basename3 } from "node:path/posix";
@@ -47496,15 +48138,15 @@ function createRfcCommand(getConfig, getCwd = () => process.cwd()) {
 }
 
 // src/tasks/qa-instructions/qa-instructions.ts
-import { existsSync as existsSync5, readFileSync as readFileSync7, statSync as statSync3 } from "node:fs";
-import { dirname as dirname7, join as join6, resolve as resolve3 } from "node:path";
+import { existsSync as existsSync6, readFileSync as readFileSync8, statSync as statSync3 } from "node:fs";
+import { dirname as dirname8, join as join7, resolve as resolve3 } from "node:path";
 var atxHeading = /^ {0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$/;
 var fenceRun2 = /^ {0,3}(`{3,}|~{3,})/;
 var legacyHint = 'Legacy QA recipe in use. Move its content into a QA.md at the repo root (or a "QA" section of AGENTS.md); see docs/qa-instructions.md.';
 var nodeFileSystem = {
-  isFile: (path3) => existsSync5(path3) && statSync3(path3).isFile(),
-  exists: (path3) => existsSync5(path3),
-  readFile: (path3) => readFileSync7(path3, "utf8")
+  isFile: (path3) => existsSync6(path3) && statSync3(path3).isFile(),
+  exists: (path3) => existsSync6(path3),
+  readFile: (path3) => readFileSync8(path3, "utf8")
 };
 var QaInstructionsFinder = class {
   fs;
@@ -47554,25 +48196,25 @@ var QaInstructionsFinder = class {
   /** The start directory and each parent up to the repository root; only the start when no root is found. */
   levels(from) {
     const absolute = resolve3(from);
-    const start = this.fs.isFile(absolute) ? dirname7(absolute) : absolute;
+    const start = this.fs.isFile(absolute) ? dirname8(absolute) : absolute;
     const levels = [];
     let current = start;
     for (; ; ) {
       levels.push(current);
-      if (this.fs.exists(join6(current, ".git"))) return levels;
-      const parent = dirname7(current);
+      if (this.fs.exists(join7(current, ".git"))) return levels;
+      const parent = dirname8(current);
       if (parent === current) return [start];
       current = parent;
     }
   }
   sourceAt(dir) {
-    const agentsMd = join6(dir, "AGENTS.md");
+    const agentsMd = join7(dir, "AGENTS.md");
     if (this.fs.isFile(agentsMd)) {
       const section = this.extractQaSection(this.fs.readFile(agentsMd));
       if (section !== void 0)
         return { path: agentsMd, kind: "agents-md-section", dir, content: section };
     }
-    return this.fileSource(join6(dir, "QA.md"), "qa-md", dir) ?? this.fileSource(join6(dir, ".agents", "QA.md"), "agents-dir-qa-md", dir);
+    return this.fileSource(join7(dir, "QA.md"), "qa-md", dir) ?? this.fileSource(join7(dir, ".agents", "QA.md"), "agents-dir-qa-md", dir);
   }
   fileSource(path3, kind, dir) {
     if (!this.fs.isFile(path3)) return void 0;
@@ -47581,7 +48223,7 @@ var QaInstructionsFinder = class {
   }
   legacySource(path3) {
     if (path3 === void 0) return void 0;
-    const source = this.fileSource(path3, "legacy-recipe", dirname7(path3));
+    const source = this.fileSource(path3, "legacy-recipe", dirname8(path3));
     return source === void 0 ? void 0 : { ...source, legacy: true, hint: legacyHint };
   }
 };
@@ -47733,7 +48375,7 @@ function createCheckCommand(getConfig, getTracker, getConfigPath, getProbe, getF
 }
 
 // src/hooks/commands/hook/command.ts
-import { text as text4 } from "node:stream/consumers";
+import { text as text5 } from "node:stream/consumers";
 
 // src/shared/attribution-stripper/attribution-stripper.ts
 var trailerText = String.raw`(?:Co-Authored-By:[^\n"']*(?:Claude|anthropic\.com)[^\n"']*|Claude-Session:[^\n"']*|https://claude\.ai/code/session_[A-Za-z0-9_-]+)`;
@@ -47745,9 +48387,9 @@ var closingBlock = new RegExp(
 var attributionLine = new RegExp(String.raw`(?:^|\r?\n)[ \t]*${trailerText}${lineEnd}`, "gi");
 var messageCommand = /(^|[\s;&|(])(?:git\b[^\n;&|]*\bcommit\b|gh\s+pr\s+(?:create|edit)\b|flight-rules\s+(?:git\s+commit|pr\s+create)\b)/;
 var AttributionStripper = class {
-  strip(text5) {
-    const stripped = text5.replace(closingBlock, "").replace(attributionLine, "");
-    if (stripped === text5) return text5;
+  strip(text6) {
+    const stripped = text6.replace(closingBlock, "").replace(attributionLine, "");
+    if (stripped === text6) return text6;
     return stripped.replace(/\n{3,}/g, "\n\n");
   }
   /** The command with attribution removed, or undefined when it writes no message or carries none. */
@@ -47764,7 +48406,7 @@ ${line.trim()}`) === "";
 };
 
 // src/hooks/commit-guard/commit-guard.ts
-import { readFileSync as readFileSync8 } from "node:fs";
+import { readFileSync as readFileSync9 } from "node:fs";
 import { isAbsolute as isAbsolute2, resolve as resolve4 } from "node:path";
 var PreToolUseInputSchema = external_exports.looseObject({
   tool_name: external_exports.string().optional(),
@@ -47857,7 +48499,7 @@ var CommitGuard = class {
     const unquoted = file2.replace(/^["']|["']$/g, "");
     if (unquoted === "-" || !isAbsolute2(unquoted) && cwd === void 0) return false;
     try {
-      const contents = readFileSync8(isAbsolute2(unquoted) ? unquoted : resolve4(cwd ?? "", unquoted), "utf8");
+      const contents = readFileSync9(isAbsolute2(unquoted) ? unquoted : resolve4(cwd ?? "", unquoted), "utf8");
       return /^Flight-Rules-Version: /m.test(contents);
     } catch {
       return false;
@@ -47893,7 +48535,7 @@ var PreBashHook = class {
 };
 
 // src/hooks/commands/hook/command.ts
-function createHookCommand(getHandler = () => new PreBashHook(), readStdin = () => text4(process.stdin)) {
+function createHookCommand(getHandler = () => new PreBashHook(), readStdin = () => text5(process.stdin)) {
   const hook2 = new Command("hook").description("handlers for the plugin's Claude Code hooks");
   hook2.command("pre-bash").alias("guard-commit").description(
     "PreToolUse(Bash): block a hand-written `git commit` in a flight-rules repo, and strip Claude's attribution trailers from commit and PR commands"
@@ -47909,11 +48551,11 @@ function createHookCommand(getHandler = () => new PreBashHook(), readStdin = () 
 }
 
 // src/git/commands/commit/command.ts
-import { readFileSync as readFileSync10 } from "node:fs";
+import { readFileSync as readFileSync11 } from "node:fs";
 
 // src/git/commit-message-builder/commit-message-builder.ts
-import { readFileSync as readFileSync9 } from "node:fs";
-import { dirname as dirname8, join as join7 } from "node:path";
+import { readFileSync as readFileSync10 } from "node:fs";
+import { dirname as dirname9, join as join8 } from "node:path";
 
 // src/git/commit-message-builder/commit-message.schema.ts
 var CommitMessageInputSchema = external_exports.object({
@@ -47971,8 +48613,8 @@ var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
   }
   static readPluginVersion(binPath) {
     try {
-      const pkgPath = join7(dirname8(binPath), "..", "package.json");
-      const parsed = JSON.parse(readFileSync9(pkgPath, "utf-8"));
+      const pkgPath = join8(dirname9(binPath), "..", "package.json");
+      const parsed = JSON.parse(readFileSync10(pkgPath, "utf-8"));
       if (typeof parsed === "object" && parsed !== null && "version" in parsed && typeof parsed.version === "string") {
         return parsed.version;
       }
@@ -48009,7 +48651,7 @@ function createGitCommand(getExecutor) {
       type: opts.type,
       scope: opts.scope,
       description: opts.description,
-      body: opts.bodyFile !== void 0 ? readFileSync10(opts.bodyFile, "utf8") : opts.body,
+      body: opts.bodyFile !== void 0 ? readFileSync11(opts.bodyFile, "utf8") : opts.body,
       footers: opts.footer,
       model: opts.model ?? void 0
     });
@@ -48047,16 +48689,16 @@ function createGitCommand(getExecutor) {
 }
 
 // src/git/commands/message/command.ts
-import { mkdtempSync, readFileSync as readFileSync11, writeFileSync as writeFileSync3 } from "node:fs";
+import { mkdtempSync, readFileSync as readFileSync12, writeFileSync as writeFileSync4 } from "node:fs";
 import { tmpdir as tmpdir2 } from "node:os";
-import { join as join8 } from "node:path";
+import { join as join9 } from "node:path";
 function createCommitMessageCommand() {
   return new Command("commit-message").description("write the conventional commit message `flight-rules git commit` would use to a file, without committing").exitOverride().requiredOption("--type <type>", "conventional commit type").requiredOption("--scope <scope>", "conventional commit scope").requiredOption("--description <description>", "commit description").option("--body <body>", "commit body (or use --body-file)").option("--body-file <path>", "read the commit body from a file; wins over --body").option("--footer <footer>", "commit footer (repeatable)", (value, previous3) => [...previous3, value], []).option("--model <model>", "model identifier").option("--out <path>", "where to write the message; defaults to a new file in the temp directory").action((opts) => {
     const input2 = CommitMessageInputSchema.parse({
       type: opts.type,
       scope: opts.scope,
       description: opts.description,
-      body: opts.bodyFile !== void 0 ? readFileSync11(opts.bodyFile, "utf8") : opts.body,
+      body: opts.bodyFile !== void 0 ? readFileSync12(opts.bodyFile, "utf8") : opts.body,
       footers: opts.footer,
       model: opts.model
     });
@@ -48064,8 +48706,8 @@ function createCommitMessageCommand() {
       binPath: process.argv[1] ?? "",
       agentEnv: process.env["AI_AGENT"]
     }).build(input2);
-    const path3 = opts.out ?? join8(mkdtempSync(join8(tmpdir2(), "flight-rules-commit-")), "message.txt");
-    writeFileSync3(path3, `${message}
+    const path3 = opts.out ?? join9(mkdtempSync(join9(tmpdir2(), "flight-rules-commit-")), "message.txt");
+    writeFileSync4(path3, `${message}
 `);
     process.stdout.write(JSON.stringify({ path: path3, message }) + "\n");
   });
@@ -48110,9 +48752,6 @@ function createPrCommand(getHost) {
   return pr;
 }
 
-// src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.56.0";
-
 // src/cli/cli.ts
 function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = () => createFlightRules().configPath(), services = createFlightRules()) {
   const program2 = new Command("flight-rules");
@@ -48143,6 +48782,7 @@ function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = () => cr
   program2.addCommand(createCompetenciesCommand(config2));
   program2.addCommand(createDocCommand(() => services.docs()));
   program2.addCommand(createCheckCommand(config2, tracker, getConfigPath, () => services.probe()));
+  program2.addCommand(createBoardCommand(() => services.board(), () => services.ariadneTokens()));
   return program2;
 }
 async function run(argv, flightRules = createFlightRules()) {

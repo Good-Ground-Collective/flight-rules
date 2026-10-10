@@ -21,6 +21,8 @@ export declare const ConfigSchema: z.ZodObject<{
     rfcStoragePath: z.ZodOptional<z.ZodString>;
     qaRecipe: z.ZodOptional<z.ZodString>;
     competencies: z.ZodDefault<z.ZodArray<z.ZodString>>;
+    "ariadne.url": z.ZodOptional<z.ZodURL>;
+    "ariadne.enabled": z.ZodOptional<z.ZodBoolean>;
 }, z.core.$strip>;
 export type Config = z.infer<typeof ConfigSchema>;
 export declare function parseFrontmatter(contents: string): Record<string, unknown>;
