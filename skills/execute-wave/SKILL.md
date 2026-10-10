@@ -124,7 +124,7 @@ ticket that didn't exist.
 **If nothing is startable, say precisely why.** The three causes are different
 and the user needs to know which one they have:
 
-- Everything in wave 0 is in-review → the wave is already drained; you are waiting on their merges.
+- Everything in wave 0 is in-review → the wave is already drained; you are waiting on their merges. Go to step 9b to route those PRs for review, then stop.
 - Wave 0 is empty but later waves aren't → shouldn't happen; report it as a planner inconsistency rather than guessing.
 - No open tickets at all → the epic or initiative is done.
 
@@ -231,7 +231,34 @@ Then give the user, in this order:
 - **Parked tickets** — for each, why it parked, the branch holding the work, whether you committed to free the tree, and the verifier's final evidence.
 - **Every `charterConcerns` and `openQuestions`** raised across every ticket, verbatim and unanswered.
 - **What unblocks on merge** — read `waves[1]` from the plan and name those tickets. This is what the user gets by reviewing, and it is the reason to stop here rather than push on.
+- **Review routing** — the block from step 9b: route, reasons, per-PR request results or the packet id, and tickets in review with no open PR found.
 - **The next step, plainly:** review and merge these PRs, then run this skill again on the same id.
+
+### 9b. Review hand-off
+
+Run this when the run is blocked on merges: everything in wave 0 is in-review (step 4), or the wave you just drained left open PRs. It asks for review and nothing more. It never merges and never starts the next wave.
+
+`flight-rules epic review-plan` takes an epic id. For an initiative, run it once per child epic. Do not look for an initiative-level verb.
+
+```bash
+flight-rules epic review-plan <node>
+```
+
+Read `route`, `reasons`, `blocked` and `unblocksOnMerge`. Each `blocked` entry carries a `pr`, or `null` when no open PR matched the ticket. `reasons` can include "ticket N is in review but has no open PR" entries alongside the route triggers.
+
+The route is `complex` if the PR set spans more than one wave, if any PR's base is not the default branch, or if it has more than 4 PRs. Otherwise it is `simple`.
+
+- **`simple`:** ask the human once, for the whole set, which reviewer logins to request. Nothing is requested before they answer. Then, for each blocked PR that has a `pr`:
+
+  ```bash
+  flight-rules pr request-review <number> --reviewer <login>
+  ```
+
+  Pass `--reviewer` once per login. Record `requested` and `failed` for each PR, and list every per-login failure in the report. Never fall back to raw `gh pr edit`.
+- **`complex`:** show the `reasons` and the ordered PR list from `blocked`, then offer to invoke the `author-review-packet` skill with the review-plan payload so the author can build a sequenced Review Packet. If the human declines, offer the simple path above, or stop, as they choose.
+- **`pr: null` tickets:** list them as "in review with no open PR found". Request nothing for them and do not guess at a PR.
+
+Ariadne board items need a Jira-style ticket key, so this step posts no board item on GitHub-tracked repos.
 
 ## Guardrails
 
@@ -239,6 +266,7 @@ Then give the user, in this order:
 - **Never work a ticket outside `waves[0]`.** Later waves are blocked by construction.
 - **Never re-drive a ticket that is in-progress or in-review.** It already has a branch, and probably a PR.
 - **Never merge.** This skill opens PRs and stops, exactly as `execute-work` does.
+- **The review hand-off requests review only.** It never merges, never starts the next wave, and requests nothing without the human's confirmation. Blocked tickets with no matching PR are reported, not guessed.
 - **Never start without an explicit go-ahead** from step 5.
 - **Never run tickets concurrently.** One working tree, one branch at a time.
 - **Never build the ticket yourself.** If `execute-work` parks a ticket, that is the outcome. Picking up the implementation by hand removes the verifier from the loop, which is the only independent check in the pipeline.
@@ -253,7 +281,7 @@ Then give the user, in this order:
 - **Dirty tree at preflight** → stop before any mutation. Report the dirty paths and ask the user to commit or stash.
 - **`flight-rules check` fails** → stop and show the report.
 - **`repo` missing from config** → settle it now, before the first ticket. Confirm the value with the user and write it into the config file.
-- **Nothing startable** → not an error. Report which of the three causes applies and stop.
+- **Nothing startable** → not an error. Report which of the three causes applies. When everything in wave 0 is in-review, run the review hand-off (step 9b) first, then stop.
 - **A ticket parks** → record it, free the tree per step 7, continue with the next ticket.
 - **Context is running short mid-wave** → stop cleanly at the current ticket boundary rather than starting one you can't finish. Return to base, and report exactly which tickets were not attempted so the user can re-invoke for the remainder.
 
