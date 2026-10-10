@@ -51,6 +51,46 @@ describe("packet command", () => {
     expect(JSON.parse(out)).toEqual(packetContract.storedPacket);
   });
 
+  it("create generates an id from the title when the file has none", async () => {
+    const transport = new FakeTransport(FakeTransport.json(200, packetContract.storedPacket));
+    const withoutId = Object.fromEntries(Object.entries(packetContract.createRequest).filter(([key]) => key !== "id"));
+    const out = await run(["create", "--file", file(withoutId)], { transport });
+
+    expect((transport.bodies()[0] as { id: string }).id).toMatch(/^checkout-rewrite-wave-2-[0-9a-f]{8}$/);
+    expect(JSON.parse(out)).toEqual(packetContract.storedPacket);
+  });
+
+  it("create retries once with a new suffix on packet_id_taken and prints the stored packet", async () => {
+    const stored = { ...packetContract.storedPacket, id: "wave-2-checkout-aaaaaaaa" };
+    const transport = new FakeTransport(FakeTransport.json(409, packetContract.errors["packet_id_taken"]), FakeTransport.json(200, stored));
+    const out = await run(["create", "--file", file(packetContract.createRequest)], { transport });
+
+    const ids = transport.bodies().map((body) => (body as { id: string }).id);
+    expect(ids[0]).toBe("wave-2-checkout");
+    expect(ids[1]).toMatch(/^wave-2-checkout-[0-9a-f]{8}$/);
+    expect(JSON.parse(out)).toEqual(stored);
+  });
+
+  it("create fails on a second packet_id_taken and on packet_exists without a further retry", async () => {
+    const taken = () => FakeTransport.json(409, packetContract.errors["packet_id_taken"]);
+    const twice = new FakeTransport(taken(), taken());
+    await expect(run(["create", "--file", file(packetContract.createRequest)], { transport: twice })).rejects.toThrow(/packet_id_taken.*wave-2-checkout/);
+    expect(twice.requests).toHaveLength(2);
+
+    const exists = new FakeTransport(FakeTransport.json(409, packetContract.errors["packet_exists"]));
+    await expect(run(["create", "--file", file(packetContract.createRequest)], { transport: exists })).rejects.toThrow(/packet_exists/);
+    expect(exists.requests).toHaveLength(1);
+  });
+
+  it("new-id prints one JSON line with a generated id and needs no token", async () => {
+    const transport = new FakeTransport();
+    const out = await run(["new-id", "--title", "Checkout rewrite, wave 2"], { transport, env: {} });
+
+    expect(out.trimEnd().split("\n")).toHaveLength(1);
+    expect(JSON.parse(out)).toEqual({ id: expect.stringMatching(/^checkout-rewrite-wave-2-[0-9a-f]{8}$/) });
+    expect(transport.requests).toHaveLength(0);
+  });
+
   it("create rejects an unknown field locally, listing the issue, and sends nothing", async () => {
     const transport = new FakeTransport();
     const bad = { ...packetContract.createRequest, diff: "--- a/x" };

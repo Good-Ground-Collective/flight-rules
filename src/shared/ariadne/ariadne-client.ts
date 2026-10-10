@@ -120,7 +120,7 @@ export class AriadneClient {
     return this.request("GET", `/v1/agents/items?session=${encodeURIComponent(id)}`, ItemListResponseSchema);
   }
 
-  /** POST /v1/review-packets: idempotent on the packet id; the same id with a different body is 409 `packet_exists`. */
+  /** POST /v1/review-packets: ids are global; replaying an id and body is idempotent, a different body is 409 `packet_exists`, another author's id is 409 `packet_id_taken`. */
   async createPacket(input: unknown): Promise<Packet> {
     const body = this.validate(PacketInputSchema, input, "packet");
     return this.request("POST", "/v1/review-packets", PacketSchema, body);

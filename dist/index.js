@@ -1056,7 +1056,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.61.0";
+var appVersion = false ? "0.0.0-dev" : "1.62.0";
 
 // src/shared/ariadne/review-packet.schema.ts
 import { z as z11 } from "zod";
@@ -1194,7 +1194,7 @@ var AriadneClient = class {
     const id = this.validate(AgentSessionIdSchema, session, "session");
     return this.request("GET", `/v1/agents/items?session=${encodeURIComponent(id)}`, ItemListResponseSchema);
   }
-  /** POST /v1/review-packets: idempotent on the packet id; the same id with a different body is 409 `packet_exists`. */
+  /** POST /v1/review-packets: ids are global; replaying an id and body is idempotent, a different body is 409 `packet_exists`, another author's id is 409 `packet_id_taken`. */
   async createPacket(input) {
     const body = this.validate(PacketInputSchema, input, "packet");
     return this.request("POST", "/v1/review-packets", PacketSchema, body);
@@ -1509,6 +1509,37 @@ var AriadneBoard = class {
 
 // src/shared/ariadne/ariadne-packets.ts
 import { randomUUID } from "node:crypto";
+
+// src/shared/ariadne/packet-id-generator.ts
+import { randomBytes } from "node:crypto";
+var maxSlugLength = 60;
+var fallbackSlug = "packet";
+var suffixPattern = /-[0-9a-f]{8}$/;
+var RandomPacketIdGenerator = class {
+  generate(title) {
+    return `${this.slug(title)}-${this.suffix()}`;
+  }
+  regenerate(id) {
+    const slug = this.trim(id.replace(suffixPattern, ""));
+    const previous = id.slice(-8);
+    let suffix = this.suffix();
+    while (suffix === previous) suffix = this.suffix();
+    return `${slug === "" ? fallbackSlug : slug}-${suffix}`;
+  }
+  slug(title) {
+    const kebab = this.trim(title.toLowerCase().replace(/[^a-z0-9]+/g, "-"));
+    return kebab === "" ? fallbackSlug : kebab;
+  }
+  trim(text) {
+    return text.slice(0, maxSlugLength).replace(/^-+|-+$/g, "");
+  }
+  suffix() {
+    return randomBytes(4).toString("hex");
+  }
+};
+var packetIdGenerator = new RandomPacketIdGenerator();
+
+// src/shared/ariadne/ariadne-packets.ts
 var AriadnePacketError = class extends Error {
   name = "AriadnePacketError";
 };
@@ -1525,8 +1556,32 @@ var AriadnePackets = class {
     this.transport = props.transport;
     this.timeoutMs = props.timeoutMs;
   }
+  /**
+   * Publishes a packet, generating its id from the title when the file has none.
+   * When another author already holds the id (409 `packet_id_taken`) the random
+   * suffix is regenerated and the create is retried once.
+   */
   async create(packet) {
-    return this.call((client) => client.createPacket(packet));
+    const first = this.withId(packet);
+    return this.call(async (client) => {
+      try {
+        return await client.createPacket(first.packet);
+      } catch (err) {
+        if (!(err instanceof AriadneError) || err.code !== "packet_id_taken") throw err;
+      }
+      const retryId = packetIdGenerator.regenerate(first.id);
+      try {
+        return await client.createPacket(Object.assign({}, first.packet, { id: retryId }));
+      } catch (err) {
+        if (err instanceof AriadneError && err.code === "packet_id_taken") {
+          throw new AriadnePacketError(
+            `the packet id is taken by another author (409 packet_id_taken; tried ${first.id} and ${retryId}); change the title in the packet file or run \`flight-rules packet new-id --title <title>\` and set its id, then retry`,
+            { cause: err }
+          );
+        }
+        throw err;
+      }
+    });
   }
   async update(id, input) {
     const operationId = input.operationId ?? randomUUID().replaceAll("-", "");
@@ -1539,6 +1594,17 @@ var AriadnePackets = class {
   }
   async reviewers() {
     return this.call((client) => client.listReviewers());
+  }
+  /** The packet carrying an id: the file's own, or one generated from its title. Anything else is left for validation to reject. */
+  withId(packet) {
+    if (typeof packet !== "object" || packet === null || Array.isArray(packet)) return { packet, id: "" };
+    const fields = { ...packet };
+    if (typeof fields["id"] === "string") return { packet: fields, id: fields["id"] };
+    if (fields["id"] === void 0 && typeof fields["title"] === "string") {
+      const id = packetIdGenerator.generate(fields["title"]);
+      return { packet: { ...fields, id }, id };
+    }
+    return { packet: fields, id: "" };
   }
   /**
    * `ariadne.url` (default: production) read only from the user and local
@@ -1601,6 +1667,9 @@ var AriadnePackets = class {
     }
     if (err.code === "packet_exists") {
       return "a packet with this id already exists with different content (409 packet_exists); use `flight-rules packet update <id>` to revise it, or choose a new id";
+    }
+    if (err.code === "packet_id_taken") {
+      return "the packet id is taken by another author (409 packet_id_taken); choose a different id, or get one with `flight-rules packet new-id --title <title>`";
     }
     if (err.code === "reviewer_not_found") {
       return `a reviewer is not an active Ariadne member with a linked GitHub login (422 reviewer_not_found): ${err.message}; list valid logins with \`flight-rules packet reviewers\``;

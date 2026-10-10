@@ -55,7 +55,7 @@ export declare class AriadneClient {
     postActivity(input: ActivityInput): Promise<ActivityResponse>;
     /** GET /v1/agents/items?session=…: every item of the session, open and resolved, oldest first. */
     listItems(session: string): Promise<ItemListResponse>;
-    /** POST /v1/review-packets: idempotent on the packet id; the same id with a different body is 409 `packet_exists`. */
+    /** POST /v1/review-packets: ids are global; replaying an id and body is idempotent, a different body is 409 `packet_exists`, another author's id is 409 `packet_id_taken`. */
     createPacket(input: unknown): Promise<Packet>;
     /** PUT /v1/review-packets/{id}: a stale `expectedRevision` is 409 `revision_conflict`; a repeated `operationId` is replayed. */
     updatePacket(id: string, input: unknown): Promise<Packet>;

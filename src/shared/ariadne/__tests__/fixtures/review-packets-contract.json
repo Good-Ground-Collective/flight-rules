@@ -1,5 +1,5 @@
 {
-  "_source": "Derived from the epic #198 'Packet contract v1 (summary)' pending think-lp/ariadne#103 (docs/review-packets-api.md). Replace these records word for word with the doc's examples when it lands.",
+  "_source": "Derived from the epic #198 'Packet contract v1 (summary)' pending think-lp/ariadne#103 (docs/review-packets-api.md). Replace these records word for word with the doc's examples when it lands. Packet ids are globally unique across authors: a create with an id another author holds is 409 packet_id_taken; the same author replaying the same id and body is idempotent, and the same id with a different body is 409 packet_exists.",
   "createRequest": {
     "id": "wave-2-checkout",
     "title": "Checkout rewrite, wave 2",
@@ -98,6 +98,7 @@
   },
   "errors": {
     "revision_conflict": { "error": "revision_conflict", "message": "The packet is at revision 4, not 3." },
+    "packet_id_taken": { "error": "packet_id_taken", "message": "Another author already holds this packet id." },
     "packet_exists": { "error": "packet_exists", "message": "A packet with this id already exists with a different body." },
     "reviewer_not_found": { "error": "reviewer_not_found", "message": "No active member has the GitHub login nobody." },
     "agents_opt_in_required": { "error": "agents_opt_in_required", "message": "Turn on Agents in Settings." },
