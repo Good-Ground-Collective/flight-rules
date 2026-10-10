@@ -1,3 +1,4 @@
+import type { ConfigScope } from "../config-store.js";
 import type { AriadneTransport } from "./ariadne-transport.js";
 import type { ActivityInput, ActivityResponse, HeartbeatInput, HeartbeatResponse, ItemInput, ItemListResponse, ItemResponse } from "./ariadne.schema.js";
 import type { AriadneTokenStore } from "./ariadne-token-store.js";
@@ -15,23 +16,36 @@ export interface BoardCallOptions {
      */
     strict?: boolean;
 }
-export type BoardOutcome<T> = {
+/**
+ * `notices` name config the board ignored. They are diagnostics: callers
+ * print them only when asked to be loud (`--strict`, `board items`).
+ */
+export type BoardOutcome<T> = ({
     status: "skipped";
-    reason: "disabled" | "no-token";
+    reason: "disabled" | "no-token" | "invalid-url";
 } | {
     status: "posted";
     value: T;
 } | {
     status: "failed";
     message: string;
+}) & {
+    notices?: string[];
 };
 export interface AriadneBoardSettings {
-    url: string;
+    /** Undefined when the configured URL failed validation: the board is then not configured. */
+    url: string | undefined;
     enabled: boolean;
+    notices: string[];
+}
+/** One config layer, as `ConfigStore.layers()` returns it. */
+export interface BoardConfigLayer {
+    scope: ConfigScope;
+    values: Record<string, unknown>;
 }
 export interface AriadneBoardProps {
-    /** The merged flight-rules config values, valid or not; `ariadne.*` keys are read from them. */
-    readConfig: () => Record<string, unknown>;
+    /** The flight-rules config layers, lowest precedence first; `ariadne.*` keys are read from the person's own. */
+    readLayers: () => readonly BoardConfigLayer[];
     tokens: AriadneTokenStore;
     env?: Record<string, string | undefined>;
     transport?: AriadneTransport;
@@ -48,13 +62,18 @@ export declare const bootstrapStep = "started";
  * skill can never fail because of Ariadne.
  */
 export declare class AriadneBoard {
-    private readonly readConfig;
+    private readonly readLayers;
     private readonly tokens;
     private readonly env;
     private readonly transport;
     private readonly timeoutMs;
     constructor(props: AriadneBoardProps);
-    /** `ariadne.url` (default: production) and `ariadne.enabled` (default: true). */
+    /**
+     * `ariadne.url` (default: production) and `ariadne.enabled` (default:
+     * true), read only from the user and local layers, local winning. Project
+     * and file layers are ignored with a notice. A URL that is not https (or
+     * http on localhost) leaves `url` undefined, so nothing is ever sent to it.
+     */
     settings(): AriadneBoardSettings;
     /** The Claude Code session id, when this process runs inside a session. */
     defaultSession(): string | undefined;

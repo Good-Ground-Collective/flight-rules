@@ -2,6 +2,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { z } from "zod";
 import { JiraHostSchema } from "../tasks/jira-task-tracker/jira-host.js";
+import { AriadneUrlSchema } from "./ariadne/ariadne.schema.js";
 
 export const seedCompetencies = [
   "define-a-schema",
@@ -66,17 +67,14 @@ export const ConfigSchema = z
         "Deprecated: path to a legacy QA recipe, read only when no QA.md or AGENTS.md QA section exists; relative paths resolve against the directory holding this config file; defaults to flight-rules.qa.md beside it",
       ),
     competencies: z.array(z.string()).default([...seedCompetencies]),
-    "ariadne.url": z
-      .url()
-      .optional()
-      .describe(
-        "Ariadne API base URL for `flight-rules board`; defaults to the production Ariadne API",
-      ),
+    "ariadne.url": AriadneUrlSchema.optional().describe(
+      "Ariadne API base URL for `flight-rules board`; https only (http for localhost); read only from user or local scope; defaults to the production Ariadne API",
+    ),
     "ariadne.enabled": z
       .boolean()
       .optional()
       .describe(
-        "Set false to stop `flight-rules board` reporting even when an Ariadne token is set; defaults to true",
+        "Set false to stop `flight-rules board` reporting even when an Ariadne token is set; read only from user or local scope; defaults to true",
       ),
   })
   .superRefine((cfg, ctx) => {

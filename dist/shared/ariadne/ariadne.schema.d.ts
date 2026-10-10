@@ -5,6 +5,11 @@ import { z } from "zod";
  * (think-lp/ariadne docs/agents-api.md).
  */
 export declare const defaultAriadneUrl = "https://ariadne-api-xohlbba2ea-uc.a.run.app";
+/**
+ * An Ariadne API base URL. It receives the person's bearer token, so it must
+ * be https; http is allowed only for localhost and 127.0.0.1.
+ */
+export declare const AriadneUrlSchema: z.ZodURL;
 export declare const agentStates: readonly ["nominal", "caution", "abort", "hold"];
 export declare const agentItemKinds: readonly ["question", "blocker", "testable", "wave-gate"];
 export declare const agentActivityLevels: readonly ["info", "success", "caution", "abort"];

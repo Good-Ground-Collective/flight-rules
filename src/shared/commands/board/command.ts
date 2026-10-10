@@ -78,7 +78,9 @@ export function createBoardCommand(
         "",
         "Token: $ARIADNE_AGENT_TOKEN, then $ARIADNE_TOKEN, then the file `board login` saves.",
         "There is no fallback to the ariadne CLI's Keychain session, so each machine needs its",
-        "own agent token from Ariadne › Settings › Connections. Config: ariadne.url, ariadne.enabled.",
+        "own agent token from Ariadne › Settings › Connections.",
+        "Config: ariadne.url (https; http only for localhost) and ariadne.enabled, read only from",
+        "user or local scope; project settings and the config file cannot set them.",
         "Not configured or disabled: prints nothing, exits 0. A failure is one stderr line and",
         "exit 0; --strict makes it exit 1. `board items` is read-only; answer items in Ariadne.",
       ].join("\n"),
@@ -92,7 +94,17 @@ export function createBoardCommand(
       .option("--json", jsonHelp)
       .exitOverride();
 
-  const finish = <T>(outcome: BoardOutcome<T>, opts: ReportOptions, print: (value: T) => void): void => {
+  /**
+   * Notices about ignored config are diagnostics: printed under --strict and
+   * by `board items`, never on the quiet path a hook uses.
+   */
+  const finish = <T>(
+    outcome: BoardOutcome<T>,
+    opts: ReportOptions,
+    print: (value: T) => void,
+    loud: boolean = opts.strict === true,
+  ): void => {
+    if (loud) for (const notice of outcome.notices ?? []) process.stderr.write(`flight-rules board: ${notice}\n`);
     if (outcome.status === "skipped") return;
     if (outcome.status === "failed") {
       if (opts.strict === true) throw new Error(`flight-rules board: ${outcome.message}`);
@@ -201,13 +213,18 @@ export function createBoardCommand(
     "print {items} as JSON",
   ).action(async (opts: ReportOptions) => {
     const outcome = await getBoard().items(opts.session, { strict: opts.strict === true });
-    finish(outcome, opts, ({ items }) => {
-      if (opts.json === true) {
-        process.stdout.write(JSON.stringify({ items }) + "\n");
-        return;
-      }
-      process.stdout.write(items.map((item) => describeItem(item) + "\n").join(""));
-    });
+    finish(
+      outcome,
+      opts,
+      ({ items }) => {
+        if (opts.json === true) {
+          process.stdout.write(JSON.stringify({ items }) + "\n");
+          return;
+        }
+        process.stdout.write(items.map((item) => describeItem(item) + "\n").join(""));
+      },
+      true,
+    );
   });
 
   board

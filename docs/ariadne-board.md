@@ -22,10 +22,12 @@ The token is read from `$ARIADNE_AGENT_TOKEN`, then `$ARIADNE_TOKEN` (an interac
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `ariadne.url` | `https://ariadne-api-xohlbba2ea-uc.a.run.app` | The Ariadne API. |
+| `ariadne.url` | `https://ariadne-api-xohlbba2ea-uc.a.run.app` | The Ariadne API. It must be https; http is allowed only for `localhost` and `127.0.0.1`. |
 | `ariadne.enabled` | `true` | Set `false` to stop reporting even when a token is set. |
 
-`flight-rules config set ariadne.enabled false` writes to user scope unless the key is already set somewhere else.
+Both keys can only be set in user scope (or the untracked local scope). They are ignored in project settings and the flight-rules config file. A repository's committed settings therefore can't redirect your token to another host or switch your reporting off. Write them with `flight-rules config set ariadne.url <url> --scope user`. A plain `config set` writes them to user scope when they are not already set elsewhere.
+
+When an ignored or invalid value is found, `--strict` and `board items` print a one-line notice such as `ignored ariadne.url from project settings; set it in user scope`. Quiet posts print nothing. If `ariadne.url` is not a valid https URL, the board treats itself as not configured and sends nothing, so the token never goes to that URL.
 
 ## Commands
 

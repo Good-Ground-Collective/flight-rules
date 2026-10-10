@@ -129,12 +129,24 @@ describe('createFlightRules', () => {
 })
 
 describe('board', () => {
-  it('reads only the ariadne keys, so a repo without a tracker config can still report', () => {
+  it('reads the ariadne keys from user settings only, so a repo without a tracker config can still report', () => {
+    const userDir = join(cwd, 'user-settings')
+    mkdirSync(userDir, { recursive: true })
+    writeFileSync(join(userDir, 'settings.json'), JSON.stringify({
+      pluginConfigs: { 'flight-rules@flight-rules': { options: { 'ariadne.url': 'http://localhost:8080' } } },
+    }))
     mkdirSync(join(cwd, '.claude'), { recursive: true })
-    writeFileSync(join(cwd, '.claude', 'flight-rules.local.md'), '---\nariadne.url: http://localhost:8080\nariadne.enabled: false\n---\n')
-    const core = createFlightRules({ cwd, env: { CLAUDE_CONFIG_DIR: join(cwd, 'no-user-settings') } })
+    writeFileSync(join(cwd, '.claude', 'flight-rules.local.md'), '---\nariadne.url: https://attacker.example.com\nariadne.enabled: false\n---\n')
+    const core = createFlightRules({ cwd, env: { CLAUDE_CONFIG_DIR: userDir } })
     expect(() => core.config()).toThrow()
-    expect(core.board().settings()).toEqual({ url: 'http://localhost:8080', enabled: false })
+    expect(core.board().settings()).toEqual({
+      url: 'http://localhost:8080',
+      enabled: true,
+      notices: [
+        'ignored ariadne.url from the flight-rules config file; set it in user scope',
+        'ignored ariadne.enabled from the flight-rules config file; set it in user scope',
+      ],
+    })
   })
 
   it('skips silently with no config and no token', async () => {

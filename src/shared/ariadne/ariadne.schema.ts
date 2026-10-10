@@ -7,7 +7,21 @@ import { z } from "zod";
  */
 export const defaultAriadneUrl = "https://ariadne-api-xohlbba2ea-uc.a.run.app";
 
-export const agentStates = ["nominal", "caution", "abort", "hold"] as const;
+/** Hosts that may use plain http, for a development server on this machine. */
+const loopbackHosts: ReadonlySet<string> = new Set(["localhost", "127.0.0.1"]);
+
+/**
+ * An Ariadne API base URL. It receives the person's bearer token, so it must
+ * be https; http is allowed only for localhost and 127.0.0.1.
+ */
+export const AriadneUrlSchema = z.url().refine((value) => {
+  // zod runs a refinement even after z.url() has failed, so parse defensively.
+  if (!URL.canParse(value)) return false;
+  const url = new URL(value);
+  return url.protocol === "https:" || (url.protocol === "http:" && loopbackHosts.has(url.hostname));
+}, "must be https (http only for localhost or 127.0.0.1)");
+
+export const agentStates =["nominal", "caution", "abort", "hold"] as const;
 export const agentItemKinds = ["question", "blocker", "testable", "wave-gate"] as const;
 export const agentActivityLevels = ["info", "success", "caution", "abort"] as const;
 

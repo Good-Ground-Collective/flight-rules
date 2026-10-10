@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AriadneBoard } from "../ariadne-board.js";
+import type { BoardConfigLayer } from "../ariadne-board.js";
 import { AriadneTokenStore } from "../ariadne-token-store.js";
 import { defaultAriadneUrl } from "../ariadne.schema.js";
 import { FakeTransport, agentToken, contract } from "./fake-transport.js";
@@ -22,11 +23,18 @@ describe("AriadneBoard", () => {
     transport: FakeTransport,
     {
       config = {},
+      layers,
       env = { ARIADNE_AGENT_TOKEN: agentToken, CLAUDE_CODE_SESSION_ID: "claude-session-1" },
-    }: { config?: Record<string, unknown>; env?: Record<string, string | undefined> } = {},
+    }: {
+      /** User-scope values. */
+      config?: Record<string, unknown>;
+      /** Every layer, replacing `config`. */
+      layers?: BoardConfigLayer[];
+      env?: Record<string, string | undefined>;
+    } = {},
   ) =>
     new AriadneBoard({
-      readConfig: () => config,
+      readLayers: () => layers ?? [{ scope: "user", values: config }],
       tokens: new AriadneTokenStore({ env, home }),
       env,
       transport,
@@ -36,14 +44,52 @@ describe("AriadneBoard", () => {
 
   describe("config resolution", () => {
     it("defaults to the production URL and enabled", () => {
-      expect(board(new FakeTransport()).settings()).toEqual({ url: defaultAriadneUrl, enabled: true });
+      expect(board(new FakeTransport()).settings()).toEqual({ url: defaultAriadneUrl, enabled: true, notices: [] });
     });
 
-    it("reads ariadne.url and ariadne.enabled from the merged config", () => {
+    it("reads ariadne.url and ariadne.enabled from user scope", () => {
       const settings = board(new FakeTransport(), {
         config: { tracker: "jira", "ariadne.url": "http://localhost:8080", "ariadne.enabled": false },
       }).settings();
-      expect(settings).toEqual({ url: "http://localhost:8080", enabled: false });
+      expect(settings).toEqual({ url: "http://localhost:8080", enabled: false, notices: [] });
+    });
+
+    it("lets local scope override user scope", () => {
+      const settings = board(new FakeTransport(), {
+        layers: [
+          { scope: "user", values: { "ariadne.url": "https://user.example.com" } },
+          { scope: "local", values: { "ariadne.url": "https://local.example.com", "ariadne.enabled": "false" } },
+        ],
+      }).settings();
+      expect(settings).toEqual({ url: "https://local.example.com", enabled: false, notices: [] });
+    });
+
+    it.each([
+      ["project", "project settings"],
+      ["file", "the flight-rules config file"],
+    ] as const)("ignores a %s-layer ariadne.url and posts to the default URL", async (scope, label) => {
+      const transport = new FakeTransport(FakeTransport.json(200, { session: contract.session }));
+      const outcome = await board(transport, {
+        layers: [{ scope, values: { "ariadne.url": "https://attacker.example.com", "ariadne.enabled": false } }],
+      }).heartbeat(heartbeat);
+      expect(outcome.status).toBe("posted");
+      expect(transport.requests.map((r) => r.url)).toEqual([`${defaultAriadneUrl}/v1/agents/heartbeat`]);
+      expect(outcome.notices).toEqual([
+        `ignored ariadne.url from ${label}; set it in user scope`,
+        `ignored ariadne.enabled from ${label}; set it in user scope`,
+      ]);
+    });
+
+    it("lets the user layer win over a project or file layer that sets the URL", async () => {
+      const transport = new FakeTransport(FakeTransport.json(200, { session: contract.session }));
+      await board(transport, {
+        layers: [
+          { scope: "user", values: { "ariadne.url": "https://ariadne.example.com" } },
+          { scope: "project", values: { "ariadne.url": "https://attacker.example.com" } },
+          { scope: "file", values: { "ariadne.url": "https://attacker.example.com" } },
+        ],
+      }).heartbeat(heartbeat);
+      expect(transport.requests.map((r) => r.url)).toEqual(["https://ariadne.example.com/v1/agents/heartbeat"]);
     });
 
     it("posts to the configured URL", async () => {
@@ -55,11 +101,21 @@ describe("AriadneBoard", () => {
       expect(transport.requests[0]?.url).toBe("http://localhost:8080/v1/agents/heartbeat");
     });
 
-    it("fails, rather than throws, on an invalid URL", async () => {
-      const outcome = await board(new FakeTransport(), { config: { "ariadne.url": "not a url" } }).heartbeat(heartbeat);
-      expect(outcome).toMatchObject({ status: "failed" });
-      expect(outcome.status === "failed" && outcome.message).toContain("ariadne.url");
+    it.each(["http://127.0.0.1:8080", "http://localhost", "https://ariadne.example.com"])("accepts %s", (url) => {
+      expect(board(new FakeTransport(), { config: { "ariadne.url": url } }).settings().url).toBe(url);
     });
+
+    it.each(["http://ariadne.example.com", "http://10.0.0.5:8080", "ftp://ariadne.example.com", "not a url"])(
+      "treats %s as not configured and never sends the token, even under strict",
+      async (url) => {
+        const transport = new FakeTransport();
+        const outcome = await board(transport, { config: { "ariadne.url": url } }).heartbeat(heartbeat, { strict: true });
+        expect(outcome).toMatchObject({ status: "skipped", reason: "invalid-url" });
+        expect(outcome.notices?.[0]).toContain("ignored ariadne.url from user settings");
+        expect(transport.requests).toHaveLength(0);
+        expect(transport.requests.some((r) => "Authorization" in r.headers)).toBe(false);
+      },
+    );
   });
 
   describe("no-op path", () => {
@@ -181,6 +237,13 @@ describe("AriadneBoard", () => {
       const transport = new FakeTransport(FakeTransport.json(422, { error: "invalid_input", message: `Check ${agentToken}.` }));
       const outcome = await board(transport).heartbeat(heartbeat);
       expect(outcome).toEqual({ status: "failed", message: "Ariadne returned 422 invalid_input Check [redacted]." });
+    });
+
+    it("redacts the token if a network error echoes the Authorization header", async () => {
+      const leaky = new TypeError("fetch failed", { cause: new Error(`bad header Authorization: Bearer ${agentToken}`) });
+      const outcome = await board(new FakeTransport(leaky, leaky)).heartbeat(heartbeat);
+      expect(outcome.status === "failed" && outcome.message).toContain("Bearer [redacted]");
+      expect(JSON.stringify(outcome)).not.toContain(agentToken);
     });
 
     it("reports an unreachable API after the retry", async () => {

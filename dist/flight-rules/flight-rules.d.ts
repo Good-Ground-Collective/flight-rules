@@ -21,7 +21,7 @@ export interface FlightRules {
     git(): GitExecutor;
     probe(): ToolProbe;
     docs(): DocResolver;
-    /** Ariadne's Agents page reporter; reads only the `ariadne.*` keys, so it works without a valid tracker config. */
+    /** Ariadne's Agents page reporter; reads only the `ariadne.*` keys from user and local scope, so it works without a valid tracker config. */
     board(): AriadneBoard;
     ariadneTokens(): AriadneTokenStore;
 }

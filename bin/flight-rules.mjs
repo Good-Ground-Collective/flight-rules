@@ -30802,6 +30802,117 @@ import { dirname as dirname2, isAbsolute, join as join3, resolve as resolve2 } f
 // src/tasks/jira-task-tracker/jira-host.ts
 var JiraHostSchema = external_exports.string().transform((host) => host.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, ""));
 
+// src/shared/ariadne/ariadne.schema.ts
+var defaultAriadneUrl = "https://ariadne-api-xohlbba2ea-uc.a.run.app";
+var loopbackHosts = /* @__PURE__ */ new Set(["localhost", "127.0.0.1"]);
+var AriadneUrlSchema = external_exports.url().refine((value) => {
+  if (!URL.canParse(value)) return false;
+  const url2 = new URL(value);
+  return url2.protocol === "https:" || url2.protocol === "http:" && loopbackHosts.has(url2.hostname);
+}, "must be https (http only for localhost or 127.0.0.1)");
+var agentStates = ["nominal", "caution", "abort", "hold"];
+var agentItemKinds = ["question", "blocker", "testable", "wave-gate"];
+var agentActivityLevels = ["info", "success", "caution", "abort"];
+var agentLimits = {
+  step: 60,
+  heartbeatDetail: 500,
+  title: 200,
+  itemDetail: 2e3,
+  option: 60,
+  options: 6,
+  text: 500,
+  branch: 255
+};
+var AgentTextNormalizer = class {
+  /** Whitespace runs collapse to a space and control characters go. */
+  oneLine(value, max) {
+    return this.cut(value.replace(/[\x00-\x08\x0e-\x1f\x7f]/g, "").replace(/\s+/g, " ").trim(), max);
+  }
+  /** Line feeds stay; tabs become spaces and other control characters go. */
+  multiLine(value, max) {
+    const normalized = value.replace(/\r\n?/g, "\n").replace(/\t/g, " ").replace(/[\x00-\x09\x0b-\x1f\x7f]/g, "").trim();
+    return this.cut(normalized, max);
+  }
+  /** Overlong text ends in an ellipsis, never in half a surrogate pair. */
+  cut(value, max) {
+    if (value.length <= max) return value;
+    const head = value.slice(0, max - 1).replace(/[\uD800-\uDBFF]$/, "");
+    return `${head.trimEnd()}\u2026`;
+  }
+};
+var normalizer = new AgentTextNormalizer();
+var oneLineSchema = (max) => external_exports.string().transform((value) => normalizer.oneLine(value, max)).pipe(external_exports.string().min(1, "must not be blank"));
+var multiLineSchema = (max) => external_exports.string().transform((value) => normalizer.multiLine(value, max)).pipe(external_exports.string().min(1, "must not be blank"));
+var optionalSchema = (schema) => external_exports.preprocess((value) => value === "" || value === null ? void 0 : value, schema.optional());
+var AgentSessionIdSchema = external_exports.string().regex(/^[A-Za-z0-9_-]{1,80}$/, "must be 1\u201380 letters, digits, underscores or hyphens");
+var AgentRecordIdSchema = AgentSessionIdSchema;
+var TicketKeySchema = external_exports.string().transform((value) => value.trim().toUpperCase()).pipe(external_exports.string().regex(/^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,8}$/, "must be a Jira issue key: project key, hyphen, number"));
+var RepoSchema = external_exports.string().regex(/^(?:[A-Za-z0-9][A-Za-z0-9-]{0,38}\/)?[A-Za-z0-9_.-]{1,100}$/, "must be owner/name or name").refine((value) => !value.includes(".."), "must not contain ..");
+var BranchSchema = external_exports.string().regex(/^[A-Za-z0-9_+@][A-Za-z0-9._/+@-]{0,254}$/, "must be a branch name as git prints it").refine((value) => !value.includes(".."), "must not contain ..");
+var SkillSchema = external_exports.string().regex(/^[A-Za-z0-9:._-]{1,80}$/, "must be up to 80 of A-Z a-z 0-9 : . _ -");
+var HeartbeatInputSchema = external_exports.strictObject({
+  session: AgentSessionIdSchema,
+  step: oneLineSchema(agentLimits.step),
+  state: external_exports.enum(agentStates),
+  ticket: optionalSchema(TicketKeySchema),
+  repo: optionalSchema(RepoSchema),
+  branch: optionalSchema(BranchSchema),
+  skill: optionalSchema(SkillSchema),
+  detail: optionalSchema(oneLineSchema(agentLimits.heartbeatDetail))
+});
+var ItemInputSchema = external_exports.strictObject({
+  session: AgentSessionIdSchema,
+  kind: external_exports.enum(agentItemKinds),
+  title: oneLineSchema(agentLimits.title),
+  ticket: optionalSchema(TicketKeySchema),
+  detail: optionalSchema(multiLineSchema(agentLimits.itemDetail)),
+  options: external_exports.array(oneLineSchema(agentLimits.option)).max(agentLimits.options, `up to ${agentLimits.options} options`).refine((labels) => new Set(labels).size === labels.length, "options must be distinct").optional(),
+  id: optionalSchema(AgentRecordIdSchema)
+});
+var ActivityInputSchema = external_exports.strictObject({
+  session: AgentSessionIdSchema,
+  text: oneLineSchema(agentLimits.text),
+  level: optionalSchema(external_exports.enum(agentActivityLevels)),
+  ticket: optionalSchema(TicketKeySchema),
+  id: optionalSchema(AgentRecordIdSchema)
+});
+var AgentSessionSchema = external_exports.looseObject({
+  id: external_exports.string(),
+  ownerId: external_exports.string(),
+  ticket: external_exports.string().nullable(),
+  step: external_exports.string(),
+  state: external_exports.string(),
+  lastHeartbeat: external_exports.string(),
+  running: external_exports.boolean()
+});
+var AgentItemSchema = external_exports.looseObject({
+  id: external_exports.string(),
+  session: external_exports.string(),
+  kind: external_exports.string(),
+  ticket: external_exports.string().nullable(),
+  title: external_exports.string(),
+  detail: external_exports.string().nullable(),
+  options: external_exports.array(external_exports.string()),
+  status: external_exports.string(),
+  chosenOption: external_exports.string().nullable(),
+  createdAt: external_exports.string(),
+  resolvedAt: external_exports.string().nullable(),
+  resolvedBy: external_exports.string().nullable()
+});
+var AgentActivitySchema = external_exports.looseObject({
+  id: external_exports.string(),
+  at: external_exports.string(),
+  session: external_exports.string(),
+  ticket: external_exports.string().nullable(),
+  level: external_exports.string(),
+  text: external_exports.string()
+});
+var HeartbeatResponseSchema = external_exports.looseObject({ session: AgentSessionSchema });
+var ItemResponseSchema = external_exports.looseObject({ item: AgentItemSchema, created: external_exports.boolean() });
+var ActivityResponseSchema = external_exports.looseObject({ activity: AgentActivitySchema, created: external_exports.boolean() });
+var ItemListResponseSchema = external_exports.looseObject({ items: external_exports.array(AgentItemSchema) });
+var AgentErrorBodySchema = external_exports.looseObject({ error: external_exports.string(), message: external_exports.string().optional() });
+
 // src/shared/config.ts
 var seedCompetencies = [
   "define-a-schema",
@@ -30840,11 +30951,11 @@ var ConfigSchema = external_exports.object({
     "Deprecated: path to a legacy QA recipe, read only when no QA.md or AGENTS.md QA section exists; relative paths resolve against the directory holding this config file; defaults to flight-rules.qa.md beside it"
   ),
   competencies: external_exports.array(external_exports.string()).default([...seedCompetencies]),
-  "ariadne.url": external_exports.url().optional().describe(
-    "Ariadne API base URL for `flight-rules board`; defaults to the production Ariadne API"
+  "ariadne.url": AriadneUrlSchema.optional().describe(
+    "Ariadne API base URL for `flight-rules board`; https only (http for localhost); read only from user or local scope; defaults to the production Ariadne API"
   ),
   "ariadne.enabled": external_exports.boolean().optional().describe(
-    "Set false to stop `flight-rules board` reporting even when an Ariadne token is set; defaults to true"
+    "Set false to stop `flight-rules board` reporting even when an Ariadne token is set; read only from user or local scope; defaults to true"
   )
 }).superRefine((cfg, ctx) => {
   if (cfg.tracker === "github" && cfg.repo === void 0) {
@@ -31284,111 +31395,6 @@ var EnvLoader = class {
 // src/version.ts
 var appVersion = false ? "0.0.0-dev" : "1.56.0";
 
-// src/shared/ariadne/ariadne.schema.ts
-var defaultAriadneUrl = "https://ariadne-api-xohlbba2ea-uc.a.run.app";
-var agentStates = ["nominal", "caution", "abort", "hold"];
-var agentItemKinds = ["question", "blocker", "testable", "wave-gate"];
-var agentActivityLevels = ["info", "success", "caution", "abort"];
-var agentLimits = {
-  step: 60,
-  heartbeatDetail: 500,
-  title: 200,
-  itemDetail: 2e3,
-  option: 60,
-  options: 6,
-  text: 500,
-  branch: 255
-};
-var AgentTextNormalizer = class {
-  /** Whitespace runs collapse to a space and control characters go. */
-  oneLine(value, max) {
-    return this.cut(value.replace(/[\x00-\x08\x0e-\x1f\x7f]/g, "").replace(/\s+/g, " ").trim(), max);
-  }
-  /** Line feeds stay; tabs become spaces and other control characters go. */
-  multiLine(value, max) {
-    const normalized = value.replace(/\r\n?/g, "\n").replace(/\t/g, " ").replace(/[\x00-\x09\x0b-\x1f\x7f]/g, "").trim();
-    return this.cut(normalized, max);
-  }
-  /** Overlong text ends in an ellipsis, never in half a surrogate pair. */
-  cut(value, max) {
-    if (value.length <= max) return value;
-    const head = value.slice(0, max - 1).replace(/[\uD800-\uDBFF]$/, "");
-    return `${head.trimEnd()}\u2026`;
-  }
-};
-var normalizer = new AgentTextNormalizer();
-var oneLineSchema = (max) => external_exports.string().transform((value) => normalizer.oneLine(value, max)).pipe(external_exports.string().min(1, "must not be blank"));
-var multiLineSchema = (max) => external_exports.string().transform((value) => normalizer.multiLine(value, max)).pipe(external_exports.string().min(1, "must not be blank"));
-var optionalSchema = (schema) => external_exports.preprocess((value) => value === "" || value === null ? void 0 : value, schema.optional());
-var AgentSessionIdSchema = external_exports.string().regex(/^[A-Za-z0-9_-]{1,80}$/, "must be 1\u201380 letters, digits, underscores or hyphens");
-var AgentRecordIdSchema = AgentSessionIdSchema;
-var TicketKeySchema = external_exports.string().transform((value) => value.trim().toUpperCase()).pipe(external_exports.string().regex(/^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,8}$/, "must be a Jira issue key: project key, hyphen, number"));
-var RepoSchema = external_exports.string().regex(/^(?:[A-Za-z0-9][A-Za-z0-9-]{0,38}\/)?[A-Za-z0-9_.-]{1,100}$/, "must be owner/name or name").refine((value) => !value.includes(".."), "must not contain ..");
-var BranchSchema = external_exports.string().regex(/^[A-Za-z0-9_+@][A-Za-z0-9._/+@-]{0,254}$/, "must be a branch name as git prints it").refine((value) => !value.includes(".."), "must not contain ..");
-var SkillSchema = external_exports.string().regex(/^[A-Za-z0-9:._-]{1,80}$/, "must be up to 80 of A-Z a-z 0-9 : . _ -");
-var HeartbeatInputSchema = external_exports.strictObject({
-  session: AgentSessionIdSchema,
-  step: oneLineSchema(agentLimits.step),
-  state: external_exports.enum(agentStates),
-  ticket: optionalSchema(TicketKeySchema),
-  repo: optionalSchema(RepoSchema),
-  branch: optionalSchema(BranchSchema),
-  skill: optionalSchema(SkillSchema),
-  detail: optionalSchema(oneLineSchema(agentLimits.heartbeatDetail))
-});
-var ItemInputSchema = external_exports.strictObject({
-  session: AgentSessionIdSchema,
-  kind: external_exports.enum(agentItemKinds),
-  title: oneLineSchema(agentLimits.title),
-  ticket: optionalSchema(TicketKeySchema),
-  detail: optionalSchema(multiLineSchema(agentLimits.itemDetail)),
-  options: external_exports.array(oneLineSchema(agentLimits.option)).max(agentLimits.options, `up to ${agentLimits.options} options`).refine((labels) => new Set(labels).size === labels.length, "options must be distinct").optional(),
-  id: optionalSchema(AgentRecordIdSchema)
-});
-var ActivityInputSchema = external_exports.strictObject({
-  session: AgentSessionIdSchema,
-  text: oneLineSchema(agentLimits.text),
-  level: optionalSchema(external_exports.enum(agentActivityLevels)),
-  ticket: optionalSchema(TicketKeySchema),
-  id: optionalSchema(AgentRecordIdSchema)
-});
-var AgentSessionSchema = external_exports.looseObject({
-  id: external_exports.string(),
-  ownerId: external_exports.string(),
-  ticket: external_exports.string().nullable(),
-  step: external_exports.string(),
-  state: external_exports.string(),
-  lastHeartbeat: external_exports.string(),
-  running: external_exports.boolean()
-});
-var AgentItemSchema = external_exports.looseObject({
-  id: external_exports.string(),
-  session: external_exports.string(),
-  kind: external_exports.string(),
-  ticket: external_exports.string().nullable(),
-  title: external_exports.string(),
-  detail: external_exports.string().nullable(),
-  options: external_exports.array(external_exports.string()),
-  status: external_exports.string(),
-  chosenOption: external_exports.string().nullable(),
-  createdAt: external_exports.string(),
-  resolvedAt: external_exports.string().nullable(),
-  resolvedBy: external_exports.string().nullable()
-});
-var AgentActivitySchema = external_exports.looseObject({
-  id: external_exports.string(),
-  at: external_exports.string(),
-  session: external_exports.string(),
-  ticket: external_exports.string().nullable(),
-  level: external_exports.string(),
-  text: external_exports.string()
-});
-var HeartbeatResponseSchema = external_exports.looseObject({ session: AgentSessionSchema });
-var ItemResponseSchema = external_exports.looseObject({ item: AgentItemSchema, created: external_exports.boolean() });
-var ActivityResponseSchema = external_exports.looseObject({ activity: AgentActivitySchema, created: external_exports.boolean() });
-var ItemListResponseSchema = external_exports.looseObject({ items: external_exports.array(AgentItemSchema) });
-var AgentErrorBodySchema = external_exports.looseObject({ error: external_exports.string(), message: external_exports.string().optional() });
-
 // src/shared/ariadne/ariadne-transport.ts
 var FetchAriadneTransport = class {
   async send(request2) {
@@ -31529,38 +31535,72 @@ var AriadneClient = class {
 // src/shared/ariadne/ariadne-board.ts
 var claudeSessionEnv = "CLAUDE_CODE_SESSION_ID";
 var bootstrapStep = "started";
-var SettingsSchema2 = external_exports.object({
-  "ariadne.url": external_exports.preprocess((v) => v === "" || v === null ? void 0 : v, external_exports.url().optional()),
-  "ariadne.enabled": external_exports.preprocess(
-    (v) => v === "true" ? true : v === "false" ? false : v === null ? void 0 : v,
-    external_exports.boolean().optional()
-  )
-});
+var personalScopes = /* @__PURE__ */ new Set(["user", "local"]);
+var scopeLabels = {
+  user: "user settings",
+  project: "project settings",
+  local: "local settings",
+  file: "the flight-rules config file"
+};
+var urlKey = "ariadne.url";
+var enabledKey = "ariadne.enabled";
 var AriadneBoard = class {
-  readConfig;
+  readLayers;
   tokens;
   env;
   transport;
   timeoutMs;
   constructor(props) {
-    this.readConfig = props.readConfig;
+    this.readLayers = props.readLayers;
     this.tokens = props.tokens;
     this.env = props.env ?? process.env;
     this.transport = props.transport;
     this.timeoutMs = props.timeoutMs;
   }
-  /** `ariadne.url` (default: production) and `ariadne.enabled` (default: true). */
+  /**
+   * `ariadne.url` (default: production) and `ariadne.enabled` (default:
+   * true), read only from the user and local layers, local winning. Project
+   * and file layers are ignored with a notice. A URL that is not https (or
+   * http on localhost) leaves `url` undefined, so nothing is ever sent to it.
+   */
   settings() {
-    const parsed = SettingsSchema2.safeParse(this.readConfig());
-    if (!parsed.success) {
-      throw new Error(
-        `invalid Ariadne config: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`
-      );
+    const notices = [];
+    let rawUrl;
+    let rawEnabled;
+    for (const layer of this.readLayers()) {
+      for (const key of [urlKey, enabledKey]) {
+        if (!(key in layer.values)) continue;
+        const value = layer.values[key];
+        if (!personalScopes.has(layer.scope)) {
+          notices.push(`ignored ${key} from ${scopeLabels[layer.scope]}; set it in user scope`);
+          continue;
+        }
+        if (value === void 0 || value === null || value === "") continue;
+        if (key === urlKey) rawUrl = { value, scope: layer.scope };
+        else rawEnabled = { value, scope: layer.scope };
+      }
     }
-    return {
-      url: parsed.data["ariadne.url"] ?? defaultAriadneUrl,
-      enabled: parsed.data["ariadne.enabled"] ?? true
-    };
+    let url2 = defaultAriadneUrl;
+    if (rawUrl !== void 0) {
+      const parsed = AriadneUrlSchema.safeParse(rawUrl.value);
+      url2 = parsed.success ? parsed.data : void 0;
+      if (!parsed.success) {
+        notices.push(
+          `ignored ${urlKey} from ${scopeLabels[rawUrl.scope]}: ${parsed.error.issues.map((i) => i.message).join("; ")}; nothing is sent until it is fixed`
+        );
+      }
+    }
+    let enabled = true;
+    if (rawEnabled !== void 0) {
+      const value = rawEnabled.value;
+      if (value === true || value === "true") enabled = true;
+      else if (value === false || value === "false") enabled = false;
+      else {
+        enabled = false;
+        notices.push(`ignored ${enabledKey} from ${scopeLabels[rawEnabled.scope]}: expected true or false; reporting is off until it is fixed`);
+      }
+    }
+    return { url: url2, enabled, notices };
   }
   /** The Claude Code session id, when this process runs inside a session. */
   defaultSession() {
@@ -31605,32 +31645,39 @@ var AriadneBoard = class {
   }
   async call(options, requestedSession, run2) {
     let settings;
-    let token;
     try {
       settings = this.settings();
-      if (!settings.enabled) return { status: "skipped", reason: "disabled" };
-      token = this.tokens.resolve()?.token;
     } catch (err) {
       return { status: "failed", message: err instanceof Error ? err.message : String(err) };
     }
-    if (token === void 0 && options.strict !== true) return { status: "skipped", reason: "no-token" };
+    const noted = (outcome) => settings.notices.length > 0 ? { ...outcome, notices: settings.notices } : outcome;
+    const url2 = settings.url;
+    if (!settings.enabled) return noted({ status: "skipped", reason: "disabled" });
+    if (url2 === void 0) return noted({ status: "skipped", reason: "invalid-url" });
+    let token;
+    try {
+      token = this.tokens.resolve()?.token;
+    } catch (err) {
+      return noted({ status: "failed", message: err instanceof Error ? err.message : String(err) });
+    }
+    if (token === void 0 && options.strict !== true) return noted({ status: "skipped", reason: "no-token" });
     const session = requestedSession ?? this.defaultSession();
     if (session === void 0) {
-      return {
+      return noted({
         status: "failed",
         message: `no session id: pass --session, or run inside Claude Code so ${claudeSessionEnv} is set`
-      };
+      });
     }
     const client = new AriadneClient({
-      baseUrl: settings.url,
+      baseUrl: url2,
       token,
       ...this.transport !== void 0 ? { transport: this.transport } : {},
       ...this.timeoutMs !== void 0 ? { timeoutMs: this.timeoutMs } : {}
     });
     try {
-      return { status: "posted", value: await run2(client, session) };
+      return noted({ status: "posted", value: await run2(client, session) });
     } catch (err) {
-      return { status: "failed", message: this.redact(this.describe(err, settings.url, token !== void 0), token) };
+      return noted({ status: "failed", message: this.redact(this.describe(err, url2, token !== void 0), token) });
     }
   }
   describe(err, url2, hasToken) {
@@ -47249,7 +47296,7 @@ var DefaultFlightRules = class {
     return FileDocResolver.fromInstall({ moduleUrl: import.meta.url, env: this.env });
   }
   board() {
-    return new AriadneBoard({ readConfig: () => this.configStore().inspect().values, tokens: this.ariadneTokens(), env: this.env });
+    return new AriadneBoard({ readLayers: () => this.configStore().layers(), tokens: this.ariadneTokens(), env: this.env });
   }
   ariadneTokens() {
     return new AriadneTokenStore({ env: this.env });
@@ -47348,14 +47395,18 @@ function createBoardCommand(getBoard, getTokens = () => new AriadneTokenStore(),
       "",
       "Token: $ARIADNE_AGENT_TOKEN, then $ARIADNE_TOKEN, then the file `board login` saves.",
       "There is no fallback to the ariadne CLI's Keychain session, so each machine needs its",
-      "own agent token from Ariadne \u203A Settings \u203A Connections. Config: ariadne.url, ariadne.enabled.",
+      "own agent token from Ariadne \u203A Settings \u203A Connections.",
+      "Config: ariadne.url (https; http only for localhost) and ariadne.enabled, read only from",
+      "user or local scope; project settings and the config file cannot set them.",
       "Not configured or disabled: prints nothing, exits 0. A failure is one stderr line and",
       "exit 0; --strict makes it exit 1. `board items` is read-only; answer items in Ariadne."
     ].join("\n")
   );
   board.exitOverride();
   const withReportOptions = (command, jsonHelp) => command.option("--session <id>", sessionHelp).option("--strict", strictHelp).option("--json", jsonHelp).exitOverride();
-  const finish = (outcome, opts, print) => {
+  const finish = (outcome, opts, print, loud = opts.strict === true) => {
+    if (loud) for (const notice of outcome.notices ?? []) process.stderr.write(`flight-rules board: ${notice}
+`);
     if (outcome.status === "skipped") return;
     if (outcome.status === "failed") {
       if (opts.strict === true) throw new Error(`flight-rules board: ${outcome.message}`);
@@ -47427,13 +47478,18 @@ function createBoardCommand(getBoard, getTokens = () => new AriadneTokenStore(),
     "print {items} as JSON"
   ).action(async (opts) => {
     const outcome = await getBoard().items(opts.session, { strict: opts.strict === true });
-    finish(outcome, opts, ({ items }) => {
-      if (opts.json === true) {
-        process.stdout.write(JSON.stringify({ items }) + "\n");
-        return;
-      }
-      process.stdout.write(items.map((item) => describeItem(item) + "\n").join(""));
-    });
+    finish(
+      outcome,
+      opts,
+      ({ items }) => {
+        if (opts.json === true) {
+          process.stdout.write(JSON.stringify({ items }) + "\n");
+          return;
+        }
+        process.stdout.write(items.map((item) => describeItem(item) + "\n").join(""));
+      },
+      true
+    );
   });
   board.command("login").description(
     "save this machine's Ariadne agent token (each machine needs its own, from Ariadne \u203A Settings \u203A Connections), read from stdin or a hidden prompt, with mode 0600"

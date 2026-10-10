@@ -32,20 +32,28 @@ describe("board command", () => {
       transport = new FakeTransport(),
       env = signedIn,
       config = {},
+      project = {},
       secret = "",
     }: {
       transport?: FakeTransport;
       env?: Record<string, string | undefined>;
+      /** User-scope values. */
       config?: Record<string, unknown>;
+      /** Committed project-scope values. */
+      project?: Record<string, unknown>;
       secret?: string;
     } = {},
   ): Promise<{ stdout: string; stderr: string }> => {
     const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     const tokens = new AriadneTokenStore({ env, home });
+    const readLayers = () => [
+      { scope: "user" as const, values: config },
+      { scope: "project" as const, values: project },
+    ];
     try {
       await createBoardCommand(
-        () => new AriadneBoard({ readConfig: () => config, tokens, env, transport }),
+        () => new AriadneBoard({ readLayers, tokens, env, transport }),
         () => tokens,
         () => Promise.resolve(secret),
       )
@@ -72,6 +80,39 @@ describe("board command", () => {
     ])("%s prints nothing and sends nothing without a token", async (_name, argv) => {
       const transport = new FakeTransport();
       expect(await run(argv, { transport, env: { CLAUDE_CODE_SESSION_ID: "s1" } })).toEqual({ stdout: "", stderr: "" });
+      expect(transport.requests).toHaveLength(0);
+    });
+
+    it("ignores a committed project ariadne.url: posts to the default URL, silent unless --strict", async () => {
+      const project = { "ariadne.url": "https://attacker.example.com" };
+      const ok = () => new FakeTransport(FakeTransport.json(200, { session: contract.session }));
+
+      const quiet = ok();
+      expect(await run(heartbeatArgs, { transport: quiet, project })).toEqual({ stdout: "", stderr: "" });
+      expect(quiet.requests.map((r) => r.url)).toEqual([`${defaultAriadneUrl}/v1/agents/heartbeat`]);
+
+      const strict = ok();
+      expect((await run([...heartbeatArgs, "--strict"], { transport: strict, project })).stderr).toBe(
+        "flight-rules board: ignored ariadne.url from project settings; set it in user scope\n",
+      );
+      expect(strict.requests.every((r) => r.url.startsWith(defaultAriadneUrl))).toBe(true);
+    });
+
+    it("board items prints the ignored-config notice", async () => {
+      const transport = new FakeTransport(FakeTransport.json(200, { items: [] }));
+      const output = await run(["items", "--json"], { transport, project: { "ariadne.enabled": false } });
+      expect(output).toEqual({
+        stdout: '{"items":[]}\n',
+        stderr: "flight-rules board: ignored ariadne.enabled from project settings; set it in user scope\n",
+      });
+    });
+
+    it("never sends anything to a plain-http URL, and says so only under --strict", async () => {
+      const transport = new FakeTransport();
+      const config = { "ariadne.url": "http://ariadne.example.com" };
+      expect(await run(heartbeatArgs, { transport, config })).toEqual({ stdout: "", stderr: "" });
+      const strict = await run([...heartbeatArgs, "--strict"], { transport, config });
+      expect(strict.stderr).toContain("ignored ariadne.url from user settings: must be https");
       expect(transport.requests).toHaveLength(0);
     });
 

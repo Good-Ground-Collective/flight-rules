@@ -1,7 +1,7 @@
-import { z } from "zod";
+import type { ConfigScope } from "../config-store.js";
 import { AriadneClient, AriadneError } from "./ariadne-client.js";
 import type { AriadneTransport } from "./ariadne-transport.js";
-import { defaultAriadneUrl } from "./ariadne.schema.js";
+import { AriadneUrlSchema, defaultAriadneUrl } from "./ariadne.schema.js";
 import type {
   ActivityInput,
   ActivityResponse,
@@ -25,19 +25,32 @@ export interface BoardCallOptions {
   strict?: boolean;
 }
 
-export type BoardOutcome<T> =
-  | { status: "skipped"; reason: "disabled" | "no-token" }
+/**
+ * `notices` name config the board ignored. They are diagnostics: callers
+ * print them only when asked to be loud (`--strict`, `board items`).
+ */
+export type BoardOutcome<T> = (
+  | { status: "skipped"; reason: "disabled" | "no-token" | "invalid-url" }
   | { status: "posted"; value: T }
-  | { status: "failed"; message: string };
+  | { status: "failed"; message: string }
+) & { notices?: string[] };
 
 export interface AriadneBoardSettings {
-  url: string;
+  /** Undefined when the configured URL failed validation: the board is then not configured. */
+  url: string | undefined;
   enabled: boolean;
+  notices: string[];
+}
+
+/** One config layer, as `ConfigStore.layers()` returns it. */
+export interface BoardConfigLayer {
+  scope: ConfigScope;
+  values: Record<string, unknown>;
 }
 
 export interface AriadneBoardProps {
-  /** The merged flight-rules config values, valid or not; `ariadne.*` keys are read from them. */
-  readConfig: () => Record<string, unknown>;
+  /** The flight-rules config layers, lowest precedence first; `ariadne.*` keys are read from the person's own. */
+  readLayers: () => readonly BoardConfigLayer[];
   tokens: AriadneTokenStore;
   env?: Record<string, string | undefined>;
   transport?: AriadneTransport;
@@ -50,13 +63,22 @@ export const claudeSessionEnv = "CLAUDE_CODE_SESSION_ID";
 /** The step a session gets when an item or activity line is its first report. */
 export const bootstrapStep = "started";
 
-const SettingsSchema = z.object({
-  "ariadne.url": z.preprocess((v) => (v === "" || v === null ? undefined : v), z.url().optional()),
-  "ariadne.enabled": z.preprocess(
-    (v) => (v === "true" ? true : v === "false" ? false : v === null ? undefined : v),
-    z.boolean().optional(),
-  ),
-});
+/**
+ * The layers a person controls and does not commit. A repo's committed
+ * project settings or config file could otherwise point the board, and the
+ * person's token, at any host.
+ */
+const personalScopes: ReadonlySet<ConfigScope> = new Set(["user", "local"]);
+
+const scopeLabels: Record<ConfigScope, string> = {
+  user: "user settings",
+  project: "project settings",
+  local: "local settings",
+  file: "the flight-rules config file",
+};
+
+const urlKey = "ariadne.url";
+const enabledKey = "ariadne.enabled";
 
 /**
  * Reports a flight-rules run to Ariadne's Agents page. Opt-in and quiet: with
@@ -65,32 +87,66 @@ const SettingsSchema = z.object({
  * skill can never fail because of Ariadne.
  */
 export class AriadneBoard {
-  private readonly readConfig: () => Record<string, unknown>;
+  private readonly readLayers: () => readonly BoardConfigLayer[];
   private readonly tokens: AriadneTokenStore;
   private readonly env: Record<string, string | undefined>;
   private readonly transport: AriadneTransport | undefined;
   private readonly timeoutMs: number | undefined;
 
   constructor(props: AriadneBoardProps) {
-    this.readConfig = props.readConfig;
+    this.readLayers = props.readLayers;
     this.tokens = props.tokens;
     this.env = props.env ?? process.env;
     this.transport = props.transport;
     this.timeoutMs = props.timeoutMs;
   }
 
-  /** `ariadne.url` (default: production) and `ariadne.enabled` (default: true). */
+  /**
+   * `ariadne.url` (default: production) and `ariadne.enabled` (default:
+   * true), read only from the user and local layers, local winning. Project
+   * and file layers are ignored with a notice. A URL that is not https (or
+   * http on localhost) leaves `url` undefined, so nothing is ever sent to it.
+   */
   settings(): AriadneBoardSettings {
-    const parsed = SettingsSchema.safeParse(this.readConfig());
-    if (!parsed.success) {
-      throw new Error(
-        `invalid Ariadne config: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`,
-      );
+    const notices: string[] = [];
+    let rawUrl: { value: unknown; scope: ConfigScope } | undefined;
+    let rawEnabled: { value: unknown; scope: ConfigScope } | undefined;
+    for (const layer of this.readLayers()) {
+      for (const key of [urlKey, enabledKey]) {
+        if (!(key in layer.values)) continue;
+        const value = layer.values[key];
+        if (!personalScopes.has(layer.scope)) {
+          notices.push(`ignored ${key} from ${scopeLabels[layer.scope]}; set it in user scope`);
+          continue;
+        }
+        if (value === undefined || value === null || value === "") continue;
+        if (key === urlKey) rawUrl = { value, scope: layer.scope };
+        else rawEnabled = { value, scope: layer.scope };
+      }
     }
-    return {
-      url: parsed.data["ariadne.url"] ?? defaultAriadneUrl,
-      enabled: parsed.data["ariadne.enabled"] ?? true,
-    };
+
+    let url: string | undefined = defaultAriadneUrl;
+    if (rawUrl !== undefined) {
+      const parsed = AriadneUrlSchema.safeParse(rawUrl.value);
+      url = parsed.success ? parsed.data : undefined;
+      if (!parsed.success) {
+        notices.push(
+          `ignored ${urlKey} from ${scopeLabels[rawUrl.scope]}: ${parsed.error.issues.map((i) => i.message).join("; ")}; nothing is sent until it is fixed`,
+        );
+      }
+    }
+
+    let enabled = true;
+    if (rawEnabled !== undefined) {
+      const value = rawEnabled.value;
+      if (value === true || value === "true") enabled = true;
+      else if (value === false || value === "false") enabled = false;
+      else {
+        enabled = false;
+        notices.push(`ignored ${enabledKey} from ${scopeLabels[rawEnabled.scope]}: expected true or false; reporting is off until it is fixed`);
+      }
+    }
+    return { url, enabled, notices };
   }
 
   /** The Claude Code session id, when this process runs inside a session. */
@@ -147,34 +203,43 @@ export class AriadneBoard {
     run: (client: AriadneClient, session: string) => Promise<T>,
   ): Promise<BoardOutcome<T>> {
     let settings: AriadneBoardSettings;
-    let token: string | undefined;
     try {
       settings = this.settings();
-      if (!settings.enabled) return { status: "skipped", reason: "disabled" };
-      token = this.tokens.resolve()?.token;
     } catch (err) {
       return { status: "failed", message: err instanceof Error ? err.message : String(err) };
     }
-    if (token === undefined && options.strict !== true) return { status: "skipped", reason: "no-token" };
+    const noted = <O extends BoardOutcome<T>>(outcome: O): O =>
+      settings.notices.length > 0 ? { ...outcome, notices: settings.notices } : outcome;
+    const url = settings.url;
+    if (!settings.enabled) return noted({ status: "skipped", reason: "disabled" });
+    if (url === undefined) return noted({ status: "skipped", reason: "invalid-url" });
+
+    let token: string | undefined;
+    try {
+      token = this.tokens.resolve()?.token;
+    } catch (err) {
+      return noted({ status: "failed", message: err instanceof Error ? err.message : String(err) });
+    }
+    if (token === undefined && options.strict !== true) return noted({ status: "skipped", reason: "no-token" });
 
     const session = requestedSession ?? this.defaultSession();
     if (session === undefined) {
-      return {
+      return noted({
         status: "failed",
         message: `no session id: pass --session, or run inside Claude Code so ${claudeSessionEnv} is set`,
-      };
+      });
     }
 
     const client = new AriadneClient({
-      baseUrl: settings.url,
+      baseUrl: url,
       token,
       ...(this.transport !== undefined ? { transport: this.transport } : {}),
       ...(this.timeoutMs !== undefined ? { timeoutMs: this.timeoutMs } : {}),
     });
     try {
-      return { status: "posted", value: await run(client, session) };
+      return noted({ status: "posted", value: await run(client, session) });
     } catch (err) {
-      return { status: "failed", message: this.redact(this.describe(err, settings.url, token !== undefined), token) };
+      return noted({ status: "failed", message: this.redact(this.describe(err, url, token !== undefined), token) });
     }
   }
 
