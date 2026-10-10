@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -117,6 +117,24 @@ describe("packet command", () => {
     const transport = new FakeTransport(FakeTransport.json(409, packetContract.errors["packet_exists"]));
     await expect(run(["create", "--file", path], { transport })).rejects.toThrow(/packet_exists/);
     expect(readFileSync(path, "utf8")).toBe(before);
+  });
+
+  it("create prints the published packet and names its id when the file cannot be written back", async () => {
+    const withoutId = Object.fromEntries(Object.entries(packetContract.createRequest).filter(([key]) => key !== "id"));
+    const path = file(withoutId);
+    chmodSync(path, 0o444);
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const tokens = new AriadneTokenStore({ env: { ARIADNE_AGENT_TOKEN: agentToken }, home });
+    const transport = new FakeTransport((request) => FakeTransport.json(200, { packet: { ...storedPacket, id: JSON.parse(request.body ?? "{}").id } }));
+    const command = createPacketCommand(() => new AriadnePackets({ readLayers: () => [], tokens, transport })).exitOverride();
+
+    const failure = command.parseAsync(["create", "--file", path], { from: "user" });
+    await expect(failure).rejects.toThrow(/was published.*add "id"/);
+
+    const publishedId = (transport.bodies()[0] as { id: string }).id;
+    const printed = stdout.mock.calls.map(([chunk]) => String(chunk)).join("");
+    expect(JSON.parse(printed)).toMatchObject({ id: publishedId });
+    await expect(failure).rejects.toThrow(publishedId);
   });
 
   it("update exits without sending when the file names a different packet", async () => {

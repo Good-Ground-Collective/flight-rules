@@ -56,7 +56,7 @@ export const PacketAnchorSchema = z
 
 const SignOffTimeSchema = z
   .string()
-  .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/, "must be an ISO 8601 UTC time ending in Z")
+  .regex(/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,3})?Z$/, "must be an ISO 8601 UTC time ending in Z")
   .refine((value) => {
     const [year = 0, month = 0, day = 0] = value.slice(0, 10).split("-").map(Number);
     const date = new Date(Date.UTC(year, month - 1, day));

@@ -37,6 +37,14 @@ const UpdateFileSchema = z
     },
   }));
 
+/** The packet was published but the file could not record its id. */
+export class PacketIdWriteError extends Error {
+  override name = "PacketIdWriteError";
+}
+
+/** A JSON object with its keys in file order, so a write-back keeps the author's layout. */
+const JsonObjectSchema = z.record(z.string(), z.unknown());
+
 /** A packet JSON file. */
 class PacketFile {
   constructor(private readonly path: string) {}
@@ -56,12 +64,15 @@ class PacketFile {
     }
   }
 
-  /** Writes the file back as `JSON.stringify(value, null, 2)` plus a newline. */
-  write(value: unknown): void {
+  /** Runs after the packet is stored, so a failure says so and names the id the file still needs. */
+  writeId(file: Record<string, unknown>, id: string): void {
     try {
-      writeFileSync(this.path, JSON.stringify(value, null, 2) + "\n");
+      writeFileSync(this.path, JSON.stringify({ ...file, id }, null, 2) + "\n");
     } catch (err) {
-      throw new Error(`cannot write ${this.path}: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
+      throw new PacketIdWriteError(
+        `packet ${id} was published, but its id could not be written to ${this.path}: ${err instanceof Error ? err.message : String(err)}; add "id": "${id}" to the file before re-running, or a re-run publishes a second packet`,
+        { cause: err },
+      );
     }
   }
 
@@ -111,10 +122,9 @@ export class PacketCommandFactory {
         const packetFile = new PacketFile(opts.file);
         const input = packetFile.read();
         const published = await getPackets().create(input);
-        if (typeof input === "object" && input !== null && !Array.isArray(input) && (input as { id?: unknown }).id !== published.id) {
-          packetFile.write({ ...input, id: published.id });
-        }
         print(published);
+        const written = JsonObjectSchema.safeParse(input);
+        if (written.success && written.data.id !== published.id) packetFile.writeId(written.data, published.id);
       });
 
     packet

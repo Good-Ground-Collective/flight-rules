@@ -337,10 +337,10 @@ describe("AriadneClient review packets", () => {
     expect(transport.requests).toHaveLength(0);
   });
 
-  it("rejects a sign-off time that is not a real calendar date", async () => {
+  it.each(["2026-02-30T00:00:00Z", "2026-10-10T25:00:00Z", "2026-10-10T11:61:00Z", "2026-10-10T11:30:00.0000Z"])("rejects the sign-off time %s", async (at) => {
     const transport = new FakeTransport();
     const prs = (create["prs"] as Record<string, unknown>[]).map((pr, index) =>
-      index === 0 ? { ...pr, signOff: { at: "2026-02-30T00:00:00Z", headSha: pr["headSha"] } } : pr,
+      index === 0 ? { ...pr, signOff: { at, headSha: pr["headSha"] } } : pr,
     );
     const error = await rejection(client(transport).createPacket(withField(create, { prs })));
     expect(error.message).toContain("signOff.at");

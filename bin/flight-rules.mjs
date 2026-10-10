@@ -31489,7 +31489,7 @@ var PacketAnchorSchema = external_exports.strictObject({
   path: ["startLine"],
   message: "must be before line"
 });
-var SignOffTimeSchema = external_exports.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/, "must be an ISO 8601 UTC time ending in Z").refine((value) => {
+var SignOffTimeSchema = external_exports.string().regex(/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,3})?Z$/, "must be an ISO 8601 UTC time ending in Z").refine((value) => {
   const [year = 0, month = 0, day = 0] = value.slice(0, 10).split("-").map(Number);
   const date5 = new Date(Date.UTC(year, month - 1, day));
   return date5.getUTCFullYear() === year && date5.getUTCMonth() === month - 1 && date5.getUTCDate() === day;
@@ -48032,6 +48032,10 @@ var UpdateFileSchema = external_exports.looseObject({ id: external_exports.strin
     ...file2.reviewers !== void 0 ? { reviewers: file2.reviewers } : {}
   }
 }));
+var PacketIdWriteError = class extends Error {
+  name = "PacketIdWriteError";
+};
+var JsonObjectSchema = external_exports.record(external_exports.string(), external_exports.unknown());
 var PacketFile = class {
   constructor(path3) {
     this.path = path3;
@@ -48051,12 +48055,15 @@ var PacketFile = class {
       throw new Error(`${this.path} is not valid JSON: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
     }
   }
-  /** Writes the file back as `JSON.stringify(value, null, 2)` plus a newline. */
-  write(value) {
+  /** Runs after the packet is stored, so a failure says so and names the id the file still needs. */
+  writeId(file2, id) {
     try {
-      writeFileSync5(this.path, JSON.stringify(value, null, 2) + "\n");
+      writeFileSync5(this.path, JSON.stringify({ ...file2, id }, null, 2) + "\n");
     } catch (err) {
-      throw new Error(`cannot write ${this.path}: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
+      throw new PacketIdWriteError(
+        `packet ${id} was published, but its id could not be written to ${this.path}: ${err instanceof Error ? err.message : String(err)}; add "id": "${id}" to the file before re-running, or a re-run publishes a second packet`,
+        { cause: err }
+      );
     }
   }
   readForUpdate() {
@@ -48090,10 +48097,9 @@ var PacketCommandFactory = class {
       const packetFile = new PacketFile(opts.file);
       const input2 = packetFile.read();
       const published = await getPackets().create(input2);
-      if (typeof input2 === "object" && input2 !== null && !Array.isArray(input2) && input2.id !== published.id) {
-        packetFile.write({ ...input2, id: published.id });
-      }
       print(published);
+      const written = JsonObjectSchema.safeParse(input2);
+      if (written.success && written.data.id !== published.id) packetFile.writeId(written.data, published.id);
     });
     packet.command("new-id").description('print {"id": "<slug>-<8 hex>"}: a globally unique packet id to write into the packet file once and reuse for every retry').requiredOption("--title <title>", "the packet title").exitOverride().action((opts) => {
       print({ id: packetIdGenerator.generate(opts.title) });
