@@ -232,7 +232,7 @@ flight-rules initiative review-plan <node>
 
 Use `initiative review-plan` for an initiative, never a loop of `epic review-plan` calls. It plans across every child epic, so dependencies between epics are kept and the simple/complex rule is applied once to the whole set of PRs you are blocked on. Per-epic plans would lose cross-epic waves and apply the size trigger to each epic separately.
 
-Read `route`, `reasons`, `missing`, `blocked` and `unblocksOnMerge`. Each `blocked` entry carries a `pr`, or `null` when no open PR matched the ticket. If a `blocked` entry has no `pr` or no `repo`, skip it and list it in the report instead of failing.
+Read `route`, `reasons`, `missing`, `blocked` and `unblocksOnMerge`. Each `blocked` entry carries a `pr` (`number`, `url`, `headRefName`, `baseRefName`), or `null` when no open PR matched the ticket. If a `blocked` entry has `pr: null`, skip it and list it in the report instead of failing.
 
 The route is `incomplete` if any blocked ticket has no open PR. Otherwise it is `complex` if the PR set spans more than one wave, if any PR's base is not the default branch, or if it has more than 4 PRs, and `simple` if none of those hold.
 

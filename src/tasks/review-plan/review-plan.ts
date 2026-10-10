@@ -75,10 +75,10 @@ export class ReviewRouteClassifier {
 }
 
 /**
- * Joins an epic's dependency waves, ticket titles and open PRs into the
- * hand-off an orchestrator gives reviewers while it waits on merges. When any
- * blocked ticket has no open PR the route is `incomplete`: the set cannot be
- * routed until those PRs exist.
+ * Joins the dependency waves of an epic or initiative, ticket titles and open
+ * PRs into the hand-off an orchestrator gives reviewers while it waits on
+ * merges. When any blocked ticket has no open PR the route is `incomplete`:
+ * the set cannot be routed until those PRs exist.
  */
 export class ReviewPlanService {
   private readonly classifier = new ReviewRouteClassifier()

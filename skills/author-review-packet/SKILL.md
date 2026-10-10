@@ -58,9 +58,11 @@ Check the payload before using it:
 
 - `route: "incomplete"` means blocked tickets have no open PR. Report the
   tickets in `missing` and stop. Do not build a packet from a partial set.
-- Skip any `blocked` entry with `pr: null` or no `repo`, and say which ones you
-  skipped. Never fail on them. For a PR whose `repo` is missing, ask the author
-  for the `owner/repo` before including it.
+- Each `blocked` entry's `pr` carries `number` and `url` but no `repo` field.
+  Take `owner/repo` from the URL, `https://github.com/<owner>/<repo>/pull/<n>`.
+- Skip any `blocked` entry with `pr: null`, or whose `url` does not name a
+  GitHub `owner/repo`, and say which ones you skipped. Never fail on them. To
+  include a skipped PR, ask the author for its `owner/repo#n`.
 
 For each PR, fetch its facts with a read-only call:
 
