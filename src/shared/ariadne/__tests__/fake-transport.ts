@@ -42,3 +42,16 @@ export const contract: ContractRecords = JSON.parse(
 
 /** A well-formed agent token that no server has ever issued. */
 export const agentToken = `ariadne_agent_0123456789abcdef_${"A".repeat(43)}`;
+
+export interface PacketContractRecords {
+  createRequest: Record<string, unknown>;
+  storedPacket: Record<string, unknown>;
+  updateRequest: Record<string, unknown>;
+  reviewerList: Record<string, unknown>;
+  errors: Record<string, Record<string, unknown>>;
+}
+
+/** Request and response records of the Review Packets contract, version 1. */
+export const packetContract: PacketContractRecords = JSON.parse(
+  readFileSync(join(import.meta.dirname, "fixtures", "review-packets-contract.json"), "utf-8"),
+);

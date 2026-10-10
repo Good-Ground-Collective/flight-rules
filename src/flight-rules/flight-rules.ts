@@ -9,6 +9,7 @@ import { WorktreeLocator } from '../git/worktree-locator/worktree-locator.js'
 import { EvidenceLocation } from '../tasks/evidence/evidence-location.js'
 import { EnvLoader } from '../shared/env.js'
 import { AriadneBoard } from '../shared/ariadne/ariadne-board.js'
+import { AriadnePackets } from '../shared/ariadne/ariadne-packets.js'
 import { AriadneTokenStore } from '../shared/ariadne/ariadne-token-store.js'
 import { BoardSessionStore } from '../shared/ariadne/board-session-store.js'
 import { GitHubTaskTracker } from '../tasks/github-task-tracker/github-task-tracker.js'
@@ -31,6 +32,7 @@ export interface FlightRules {
   docs(): DocResolver
   /** Ariadne's Agents page reporter; reads only the `ariadne.*` keys from user and local scope, so it works without a valid tracker config. */
   board(): AriadneBoard
+  packets(): AriadnePackets
   ariadneTokens(): AriadneTokenStore
   /** The last heartbeat each session's skill posted, outside every repo; read by the heartbeat hook. */
   boardSessions(): BoardSessionStore
@@ -153,6 +155,13 @@ export class DefaultFlightRules implements FlightRules {
       tokens: this.ariadneTokens(),
       env: this.env,
       sessions: this.boardSessions(),
+    })
+  }
+
+  packets(): AriadnePackets {
+    return new AriadnePackets({
+      readLayers: () => this.configStore().layers(),
+      tokens: this.ariadneTokens(),
     })
   }
 

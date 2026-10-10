@@ -20,6 +20,14 @@ import type {
   ItemListResponse,
   ItemResponse,
 } from "./ariadne.schema.js";
+import {
+  PacketIdSchema,
+  PacketInputSchema,
+  PacketSchema,
+  PacketUpdateSchema,
+  ReviewerListResponseSchema,
+} from "./review-packet.schema.js";
+import type { Packet, ReviewerListResponse } from "./review-packet.schema.js";
 import { FetchAriadneTransport } from "./ariadne-transport.js";
 import type { AriadneRequest, AriadneResponse, AriadneTransport } from "./ariadne-transport.js";
 
@@ -70,8 +78,10 @@ export interface AriadneClientProps {
 /**
  * Ariadne's Agents API, contract version 1. Each request times out after
  * `timeoutMs` and is retried once when no response arrived or the server
- * answered 5xx. Retrying is safe: heartbeats are upserts, and items and
- * activity are keyed by session and id (or their natural key without one).
+ * answered 5xx. Retrying is safe: heartbeats are upserts, items and
+ * activity are keyed by session and id (or their natural key without one),
+ * packet creates are keyed by the packet id, and packet updates carry an
+ * `operationId` the server replays.
  */
 export class AriadneClient {
   private readonly baseUrl: string;
@@ -108,6 +118,30 @@ export class AriadneClient {
   async listItems(session: string): Promise<ItemListResponse> {
     const id = this.validate(AgentSessionIdSchema, session, "session");
     return this.request("GET", `/v1/agents/items?session=${encodeURIComponent(id)}`, ItemListResponseSchema);
+  }
+
+  /** POST /v1/review-packets: idempotent on the packet id; the same id with a different body is 409 `packet_exists`. */
+  async createPacket(input: unknown): Promise<Packet> {
+    const body = this.validate(PacketInputSchema, input, "packet");
+    return this.request("POST", "/v1/review-packets", PacketSchema, body);
+  }
+
+  /** PUT /v1/review-packets/{id}: a stale `expectedRevision` is 409 `revision_conflict`; a repeated `operationId` is replayed. */
+  async updatePacket(id: string, input: unknown): Promise<Packet> {
+    const packetId = this.validate(PacketIdSchema, id, "packet id");
+    const body = this.validate(PacketUpdateSchema, input, "packet update");
+    return this.request("PUT", `/v1/review-packets/${encodeURIComponent(packetId)}`, PacketSchema, body);
+  }
+
+  /** GET /v1/review-packets/{id}. */
+  async getPacket(id: string): Promise<Packet> {
+    const packetId = this.validate(PacketIdSchema, id, "packet id");
+    return this.request("GET", `/v1/review-packets/${encodeURIComponent(packetId)}`, PacketSchema);
+  }
+
+  /** GET /v1/review-packets/reviewers: active members with a linked GitHub login. */
+  async listReviewers(): Promise<ReviewerListResponse> {
+    return this.request("GET", "/v1/review-packets/reviewers", ReviewerListResponseSchema);
   }
 
   private validate<S extends z.ZodType>(schema: S, input: unknown, what: string): z.output<S> {

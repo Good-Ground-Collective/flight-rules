@@ -1,4 +1,5 @@
 import type { ActivityInput, ActivityResponse, HeartbeatInput, HeartbeatResponse, ItemInput, ItemListResponse, ItemResponse } from "./ariadne.schema.js";
+import type { Packet, ReviewerListResponse } from "./review-packet.schema.js";
 import type { AriadneTransport } from "./ariadne-transport.js";
 /**
  * Why a call failed: the input broke the contract before anything was sent,
@@ -35,8 +36,10 @@ export interface AriadneClientProps {
 /**
  * Ariadne's Agents API, contract version 1. Each request times out after
  * `timeoutMs` and is retried once when no response arrived or the server
- * answered 5xx. Retrying is safe: heartbeats are upserts, and items and
- * activity are keyed by session and id (or their natural key without one).
+ * answered 5xx. Retrying is safe: heartbeats are upserts, items and
+ * activity are keyed by session and id (or their natural key without one),
+ * packet creates are keyed by the packet id, and packet updates carry an
+ * `operationId` the server replays.
  */
 export declare class AriadneClient {
     private readonly baseUrl;
@@ -52,6 +55,14 @@ export declare class AriadneClient {
     postActivity(input: ActivityInput): Promise<ActivityResponse>;
     /** GET /v1/agents/items?session=…: every item of the session, open and resolved, oldest first. */
     listItems(session: string): Promise<ItemListResponse>;
+    /** POST /v1/review-packets: idempotent on the packet id; the same id with a different body is 409 `packet_exists`. */
+    createPacket(input: unknown): Promise<Packet>;
+    /** PUT /v1/review-packets/{id}: a stale `expectedRevision` is 409 `revision_conflict`; a repeated `operationId` is replayed. */
+    updatePacket(id: string, input: unknown): Promise<Packet>;
+    /** GET /v1/review-packets/{id}. */
+    getPacket(id: string): Promise<Packet>;
+    /** GET /v1/review-packets/reviewers: active members with a linked GitHub login. */
+    listReviewers(): Promise<ReviewerListResponse>;
     private validate;
     private request;
     private send;

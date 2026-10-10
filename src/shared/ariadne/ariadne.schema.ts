@@ -82,7 +82,7 @@ const multiLineSchema = (max: number) =>
     .pipe(z.string().min(1, "must not be blank"));
 
 /** Optional fields may be omitted, null or "". */
-const optionalSchema = <T extends z.ZodType>(schema: T) =>
+export const optionalSchema = <T extends z.ZodType>(schema: T) =>
   z.preprocess((value) => (value === "" || value === null ? undefined : value), schema.optional());
 
 export const AgentSessionIdSchema = z

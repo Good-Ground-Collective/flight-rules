@@ -85,3 +85,5 @@ Each request times out after 5 seconds and is retried once when no response arri
 ## What is sent
 
 Only the fields above: session id, ticket key, step, state, branch, repo, skill, short detail lines, item titles and options, and activity lines. Never source code, diffs or ticket bodies. The request schemas are strict, so an unexpected field is refused before anything is sent.
+
+This never-send list covers board posts. Review Packets are a separate payload, described in [review-packets.md](review-packets.md).
