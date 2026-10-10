@@ -12,9 +12,11 @@ import {
 } from '../../git/pr-template/pr-template.js'
 import type {
   CreatedPullRequest,
+  OpenPullRequest,
   PullRequestAttachOptions,
   PullRequestComment,
   PullRequestHost,
+  ReviewerRequestResult,
 } from './pull-request-host.js'
 
 type ExecFileFn = (file: string, args: readonly string[]) => Promise<{ stdout: string; stderr: string }>
@@ -27,6 +29,16 @@ export type GhPullRequestHostProps = z.input<typeof GhPullRequestHostPropsSchema
   builder?: PullRequestBuilder
   execFileFn?: ExecFileFn
 }
+
+const GhPullRequestListSchema = z.array(
+  z.object({
+    number: z.number(),
+    url: z.string(),
+    headRefName: z.string(),
+    baseRefName: z.string(),
+    title: z.string(),
+  }),
+)
 
 const pullUrl = /\/pull\/(\d+)\b/
 
@@ -96,6 +108,56 @@ export class GhPullRequestHost implements PullRequestHost {
     )
 
     return { url: stdout.trim() }
+  }
+
+  async listOpenPullRequestsForTickets(ticketIds: readonly string[]): Promise<OpenPullRequest[]> {
+    const { stdout } = await this.execFile('gh', [
+      'pr',
+      'list',
+      '--repo',
+      this.repo,
+      '--state',
+      'open',
+      '--limit',
+      '200',
+      '--json',
+      'number,url,headRefName,baseRefName,title',
+    ])
+    const open = GhPullRequestListSchema.parse(JSON.parse(stdout))
+
+    return ticketIds.flatMap((ticket) => {
+      const id = this.escapeRegExp(ticket)
+      const branch = new RegExp(`^[a-z]+/${id}(-|$)`)
+      const titleScope = new RegExp(`^[a-z]+\\(${id}\\)!?:`)
+      return open
+        .filter((candidate) => branch.test(candidate.headRefName) || titleScope.test(candidate.title))
+        .map((candidate) => ({ ticket, ...candidate }))
+    })
+  }
+
+  async requestReviewers(number: number, logins: readonly string[]): Promise<ReviewerRequestResult> {
+    const result: ReviewerRequestResult = { number, requested: [], failed: [] }
+
+    for (const login of logins) {
+      try {
+        await this.execFile('gh', ['pr', 'edit', String(number), '--repo', this.repo, '--add-reviewer', login])
+        result.requested.push(login)
+      } catch (err) {
+        result.failed.push({ login, error: this.describeFailure(err) })
+      }
+    }
+
+    return result
+  }
+
+  private describeFailure(err: unknown): string {
+    const stderr = this.readStringProperty(err, 'stderr')?.trim()
+    const text = stderr !== undefined && stderr.length > 0 ? stderr : err instanceof Error ? err.message : String(err)
+    return text.split('\n')[0]?.trim() ?? text
+  }
+
+  private escapeRegExp(text: string): string {
+    return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   }
 
   private async runCreate(

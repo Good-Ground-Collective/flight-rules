@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { CommanderError } from 'commander'
-import type { CreatedPullRequest, PullRequestComment, PullRequestHost } from '../../../pull-request-host/pull-request-host.js'
+import type {
+  CreatedPullRequest,
+  OpenPullRequest,
+  PullRequestComment,
+  PullRequestHost,
+  ReviewerRequestResult,
+} from '../../../pull-request-host/pull-request-host.js'
 import { createPrCommand } from '../command.js'
 
 const makeMockHost = (
@@ -9,6 +15,8 @@ const makeMockHost = (
 ): PullRequestHost => ({
   createPullRequest: vi.fn().mockResolvedValue(created),
   commentOnPullRequest: vi.fn().mockResolvedValue(comment),
+  listOpenPullRequestsForTickets: vi.fn().mockResolvedValue([]),
+  requestReviewers: vi.fn().mockResolvedValue({ number: 7, requested: [], failed: [] }),
 })
 
 const run = (host: PullRequestHost, args: string[]) =>
@@ -112,5 +120,60 @@ describe('pr comment command', () => {
     const host = makeMockHost()
     await expect(run(host, ['comment', '42'])).rejects.toThrow()
     expect(vi.mocked(host.commentOnPullRequest)).not.toHaveBeenCalled()
+  })
+})
+
+describe('pr list command', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('passes every --ticket to the host and prints the matches as one JSON line', async () => {
+    const host = makeMockHost()
+    const matches: OpenPullRequest[] = [
+      {
+        ticket: '42',
+        number: 7,
+        url: 'https://github.com/o/r/pull/7',
+        headRefName: 'feat/42-x',
+        baseRefName: 'main',
+        title: 'feat(42): x',
+      },
+    ]
+    vi.mocked(host.listOpenPullRequestsForTickets).mockResolvedValue(matches)
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(host, ['list', '--ticket', '42', '--ticket', '43'])
+    expect(vi.mocked(host.listOpenPullRequestsForTickets)).toHaveBeenCalledWith(['42', '43'])
+    expect(output).toHaveBeenCalledWith(JSON.stringify(matches) + '\n')
+    output.mockRestore()
+  })
+})
+
+describe('pr request-review command', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('prints the per-login result and resolves when nothing failed', async () => {
+    const host = makeMockHost()
+    const result: ReviewerRequestResult = { number: 7, requested: ['alice', 'bob'], failed: [] }
+    vi.mocked(host.requestReviewers).mockResolvedValue(result)
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(host, ['request-review', '7', '--reviewer', 'alice', '--reviewer', 'bob'])
+    expect(vi.mocked(host.requestReviewers)).toHaveBeenCalledWith(7, ['alice', 'bob'])
+    expect(output).toHaveBeenCalledWith(JSON.stringify(result) + '\n')
+    output.mockRestore()
+  })
+
+  it('prints the result and then rejects when any login failed', async () => {
+    const host = makeMockHost()
+    const result: ReviewerRequestResult = {
+      number: 7,
+      requested: ['alice'],
+      failed: [{ login: 'bob', error: 'not a collaborator' }],
+    }
+    vi.mocked(host.requestReviewers).mockResolvedValue(result)
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await expect(run(host, ['request-review', '7', '--reviewer', 'alice', '--reviewer', 'bob'])).rejects.toThrow(
+      'reviewer request failed for: bob',
+    )
+    expect(output).toHaveBeenCalledWith(JSON.stringify(result) + '\n')
+    output.mockRestore()
   })
 })

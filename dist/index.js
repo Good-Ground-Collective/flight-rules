@@ -275,6 +275,15 @@ var pullRequestBuilder = new DefaultPullRequestBuilder();
 var GhPullRequestHostPropsSchema = z5.object({
   repo: z5.string().regex(/^[^/\s]+\/[^/\s]+$/, 'expected "owner/repo"')
 });
+var GhPullRequestListSchema = z5.array(
+  z5.object({
+    number: z5.number(),
+    url: z5.string(),
+    headRefName: z5.string(),
+    baseRefName: z5.string(),
+    title: z5.string()
+  })
+);
 var pullUrl = /\/pull\/(\d+)\b/;
 var GhOutputParseError = class extends Error {
   name = "GhOutputParseError";
@@ -325,6 +334,47 @@ var GhPullRequestHost = class {
       ])
     );
     return { url: stdout.trim() };
+  }
+  async listOpenPullRequestsForTickets(ticketIds) {
+    const { stdout } = await this.execFile("gh", [
+      "pr",
+      "list",
+      "--repo",
+      this.repo,
+      "--state",
+      "open",
+      "--limit",
+      "200",
+      "--json",
+      "number,url,headRefName,baseRefName,title"
+    ]);
+    const open = GhPullRequestListSchema.parse(JSON.parse(stdout));
+    return ticketIds.flatMap((ticket) => {
+      const id = this.escapeRegExp(ticket);
+      const branch = new RegExp(`^[a-z]+/${id}(-|$)`);
+      const titleScope = new RegExp(`^[a-z]+\\(${id}\\)!?:`);
+      return open.filter((candidate) => branch.test(candidate.headRefName) || titleScope.test(candidate.title)).map((candidate) => ({ ticket, ...candidate }));
+    });
+  }
+  async requestReviewers(number, logins) {
+    const result = { number, requested: [], failed: [] };
+    for (const login of logins) {
+      try {
+        await this.execFile("gh", ["pr", "edit", String(number), "--repo", this.repo, "--add-reviewer", login]);
+        result.requested.push(login);
+      } catch (err) {
+        result.failed.push({ login, error: this.describeFailure(err) });
+      }
+    }
+    return result;
+  }
+  describeFailure(err) {
+    const stderr = this.readStringProperty(err, "stderr")?.trim();
+    const text = stderr !== void 0 && stderr.length > 0 ? stderr : err instanceof Error ? err.message : String(err);
+    return text.split("\n")[0]?.trim() ?? text;
+  }
+  escapeRegExp(text) {
+    return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
   async runCreate(template, title, bodyFile, attach) {
     const args = [
@@ -994,7 +1044,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.56.0";
+var appVersion = false ? "0.0.0-dev" : "1.58.0";
 
 // src/shared/ariadne/ariadne-transport.ts
 var FetchAriadneTransport = class {

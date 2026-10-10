@@ -30684,6 +30684,15 @@ var pullRequestBuilder = new DefaultPullRequestBuilder();
 var GhPullRequestHostPropsSchema = external_exports.object({
   repo: external_exports.string().regex(/^[^/\s]+\/[^/\s]+$/, 'expected "owner/repo"')
 });
+var GhPullRequestListSchema = external_exports.array(
+  external_exports.object({
+    number: external_exports.number(),
+    url: external_exports.string(),
+    headRefName: external_exports.string(),
+    baseRefName: external_exports.string(),
+    title: external_exports.string()
+  })
+);
 var pullUrl = /\/pull\/(\d+)\b/;
 var GhOutputParseError = class extends Error {
   name = "GhOutputParseError";
@@ -30734,6 +30743,47 @@ var GhPullRequestHost = class {
       ])
     );
     return { url: stdout.trim() };
+  }
+  async listOpenPullRequestsForTickets(ticketIds) {
+    const { stdout } = await this.execFile("gh", [
+      "pr",
+      "list",
+      "--repo",
+      this.repo,
+      "--state",
+      "open",
+      "--limit",
+      "200",
+      "--json",
+      "number,url,headRefName,baseRefName,title"
+    ]);
+    const open2 = GhPullRequestListSchema.parse(JSON.parse(stdout));
+    return ticketIds.flatMap((ticket) => {
+      const id = this.escapeRegExp(ticket);
+      const branch = new RegExp(`^[a-z]+/${id}(-|$)`);
+      const titleScope = new RegExp(`^[a-z]+\\(${id}\\)!?:`);
+      return open2.filter((candidate) => branch.test(candidate.headRefName) || titleScope.test(candidate.title)).map((candidate) => ({ ticket, ...candidate }));
+    });
+  }
+  async requestReviewers(number4, logins) {
+    const result = { number: number4, requested: [], failed: [] };
+    for (const login of logins) {
+      try {
+        await this.execFile("gh", ["pr", "edit", String(number4), "--repo", this.repo, "--add-reviewer", login]);
+        result.requested.push(login);
+      } catch (err) {
+        result.failed.push({ login, error: this.describeFailure(err) });
+      }
+    }
+    return result;
+  }
+  describeFailure(err) {
+    const stderr = this.readStringProperty(err, "stderr")?.trim();
+    const text6 = stderr !== void 0 && stderr.length > 0 ? stderr : err instanceof Error ? err.message : String(err);
+    return text6.split("\n")[0]?.trim() ?? text6;
+  }
+  escapeRegExp(text6) {
+    return text6.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
   async runCreate(template, title, bodyFile, attach) {
     const args = [
@@ -48947,6 +48997,17 @@ function createPrCommand(getHost) {
     const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
     const result = await getHost().commentOnPullRequest(Number(number4), body, { attach: opts.attach });
     process.stdout.write(JSON.stringify(result) + "\n");
+  });
+  pr.command("list").exitOverride().requiredOption("--ticket <id>", "ticket id (repeatable)", collect, []).action(async (opts) => {
+    const matches = await getHost().listOpenPullRequestsForTickets(opts.ticket);
+    process.stdout.write(JSON.stringify(matches) + "\n");
+  });
+  pr.command("request-review").exitOverride().argument("<number>", "pull request number").requiredOption("--reviewer <login>", "reviewer to request (repeatable)", collect, []).action(async (number4, opts) => {
+    const result = await getHost().requestReviewers(Number(number4), opts.reviewer);
+    process.stdout.write(JSON.stringify(result) + "\n");
+    if (result.failed.length > 0) {
+      throw new Error(`reviewer request failed for: ${result.failed.map((f) => f.login).join(", ")}`);
+    }
   });
   return pr;
 }
