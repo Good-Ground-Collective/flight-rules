@@ -90,12 +90,90 @@ describe("AriadnePackets", () => {
     [403, "agents_opt_in_required", "turn on Agents"],
     [409, "revision_conflict", "flight-rules packet get"],
     [409, "packet_exists", "flight-rules packet update"],
+    [409, "packet_id_taken", "flight-rules packet new-id"],
     [422, "reviewer_not_found", "flight-rules packet reviewers"],
   ])("maps %s %s to a next step", async (status, code, step) => {
     const transport = new FakeTransport(FakeTransport.json(status, packetContract.errors[code]));
     const error = await failure(packets(transport).get("wave-2-checkout"));
     expect(error.message).toContain(code);
     expect(error.message).toContain(step);
+  });
+
+  describe("create ids", () => {
+    const withoutId = Object.fromEntries(Object.entries(packetContract.createRequest).filter(([key]) => key !== "id"));
+    const taken = () => FakeTransport.json(409, packetContract.errors["packet_id_taken"]);
+    const sentIds = (transport: FakeTransport) => transport.bodies().map((body) => (body as { id: string }).id);
+
+    it("generates an id from the title when the packet has none", async () => {
+      const transport = new FakeTransport(FakeTransport.json(200, packetContract.storedPacket));
+      await packets(transport).create(withoutId);
+      expect(sentIds(transport)).toHaveLength(1);
+      expect(sentIds(transport)[0]).toMatch(/^checkout-rewrite-wave-2-[0-9a-f]{8}$/);
+    });
+
+    it("keeps the id the packet already has", async () => {
+      const transport = new FakeTransport(FakeTransport.json(200, packetContract.storedPacket));
+      await packets(transport).create(packetContract.createRequest);
+      expect(sentIds(transport)).toEqual(["wave-2-checkout"]);
+    });
+
+    it("resends the same id and body when a 5xx is retried", async () => {
+      const transport = new FakeTransport(FakeTransport.json(503, {}), FakeTransport.json(200, packetContract.storedPacket));
+      await packets(transport).create(withoutId);
+      const [first, second] = sentIds(transport);
+      expect(transport.requests).toHaveLength(2);
+      expect(first).toBe(second);
+    });
+
+    it("regenerates the suffix once after packet_id_taken and returns the stored packet", async () => {
+      const stored = { ...packetContract.storedPacket, id: "ignored" };
+      const transport = new FakeTransport(taken(), FakeTransport.json(200, stored));
+      const result = await packets(transport).create(withoutId);
+      const [first, second] = sentIds(transport);
+      expect(sentIds(transport)).toHaveLength(2);
+      expect(first).toMatch(/^checkout-rewrite-wave-2-[0-9a-f]{8}$/);
+      expect(second).toMatch(/^checkout-rewrite-wave-2-[0-9a-f]{8}$/);
+      expect(second).not.toBe(first);
+      expect(result).toEqual(stored);
+    });
+
+    it("keeps the slug of a file-supplied id when regenerating", async () => {
+      const transport = new FakeTransport(taken(), FakeTransport.json(200, packetContract.storedPacket));
+      await packets(transport).create(packetContract.createRequest);
+      const [first, second] = sentIds(transport);
+      expect(first).toBe("wave-2-checkout");
+      expect(second).toMatch(/^wave-2-checkout-[0-9a-f]{8}$/);
+    });
+
+    it("fails on a second packet_id_taken, naming the ids tried", async () => {
+      const transport = new FakeTransport(taken(), taken(), FakeTransport.json(200, packetContract.storedPacket));
+      const error = await failure(packets(transport).create(withoutId));
+      const [first, second] = sentIds(transport);
+      expect(transport.requests).toHaveLength(2);
+      expect(error.message).toContain("packet_id_taken");
+      expect(error.message).toContain(String(first));
+      expect(error.message).toContain(String(second));
+      expect(error.message).toContain("flight-rules packet new-id");
+    });
+
+    it("never retries packet_exists", async () => {
+      const transport = new FakeTransport(FakeTransport.json(409, packetContract.errors["packet_exists"]));
+      await failure(packets(transport).create(withoutId));
+      expect(transport.requests).toHaveLength(1);
+    });
+
+    it("never retries an unknown 409", async () => {
+      const transport = new FakeTransport(FakeTransport.json(409, { error: "surprise", message: "x" }));
+      const error = await failure(packets(transport).create(withoutId));
+      expect(transport.requests).toHaveLength(1);
+      expect(error.message).toContain("409");
+    });
+
+    it("sends nothing for a packet that has neither id nor title", async () => {
+      const transport = new FakeTransport();
+      await failure(packets(transport).create({}));
+      expect(transport.requests).toHaveLength(0);
+    });
   });
 
   it("explains a network failure", async () => {

@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { Command } from "commander";
 import { z } from "zod";
 import type { AriadnePackets } from "../../ariadne/ariadne-packets.js";
+import { packetIdGenerator } from "../../ariadne/packet-id-generator.js";
 
 interface FileOptions {
   file: string;
@@ -90,11 +91,22 @@ export class PacketCommandFactory {
 
     packet
       .command("create")
-      .description("publish a packet from a JSON file; prints the stored packet. Safe to repeat: create is idempotent on the packet id")
+      .description(
+        "publish a packet from a JSON file; prints the stored packet. An id is generated from the title when the file has none. Safe to repeat with the same id: create is idempotent",
+      )
       .requiredOption("--file <path>", "the packet JSON")
       .exitOverride()
       .action(async (opts: FileOptions) => {
         print(await getPackets().create(new PacketFile(opts.file).read()));
+      });
+
+    packet
+      .command("new-id")
+      .description('print {"id": "<slug>-<8 hex>"}: a globally unique packet id to write into the packet file once and reuse for every retry')
+      .requiredOption("--title <title>", "the packet title")
+      .exitOverride()
+      .action((opts: { title: string }) => {
+        print({ id: packetIdGenerator.generate(opts.title) });
       });
 
     packet
