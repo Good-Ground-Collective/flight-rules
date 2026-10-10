@@ -31485,7 +31485,15 @@ var PacketAnchorSchema = external_exports.strictObject({
   line: PositiveIntSchema,
   startLine: optionalSchema(PositiveIntSchema),
   side: external_exports.enum(anchorSides)
+}).refine((anchor2) => anchor2.startLine === void 0 || anchor2.startLine < anchor2.line, {
+  path: ["startLine"],
+  message: "must be before line"
 });
+var SignOffTimeSchema = external_exports.string().regex(/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,3})?Z$/, "must be an ISO 8601 UTC time ending in Z").refine((value) => {
+  const [year = 0, month = 0, day = 0] = value.slice(0, 10).split("-").map(Number);
+  const date5 = new Date(Date.UTC(year, month - 1, day));
+  return date5.getUTCFullYear() === year && date5.getUTCMonth() === month - 1 && date5.getUTCDate() === day;
+}, "must be a real calendar date");
 var FocusAreaSchema = external_exports.strictObject({
   id: AgentRecordIdSchema,
   kind: external_exports.enum(focusAreaKinds),
@@ -31499,7 +31507,7 @@ var PacketPrSchema = external_exports.strictObject({
   headSha: HeadShaSchema,
   title: oneLineTextSchema(packetLimits.title),
   ticket: optionalSchema(oneLineTextSchema(packetLimits.ticket)),
-  signOff: external_exports.strictObject({ at: textSchema(64), headSha: HeadShaSchema }).nullable(),
+  signOff: external_exports.strictObject({ at: SignOffTimeSchema, headSha: HeadShaSchema }).nullable().optional(),
   focusAreas: external_exports.array(FocusAreaSchema).max(packetLimits.focusAreas, `up to ${packetLimits.focusAreas} focus areas per PR`)
 });
 var PacketInputSchema = external_exports.strictObject({
@@ -31515,7 +31523,7 @@ var PacketInputSchema = external_exports.strictObject({
 var PacketUpdateSchema = external_exports.strictObject({
   expectedRevision: external_exports.number().int().nonnegative(),
   operationId: OperationIdSchema,
-  packet: PacketInputSchema
+  packet: PacketInputSchema.omit({ id: true })
 });
 var GithubSnapshotSchema = external_exports.looseObject({ id: external_exports.union([external_exports.string(), external_exports.number()]), login: external_exports.string() });
 var PacketSchema = external_exports.looseObject({
@@ -31531,6 +31539,7 @@ var PacketSchema = external_exports.looseObject({
   updatedAt: external_exports.string()
 });
 var ReviewerSchema = external_exports.looseObject({ id: external_exports.string(), name: external_exports.string(), github: GithubSnapshotSchema });
+var PacketResponseSchema = external_exports.looseObject({ packet: PacketSchema }).transform((response) => response.packet);
 var ReviewerListResponseSchema = external_exports.looseObject({ reviewers: external_exports.array(ReviewerSchema) });
 
 // src/shared/ariadne/ariadne-transport.ts
@@ -31595,18 +31604,18 @@ var AriadneClient = class {
   /** POST /v1/review-packets: ids are global; replaying an id and body is idempotent, a different body is 409 `packet_exists`, another author's id is 409 `packet_id_taken`. */
   async createPacket(input2) {
     const body = this.validate(PacketInputSchema, input2, "packet");
-    return this.request("POST", "/v1/review-packets", PacketSchema, body);
+    return this.request("POST", "/v1/review-packets", PacketResponseSchema, body);
   }
   /** PUT /v1/review-packets/{id}: a stale `expectedRevision` is 409 `revision_conflict`; a repeated `operationId` is replayed. */
   async updatePacket(id, input2) {
     const packetId = this.validate(PacketIdSchema, id, "packet id");
     const body = this.validate(PacketUpdateSchema, input2, "packet update");
-    return this.request("PUT", `/v1/review-packets/${encodeURIComponent(packetId)}`, PacketSchema, body);
+    return this.request("PUT", `/v1/review-packets/${encodeURIComponent(packetId)}`, PacketResponseSchema, body);
   }
   /** GET /v1/review-packets/{id}. */
   async getPacket(id) {
     const packetId = this.validate(PacketIdSchema, id, "packet id");
-    return this.request("GET", `/v1/review-packets/${encodeURIComponent(packetId)}`, PacketSchema);
+    return this.request("GET", `/v1/review-packets/${encodeURIComponent(packetId)}`, PacketResponseSchema);
   }
   /** GET /v1/review-packets/reviewers: active members with a linked GitHub login. */
   async listReviewers() {
@@ -47989,19 +47998,44 @@ function createBoardCommand(getBoard, getTokens = () => new AriadneTokenStore(),
 }
 
 // src/shared/commands/packet/command.ts
-import { readFileSync as readFileSync8 } from "node:fs";
-var serverOwnedFields = /* @__PURE__ */ new Set(["authorId", "status", "revision", "createdAt", "updatedAt"]);
+import { readFileSync as readFileSync8, writeFileSync as writeFileSync5 } from "node:fs";
+
+// src/shared/decimal-integer.ts
+var DecimalIntegerParser = class {
+  /** A pull request number or similar count that starts at 1. */
+  positive(value) {
+    return this.parse(value, /^[1-9][0-9]*$/, "must be a positive whole number written in decimal digits");
+  }
+  /** A revision, which starts at 0. */
+  nonNegative(value) {
+    return this.parse(value, /^(0|[1-9][0-9]*)$/, "must be a whole number from 0 written in decimal digits");
+  }
+  parse(value, pattern, message) {
+    const parsed = Number(value);
+    if (!pattern.test(value) || !Number.isSafeInteger(parsed)) throw new InvalidArgumentError(message);
+    return parsed;
+  }
+};
+var decimalIntegers = new DecimalIntegerParser();
+
+// src/shared/commands/packet/command.ts
+var serverOwnedFields = /* @__PURE__ */ new Set(["id", "authorId", "status", "revision", "createdAt", "updatedAt"]);
 var ReviewerEntrySchema = external_exports.union([
   external_exports.string(),
   external_exports.looseObject({ github: external_exports.looseObject({ login: external_exports.string() }) }).transform((reviewer) => reviewer.github.login)
 ]);
-var UpdateFileSchema = external_exports.looseObject({ revision: external_exports.number().int().optional(), reviewers: external_exports.array(ReviewerEntrySchema).optional() }).transform((file2) => ({
+var UpdateFileSchema = external_exports.looseObject({ id: external_exports.string().optional(), revision: external_exports.number().int().optional(), reviewers: external_exports.array(ReviewerEntrySchema).optional() }).transform((file2) => ({
+  id: file2.id,
   revision: file2.revision,
   packet: {
     ...Object.fromEntries(Object.entries(file2).filter(([key]) => !serverOwnedFields.has(key))),
     ...file2.reviewers !== void 0 ? { reviewers: file2.reviewers } : {}
   }
 }));
+var PacketIdWriteError = class extends Error {
+  name = "PacketIdWriteError";
+};
+var JsonObjectSchema = external_exports.record(external_exports.string(), external_exports.unknown());
 var PacketFile = class {
   constructor(path3) {
     this.path = path3;
@@ -48019,6 +48053,17 @@ var PacketFile = class {
       return JSON.parse(text6);
     } catch (err) {
       throw new Error(`${this.path} is not valid JSON: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
+    }
+  }
+  /** Runs after the packet is stored, so a failure says so and names the id the file still needs. */
+  writeId(file2, id) {
+    try {
+      writeFileSync5(this.path, JSON.stringify({ ...file2, id }, null, 2) + "\n");
+    } catch (err) {
+      throw new PacketIdWriteError(
+        `packet ${id} was published, but its id could not be written to ${this.path}: ${err instanceof Error ? err.message : String(err)}; add "id": "${id}" to the file before re-running, or a re-run publishes a second packet`,
+        { cause: err }
+      );
     }
   }
   readForUpdate() {
@@ -48047,16 +48092,28 @@ var PacketCommandFactory = class {
       process.stdout.write(JSON.stringify(value) + "\n");
     };
     packet.command("create").description(
-      "publish a packet from a JSON file; prints the stored packet. An id is generated from the title when the file has none. Safe to repeat with the same id: create is idempotent"
+      "publish a packet from a JSON file; prints the stored packet. An id is generated from the title when the file has none, and the published id is written back into the file so a re-run replays instead of creating a second packet"
     ).requiredOption("--file <path>", "the packet JSON").exitOverride().action(async (opts) => {
-      print(await getPackets().create(new PacketFile(opts.file).read()));
+      const packetFile = new PacketFile(opts.file);
+      const input2 = packetFile.read();
+      const published = await getPackets().create(input2);
+      print(published);
+      const written = JsonObjectSchema.safeParse(input2);
+      if (written.success && written.data.id !== published.id) packetFile.writeId(written.data, published.id);
     });
     packet.command("new-id").description('print {"id": "<slug>-<8 hex>"}: a globally unique packet id to write into the packet file once and reuse for every retry').requiredOption("--title <title>", "the packet title").exitOverride().action((opts) => {
       print({ id: packetIdGenerator.generate(opts.title) });
     });
-    packet.command("update").description("revise a packet from a JSON file; a stale revision fails with 409 revision_conflict").argument("<id>", "the packet id").requiredOption("--file <path>", "the packet JSON; `packet get` output works, and its revision is used").option("--expected-revision <n>", "the revision you read; defaults to the file's `revision`").exitOverride().action(async (id, opts) => {
+    packet.command("update").description("revise a packet from a JSON file; a stale revision fails with 409 revision_conflict").argument("<id>", "the packet id").requiredOption("--file <path>", "the packet JSON; `packet get` output works, and its revision is used").option(
+      "--expected-revision <n>",
+      "the revision you read, in decimal digits; defaults to the file's `revision`",
+      (value) => decimalIntegers.nonNegative(value)
+    ).exitOverride().action(async (id, opts) => {
       const file2 = new PacketFile(opts.file).readForUpdate();
-      const expectedRevision = opts.expectedRevision !== void 0 ? Number(opts.expectedRevision) : file2.revision;
+      if (file2.id !== void 0 && file2.id !== id) {
+        throw new Error(`${opts.file} holds packet ${file2.id} but the command names ${id}; nothing was sent`);
+      }
+      const expectedRevision = opts.expectedRevision ?? file2.revision;
       if (expectedRevision === void 0 || !Number.isInteger(expectedRevision) || expectedRevision < 0) {
         throw new Error(
           "no expected revision: pass --expected-revision <n>, or use a file with a numeric `revision` such as `flight-rules packet get` output; nothing was sent"
@@ -49422,7 +49479,7 @@ function createGitCommand(getExecutor) {
 }
 
 // src/git/commands/message/command.ts
-import { mkdtempSync, readFileSync as readFileSync14, writeFileSync as writeFileSync5 } from "node:fs";
+import { mkdtempSync, readFileSync as readFileSync14, writeFileSync as writeFileSync6 } from "node:fs";
 import { tmpdir as tmpdir2 } from "node:os";
 import { join as join10 } from "node:path";
 function createCommitMessageCommand() {
@@ -49440,7 +49497,7 @@ function createCommitMessageCommand() {
       agentEnv: process.env["AI_AGENT"]
     }).build(input2);
     const path3 = opts.out ?? join10(mkdtempSync(join10(tmpdir2(), "flight-rules-commit-")), "message.txt");
-    writeFileSync5(path3, `${message}
+    writeFileSync6(path3, `${message}
 `);
     process.stdout.write(JSON.stringify({ path: path3, message }) + "\n");
   });
@@ -49477,17 +49534,19 @@ function createPrCommand(getHost) {
     const created = await getHost().createPullRequest(template, { attach: opts.attach });
     process.stdout.write(JSON.stringify(created) + "\n");
   });
-  pr.command("comment").exitOverride().argument("<number>", "pull request number").option("--body <body>", "comment body (or use --body-file)").option("--body-file <path>", "read the comment body from a file").option("--attach <spec>", "file to attach, as <path>#<caption> (repeatable)", collect, []).action(async (number4, opts) => {
+  pr.command("comment").exitOverride().argument("<number>", "pull request number", (value) => decimalIntegers.positive(value)).option("--body <body>", "comment body (or use --body-file)").option("--body-file <path>", "read the comment body from a file").option("--attach <spec>", "file to attach, as <path>#<caption> (repeatable)", collect, []).action(async (number4, opts) => {
     const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
-    const result = await getHost().commentOnPullRequest(Number(number4), body, { attach: opts.attach });
+    const result = await getHost().commentOnPullRequest(number4, body, { attach: opts.attach });
     process.stdout.write(JSON.stringify(result) + "\n");
   });
-  pr.command("list").exitOverride().requiredOption("--ticket <id>", "ticket id (repeatable)", collect, []).action(async (opts) => {
+  pr.command("list").exitOverride().option("--ticket <id>", "ticket id (repeatable, required)", collect, []).action(async (opts, command) => {
+    if (opts.ticket.length === 0) command.error("pr list needs at least one --ticket <id>");
     const matches = await getHost().listOpenPullRequestsForTickets(opts.ticket);
     process.stdout.write(JSON.stringify(matches) + "\n");
   });
-  pr.command("request-review").exitOverride().argument("<number>", "pull request number").requiredOption("--reviewer <login>", "reviewer to request (repeatable)", collect, []).action(async (number4, opts) => {
-    const result = await getHost().requestReviewers(Number(number4), opts.reviewer);
+  pr.command("request-review").exitOverride().argument("<number>", "pull request number", (value) => decimalIntegers.positive(value)).option("--reviewer <login>", "reviewer to request (repeatable, required)", collect, []).action(async (number4, opts, command) => {
+    if (opts.reviewer.length === 0) command.error("pr request-review needs at least one --reviewer <login>");
+    const result = await getHost().requestReviewers(number4, opts.reviewer);
     process.stdout.write(JSON.stringify(result) + "\n");
     if (result.failed.length > 0) {
       throw new Error(`reviewer request failed for: ${result.failed.map((f) => f.login).join(", ")}`);

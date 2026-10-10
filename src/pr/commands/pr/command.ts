@@ -1,6 +1,7 @@
 import { Command } from 'commander'
 import { PullRequestTemplateSchema } from '../../../git/pr-template/pr-template.js'
 import { collect } from '../../../shared/collect.js'
+import { decimalIntegers } from '../../../shared/decimal-integer.js'
 import { resolveBody } from '../../../tasks/commands/resolve-body.js'
 import type { PullRequestHost } from '../../pull-request-host/pull-request-host.js'
 
@@ -73,30 +74,32 @@ export function createPrCommand(getHost: () => PullRequestHost): Command {
 
   pr.command('comment')
     .exitOverride()
-    .argument('<number>', 'pull request number')
+    .argument('<number>', 'pull request number', (value: string) => decimalIntegers.positive(value))
     .option('--body <body>', 'comment body (or use --body-file)')
     .option('--body-file <path>', 'read the comment body from a file')
     .option('--attach <spec>', 'file to attach, as <path>#<caption> (repeatable)', collect, [])
-    .action(async (number: string, opts: PrCommentOptions) => {
+    .action(async (number: number, opts: PrCommentOptions) => {
       const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile })
-      const result = await getHost().commentOnPullRequest(Number(number), body, { attach: opts.attach })
+      const result = await getHost().commentOnPullRequest(number, body, { attach: opts.attach })
       process.stdout.write(JSON.stringify(result) + '\n')
     })
 
   pr.command('list')
     .exitOverride()
-    .requiredOption('--ticket <id>', 'ticket id (repeatable)', collect, [])
-    .action(async (opts: PrListOptions) => {
+    .option('--ticket <id>', 'ticket id (repeatable, required)', collect, [])
+    .action(async (opts: PrListOptions, command: Command) => {
+      if (opts.ticket.length === 0) command.error('pr list needs at least one --ticket <id>')
       const matches = await getHost().listOpenPullRequestsForTickets(opts.ticket)
       process.stdout.write(JSON.stringify(matches) + '\n')
     })
 
   pr.command('request-review')
     .exitOverride()
-    .argument('<number>', 'pull request number')
-    .requiredOption('--reviewer <login>', 'reviewer to request (repeatable)', collect, [])
-    .action(async (number: string, opts: PrRequestReviewOptions) => {
-      const result = await getHost().requestReviewers(Number(number), opts.reviewer)
+    .argument('<number>', 'pull request number', (value: string) => decimalIntegers.positive(value))
+    .option('--reviewer <login>', 'reviewer to request (repeatable, required)', collect, [])
+    .action(async (number: number, opts: PrRequestReviewOptions, command: Command) => {
+      if (opts.reviewer.length === 0) command.error('pr request-review needs at least one --reviewer <login>')
+      const result = await getHost().requestReviewers(number, opts.reviewer)
       process.stdout.write(JSON.stringify(result) + '\n')
       if (result.failed.length > 0) {
         throw new Error(`reviewer request failed for: ${result.failed.map((f) => f.login).join(', ')}`)

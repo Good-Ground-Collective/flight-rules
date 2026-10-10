@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { AriadneClient, AriadneError } from "../ariadne-client.js";
 import { defaultAriadneUrl } from "../ariadne.schema.js";
-import { FakeTransport, agentToken, contract, packetContract } from "./fake-transport.js";
+import { FakeTransport, agentToken, contract, packetContract, packetEnvelope } from "./fake-transport.js";
 
 // Payloads and paths are pinned to think-lp/ariadne docs/agents-api.md,
 // contract version 1. The request examples below are the contract's own.
@@ -261,10 +261,10 @@ describe("AriadneClient review packets", () => {
   const withField = (record: Record<string, unknown>, extra: Record<string, unknown>) => ({ ...record, ...extra });
 
   it("creates with POST and the exact body, returning the stored packet", async () => {
-    const transport = new FakeTransport(FakeTransport.json(200, packetContract.storedPacket));
+    const transport = new FakeTransport(FakeTransport.json(200, packetEnvelope));
     const response = await client(transport).createPacket(create);
 
-    expect(response).toMatchObject({ id: "wave-2-checkout", revision: 3 });
+    expect(response).toMatchObject({ id: "rp-frt-2400", revision: 1 });
     expect(transport.requests[0]).toMatchObject({ method: "POST", url: base });
     expect(transport.requests[0]?.headers).toMatchObject({
       Authorization: `Bearer ${agentToken}`,
@@ -274,27 +274,27 @@ describe("AriadneClient review packets", () => {
   });
 
   it("updates with PUT to the packet's own path", async () => {
-    const transport = new FakeTransport(FakeTransport.json(200, packetContract.storedPacket));
-    await client(transport).updatePacket("wave-2-checkout", update);
+    const transport = new FakeTransport(FakeTransport.json(200, packetEnvelope));
+    await client(transport).updatePacket("rp-frt-2400", update);
 
-    expect(transport.requests[0]).toMatchObject({ method: "PUT", url: `${base}/wave-2-checkout` });
+    expect(transport.requests[0]).toMatchObject({ method: "PUT", url: `${base}/rp-frt-2400` });
     expect(transport.bodies()[0]).toEqual(update);
   });
 
   it("gets a packet and lists reviewers with no body", async () => {
     const transport = new FakeTransport(
-      FakeTransport.json(200, packetContract.storedPacket),
+      FakeTransport.json(200, packetEnvelope),
       FakeTransport.json(200, packetContract.reviewerList),
     );
-    await client(transport).getPacket("wave-2-checkout");
+    await client(transport).getPacket("rp-frt-2400");
     const list = await client(transport).listReviewers();
 
     expect(transport.requests.map((r) => `${r.method} ${r.url}`)).toEqual([
-      `GET ${base}/wave-2-checkout`,
+      `GET ${base}/rp-frt-2400`,
       `GET ${base}/reviewers`,
     ]);
     expect(transport.requests.every((r) => r.body === undefined)).toBe(true);
-    expect(list.reviewers[0]).toMatchObject({ id: "member-1", name: "Octo Cat", github: { id: 583231, login: "octocat" } });
+    expect(list.reviewers[0]).toMatchObject({ id: "alex-morgan", name: "Alex Morgan", github: { id: "2001", login: "alex-example" } });
   });
 
   it("rejects an unknown field such as diff or snippet without sending anything", async () => {
@@ -322,6 +322,31 @@ describe("AriadneClient review packets", () => {
     expect(transport.requests).toHaveLength(0);
   });
 
+  it.each([
+    ["equal to line", { startLine: 12, line: 12 }],
+    ["after line", { startLine: 13, line: 12 }],
+  ])("rejects an anchor whose startLine is %s without sending anything", async (_name, lines) => {
+    const transport = new FakeTransport();
+    const prs = (create["prs"] as Record<string, unknown>[]).map((pr, index) =>
+      index === 0
+        ? { ...pr, focusAreas: [{ id: "fa-1", kind: "other", title: "t", rationale: "r", anchors: [{ path: "a.ts", side: "RIGHT", ...lines }] }] }
+        : pr,
+    );
+    const error = await rejection(client(transport).createPacket(withField(create, { prs })));
+    expect(error.message).toContain("startLine: must be before line");
+    expect(transport.requests).toHaveLength(0);
+  });
+
+  it.each(["2026-02-30T00:00:00Z", "2026-10-10T25:00:00Z", "2026-10-10T11:61:00Z", "2026-10-10T11:30:00.0000Z"])("rejects the sign-off time %s", async (at) => {
+    const transport = new FakeTransport();
+    const prs = (create["prs"] as Record<string, unknown>[]).map((pr, index) =>
+      index === 0 ? { ...pr, signOff: { at, headSha: pr["headSha"] } } : pr,
+    );
+    const error = await rejection(client(transport).createPacket(withField(create, { prs })));
+    expect(error.message).toContain("signOff.at");
+    expect(transport.requests).toHaveLength(0);
+  });
+
   it("rejects a malformed packet id before building a path", async () => {
     const transport = new FakeTransport();
     await rejection(client(transport).getPacket("../etc"));
@@ -330,13 +355,13 @@ describe("AriadneClient review packets", () => {
   });
 
   it("retries once after a 5xx and never after a 4xx", async () => {
-    const retried = new FakeTransport(FakeTransport.json(503, { error: "unavailable" }), FakeTransport.json(200, packetContract.storedPacket));
-    await client(retried).updatePacket("wave-2-checkout", update);
+    const retried = new FakeTransport(FakeTransport.json(503, { error: "unavailable" }), FakeTransport.json(200, packetEnvelope));
+    await client(retried).updatePacket("rp-frt-2400", update);
     expect(retried.requests).toHaveLength(2);
     expect(retried.bodies()[1]).toEqual(retried.bodies()[0]);
 
     const conflict = new FakeTransport(FakeTransport.json(409, packetContract.errors["revision_conflict"]));
-    const error = await rejection(client(conflict).updatePacket("wave-2-checkout", update));
+    const error = await rejection(client(conflict).updatePacket("rp-frt-2400", update));
     expect(error).toMatchObject({ failure: "http", status: 409, code: "revision_conflict" });
     expect(conflict.requests).toHaveLength(1);
   });

@@ -45,9 +45,10 @@ export const agentToken = `ariadne_agent_0123456789abcdef_${"A".repeat(43)}`;
 
 export interface PacketContractRecords {
   createRequest: Record<string, unknown>;
-  storedPacket: Record<string, unknown>;
+  createResponse: { packet: Record<string, unknown>; created: boolean };
   updateRequest: Record<string, unknown>;
   reviewerList: Record<string, unknown>;
+  packetList: Record<string, unknown>;
   errors: Record<string, Record<string, unknown>>;
 }
 
@@ -55,3 +56,9 @@ export interface PacketContractRecords {
 export const packetContract: PacketContractRecords = JSON.parse(
   readFileSync(join(import.meta.dirname, "fixtures", "review-packets-contract.json"), "utf-8"),
 );
+
+/** The packet a create answers with, as the contract prints it. */
+export const storedPacket: Record<string, unknown> = packetContract.createResponse.packet;
+
+/** A read or replace response: `{packet}`. */
+export const packetEnvelope: Record<string, unknown> = { packet: storedPacket };
