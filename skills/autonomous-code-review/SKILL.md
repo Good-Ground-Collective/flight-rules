@@ -303,6 +303,10 @@ merged defect.
 
 The review **body** carries, in this order:
 
+0. **The marker** — the first line of the body is exactly
+   `<!-- flight-rules:autonomous-code-review -->`. The author's own session
+   posts this review, so it can't be found by login; `guided-code-review`'s
+   self-review mode finds it by this marker.
 1. **What the PR does** — a short plain-language summary.
 2. **How it was reviewed** — the lint command you ran (or why none ran), each
    Tier A mandate's coverage state, and any scoping from the stacked-PR or
