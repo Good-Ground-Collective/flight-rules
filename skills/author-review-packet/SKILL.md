@@ -51,6 +51,17 @@ flight-rules epic review-plan <id>
 - explicit `owner/repo#n` PRs the author lists, with their dependency order if
   they have one.
 
+An initiative payload (`flight-rules initiative review-plan <id>`) has the same
+shape and is handled the same way.
+
+Check the payload before using it:
+
+- `route: "incomplete"` means blocked tickets have no open PR. Report the
+  tickets in `missing` and stop. Do not build a packet from a partial set.
+- Skip any `blocked` entry with `pr: null` or no `repo`, and say which ones you
+  skipped. Never fail on them. For a PR whose `repo` is missing, ask the author
+  for the `owner/repo` before including it.
+
 For each PR, fetch its facts with a read-only call:
 
 ```bash
@@ -106,7 +117,7 @@ For each PR, in the confirmed order:
    note it and continue with the next PR.
 
 If the PR head moves after the sign-off, the sign-off no longer covers it:
-re-run the self-review for that PR.
+re-run the self-review for that PR. Step 6 checks for this before publishing.
 
 ---
 
@@ -123,10 +134,11 @@ each login to a member when it publishes.
 Get the packet id once, from the title:
 
 ```bash
-flight-rules packet new-id --title <title>
+flight-rules packet new-id --title "<title>"
 ```
 
-It prints `{"id": "<slug>-<8 hex>"}`. Ids are unique across every author. Do
+Pass the title as one quoted argument. It comes from PR text, so never let the
+shell split or expand it. It prints `{"id": "<slug>-<8 hex>"}`. Ids are unique across every author. Do
 not invent an id of your own.
 
 Build the packet JSON:
@@ -135,6 +147,17 @@ Build the packet JSON:
 - `prs`: the entries in sequence order, each with `repo`, `number`, `headSha`,
   `title`, optional `ticket`, `signOff` (`{at, headSha}`) and `focusAreas`;
 - `reviewers`: the chosen GitHub logins.
+
+Before the author confirms, re-check every PR's head against its sign-off:
+
+```bash
+gh pr view <n> --repo <owner/repo> --json headRefOid
+```
+
+If `headRefOid` differs from that PR's `signOff.headSha`, the sign-off is
+stale. Do not publish it. Re-run that PR's self-review (Step 4) and use the new
+sign-off, or, if the author confirms, drop the PR from the packet. Do the same
+check again before `packet update`.
 
 Show the author the full packet: the overview, the ordered PRs with head shas
 and focus areas, and the reviewers. Publish only after explicit confirmation.
@@ -157,7 +180,7 @@ same packet instead of publishing a duplicate.
 
 Failures are loud and exit non-zero with a next step. Read the error code:
 
-- `packet_id_taken` a second time: run `flight-rules packet new-id --title <title>` again, write the new id into the file, and retry.
+- `packet_id_taken` a second time: run `flight-rules packet new-id --title "<title>"` again, write the new id into the file, and retry.
 - `packet_exists`: the same author already used this id with different content.
   Do not retry. Revise the existing packet as below.
 - 422 `reviewer_not_found`: that person has not linked GitHub in Ariadne. Say
@@ -173,7 +196,7 @@ When the author edits the packet or a PR head moves, read the current packet:
 flight-rules packet get <id>
 ```
 
-Edit the JSON it printed, keeping its `revision` field, which becomes the
+Re-check each PR's head as in Step 6 first. Edit the JSON it printed, keeping its `revision` field, which becomes the
 expected revision. Stored reviewers come back as `{id, github: {id, login}}`
 objects; before sending, replace each with its GitHub login string
 (`github.login`). The server-owned fields (`authorId`, `status`, `revision`,
@@ -194,5 +217,9 @@ again, re-apply the edit and retry.
 - **No token** → stop at Step 0 and point at the setup skill. Never ask for the
   token in chat.
 - **No sign-off for a PR** → leave it out of the packet and say so.
+- **`route: "incomplete"` or only `pr: null` entries** → report the missing PRs
+  and stop.
+- **Head differs from the sign-off** → re-run that PR's self-review or drop it
+  with the author's confirmation; never publish a stale sign-off.
 - **Nothing signed off** → there is nothing to publish; tell the author.
 - **Over-long text** → shorten it with the author; never truncate.

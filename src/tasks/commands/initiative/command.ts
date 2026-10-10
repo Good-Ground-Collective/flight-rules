@@ -3,11 +3,18 @@ import type { TaskTracker } from "../../task-tracker/task-tracker.js";
 import { resolveBody } from "../resolve-body.js";
 import { portableContextGuard } from "../../portable-context/portable-context.js";
 import { DependencyPlannerService } from "../../dependency-planner/dependency-planner.js";
+import { ReviewPlanService } from "../../review-plan/review-plan.js";
+import type { PullRequestHost } from "../../../pr/pull-request-host/pull-request-host.js";
+import type { Config } from "../../../shared/config.js";
 
 type CreateInitiativeOptions = { title: string; body?: string; bodyFile?: string; allowLocalPaths?: boolean };
 type EditInitiativeOptions = { body?: string; bodyFile?: string; title?: string; allowLocalPaths?: boolean };
 
-export function createInitiativeCommand(getTracker: () => TaskTracker): Command {
+export function createInitiativeCommand(
+  getTracker: () => TaskTracker,
+  getPrHost: () => PullRequestHost,
+  getConfig: () => Pick<Config, "inReviewStatus"> = () => ({}),
+): Command {
   const initiative = new Command("initiative");
 
   initiative
@@ -73,6 +80,47 @@ export function createInitiativeCommand(getTracker: () => TaskTracker): Command 
           })),
       );
       process.stdout.write(JSON.stringify(plan) + "\n");
+      if (plan.cycles.length > 0) {
+        throw new Error(`dependency cycle detected among tickets: ${plan.cycles.join(", ")}`);
+      }
+    });
+
+  initiative
+    .command("review-plan")
+    .exitOverride()
+    .argument("<id>", "initiative id")
+    .action(async (id: string) => {
+      const tracker = getTracker();
+      const initiativeData = await tracker.getInitiative(id);
+      const epics = await Promise.all(initiativeData.epics.map((e) => tracker.getEpic(e.id)));
+      const tickets = epics.flatMap((e) => e.childIssues);
+      const plan = new DependencyPlannerService().plan(
+        tickets.map((ticket) => ({
+          id: ticket.id,
+          status: ticket.status,
+          blockedBy: ticket.blockedBy,
+        })),
+      );
+      const { inReviewStatus } = getConfig();
+      const reviewPlan = new ReviewPlanService();
+      const inReviewIds = reviewPlan.inReviewTicketIds(plan, inReviewStatus);
+
+      const host = getPrHost();
+      const pullRequests = inReviewIds.length > 0 ? await host.listOpenPullRequestsForTickets(inReviewIds) : [];
+      const defaultBranch = await host.defaultBranch();
+
+      const result = reviewPlan.build({ plan, tickets, pullRequests, defaultBranch, inReviewStatus });
+      process.stdout.write(
+        JSON.stringify({
+          initiative: { id: initiativeData.id, title: initiativeData.title },
+          defaultBranch,
+          route: result.route,
+          reasons: result.reasons,
+          missing: result.missing,
+          blocked: result.blocked,
+          unblocksOnMerge: result.unblocksOnMerge,
+        }) + "\n",
+      );
       if (plan.cycles.length > 0) {
         throw new Error(`dependency cycle detected among tickets: ${plan.cycles.join(", ")}`);
       }

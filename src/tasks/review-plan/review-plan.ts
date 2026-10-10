@@ -20,10 +20,10 @@ export interface BlockedTicket {
   pr: BlockedPullRequest | null
 }
 
-export type ReviewRoute = 'simple' | 'complex'
+export type ReviewRoute = 'simple' | 'complex' | 'incomplete'
 
 export interface ReviewRouteDecision {
-  route: ReviewRoute
+  route: Exclude<ReviewRoute, 'incomplete'>
   reasons: string[]
 }
 
@@ -38,6 +38,8 @@ export interface ReviewPlanInput {
 export interface ReviewPlan {
   route: ReviewRoute
   reasons: string[]
+  /** Ids of blocked tickets with no open PR; the route is `incomplete` whenever this is non-empty. */
+  missing: string[]
   blocked: BlockedTicket[]
   unblocksOnMerge: string[]
 }
@@ -74,7 +76,9 @@ export class ReviewRouteClassifier {
 
 /**
  * Joins an epic's dependency waves, ticket titles and open PRs into the
- * hand-off an orchestrator gives reviewers while it waits on merges.
+ * hand-off an orchestrator gives reviewers while it waits on merges. When any
+ * blocked ticket has no open PR the route is `incomplete`: the set cannot be
+ * routed until those PRs exist.
  */
 export class ReviewPlanService {
   private readonly classifier = new ReviewRouteClassifier()
@@ -120,11 +124,23 @@ export class ReviewPlanService {
       }
     })
 
+    const missing = blocked.filter((entry) => entry.pr === null).map((entry) => entry.ticketId)
+    if (missing.length > 0) {
+      return {
+        route: 'incomplete',
+        reasons: missingPrReasons,
+        missing,
+        blocked,
+        unblocksOnMerge: this.unblockedOnMerge(input.plan, blocked),
+      }
+    }
+
     const decision = this.classifier.classify(blocked, input.defaultBranch)
 
     return {
       route: decision.route,
-      reasons: [...decision.reasons, ...missingPrReasons],
+      reasons: decision.reasons,
+      missing,
       blocked,
       unblocksOnMerge: this.unblockedOnMerge(input.plan, blocked),
     }

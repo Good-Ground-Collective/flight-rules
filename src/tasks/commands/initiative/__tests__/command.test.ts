@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { CommanderError } from "commander";
 import type { TaskTracker, Initiative, Epic, Ticket } from "../../../task-tracker/task-tracker.js";
+import type { PullRequestHost, OpenPullRequest } from "../../../../pr/pull-request-host/pull-request-host.js";
 import { createInitiativeCommand } from "../command.js";
 
 const mockInitiative: Initiative = {
@@ -54,8 +55,16 @@ const makeTracker = (): InitiativeTracker => ({
   updateInitiativeDescription: vi.fn().mockResolvedValue(mockInitiative),
 });
 
-const run = (tracker: InitiativeTracker, args: string[]) =>
-  createInitiativeCommand(() => tracker as TaskTracker)
+const makeHost = (open: OpenPullRequest[] = []): PullRequestHost => ({
+  createPullRequest: vi.fn(),
+  commentOnPullRequest: vi.fn(),
+  listOpenPullRequestsForTickets: vi.fn().mockResolvedValue(open),
+  defaultBranch: vi.fn().mockResolvedValue("main"),
+  requestReviewers: vi.fn(),
+});
+
+const run = (tracker: InitiativeTracker, args: string[], host: PullRequestHost = makeHost()) =>
+  createInitiativeCommand(() => tracker as TaskTracker, () => host)
     .exitOverride()
     .parseAsync(args, { from: "user" });
 
@@ -207,6 +216,83 @@ describe("initiative command", () => {
     );
     expect(parsed.waves).toEqual([]);
     expect(parsed.cycles).toEqual([]);
+    output.mockRestore();
+  });
+
+  it('plans reviews across epics and applies the route rule once for "review-plan"', async () => {
+    const tracker = makeTracker();
+    vi.mocked(tracker.getInitiative).mockResolvedValue({
+      ...mockInitiative,
+      epics: [
+        { id: "19", title: "First" },
+        { id: "20", title: "Second" },
+      ],
+    });
+    vi.mocked(tracker.getEpic).mockImplementation(async (id: string) =>
+      id === "19"
+        ? epicWith("19", [child("1", [], "In Review")])
+        : epicWith("20", [child("2", ["1"], "In Review"), child("3", ["2"])]),
+    );
+    const host = makeHost([
+      { ticket: "1", number: 11, url: "https://x/pull/11", headRefName: "feat/1-a", baseRefName: "main", title: "feat(1): a" },
+      { ticket: "2", number: 12, url: "https://x/pull/12", headRefName: "feat/2-b", baseRefName: "main", title: "feat(2): b" },
+    ]);
+    const output = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+
+    await run(tracker, ["review-plan", "7"], host);
+
+    expect(host.listOpenPullRequestsForTickets).toHaveBeenCalledWith(["1", "2"]);
+    const parsed: {
+      initiative: { id: string };
+      route: string;
+      reasons: string[];
+      missing: string[];
+      blocked: { ticketId: string; wave: number; blockedBy: string[] }[];
+      unblocksOnMerge: string[];
+    } = JSON.parse(String(vi.mocked(output).mock.calls[0]?.[0]));
+    expect(parsed.initiative.id).toBe("7");
+    expect(parsed.blocked.map((b) => [b.ticketId, b.wave, b.blockedBy])).toEqual([
+      ["1", 0, []],
+      ["2", 1, ["1"]],
+    ]);
+    expect(parsed.route).toBe("complex");
+    expect(parsed.reasons).toHaveLength(1);
+    expect(parsed.reasons[0]).toContain("spans more than one wave");
+    expect(parsed.missing).toEqual([]);
+    expect(parsed.unblocksOnMerge).toEqual(["3"]);
+    output.mockRestore();
+  });
+
+  it('reports an incomplete route when a blocked ticket has no PR for "review-plan"', async () => {
+    const tracker = makeTracker();
+    vi.mocked(tracker.getEpic).mockResolvedValue(epicWith("19", [child("1", [], "In Review")]));
+    const output = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+
+    await run(tracker, ["review-plan", "7"]);
+
+    const parsed: { route: string; missing: string[] } = JSON.parse(String(vi.mocked(output).mock.calls[0]?.[0]));
+    expect(parsed.route).toBe("incomplete");
+    expect(parsed.missing).toEqual(["1"]);
+    output.mockRestore();
+  });
+
+  it('throws after printing when "review-plan" finds a cycle across epics', async () => {
+    const tracker = makeTracker();
+    vi.mocked(tracker.getInitiative).mockResolvedValue({
+      ...mockInitiative,
+      epics: [
+        { id: "19", title: "First" },
+        { id: "20", title: "Second" },
+      ],
+    });
+    vi.mocked(tracker.getEpic).mockImplementation(async (id: string) =>
+      id === "19" ? epicWith("19", [child("1", ["2"])]) : epicWith("20", [child("2", ["1"])]),
+    );
+    const output = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+
+    await expect(run(tracker, ["review-plan", "7"])).rejects.toThrow("dependency cycle");
+
+    expect(output).toHaveBeenCalled();
     output.mockRestore();
   });
 });

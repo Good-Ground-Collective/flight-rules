@@ -124,19 +124,19 @@ ticket that didn't exist.
 **If nothing is startable, say precisely why.** The three causes are different
 and the user needs to know which one they have:
 
-- Everything in wave 0 is in-review → the wave is already drained; you are waiting on their merges. Go to step 9b to route those PRs for review, then stop.
+- Everything in wave 0 is in-review → the wave is already drained; you are waiting on their merges. Go to step 9 to route those PRs for review, then stop.
 - Wave 0 is empty but later waves aren't → shouldn't happen; report it as a planner inconsistency rather than guessing.
 - No open tickets at all → the epic or initiative is done.
 
 ### 5. Confirm before spending
 
-First read the wave gate the previous run left in Ariadne (step 9):
+First read the wave gate the previous run left in Ariadne (step 10):
 
 ```bash
 flight-rules board items --session wave-<node id> --json
 ```
 
-Take the newest `wave-gate` item, and remember how many `wave-gate` items there are (zero when nothing prints) for step 9. If its `chosenOption` is `Start wave` and its `detail` lists exactly the tickets you selected, that answer is the go-ahead: say so and start draining without asking. `Review wave` means stop and tell the user they asked to review first. Otherwise there is no answer yet, so continue below.
+Take the newest `wave-gate` item, and remember how many `wave-gate` items there are (zero when nothing prints) for step 10. If its `chosenOption` is `Start wave` and its `detail` lists exactly the tickets you selected, that answer is the go-ahead: say so and start draining without asking. `Review wave` means stop and tell the user they asked to review first. Otherwise there is no answer yet, so continue below.
 
 Show the user the wave: each ticket id, its title, and the count. List what you
 dropped and why. Then ask for a go-ahead. Post the same closed question to Ariadne, and take whichever answer comes first, in chat or in `chosenOption` from `flight-rules board items --json`:
@@ -214,7 +214,41 @@ When the wave is drained, check out the base branch recorded in step 2 and
 confirm the tree is clean. Leaving the user on the last ticket's branch means
 their next command runs somewhere they didn't choose.
 
-### 9. Report
+### 9. Review hand-off
+
+Run this when the run is blocked on merges: everything in wave 0 is in-review (step 4), or the wave you just drained left open PRs. It asks for review and nothing more. It never merges and never starts the next wave.
+
+For an epic:
+
+```bash
+flight-rules epic review-plan <node>
+```
+
+For an initiative:
+
+```bash
+flight-rules initiative review-plan <node>
+```
+
+Use `initiative review-plan` for an initiative, never a loop of `epic review-plan` calls. It plans across every child epic, so dependencies between epics are kept and the simple/complex rule is applied once to the whole set of PRs you are blocked on. Per-epic plans would lose cross-epic waves and apply the size trigger to each epic separately.
+
+Read `route`, `reasons`, `missing`, `blocked` and `unblocksOnMerge`. Each `blocked` entry carries a `pr`, or `null` when no open PR matched the ticket. If a `blocked` entry has no `pr` or no `repo`, skip it and list it in the report instead of failing.
+
+The route is `incomplete` if any blocked ticket has no open PR. Otherwise it is `complex` if the PR set spans more than one wave, if any PR's base is not the default branch, or if it has more than 4 PRs, and `simple` if none of those hold.
+
+- **`incomplete`:** report the tickets in `missing` as "in review with no open PR found" and stop routing. Request nothing and do not offer a packet until those PRs exist.
+- **`simple`:** ask the human once, for the whole set, which reviewer logins to request. Nothing is requested before they answer. Then, for each blocked PR that has a `pr`:
+
+  ```bash
+  flight-rules pr request-review <number> --reviewer <login>
+  ```
+
+  Pass `--reviewer` once per login. Record `requested` and `failed` for each PR. If a call exits non-zero, carry on with the remaining PRs and logins, then list every failed login and its PR in the report. Never fall back to raw `gh pr edit`.
+- **`complex`:** show the `reasons` and the ordered PR list from `blocked`, then offer to invoke the `author-review-packet` skill with the review-plan payload so the author can build a sequenced Review Packet. If the human declines, offer the simple path above, or stop, as they choose.
+
+Ariadne board items need a Jira-style ticket key, so this step posts no board item on GitHub-tracked repos.
+
+### 10. Report
 
 First post the wave gate, so a person can approve the next wave in Ariadne. Run it under the node's own session, `wave-<node id>`, so the next run finds it in step 5. Take `<n>` from the count of `wave-gate` items step 5 read, plus one. Write `<waves[1] ids>` as the ticket ids that unblock on merge, comma-separated:
 
@@ -231,34 +265,8 @@ Then give the user, in this order:
 - **Parked tickets** — for each, why it parked, the branch holding the work, whether you committed to free the tree, and the verifier's final evidence.
 - **Every `charterConcerns` and `openQuestions`** raised across every ticket, verbatim and unanswered.
 - **What unblocks on merge** — read `waves[1]` from the plan and name those tickets. This is what the user gets by reviewing, and it is the reason to stop here rather than push on.
-- **Review routing** — the block from step 9b: route, reasons, per-PR request results or the packet id, and tickets in review with no open PR found.
+- **Review routing** — the block from step 9: the route taken (`simple`, `complex` or `incomplete`), reasons, per-PR request results or the packet id, every failed login with its PR, and tickets in review with no open PR found.
 - **The next step, plainly:** review and merge these PRs, then run this skill again on the same id.
-
-### 9b. Review hand-off
-
-Run this when the run is blocked on merges: everything in wave 0 is in-review (step 4), or the wave you just drained left open PRs. It asks for review and nothing more. It never merges and never starts the next wave.
-
-`flight-rules epic review-plan` takes an epic id. For an initiative, run it once per child epic. Do not look for an initiative-level verb.
-
-```bash
-flight-rules epic review-plan <node>
-```
-
-Read `route`, `reasons`, `blocked` and `unblocksOnMerge`. Each `blocked` entry carries a `pr`, or `null` when no open PR matched the ticket. `reasons` can include "ticket N is in review but has no open PR" entries alongside the route triggers.
-
-The route is `complex` if the PR set spans more than one wave, if any PR's base is not the default branch, or if it has more than 4 PRs. Otherwise it is `simple`.
-
-- **`simple`:** ask the human once, for the whole set, which reviewer logins to request. Nothing is requested before they answer. Then, for each blocked PR that has a `pr`:
-
-  ```bash
-  flight-rules pr request-review <number> --reviewer <login>
-  ```
-
-  Pass `--reviewer` once per login. Record `requested` and `failed` for each PR, and list every per-login failure in the report. Never fall back to raw `gh pr edit`.
-- **`complex`:** show the `reasons` and the ordered PR list from `blocked`, then offer to invoke the `author-review-packet` skill with the review-plan payload so the author can build a sequenced Review Packet. If the human declines, offer the simple path above, or stop, as they choose.
-- **`pr: null` tickets:** list them as "in review with no open PR found". Request nothing for them and do not guess at a PR.
-
-Ariadne board items need a Jira-style ticket key, so this step posts no board item on GitHub-tracked repos.
 
 ## Guardrails
 
@@ -266,7 +274,7 @@ Ariadne board items need a Jira-style ticket key, so this step posts no board it
 - **Never work a ticket outside `waves[0]`.** Later waves are blocked by construction.
 - **Never re-drive a ticket that is in-progress or in-review.** It already has a branch, and probably a PR.
 - **Never merge.** This skill opens PRs and stops, exactly as `execute-work` does.
-- **The review hand-off requests review only.** It never merges, never starts the next wave, and requests nothing without the human's confirmation. Blocked tickets with no matching PR are reported, not guessed.
+- **The review hand-off requests review only.** It never merges, never starts the next wave, and requests nothing without the human's confirmation. Blocked tickets with no matching PR are reported, not guessed, and a failed review request never stops the rest of the set.
 - **Never start without an explicit go-ahead** from step 5.
 - **Never run tickets concurrently.** One working tree, one branch at a time.
 - **Never build the ticket yourself.** If `execute-work` parks a ticket, that is the outcome. Picking up the implementation by hand removes the verifier from the loop, which is the only independent check in the pipeline.
@@ -281,7 +289,7 @@ Ariadne board items need a Jira-style ticket key, so this step posts no board it
 - **Dirty tree at preflight** → stop before any mutation. Report the dirty paths and ask the user to commit or stash.
 - **`flight-rules check` fails** → stop and show the report.
 - **`repo` missing from config** → settle it now, before the first ticket. Confirm the value with the user and write it into the config file.
-- **Nothing startable** → not an error. Report which of the three causes applies. When everything in wave 0 is in-review, run the review hand-off (step 9b) first, then stop.
+- **Nothing startable** → not an error. Report which of the three causes applies. When everything in wave 0 is in-review, run the review hand-off (step 9) first, then stop.
 - **A ticket parks** → record it, free the tree per step 7, continue with the next ticket.
 - **Context is running short mid-wave** → stop cleanly at the current ticket boundary rather than starting one you can't finish. Return to base, and report exactly which tickets were not attempted so the user can re-invoke for the remainder.
 

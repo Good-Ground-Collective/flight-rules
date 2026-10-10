@@ -211,6 +211,7 @@ describe('epic command', () => {
         defaultBranch: 'main',
         route: 'simple',
         reasons: [],
+        missing: [],
         blocked: [
           {
             ticketId: '1',
