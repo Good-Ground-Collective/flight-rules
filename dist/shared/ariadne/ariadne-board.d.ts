@@ -2,6 +2,7 @@ import type { ConfigScope } from "../config-store.js";
 import type { AriadneTransport } from "./ariadne-transport.js";
 import type { ActivityInput, ActivityResponse, HeartbeatInput, HeartbeatResponse, ItemInput, ItemListResponse, ItemResponse } from "./ariadne.schema.js";
 import type { AriadneTokenStore } from "./ariadne-token-store.js";
+import type { BoardSessionStore } from "./board-session-store.js";
 /** A board call whose `session` falls back to the Claude Code session id. */
 export type BoardInput<T extends {
     session: string;
@@ -20,9 +21,10 @@ export interface BoardCallOptions {
  * `notices` name config the board ignored. They are diagnostics: callers
  * print them only when asked to be loud (`--strict`, `board items`).
  */
+export type BoardSkipReason = "disabled" | "no-token" | "invalid-url" | "not-jira-ticket" | "nothing-recorded";
 export type BoardOutcome<T> = ({
     status: "skipped";
-    reason: "disabled" | "no-token" | "invalid-url";
+    reason: BoardSkipReason;
 } | {
     status: "posted";
     value: T;
@@ -50,6 +52,8 @@ export interface AriadneBoardProps {
     env?: Record<string, string | undefined>;
     transport?: AriadneTransport;
     timeoutMs?: number;
+    /** Where skill heartbeats are remembered for the heartbeat hook; none means nothing is remembered. */
+    sessions?: BoardSessionStore;
 }
 /** Claude Code exports the session id to every Bash tool call it runs. */
 export declare const claudeSessionEnv = "CLAUDE_CODE_SESSION_ID";
@@ -67,6 +71,7 @@ export declare class AriadneBoard {
     private readonly env;
     private readonly transport;
     private readonly timeoutMs;
+    private readonly sessions;
     constructor(props: AriadneBoardProps);
     /**
      * `ariadne.url` (default: production) and `ariadne.enabled` (default:
@@ -77,7 +82,16 @@ export declare class AriadneBoard {
     settings(): AriadneBoardSettings;
     /** The Claude Code session id, when this process runs inside a session. */
     defaultSession(): string | undefined;
+    /**
+     * Posts a heartbeat and remembers it for the session, so the heartbeat
+     * hook can keep the session alive with the same ticket and step.
+     */
     heartbeat(input: BoardInput<HeartbeatInput>, options?: BoardCallOptions): Promise<BoardOutcome<HeartbeatResponse>>;
+    /**
+     * Re-sends the last heartbeat a skill posted for `session`, without
+     * refreshing when it was recorded. The heartbeat hook's liveness ping.
+     */
+    replay(session: string, options?: BoardCallOptions): Promise<BoardOutcome<HeartbeatResponse>>;
     /**
      * Posts an item. A session that has never sent a heartbeat (or has aged
      * out) gets one first, with step `started` and state `nominal`, and the item
@@ -88,6 +102,8 @@ export declare class AriadneBoard {
     activity(input: BoardInput<ActivityInput>, options?: BoardCallOptions): Promise<BoardOutcome<ActivityResponse>>;
     /** Every item of one of the caller's sessions, open and resolved, with any chosen option. */
     items(session: string | undefined, options?: BoardCallOptions): Promise<BoardOutcome<ItemListResponse>>;
+    /** Remembering is best effort: a full disk must not fail a report. */
+    private remember;
     private withSession;
     private call;
     private describe;

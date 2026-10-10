@@ -1151,12 +1151,14 @@ var AriadneBoard = class {
   env;
   transport;
   timeoutMs;
+  sessions;
   constructor(props) {
     this.readLayers = props.readLayers;
     this.tokens = props.tokens;
     this.env = props.env ?? process.env;
     this.transport = props.transport;
     this.timeoutMs = props.timeoutMs;
+    this.sessions = props.sessions;
   }
   /**
    * `ariadne.url` (default: production) and `ariadne.enabled` (default:
@@ -1208,8 +1210,36 @@ var AriadneBoard = class {
     const value = this.env[claudeSessionEnv]?.trim();
     return value === void 0 || value === "" ? void 0 : value;
   }
+  /**
+   * Posts a heartbeat and remembers it for the session, so the heartbeat
+   * hook can keep the session alive with the same ticket and step.
+   */
   async heartbeat(input, options = {}) {
-    return this.call(options, input.session, (client, session) => client.heartbeat({ ...input, session }));
+    return this.call(
+      options,
+      input.session,
+      async (client, session) => {
+        const sent = { ...input, session };
+        try {
+          const response = await client.heartbeat(sent);
+          this.remember(sent);
+          return response;
+        } catch (err) {
+          if (!(err instanceof AriadneError) || err.failure !== "invalid-input") this.remember(sent);
+          throw err;
+        }
+      },
+      input.ticket
+    );
+  }
+  /**
+   * Re-sends the last heartbeat a skill posted for `session`, without
+   * refreshing when it was recorded. The heartbeat hook's liveness ping.
+   */
+  async replay(session, options = {}) {
+    const record = this.sessions?.read(session);
+    if (record === void 0) return { status: "skipped", reason: "nothing-recorded" };
+    return this.call(options, session, (client) => client.heartbeat(record.heartbeat), record.heartbeat.ticket);
   }
   /**
    * Posts an item. A session that has never sent a heartbeat (or has aged
@@ -1220,7 +1250,8 @@ var AriadneBoard = class {
     return this.call(
       options,
       input.session,
-      (client, session) => this.withSession(client, session, input.ticket, () => client.postItem({ ...input, session }))
+      (client, session) => this.withSession(client, session, input.ticket, () => client.postItem({ ...input, session })),
+      input.ticket
     );
   }
   /** Posts one activity line, creating the session first as `item` does. */
@@ -1228,12 +1259,21 @@ var AriadneBoard = class {
     return this.call(
       options,
       input.session,
-      (client, session) => this.withSession(client, session, input.ticket, () => client.postActivity({ ...input, session }))
+      (client, session) => this.withSession(client, session, input.ticket, () => client.postActivity({ ...input, session })),
+      input.ticket
     );
   }
   /** Every item of one of the caller's sessions, open and resolved, with any chosen option. */
   async items(session, options = {}) {
     return this.call(options, session, (client, id) => client.listItems(id));
+  }
+  /** Remembering is best effort: a full disk must not fail a report. */
+  remember(heartbeat) {
+    try {
+      this.sessions?.record(heartbeat);
+    } catch {
+      return;
+    }
   }
   async withSession(client, session, ticket, post) {
     try {
@@ -1244,7 +1284,7 @@ var AriadneBoard = class {
     await client.heartbeat({ session, ticket, step: bootstrapStep, state: "nominal" });
     return post();
   }
-  async call(options, requestedSession, run) {
+  async call(options, requestedSession, run, ticket) {
     let settings;
     try {
       settings = this.settings();
@@ -1255,6 +1295,13 @@ var AriadneBoard = class {
     const url = settings.url;
     if (!settings.enabled) return noted({ status: "skipped", reason: "disabled" });
     if (url === void 0) return noted({ status: "skipped", reason: "invalid-url" });
+    if (ticket !== void 0 && ticket !== "" && !TicketKeySchema.safeParse(ticket).success) {
+      return {
+        status: "skipped",
+        reason: "not-jira-ticket",
+        notices: [...settings.notices, `skipped: ${ticket} is not a Jira issue key, and Ariadne tracks only Jira tickets`]
+      };
+    }
     let token;
     try {
       token = this.tokens.resolve()?.token;
@@ -1361,6 +1408,89 @@ var AriadneTokenStore = class {
   }
 };
 
+// src/shared/ariadne/board-session-store.ts
+import { existsSync as existsSync6, mkdirSync as mkdirSync4, readFileSync as readFileSync6, writeFileSync as writeFileSync4 } from "node:fs";
+import { homedir as homedir3 } from "node:os";
+import { join as join7 } from "node:path";
+import { z as z11 } from "zod";
+var SessionRecordSchema = z11.object({
+  heartbeat: z11.object({
+    session: z11.string(),
+    step: z11.string(),
+    state: z11.enum(agentStates),
+    ticket: z11.string().optional(),
+    repo: z11.string().optional(),
+    branch: z11.string().optional(),
+    skill: z11.string().optional(),
+    detail: z11.string().optional()
+  }),
+  /** When a skill last posted this heartbeat. */
+  recordedAt: z11.number(),
+  /** When any heartbeat for the session was last sent, by a skill or the hook. */
+  sentAt: z11.number()
+});
+var sessionFilePattern = /^[A-Za-z0-9_-]{1,80}$/;
+var BoardSessionStore = class {
+  env;
+  home;
+  now;
+  constructor(props = {}) {
+    this.env = props.env ?? process.env;
+    this.home = props.home ?? homedir3();
+    this.now = props.now ?? Date.now;
+  }
+  dir() {
+    const stateHome = this.env["XDG_STATE_HOME"];
+    const base = stateHome !== void 0 && stateHome !== "" ? stateHome : join7(this.home, ".local", "state");
+    return join7(base, "flight-rules", "board");
+  }
+  read(session) {
+    const path = this.pathFor(session);
+    if (path === void 0 || !existsSync6(path)) return void 0;
+    try {
+      const parsed = SessionRecordSchema.safeParse(JSON.parse(readFileSync6(path, "utf-8")));
+      return parsed.success ? parsed.data : void 0;
+    } catch {
+      return void 0;
+    }
+  }
+  /** Remembers a heartbeat a skill just sent. */
+  record(heartbeat) {
+    const now = this.now();
+    const { session, step, state } = heartbeat;
+    const optional = Object.fromEntries(
+      ["ticket", "repo", "branch", "skill", "detail"].map((key) => [key, heartbeat[key]]).filter(([, value]) => value !== void 0 && value !== "")
+    );
+    this.write({ heartbeat: { session, step, state, ...optional }, recordedAt: now, sentAt: now });
+  }
+  /**
+   * Claims the next liveness heartbeat for a session: returns its record and
+   * marks it sent, or returns undefined when there is nothing to keep alive.
+   * That is when no skill has recorded one, the record is older than
+   * `maxAgeMs`, the run aborted, or one was sent less than `intervalMs` ago.
+   */
+  claim(session, intervalMs, maxAgeMs) {
+    const record = this.read(session);
+    if (record === void 0) return void 0;
+    const now = this.now();
+    if (record.heartbeat.state === "abort") return void 0;
+    if (now - record.recordedAt > maxAgeMs) return void 0;
+    if (now - record.sentAt < intervalMs) return void 0;
+    const claimed = { ...record, sentAt: now };
+    this.write(claimed);
+    return claimed;
+  }
+  write(record) {
+    const path = this.pathFor(record.heartbeat.session);
+    if (path === void 0) return;
+    mkdirSync4(this.dir(), { recursive: true, mode: 448 });
+    writeFileSync4(path, JSON.stringify(record), { mode: 384 });
+  }
+  pathFor(session) {
+    return sessionFilePattern.test(session) ? join7(this.dir(), `${session}.json`) : void 0;
+  }
+};
+
 // src/tasks/github-task-tracker/github-task-tracker.ts
 import { Octokit } from "@octokit/rest";
 import { graphql } from "@octokit/graphql";
@@ -1369,116 +1499,116 @@ import { graphql } from "@octokit/graphql";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
 // src/tasks/task-tracker/task-tracker.ts
-import { z as z11 } from "zod";
-var TrackerUserSchema = z11.object({
-  accountId: z11.string(),
-  displayName: z11.string()
+import { z as z12 } from "zod";
+var TrackerUserSchema = z12.object({
+  accountId: z12.string(),
+  displayName: z12.string()
 });
-var EntityMetadataSchema = z11.object({
-  tddId: z11.number().optional(),
-  epicId: z11.number().optional(),
-  notes: z11.string().optional(),
+var EntityMetadataSchema = z12.object({
+  tddId: z12.number().optional(),
+  epicId: z12.number().optional(),
+  notes: z12.string().optional(),
   /** Explicit body-format override read first by BodyFormatDetector (docs/bug-report-format.md). */
-  kind: z11.enum(["bug", "story"]).optional()
+  kind: z12.enum(["bug", "story"]).optional()
 }).passthrough();
-var CommentSchema = z11.object({
-  id: z11.string(),
-  body: z11.string(),
-  author: z11.string(),
-  createdAt: z11.string(),
-  updatedAt: z11.string()
+var CommentSchema = z12.object({
+  id: z12.string(),
+  body: z12.string(),
+  author: z12.string(),
+  createdAt: z12.string(),
+  updatedAt: z12.string()
 });
-var AttachmentSchema = z11.object({
-  id: z11.string(),
-  filename: z11.string(),
-  mimeType: z11.string(),
-  size: z11.number().optional(),
-  mediaUuid: z11.string().optional()
+var AttachmentSchema = z12.object({
+  id: z12.string(),
+  filename: z12.string(),
+  mimeType: z12.string(),
+  size: z12.number().optional(),
+  mediaUuid: z12.string().optional()
 });
-var TechnicalDesignSchema = z11.object({
-  id: z11.string(),
-  epicId: z11.string(),
-  url: z11.string().optional(),
-  body: z11.string(),
-  comments: z11.array(CommentSchema),
+var TechnicalDesignSchema = z12.object({
+  id: z12.string(),
+  epicId: z12.string(),
+  url: z12.string().optional(),
+  body: z12.string(),
+  comments: z12.array(CommentSchema),
   metadata: EntityMetadataSchema.default({}),
-  updatedAt: z11.string()
+  updatedAt: z12.string()
 });
-var TicketSchema = z11.object({
-  id: z11.string(),
-  size: z11.literal("ticket"),
-  status: z11.string(),
-  labels: z11.array(z11.string()),
-  title: z11.string(),
-  body: z11.string(),
-  comments: z11.array(CommentSchema),
-  assignee: z11.string().nullable(),
-  attachments: z11.array(AttachmentSchema).default([]),
-  reporter: z11.string().nullable().default(null),
-  issueType: z11.string().default("unknown"),
-  blockedBy: z11.array(z11.string()).default([]),
-  blocking: z11.array(z11.string()).default([]),
+var TicketSchema = z12.object({
+  id: z12.string(),
+  size: z12.literal("ticket"),
+  status: z12.string(),
+  labels: z12.array(z12.string()),
+  title: z12.string(),
+  body: z12.string(),
+  comments: z12.array(CommentSchema),
+  assignee: z12.string().nullable(),
+  attachments: z12.array(AttachmentSchema).default([]),
+  reporter: z12.string().nullable().default(null),
+  issueType: z12.string().default("unknown"),
+  blockedBy: z12.array(z12.string()).default([]),
+  blocking: z12.array(z12.string()).default([]),
   metadata: EntityMetadataSchema.default({}),
-  updatedAt: z11.string()
+  updatedAt: z12.string()
 });
-var EpicSchema = z11.object({
-  id: z11.string(),
-  size: z11.literal("epic"),
-  status: z11.string(),
-  labels: z11.array(z11.string()),
-  title: z11.string(),
-  body: z11.string(),
-  childIssues: z11.array(TicketSchema),
-  comments: z11.array(CommentSchema),
+var EpicSchema = z12.object({
+  id: z12.string(),
+  size: z12.literal("epic"),
+  status: z12.string(),
+  labels: z12.array(z12.string()),
+  title: z12.string(),
+  body: z12.string(),
+  childIssues: z12.array(TicketSchema),
+  comments: z12.array(CommentSchema),
   tdd: TechnicalDesignSchema.optional(),
   metadata: EntityMetadataSchema.default({}),
-  updatedAt: z11.string()
+  updatedAt: z12.string()
 });
-var CreateEpicInputSchema = z11.object({
-  title: z11.string(),
-  body: z11.string(),
-  labels: z11.array(z11.string()).default([]),
+var CreateEpicInputSchema = z12.object({
+  title: z12.string(),
+  body: z12.string(),
+  labels: z12.array(z12.string()).default([]),
   metadata: EntityMetadataSchema.partial().optional()
 });
-var CreateTicketInputSchema = z11.object({
-  title: z11.string(),
-  body: z11.string(),
+var CreateTicketInputSchema = z12.object({
+  title: z12.string(),
+  body: z12.string(),
   /** Absent for a standalone ticket: a ticket-sized RFC has no epic to parent to. */
-  epicId: z11.string().optional(),
-  labels: z11.array(z11.string()).default([]),
-  assignee: z11.string().optional(),
+  epicId: z12.string().optional(),
+  labels: z12.array(z12.string()).default([]),
+  assignee: z12.string().optional(),
   metadata: EntityMetadataSchema.partial().optional()
 });
-var CreateTechnicalDesignInputSchema = z11.object({
-  title: z11.string(),
-  body: z11.string(),
-  epicId: z11.string(),
+var CreateTechnicalDesignInputSchema = z12.object({
+  title: z12.string(),
+  body: z12.string(),
+  epicId: z12.string(),
   metadata: EntityMetadataSchema.partial().optional()
 });
-var UpdateEpicInputSchema = z11.object({
-  body: z11.string(),
-  title: z11.string().optional(),
-  labels: z11.array(z11.string()).optional()
+var UpdateEpicInputSchema = z12.object({
+  body: z12.string(),
+  title: z12.string().optional(),
+  labels: z12.array(z12.string()).optional()
 });
-var UpdateTicketInputSchema = z11.object({
-  body: z11.string(),
-  title: z11.string().optional(),
-  labels: z11.array(z11.string()).optional()
+var UpdateTicketInputSchema = z12.object({
+  body: z12.string(),
+  title: z12.string().optional(),
+  labels: z12.array(z12.string()).optional()
 });
-var UpdateInitiativeInputSchema = z11.object({
-  body: z11.string(),
-  title: z11.string().optional()
+var UpdateInitiativeInputSchema = z12.object({
+  body: z12.string(),
+  title: z12.string().optional()
 });
-var InitiativeSchema = z11.object({
-  id: z11.string(),
-  size: z11.literal("initiative"),
-  title: z11.string(),
-  body: z11.string(),
-  epics: z11.array(z11.object({ id: z11.string(), title: z11.string() })).default([])
+var InitiativeSchema = z12.object({
+  id: z12.string(),
+  size: z12.literal("initiative"),
+  title: z12.string(),
+  body: z12.string(),
+  epics: z12.array(z12.object({ id: z12.string(), title: z12.string() })).default([])
 });
-var CreateInitiativeInputSchema = z11.object({
-  title: z11.string(),
-  body: z11.string()
+var CreateInitiativeInputSchema = z12.object({
+  title: z12.string(),
+  body: z12.string()
 });
 
 // src/tasks/body-metadata/body-metadata.ts
@@ -1526,14 +1656,14 @@ ${block}`;
 };
 
 // src/tasks/github-task-tracker/github-task-tracker.ts
-import { z as z13 } from "zod";
+import { z as z14 } from "zod";
 
 // src/tasks/task-tracker/unsupported-tracker-operation-error.ts
-import { z as z12 } from "zod";
-var UnsupportedTrackerOperationPropsSchema = z12.object({
-  tracker: z12.string().min(1),
-  operation: z12.string().min(1),
-  remedy: z12.string().min(1).optional()
+import { z as z13 } from "zod";
+var UnsupportedTrackerOperationPropsSchema = z13.object({
+  tracker: z13.string().min(1),
+  operation: z13.string().min(1),
+  remedy: z13.string().min(1).optional()
 });
 var UnsupportedTrackerOperationError = class extends Error {
   tracker;
@@ -1550,7 +1680,7 @@ var UnsupportedTrackerOperationError = class extends Error {
 };
 
 // src/tasks/github-task-tracker/github-task-tracker.ts
-var IssueRefListSchema = z13.array(z13.object({ number: z13.number() }));
+var IssueRefListSchema = z14.array(z14.object({ number: z14.number() }));
 var GitHubTaskTracker = class {
   octokit;
   gql;
@@ -2062,12 +2192,12 @@ var GitHubTaskTracker = class {
 };
 
 // src/tasks/jira-task-tracker/jira-task-tracker.ts
-import { readFileSync as readFileSync6 } from "node:fs";
+import { readFileSync as readFileSync7 } from "node:fs";
 import { basename as basename2 } from "node:path";
-import { z as z17 } from "zod";
+import { z as z18 } from "zod";
 
 // src/tasks/jira-task-tracker/jira-client.ts
-import { z as z14 } from "zod";
+import { z as z15 } from "zod";
 
 // src/tasks/jira-task-tracker/jira-api-error.ts
 var JiraApiError = class extends Error {
@@ -2090,11 +2220,11 @@ var defaultRetryAfterSeconds = 2;
 var maxBackoffMs = 3e4;
 var attachmentXsrfHeader = "no-check";
 var redirectStatuses = /* @__PURE__ */ new Set([301, 302, 303, 307, 308]);
-var JiraErrorBodySchema = z14.object({
-  errorMessages: z14.array(z14.string()).optional(),
+var JiraErrorBodySchema = z15.object({
+  errorMessages: z15.array(z15.string()).optional(),
   // Caught per-field so an off-contract `errors` map cannot discard a valid sibling `errorMessages`.
-  errors: z14.record(z14.string(), z14.string()).optional().catch(void 0),
-  message: z14.string().optional()
+  errors: z15.record(z15.string(), z15.string()).optional().catch(void 0),
+  message: z15.string().optional()
 });
 var JiraClient = class {
   baseUrl;
@@ -2180,13 +2310,13 @@ var JiraClient = class {
 };
 
 // src/tasks/jira-task-tracker/confluence-client.ts
-import { z as z15 } from "zod";
+import { z as z16 } from "zod";
 var maxRetries2 = 4;
 var defaultRetryAfterSeconds2 = 2;
 var maxBackoffMs2 = 3e4;
-var ConfluenceErrorBodySchema = z15.object({
-  errors: z15.array(z15.object({ title: z15.string().optional(), detail: z15.string().optional() })).optional().catch(void 0),
-  message: z15.string().optional()
+var ConfluenceErrorBodySchema = z16.object({
+  errors: z16.array(z16.object({ title: z16.string().optional(), detail: z16.string().optional() })).optional().catch(void 0),
+  message: z16.string().optional()
 });
 var ConfluenceClient = class {
   siteBaseUrl;
@@ -2261,14 +2391,14 @@ import { fromMarkdown } from "mdast-util-from-markdown";
 import { gfmFromMarkdown } from "mdast-util-gfm";
 import { gfm } from "micromark-extension-gfm";
 import { decodeString } from "micromark-util-decode-string";
-import { z as z16 } from "zod";
-var MediaRefSchema = z16.object({
-  mediaUuid: z16.string().min(1),
-  collection: z16.string().default(""),
-  width: z16.number().int().positive().optional(),
-  height: z16.number().int().positive().optional()
+import { z as z17 } from "zod";
+var MediaRefSchema = z17.object({
+  mediaUuid: z17.string().min(1),
+  collection: z17.string().default(""),
+  width: z17.number().int().positive().optional(),
+  height: z17.number().int().positive().optional()
 });
-var MediaLookupSchema = z16.record(z16.string(), MediaRefSchema);
+var MediaLookupSchema = z17.record(z17.string(), MediaRefSchema);
 var attachmentPrefix = /^attachment:/;
 var externalTarget = /^[a-zA-Z][a-zA-Z0-9+.-]*:|^\/\//;
 var detailsOpen = /^<details>/;
@@ -3261,13 +3391,13 @@ var deliveryLinkOutward = "implements";
 var tddMetadataPropertyKey = "flight-rules-metadata";
 var mediaFilePath = /^\/file\/([0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12})\/binary$/;
 var mediaLocationBase = "https://media.invalid/";
-var JiraUploadedAttachmentSchema = z17.object({
-  id: z17.union([z17.string(), z17.number()]).transform(String),
-  filename: z17.string(),
-  mimeType: z17.string(),
-  size: z17.number().optional()
+var JiraUploadedAttachmentSchema = z18.object({
+  id: z18.union([z18.string(), z18.number()]).transform(String),
+  filename: z18.string(),
+  mimeType: z18.string(),
+  size: z18.number().optional()
 });
-var JiraUploadedAttachmentsSchema = z17.array(JiraUploadedAttachmentSchema);
+var JiraUploadedAttachmentsSchema = z18.array(JiraUploadedAttachmentSchema);
 var JiraTaskTracker = class {
   client;
   confluence;
@@ -3521,7 +3651,7 @@ var JiraTaskTracker = class {
    */
   async addAttachment(ticketId, filePath) {
     const filename = basename2(filePath);
-    const file = new File([readFileSync6(filePath)], filename, { type: this.mimeTypes.forFilename(filename) });
+    const file = new File([readFileSync7(filePath)], filename, { type: this.mimeTypes.forFilename(filename) });
     const uploaded = JiraUploadedAttachmentsSchema.parse(
       await this.client.upload(`/issue/${ticketId}/attachments`, [file])
     );
@@ -3880,11 +4010,11 @@ var NodeToolProbe = class {
 var nodeToolProbe = new NodeToolProbe();
 
 // src/flight-rules/flight-rules.schema.ts
-import { z as z18 } from "zod";
-var FlightRulesPropsSchema = z18.object({
-  cwd: z18.string().optional().describe("Directory used for config discovery; defaults to process.cwd()"),
-  env: z18.record(z18.string(), z18.string().optional()).optional().describe("Live environment record; defaults to process.env"),
-  configPath: z18.string().optional().describe("Explicit config file, taking precedence over FLIGHT_RULES_CONFIG and discovery")
+import { z as z19 } from "zod";
+var FlightRulesPropsSchema = z19.object({
+  cwd: z19.string().optional().describe("Directory used for config discovery; defaults to process.cwd()"),
+  env: z19.record(z19.string(), z19.string().optional()).optional().describe("Live environment record; defaults to process.env"),
+  configPath: z19.string().optional().describe("Explicit config file, taking precedence over FLIGHT_RULES_CONFIG and discovery")
 });
 
 // src/flight-rules/flight-rules.ts
@@ -3976,10 +4106,18 @@ var DefaultFlightRules = class {
     return FileDocResolver.fromInstall({ moduleUrl: import.meta.url, env: this.env });
   }
   board() {
-    return new AriadneBoard({ readLayers: () => this.configStore().layers(), tokens: this.ariadneTokens(), env: this.env });
+    return new AriadneBoard({
+      readLayers: () => this.configStore().layers(),
+      tokens: this.ariadneTokens(),
+      env: this.env,
+      sessions: this.boardSessions()
+    });
   }
   ariadneTokens() {
     return new AriadneTokenStore({ env: this.env });
+  }
+  boardSessions() {
+    return new BoardSessionStore({ env: this.env });
   }
 };
 function createFlightRules(props = {}) {
@@ -3987,8 +4125,8 @@ function createFlightRules(props = {}) {
 }
 
 // src/git/commit-message-builder/commit-message-builder.ts
-import { readFileSync as readFileSync7 } from "node:fs";
-import { dirname as dirname8, join as join7 } from "node:path";
+import { readFileSync as readFileSync8 } from "node:fs";
+import { dirname as dirname8, join as join8 } from "node:path";
 
 // src/shared/attribution-stripper/attribution-stripper.ts
 var trailerText = String.raw`(?:Co-Authored-By:[^\n"']*(?:Claude|anthropic\.com)[^\n"']*|Claude-Session:[^\n"']*|https://claude\.ai/code/session_[A-Za-z0-9_-]+)`;
@@ -4019,25 +4157,25 @@ ${line.trim()}`) === "";
 };
 
 // src/git/commit-message-builder/commit-message.schema.ts
-import { z as z19 } from "zod";
-var CommitMessageInputSchema = z19.object({
+import { z as z20 } from "zod";
+var CommitMessageInputSchema = z20.object({
   type: SemanticTypeSchema,
   // Bare issue numbers make one-character scopes legitimate; 32 clears a 10-character tracker key plus a six-digit number.
-  scope: z19.string().min(1).max(32),
-  description: z19.string().min(2).max(50),
-  body: z19.string().optional(),
-  model: z19.string().max(72).optional(),
-  footers: z19.array(z19.string().regex(/^[a-zA-Z0-9-]+(: |=).*$/)).default([])
+  scope: z20.string().min(1).max(32),
+  description: z20.string().min(2).max(50),
+  body: z20.string().optional(),
+  model: z20.string().max(72).optional(),
+  footers: z20.array(z20.string().regex(/^[a-zA-Z0-9-]+(: |=).*$/)).default([])
 });
-var CommitMessageHeaderSchema = z19.preprocess(
+var CommitMessageHeaderSchema = z20.preprocess(
   (arg) => {
-    return z19.string({ error: "Git Commit headers should be 72 characters or less" }).max(72).parse(arg);
+    return z20.string({ error: "Git Commit headers should be 72 characters or less" }).max(72).parse(arg);
   },
-  z19.templateLiteral([SemanticTypeSchema, "(", z19.string(), "): ", z19.string()])
+  z20.templateLiteral([SemanticTypeSchema, "(", z20.string(), "): ", z20.string()])
 );
-var CommitMessageBuilderPropsSchema = z19.object({
-  binPath: z19.string().min(1),
-  agentEnv: z19.string().optional()
+var CommitMessageBuilderPropsSchema = z20.object({
+  binPath: z20.string().min(1),
+  agentEnv: z20.string().optional()
 });
 
 // src/git/commit-message-builder/commit-message-builder.ts
@@ -4075,8 +4213,8 @@ var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
   }
   static readPluginVersion(binPath) {
     try {
-      const pkgPath = join7(dirname8(binPath), "..", "package.json");
-      const parsed = JSON.parse(readFileSync7(pkgPath, "utf-8"));
+      const pkgPath = join8(dirname8(binPath), "..", "package.json");
+      const parsed = JSON.parse(readFileSync8(pkgPath, "utf-8"));
       if (typeof parsed === "object" && parsed !== null && "version" in parsed && typeof parsed.version === "string") {
         return parsed.version;
       }
@@ -4330,12 +4468,12 @@ var bodyFormatDetector = new PrecedenceBodyFormatDetector();
 
 // src/tasks/evidence/evidence.ts
 import { basename as basename3 } from "node:path/posix";
-import { z as z20 } from "zod";
+import { z as z21 } from "zod";
 var mediaReference = /(!?)\[([^\]]*)\]\(\s*<?([^\s()<>]+)>?(?:\s+"[^"]*")?\s*\)/g;
 var absoluteTarget = /^[a-zA-Z][a-zA-Z0-9+.-]*:|^\/\/|^#/;
 var localPrefix = /^(?:\.\/)+/;
 var fenceRun = /^ {0,3}(`{3,}|~{3,})(.*)$/;
-var AttachmentSpecSchema = z20.string().min(1).transform((spec) => {
+var AttachmentSpecSchema = z21.string().min(1).transform((spec) => {
   const hash = spec.lastIndexOf("#");
   const path = hash > 0 ? spec.slice(0, hash) : spec;
   const caption = hash > 0 ? spec.slice(hash + 1).trim() : "";
@@ -4457,31 +4595,31 @@ var TrackerEvidenceService = class {
 var settingsScopes = ["user", "project", "local"];
 
 // src/agents/agent-frontmatter/agent-frontmatter.schema.ts
-import { z as z21 } from "zod";
+import { z as z22 } from "zod";
 var agentCapabilities = ["read", "edit", "shell", "web", "spawn", "ask"];
 var modelTiers = ["standard", "escalated", "expert"];
 var reasoningLevels = ["low", "medium", "high"];
 var claudeAgentColors = ["red", "blue", "green", "yellow", "purple", "orange", "pink", "cyan"];
-var AgentCapabilitySchema = z21.enum(agentCapabilities);
-var ModelTierSchema = z21.enum(modelTiers);
-var AgentFrontmatterSchema = z21.strictObject({
-  name: z21.string().regex(/^[a-z][a-z0-9-]*$/),
-  description: z21.string().min(1),
-  capabilities: z21.array(AgentCapabilitySchema).min(1).refine(
+var AgentCapabilitySchema = z22.enum(agentCapabilities);
+var ModelTierSchema = z22.enum(modelTiers);
+var AgentFrontmatterSchema = z22.strictObject({
+  name: z22.string().regex(/^[a-z][a-z0-9-]*$/),
+  description: z22.string().min(1),
+  capabilities: z22.array(AgentCapabilitySchema).min(1).refine(
     (capabilities) => new Set(capabilities).size === capabilities.length,
     { message: "duplicate capability" }
   ),
   model: ModelTierSchema,
-  reasoning: z21.enum(reasoningLevels).optional(),
-  sandbox: z21.strictObject({
-    fs: z21.enum(["read-only", "workspace-write"]),
-    network: z21.enum(["none", "enabled"])
+  reasoning: z22.enum(reasoningLevels).optional(),
+  sandbox: z22.strictObject({
+    fs: z22.enum(["read-only", "workspace-write"]),
+    network: z22.enum(["none", "enabled"])
   }).optional(),
-  dispatch: z21.strictObject({
-    maxConcurrent: z21.int().positive(),
-    maxDepth: z21.int().positive()
+  dispatch: z22.strictObject({
+    maxConcurrent: z22.int().positive(),
+    maxDepth: z22.int().positive()
   }).optional(),
-  "x-claude": z21.strictObject({ color: z21.enum(claudeAgentColors).optional() }).optional()
+  "x-claude": z22.strictObject({ color: z22.enum(claudeAgentColors).optional() }).optional()
 });
 
 // src/agents/agent-frontmatter/agent-frontmatter.ts

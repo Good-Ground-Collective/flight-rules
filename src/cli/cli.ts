@@ -14,6 +14,7 @@ import { createQaCommand } from '../tasks/commands/qa/command.js'
 import { createCompetenciesCommand } from '../tasks/commands/competencies/command.js'
 import { createCheckCommand } from '../tasks/commands/check/command.js'
 import { createHookCommand } from '../hooks/commands/hook/command.js'
+import { BoardHeartbeatHook, DetachedHeartbeatSender } from '../hooks/board-heartbeat/board-heartbeat.js'
 import type { TaskTracker } from '../tasks/task-tracker/task-tracker.js'
 import { createGitCommand } from '../git/commands/commit/command.js'
 import { createBranchNameCommand, createCommitMessageCommand } from '../git/commands/message/command.js'
@@ -26,7 +27,7 @@ export function buildProgram(
   getConfig: (overrideTracker?: string) => Config,
   getPrHost: (overrideTracker?: string) => PullRequestHost,
   getConfigPath: () => string = () => createFlightRules().configPath(),
-  services: Pick<FlightRules, 'git' | 'probe' | 'docs' | 'configStore' | 'evidence' | 'board' | 'ariadneTokens'> = createFlightRules(),
+  services: Pick<FlightRules, 'git' | 'probe' | 'docs' | 'configStore' | 'evidence' | 'board' | 'ariadneTokens' | 'boardSessions'> = createFlightRules(),
 ): Command {
   const program = new Command('flight-rules')
   program.version(appVersion)
@@ -54,7 +55,13 @@ export function buildProgram(
   program.addCommand(createUsersCommand(tracker))
   program.addCommand(createRfcCommand(config))
   program.addCommand(createConfigCommand(() => services.configStore()))
-  program.addCommand(createHookCommand())
+  program.addCommand(
+    createHookCommand(undefined, undefined, {
+      heartbeatHook: () => new BoardHeartbeatHook({ sessions: services.boardSessions() }),
+      sender: () => new DetachedHeartbeatSender(),
+      board: () => services.board(),
+    }),
+  )
   program.addCommand(createQaCommand(config, getConfigPath, undefined, () => services.evidence()))
   program.addCommand(createCompetenciesCommand(config))
   program.addCommand(createDocCommand(() => services.docs()))

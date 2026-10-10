@@ -31550,12 +31550,14 @@ var AriadneBoard = class {
   env;
   transport;
   timeoutMs;
+  sessions;
   constructor(props) {
     this.readLayers = props.readLayers;
     this.tokens = props.tokens;
     this.env = props.env ?? process.env;
     this.transport = props.transport;
     this.timeoutMs = props.timeoutMs;
+    this.sessions = props.sessions;
   }
   /**
    * `ariadne.url` (default: production) and `ariadne.enabled` (default:
@@ -31607,8 +31609,36 @@ var AriadneBoard = class {
     const value = this.env[claudeSessionEnv]?.trim();
     return value === void 0 || value === "" ? void 0 : value;
   }
+  /**
+   * Posts a heartbeat and remembers it for the session, so the heartbeat
+   * hook can keep the session alive with the same ticket and step.
+   */
   async heartbeat(input2, options = {}) {
-    return this.call(options, input2.session, (client, session) => client.heartbeat({ ...input2, session }));
+    return this.call(
+      options,
+      input2.session,
+      async (client, session) => {
+        const sent = { ...input2, session };
+        try {
+          const response = await client.heartbeat(sent);
+          this.remember(sent);
+          return response;
+        } catch (err) {
+          if (!(err instanceof AriadneError) || err.failure !== "invalid-input") this.remember(sent);
+          throw err;
+        }
+      },
+      input2.ticket
+    );
+  }
+  /**
+   * Re-sends the last heartbeat a skill posted for `session`, without
+   * refreshing when it was recorded. The heartbeat hook's liveness ping.
+   */
+  async replay(session, options = {}) {
+    const record2 = this.sessions?.read(session);
+    if (record2 === void 0) return { status: "skipped", reason: "nothing-recorded" };
+    return this.call(options, session, (client) => client.heartbeat(record2.heartbeat), record2.heartbeat.ticket);
   }
   /**
    * Posts an item. A session that has never sent a heartbeat (or has aged
@@ -31619,7 +31649,8 @@ var AriadneBoard = class {
     return this.call(
       options,
       input2.session,
-      (client, session) => this.withSession(client, session, input2.ticket, () => client.postItem({ ...input2, session }))
+      (client, session) => this.withSession(client, session, input2.ticket, () => client.postItem({ ...input2, session })),
+      input2.ticket
     );
   }
   /** Posts one activity line, creating the session first as `item` does. */
@@ -31627,12 +31658,21 @@ var AriadneBoard = class {
     return this.call(
       options,
       input2.session,
-      (client, session) => this.withSession(client, session, input2.ticket, () => client.postActivity({ ...input2, session }))
+      (client, session) => this.withSession(client, session, input2.ticket, () => client.postActivity({ ...input2, session })),
+      input2.ticket
     );
   }
   /** Every item of one of the caller's sessions, open and resolved, with any chosen option. */
   async items(session, options = {}) {
     return this.call(options, session, (client, id) => client.listItems(id));
+  }
+  /** Remembering is best effort: a full disk must not fail a report. */
+  remember(heartbeat) {
+    try {
+      this.sessions?.record(heartbeat);
+    } catch {
+      return;
+    }
   }
   async withSession(client, session, ticket, post) {
     try {
@@ -31643,7 +31683,7 @@ var AriadneBoard = class {
     await client.heartbeat({ session, ticket, step: bootstrapStep, state: "nominal" });
     return post();
   }
-  async call(options, requestedSession, run2) {
+  async call(options, requestedSession, run2, ticket) {
     let settings;
     try {
       settings = this.settings();
@@ -31654,6 +31694,13 @@ var AriadneBoard = class {
     const url2 = settings.url;
     if (!settings.enabled) return noted({ status: "skipped", reason: "disabled" });
     if (url2 === void 0) return noted({ status: "skipped", reason: "invalid-url" });
+    if (ticket !== void 0 && ticket !== "" && !TicketKeySchema.safeParse(ticket).success) {
+      return {
+        status: "skipped",
+        reason: "not-jira-ticket",
+        notices: [...settings.notices, `skipped: ${ticket} is not a Jira issue key, and Ariadne tracks only Jira tickets`]
+      };
+    }
     let token;
     try {
       token = this.tokens.resolve()?.token;
@@ -31757,6 +31804,88 @@ var AriadneTokenStore = class {
     if (!existsSync5(path3)) return false;
     rmSync(path3);
     return true;
+  }
+};
+
+// src/shared/ariadne/board-session-store.ts
+import { existsSync as existsSync6, mkdirSync as mkdirSync4, readFileSync as readFileSync6, writeFileSync as writeFileSync4 } from "node:fs";
+import { homedir as homedir3 } from "node:os";
+import { join as join7 } from "node:path";
+var SessionRecordSchema = external_exports.object({
+  heartbeat: external_exports.object({
+    session: external_exports.string(),
+    step: external_exports.string(),
+    state: external_exports.enum(agentStates),
+    ticket: external_exports.string().optional(),
+    repo: external_exports.string().optional(),
+    branch: external_exports.string().optional(),
+    skill: external_exports.string().optional(),
+    detail: external_exports.string().optional()
+  }),
+  /** When a skill last posted this heartbeat. */
+  recordedAt: external_exports.number(),
+  /** When any heartbeat for the session was last sent, by a skill or the hook. */
+  sentAt: external_exports.number()
+});
+var sessionFilePattern = /^[A-Za-z0-9_-]{1,80}$/;
+var BoardSessionStore = class {
+  env;
+  home;
+  now;
+  constructor(props = {}) {
+    this.env = props.env ?? process.env;
+    this.home = props.home ?? homedir3();
+    this.now = props.now ?? Date.now;
+  }
+  dir() {
+    const stateHome = this.env["XDG_STATE_HOME"];
+    const base = stateHome !== void 0 && stateHome !== "" ? stateHome : join7(this.home, ".local", "state");
+    return join7(base, "flight-rules", "board");
+  }
+  read(session) {
+    const path3 = this.pathFor(session);
+    if (path3 === void 0 || !existsSync6(path3)) return void 0;
+    try {
+      const parsed = SessionRecordSchema.safeParse(JSON.parse(readFileSync6(path3, "utf-8")));
+      return parsed.success ? parsed.data : void 0;
+    } catch {
+      return void 0;
+    }
+  }
+  /** Remembers a heartbeat a skill just sent. */
+  record(heartbeat) {
+    const now = this.now();
+    const { session, step, state } = heartbeat;
+    const optional2 = Object.fromEntries(
+      ["ticket", "repo", "branch", "skill", "detail"].map((key) => [key, heartbeat[key]]).filter(([, value]) => value !== void 0 && value !== "")
+    );
+    this.write({ heartbeat: { session, step, state, ...optional2 }, recordedAt: now, sentAt: now });
+  }
+  /**
+   * Claims the next liveness heartbeat for a session: returns its record and
+   * marks it sent, or returns undefined when there is nothing to keep alive.
+   * That is when no skill has recorded one, the record is older than
+   * `maxAgeMs`, the run aborted, or one was sent less than `intervalMs` ago.
+   */
+  claim(session, intervalMs, maxAgeMs) {
+    const record2 = this.read(session);
+    if (record2 === void 0) return void 0;
+    const now = this.now();
+    if (record2.heartbeat.state === "abort") return void 0;
+    if (now - record2.recordedAt > maxAgeMs) return void 0;
+    if (now - record2.sentAt < intervalMs) return void 0;
+    const claimed = { ...record2, sentAt: now };
+    this.write(claimed);
+    return claimed;
+  }
+  write(record2) {
+    const path3 = this.pathFor(record2.heartbeat.session);
+    if (path3 === void 0) return;
+    mkdirSync4(this.dir(), { recursive: true, mode: 448 });
+    writeFileSync4(path3, JSON.stringify(record2), { mode: 384 });
+  }
+  pathFor(session) {
+    return sessionFilePattern.test(session) ? join7(this.dir(), `${session}.json`) : void 0;
   }
 };
 
@@ -36502,7 +36631,7 @@ var GitHubTaskTracker = class {
 };
 
 // src/tasks/jira-task-tracker/jira-task-tracker.ts
-import { readFileSync as readFileSync6 } from "node:fs";
+import { readFileSync as readFileSync7 } from "node:fs";
 import { basename as basename2 } from "node:path";
 
 // src/tasks/jira-task-tracker/jira-api-error.ts
@@ -46842,7 +46971,7 @@ var JiraTaskTracker = class {
    */
   async addAttachment(ticketId, filePath) {
     const filename = basename2(filePath);
-    const file2 = new File([readFileSync6(filePath)], filename, { type: this.mimeTypes.forFilename(filename) });
+    const file2 = new File([readFileSync7(filePath)], filename, { type: this.mimeTypes.forFilename(filename) });
     const uploaded = JiraUploadedAttachmentsSchema.parse(
       await this.client.upload(`/issue/${ticketId}/attachments`, [file2])
     );
@@ -47296,10 +47425,18 @@ var DefaultFlightRules = class {
     return FileDocResolver.fromInstall({ moduleUrl: import.meta.url, env: this.env });
   }
   board() {
-    return new AriadneBoard({ readLayers: () => this.configStore().layers(), tokens: this.ariadneTokens(), env: this.env });
+    return new AriadneBoard({
+      readLayers: () => this.configStore().layers(),
+      tokens: this.ariadneTokens(),
+      env: this.env,
+      sessions: this.boardSessions()
+    });
   }
   ariadneTokens() {
     return new AriadneTokenStore({ env: this.env });
+  }
+  boardSessions() {
+    return new BoardSessionStore({ env: this.env });
   }
 };
 function createFlightRules(props = {}) {
@@ -47512,9 +47649,9 @@ function createBoardCommand(getBoard, getTokens = () => new AriadneTokenStore(),
 }
 
 // src/tasks/commands/resolve-body.ts
-import { readFileSync as readFileSync7 } from "node:fs";
+import { readFileSync as readFileSync8 } from "node:fs";
 function resolveBody(opts) {
-  if (opts.bodyFile !== void 0) return readFileSync7(opts.bodyFile, "utf8");
+  if (opts.bodyFile !== void 0) return readFileSync8(opts.bodyFile, "utf8");
   if (opts.body !== void 0) return opts.body;
   throw new Error("one of --body or --body-file is required");
 }
@@ -48138,15 +48275,15 @@ function createRfcCommand(getConfig, getCwd = () => process.cwd()) {
 }
 
 // src/tasks/qa-instructions/qa-instructions.ts
-import { existsSync as existsSync6, readFileSync as readFileSync8, statSync as statSync3 } from "node:fs";
-import { dirname as dirname8, join as join7, resolve as resolve3 } from "node:path";
+import { existsSync as existsSync7, readFileSync as readFileSync9, statSync as statSync3 } from "node:fs";
+import { dirname as dirname8, join as join8, resolve as resolve3 } from "node:path";
 var atxHeading = /^ {0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$/;
 var fenceRun2 = /^ {0,3}(`{3,}|~{3,})/;
 var legacyHint = 'Legacy QA recipe in use. Move its content into a QA.md at the repo root (or a "QA" section of AGENTS.md); see docs/qa-instructions.md.';
 var nodeFileSystem = {
-  isFile: (path3) => existsSync6(path3) && statSync3(path3).isFile(),
-  exists: (path3) => existsSync6(path3),
-  readFile: (path3) => readFileSync8(path3, "utf8")
+  isFile: (path3) => existsSync7(path3) && statSync3(path3).isFile(),
+  exists: (path3) => existsSync7(path3),
+  readFile: (path3) => readFileSync9(path3, "utf8")
 };
 var QaInstructionsFinder = class {
   fs;
@@ -48201,20 +48338,20 @@ var QaInstructionsFinder = class {
     let current = start;
     for (; ; ) {
       levels.push(current);
-      if (this.fs.exists(join7(current, ".git"))) return levels;
+      if (this.fs.exists(join8(current, ".git"))) return levels;
       const parent = dirname8(current);
       if (parent === current) return [start];
       current = parent;
     }
   }
   sourceAt(dir) {
-    const agentsMd = join7(dir, "AGENTS.md");
+    const agentsMd = join8(dir, "AGENTS.md");
     if (this.fs.isFile(agentsMd)) {
       const section = this.extractQaSection(this.fs.readFile(agentsMd));
       if (section !== void 0)
         return { path: agentsMd, kind: "agents-md-section", dir, content: section };
     }
-    return this.fileSource(join7(dir, "QA.md"), "qa-md", dir) ?? this.fileSource(join7(dir, ".agents", "QA.md"), "agents-dir-qa-md", dir);
+    return this.fileSource(join8(dir, "QA.md"), "qa-md", dir) ?? this.fileSource(join8(dir, ".agents", "QA.md"), "agents-dir-qa-md", dir);
   }
   fileSource(path3, kind, dir) {
     if (!this.fs.isFile(path3)) return void 0;
@@ -48377,6 +48514,42 @@ function createCheckCommand(getConfig, getTracker, getConfigPath, getProbe, getF
 // src/hooks/commands/hook/command.ts
 import { text as text5 } from "node:stream/consumers";
 
+// src/hooks/board-heartbeat/board-heartbeat.ts
+import { spawn } from "node:child_process";
+var heartbeatIntervalMs = 6e4;
+var heartbeatMaxAgeMs = 60 * 6e4;
+var PostToolUseInputSchema = external_exports.looseObject({ session_id: external_exports.string() });
+var BoardHeartbeatHook = class {
+  sessions;
+  constructor(props) {
+    this.sessions = props.sessions;
+  }
+  /** The session to send a heartbeat for now, already claimed, or undefined. */
+  due(payload) {
+    const parsed = PostToolUseInputSchema.safeParse(payload);
+    if (!parsed.success) return void 0;
+    const claimed = this.sessions.claim(parsed.data.session_id, heartbeatIntervalMs, heartbeatMaxAgeMs);
+    return claimed?.heartbeat.session;
+  }
+};
+var DetachedHeartbeatSender = class {
+  execPath;
+  entry;
+  constructor(props = {}) {
+    this.execPath = props.execPath ?? process.execPath;
+    this.entry = "entry" in props ? props.entry : process.argv[1];
+  }
+  send(session) {
+    if (this.entry === void 0) return;
+    const child = spawn(this.execPath, [this.entry, "hook", "board-heartbeat", "--send", session], {
+      detached: true,
+      stdio: "ignore"
+    });
+    child.on("error", () => void 0);
+    child.unref();
+  }
+};
+
 // src/shared/attribution-stripper/attribution-stripper.ts
 var trailerText = String.raw`(?:Co-Authored-By:[^\n"']*(?:Claude|anthropic\.com)[^\n"']*|Claude-Session:[^\n"']*|https://claude\.ai/code/session_[A-Za-z0-9_-]+)`;
 var lineEnd = String.raw`(?=["']?[ \t]*(?:\r?\n|$))`;
@@ -48406,7 +48579,7 @@ ${line.trim()}`) === "";
 };
 
 // src/hooks/commit-guard/commit-guard.ts
-import { readFileSync as readFileSync9 } from "node:fs";
+import { readFileSync as readFileSync10 } from "node:fs";
 import { isAbsolute as isAbsolute2, resolve as resolve4 } from "node:path";
 var PreToolUseInputSchema = external_exports.looseObject({
   tool_name: external_exports.string().optional(),
@@ -48499,7 +48672,7 @@ var CommitGuard = class {
     const unquoted = file2.replace(/^["']|["']$/g, "");
     if (unquoted === "-" || !isAbsolute2(unquoted) && cwd === void 0) return false;
     try {
-      const contents = readFileSync9(isAbsolute2(unquoted) ? unquoted : resolve4(cwd ?? "", unquoted), "utf8");
+      const contents = readFileSync10(isAbsolute2(unquoted) ? unquoted : resolve4(cwd ?? "", unquoted), "utf8");
       return /^Flight-Rules-Version: /m.test(contents);
     } catch {
       return false;
@@ -48535,7 +48708,19 @@ var PreBashHook = class {
 };
 
 // src/hooks/commands/hook/command.ts
-function createHookCommand(getHandler = () => new PreBashHook(), readStdin = () => text5(process.stdin)) {
+var DefaultBoardHookServices = class {
+  heartbeatHook() {
+    return new BoardHeartbeatHook({ sessions: createFlightRules().boardSessions() });
+  }
+  sender() {
+    return new DetachedHeartbeatSender();
+  }
+  board() {
+    return createFlightRules().board();
+  }
+};
+var defaultBoardServices = new DefaultBoardHookServices();
+function createHookCommand(getHandler = () => new PreBashHook(), readStdin = () => text5(process.stdin), boardServices = defaultBoardServices) {
   const hook2 = new Command("hook").description("handlers for the plugin's Claude Code hooks");
   hook2.command("pre-bash").alias("guard-commit").description(
     "PreToolUse(Bash): block a hand-written `git commit` in a flight-rules repo, and strip Claude's attribution trailers from commit and PR commands"
@@ -48547,15 +48732,29 @@ function createHookCommand(getHandler = () => new PreBashHook(), readStdin = () 
       return;
     }
   });
+  hook2.command("board-heartbeat").description(
+    "PostToolUse: keep this session alive on Ariadne's Agents page, at most once a minute, while a skill has a ticket in progress; silent, never blocks"
+  ).option("--send <session>", "internal: replay the session's last heartbeat (run detached by the hook)").exitOverride().action(async (opts) => {
+    try {
+      if (opts.send !== void 0) {
+        await boardServices.board().replay(opts.send);
+        return;
+      }
+      const session = boardServices.heartbeatHook().due(JSON.parse(await readStdin()));
+      if (session !== void 0) boardServices.sender().send(session);
+    } catch {
+      return;
+    }
+  });
   return hook2;
 }
 
 // src/git/commands/commit/command.ts
-import { readFileSync as readFileSync11 } from "node:fs";
+import { readFileSync as readFileSync12 } from "node:fs";
 
 // src/git/commit-message-builder/commit-message-builder.ts
-import { readFileSync as readFileSync10 } from "node:fs";
-import { dirname as dirname9, join as join8 } from "node:path";
+import { readFileSync as readFileSync11 } from "node:fs";
+import { dirname as dirname9, join as join9 } from "node:path";
 
 // src/git/commit-message-builder/commit-message.schema.ts
 var CommitMessageInputSchema = external_exports.object({
@@ -48613,8 +48812,8 @@ var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
   }
   static readPluginVersion(binPath) {
     try {
-      const pkgPath = join8(dirname9(binPath), "..", "package.json");
-      const parsed = JSON.parse(readFileSync10(pkgPath, "utf-8"));
+      const pkgPath = join9(dirname9(binPath), "..", "package.json");
+      const parsed = JSON.parse(readFileSync11(pkgPath, "utf-8"));
       if (typeof parsed === "object" && parsed !== null && "version" in parsed && typeof parsed.version === "string") {
         return parsed.version;
       }
@@ -48651,7 +48850,7 @@ function createGitCommand(getExecutor) {
       type: opts.type,
       scope: opts.scope,
       description: opts.description,
-      body: opts.bodyFile !== void 0 ? readFileSync11(opts.bodyFile, "utf8") : opts.body,
+      body: opts.bodyFile !== void 0 ? readFileSync12(opts.bodyFile, "utf8") : opts.body,
       footers: opts.footer,
       model: opts.model ?? void 0
     });
@@ -48689,16 +48888,16 @@ function createGitCommand(getExecutor) {
 }
 
 // src/git/commands/message/command.ts
-import { mkdtempSync, readFileSync as readFileSync12, writeFileSync as writeFileSync4 } from "node:fs";
+import { mkdtempSync, readFileSync as readFileSync13, writeFileSync as writeFileSync5 } from "node:fs";
 import { tmpdir as tmpdir2 } from "node:os";
-import { join as join9 } from "node:path";
+import { join as join10 } from "node:path";
 function createCommitMessageCommand() {
   return new Command("commit-message").description("write the conventional commit message `flight-rules git commit` would use to a file, without committing").exitOverride().requiredOption("--type <type>", "conventional commit type").requiredOption("--scope <scope>", "conventional commit scope").requiredOption("--description <description>", "commit description").option("--body <body>", "commit body (or use --body-file)").option("--body-file <path>", "read the commit body from a file; wins over --body").option("--footer <footer>", "commit footer (repeatable)", (value, previous3) => [...previous3, value], []).option("--model <model>", "model identifier").option("--out <path>", "where to write the message; defaults to a new file in the temp directory").action((opts) => {
     const input2 = CommitMessageInputSchema.parse({
       type: opts.type,
       scope: opts.scope,
       description: opts.description,
-      body: opts.bodyFile !== void 0 ? readFileSync12(opts.bodyFile, "utf8") : opts.body,
+      body: opts.bodyFile !== void 0 ? readFileSync13(opts.bodyFile, "utf8") : opts.body,
       footers: opts.footer,
       model: opts.model
     });
@@ -48706,8 +48905,8 @@ function createCommitMessageCommand() {
       binPath: process.argv[1] ?? "",
       agentEnv: process.env["AI_AGENT"]
     }).build(input2);
-    const path3 = opts.out ?? join9(mkdtempSync(join9(tmpdir2(), "flight-rules-commit-")), "message.txt");
-    writeFileSync4(path3, `${message}
+    const path3 = opts.out ?? join10(mkdtempSync(join10(tmpdir2(), "flight-rules-commit-")), "message.txt");
+    writeFileSync5(path3, `${message}
 `);
     process.stdout.write(JSON.stringify({ path: path3, message }) + "\n");
   });
@@ -48777,7 +48976,13 @@ function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = () => cr
   program2.addCommand(createUsersCommand(tracker));
   program2.addCommand(createRfcCommand(config2));
   program2.addCommand(createConfigCommand(() => services.configStore()));
-  program2.addCommand(createHookCommand());
+  program2.addCommand(
+    createHookCommand(void 0, void 0, {
+      heartbeatHook: () => new BoardHeartbeatHook({ sessions: services.boardSessions() }),
+      sender: () => new DetachedHeartbeatSender(),
+      board: () => services.board()
+    })
+  );
   program2.addCommand(createQaCommand(config2, getConfigPath, void 0, () => services.evidence()));
   program2.addCommand(createCompetenciesCommand(config2));
   program2.addCommand(createDocCommand(() => services.docs()));

@@ -27,6 +27,7 @@ This is the skill that confirms the thing. You are handed a **ticket id**; you h
   Hand the tester every source path, nearest first. `"found": false` is a stop, not a prompt — report it and point the user at the output of `flight-rules doc qa-instructions`.
 - **The access the QA instructions name is available headlessly.** Check each environment variable they name with `printenv <VAR> >/dev/null`, never by printing it. When something a human must supply is missing, stop with one line, `needs: <what to provide>`, before you mutate the ticket. Do not pre-check a secrets manager's sign-in state; the tester resolves secrets inside the wrapper the instructions name.
 - **The fix or feature under test is already deployed** to the environment the QA instructions name. This skill verifies; it does not deploy.
+- **Ariadne reporting is optional.** The `flight-rules board post` lines below tell Ariadne's Agents page what is ready to test and how verification went. When Ariadne is not configured they print nothing and exit 0. A failed post prints one line and still exits 0. They are reports, not prompts: never wait on one or let it change the run.
 
 ## Process
 
@@ -69,6 +70,12 @@ flight-rules ticket label <id> --add Agentic-Verification-In-Progress
 ```
 
 This is the lock. From here on, a CLI error must clear it before you stop (see Error handling).
+
+The change is deployed and about to be checked, so report it as testable:
+
+```bash
+flight-rules board post item --kind testable --ticket <id> --title "<id> is deployed to <environment> and ready to test"
+```
 
 ### 4. Fetch the contract fresh
 
@@ -118,6 +125,10 @@ Read the single trailing `yaml` block it returns: `items[].{item, verdict, evide
    flight-rules ticket label <id> --remove Agentic-Verification-In-Progress --add Agentic-Verification-Success
    ```
 
+   ```bash
+   flight-rules board post activity --ticket <id> --level success --text "Verified on <environment>: <m> of <m> passed; labelled Agentic-Verification-Success"
+   ```
+
    Repeat `--attach` once per manifest item, referencing each in the body as `![<caption>](./<basename>)` with the same basename.
 
 2. **Any FAIL** — failure. Write the comment to a file. The first line opens with a mention of the assignee, falling back to the reporter — `@{<accountId>|<display name>}` using that person's `accountId` and display name — then, for a bug, `⚠️ this fix does not resolve the bug — re-running the documented reproduction still triggers it; <reason>. Details/evidence below.`, or, for a story, `⚠️ this change does not satisfy the acceptance criteria — <n> of <m> failed; <reason>. Details/evidence below.`. `<reason>` is the first FAIL item's evidence with any trailing period stripped. A symptom that merely changed shape is a FAIL, not a pass — record its new shape as that item's evidence, per Q-2. Then one line per item with its verdict and evidence, then the evidence references. Post with the same `ticket comment … --attach` form, then swap the label:
@@ -126,10 +137,18 @@ Read the single trailing `yaml` block it returns: `items[].{item, verdict, evide
    flight-rules ticket label <id> --remove Agentic-Verification-In-Progress --add Agentic-Verification-Failure
    ```
 
+   ```bash
+   flight-rules board post activity --ticket <id> --level abort --text "Verification failed on <environment>: <n> of <m> failed; labelled Agentic-Verification-Failure"
+   ```
+
 3. **Any UNVERIFIABLE and no FAIL** — the item could not be tested as handed over, which is a contract or environment problem, not a demonstrated defect. Write a comment: `Verification could not complete.` then one line per UNVERIFIABLE item with its evidence and the matching `openQuestions` entry. Post it with `ticket comment`, then remove the lock and add **no** outcome label:
 
    ```bash
    flight-rules ticket label <id> --remove Agentic-Verification-In-Progress
+   ```
+
+   ```bash
+   flight-rules board post activity --ticket <id> --level caution --text "Verification could not complete on <environment>; no outcome label"
    ```
 
    Surface every `openQuestions` entry to the user in the report.
