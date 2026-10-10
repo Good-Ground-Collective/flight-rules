@@ -31,6 +31,7 @@ the user is holding a report they can act on.
 - The **working tree is clean**. Checked once, here, before any mutation.
 - `flight-rules check` reports `"ok": true`.
 - Config carries a **`repo`** field (`owner/repo`). `execute-work` needs it to open each PR, and discovering it missing on ticket four means three PRs and a broken run. Settle it now.
+- **Ariadne reporting is optional.** The `flight-rules board` lines below report the wave to Ariadne's Agents page and read answers people gave there. When Ariadne is not configured, or the node is not a Jira key, they print nothing and exit 0. Treat empty output as "no answer". Never let a post change the run. Answers come only from people in Ariadne; this skill reads them and never answers an item itself.
 
 ## Process
 
@@ -74,7 +75,12 @@ the wave branches from it.
 
 If the base branch is not the repo's default branch, say so and confirm before
 continuing. Draining a wave onto a feature branch is legitimate but rarely what
-someone means.
+someone means. Post that closed question to Ariadne too, and take whichever
+answer comes first, in chat or in `chosenOption` from `flight-rules board items --json`:
+
+```bash
+flight-rules board post item --kind question --ticket <node id> --title "Drain the wave onto <base branch>, not the default branch?" --option Continue --option Stop
+```
 
 ### 3. Plan the graph
 
@@ -124,8 +130,20 @@ and the user needs to know which one they have:
 
 ### 5. Confirm before spending
 
+First read the wave gate the previous run left in Ariadne (step 9):
+
+```bash
+flight-rules board items --session wave-<node id> --json
+```
+
+Take the newest `wave-gate` item, and remember how many `wave-gate` items there are (zero when nothing prints) for step 9. If its `chosenOption` is `Start wave` and its `detail` lists exactly the tickets you selected, that answer is the go-ahead: say so and start draining without asking. `Review wave` means stop and tell the user they asked to review first. Otherwise there is no answer yet, so continue below.
+
 Show the user the wave: each ticket id, its title, and the count. List what you
-dropped and why. Then ask for a go-ahead.
+dropped and why. Then ask for a go-ahead. Post the same closed question to Ariadne, and take whichever answer comes first, in chat or in `chosenOption` from `flight-rules board items --json`:
+
+```bash
+flight-rules board post item --kind question --ticket <node id> --title "Start <count> tickets under <node id>?" --option Start --option Stop
+```
 
 **Past five tickets, make the cost explicit** before asking. Each ticket runs an
 implement/verify loop of up to three iterations with two agents per iteration,
@@ -198,7 +216,14 @@ their next command runs somewhere they didn't choose.
 
 ### 9. Report
 
-Give the user, in this order:
+First post the wave gate, so a person can approve the next wave in Ariadne. Run it under the node's own session, `wave-<node id>`, so the next run finds it in step 5. Take `<n>` from the count of `wave-gate` items step 5 read, plus one. Write `<waves[1] ids>` as the ticket ids that unblock on merge, comma-separated:
+
+```bash
+flight-rules board post heartbeat --session wave-<node id> --ticket <node id> --step "wave gate" --state hold --skill flight-rules:execute-wave
+flight-rules board post item --session wave-<node id> --kind wave-gate --ticket <node id> --id wave-<node id>-<n> --title "<k> PRs open for review; <m> tickets can start once they merge" --detail "<waves[1] ids>" --option "Start wave" --option "Review wave"
+```
+
+Then give the user, in this order:
 
 - **The node** — epic or initiative, id and title, and which you resolved it as.
 - **Wave size** — how many tickets were startable, out of how many open.

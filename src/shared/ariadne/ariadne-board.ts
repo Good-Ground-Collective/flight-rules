@@ -1,7 +1,7 @@
 import type { ConfigScope } from "../config-store.js";
 import { AriadneClient, AriadneError } from "./ariadne-client.js";
 import type { AriadneTransport } from "./ariadne-transport.js";
-import { AriadneUrlSchema, defaultAriadneUrl } from "./ariadne.schema.js";
+import { AriadneUrlSchema, TicketKeySchema, defaultAriadneUrl } from "./ariadne.schema.js";
 import type {
   ActivityInput,
   ActivityResponse,
@@ -12,6 +12,7 @@ import type {
   ItemResponse,
 } from "./ariadne.schema.js";
 import type { AriadneTokenStore } from "./ariadne-token-store.js";
+import type { BoardSessionStore } from "./board-session-store.js";
 
 /** A board call whose `session` falls back to the Claude Code session id. */
 export type BoardInput<T extends { session: string }> = Omit<T, "session"> & { session?: string | undefined };
@@ -29,8 +30,10 @@ export interface BoardCallOptions {
  * `notices` name config the board ignored. They are diagnostics: callers
  * print them only when asked to be loud (`--strict`, `board items`).
  */
+export type BoardSkipReason = "disabled" | "no-token" | "invalid-url" | "not-jira-ticket" | "nothing-recorded";
+
 export type BoardOutcome<T> = (
-  | { status: "skipped"; reason: "disabled" | "no-token" | "invalid-url" }
+  | { status: "skipped"; reason: BoardSkipReason }
   | { status: "posted"; value: T }
   | { status: "failed"; message: string }
 ) & { notices?: string[] };
@@ -55,6 +58,8 @@ export interface AriadneBoardProps {
   env?: Record<string, string | undefined>;
   transport?: AriadneTransport;
   timeoutMs?: number;
+  /** Where skill heartbeats are remembered for the heartbeat hook; none means nothing is remembered. */
+  sessions?: BoardSessionStore;
 }
 
 /** Claude Code exports the session id to every Bash tool call it runs. */
@@ -92,6 +97,7 @@ export class AriadneBoard {
   private readonly env: Record<string, string | undefined>;
   private readonly transport: AriadneTransport | undefined;
   private readonly timeoutMs: number | undefined;
+  private readonly sessions: BoardSessionStore | undefined;
 
   constructor(props: AriadneBoardProps) {
     this.readLayers = props.readLayers;
@@ -99,6 +105,7 @@ export class AriadneBoard {
     this.env = props.env ?? process.env;
     this.transport = props.transport;
     this.timeoutMs = props.timeoutMs;
+    this.sessions = props.sessions;
   }
 
   /**
@@ -155,8 +162,38 @@ export class AriadneBoard {
     return value === undefined || value === "" ? undefined : value;
   }
 
+  /**
+   * Posts a heartbeat and remembers it for the session, so the heartbeat
+   * hook can keep the session alive with the same ticket and step.
+   */
   async heartbeat(input: BoardInput<HeartbeatInput>, options: BoardCallOptions = {}): Promise<BoardOutcome<HeartbeatResponse>> {
-    return this.call(options, input.session, (client, session) => client.heartbeat({ ...input, session }));
+    return this.call(
+      options,
+      input.session,
+      async (client, session) => {
+        const sent = { ...input, session };
+        try {
+          const response = await client.heartbeat(sent);
+          this.remember(sent);
+          return response;
+        } catch (err) {
+          // A heartbeat that failed in transit still says what the run is doing.
+          if (!(err instanceof AriadneError) || err.failure !== "invalid-input") this.remember(sent);
+          throw err;
+        }
+      },
+      input.ticket,
+    );
+  }
+
+  /**
+   * Re-sends the last heartbeat a skill posted for `session`, without
+   * refreshing when it was recorded. The heartbeat hook's liveness ping.
+   */
+  async replay(session: string, options: BoardCallOptions = {}): Promise<BoardOutcome<HeartbeatResponse>> {
+    const record = this.sessions?.read(session);
+    if (record === undefined) return { status: "skipped", reason: "nothing-recorded" };
+    return this.call(options, session, (client) => client.heartbeat(record.heartbeat), record.heartbeat.ticket);
   }
 
   /**
@@ -165,21 +202,36 @@ export class AriadneBoard {
    * is posted again. A live session's step is never overwritten this way.
    */
   async item(input: BoardInput<ItemInput>, options: BoardCallOptions = {}): Promise<BoardOutcome<ItemResponse>> {
-    return this.call(options, input.session, (client, session) =>
-      this.withSession(client, session, input.ticket, () => client.postItem({ ...input, session })),
+    return this.call(
+      options,
+      input.session,
+      (client, session) => this.withSession(client, session, input.ticket, () => client.postItem({ ...input, session })),
+      input.ticket,
     );
   }
 
   /** Posts one activity line, creating the session first as `item` does. */
   async activity(input: BoardInput<ActivityInput>, options: BoardCallOptions = {}): Promise<BoardOutcome<ActivityResponse>> {
-    return this.call(options, input.session, (client, session) =>
-      this.withSession(client, session, input.ticket, () => client.postActivity({ ...input, session })),
+    return this.call(
+      options,
+      input.session,
+      (client, session) => this.withSession(client, session, input.ticket, () => client.postActivity({ ...input, session })),
+      input.ticket,
     );
   }
 
   /** Every item of one of the caller's sessions, open and resolved, with any chosen option. */
   async items(session: string | undefined, options: BoardCallOptions = {}): Promise<BoardOutcome<ItemListResponse>> {
     return this.call(options, session, (client, id) => client.listItems(id));
+  }
+
+  /** Remembering is best effort: a full disk must not fail a report. */
+  private remember(heartbeat: HeartbeatInput): void {
+    try {
+      this.sessions?.record(heartbeat);
+    } catch {
+      return;
+    }
   }
 
   private async withSession<T>(
@@ -201,6 +253,7 @@ export class AriadneBoard {
     options: BoardCallOptions,
     requestedSession: string | undefined,
     run: (client: AriadneClient, session: string) => Promise<T>,
+    ticket?: string,
   ): Promise<BoardOutcome<T>> {
     let settings: AriadneBoardSettings;
     try {
@@ -213,6 +266,14 @@ export class AriadneBoard {
     const url = settings.url;
     if (!settings.enabled) return noted({ status: "skipped", reason: "disabled" });
     if (url === undefined) return noted({ status: "skipped", reason: "invalid-url" });
+    // Ariadne maps tickets through Jira, so a GitHub-tracked run is skipped, not failed.
+    if (ticket !== undefined && ticket !== "" && !TicketKeySchema.safeParse(ticket).success) {
+      return {
+        status: "skipped",
+        reason: "not-jira-ticket",
+        notices: [...settings.notices, `skipped: ${ticket} is not a Jira issue key, and Ariadne tracks only Jira tickets`],
+      };
+    }
 
     let token: string | undefined;
     try {

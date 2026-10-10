@@ -44,11 +44,32 @@ Every `post` command and `board items` also take:
 - `--strict`: exit 1 when the call fails. A missing token then counts as a failure, so the request is sent without one and the API's 401 is reported.
 - `--json`: print the API response. For an item that is `{item, created}`, including any `chosenOption`; for `board items` it is `{items}`.
 
-`--step` is one line of up to 60 characters, such as `implement`, `verify 2/3`, `pr` or `qa`. `--ticket` is a Jira issue key. An item takes up to six `--option` labels. Over-long text is cut to the API's limits and folded onto one line where the API wants one.
+`--step` is one line of up to 60 characters, such as `implement`, `verify 2/3`, `pr` or `qa`. `--ticket` is a Jira issue key. A ticket that is not one, such as a GitHub issue number, is skipped quietly: Ariadne maps sessions to objectives through Jira, so a GitHub-tracked run reports nothing. `--strict` prints a one-line notice about the skip. An item takes up to six `--option` labels. Over-long text is cut to the API's limits and folded onto one line where the API wants one.
 
 An item or activity line needs its session to exist. When the session has no heartbeat yet, the post sends one first (step `started`, state `nominal`) and then retries; a live session's step is never overwritten.
 
 Reposting an item with the same `--id` (or, without one, the same kind, ticket and title) stores nothing new and returns the stored item with any answer, so a run can read a decision by posting its question again. `board items` lists every item of the session, open and resolved, with `chosenOption`. It is read-only: people answer items in Ariadne, and an agent token cannot answer them.
+
+## Where runs report
+
+The plugin's skills post at their step boundaries:
+
+- `execute-work` sends a heartbeat at each step: `implement`, `verify <n>/3`, `qa`, `pr`, then `pr` with state `hold` once the PR waits for review. It posts an activity line when it opens the PR, and a heartbeat with state `abort` and the reason when a gate stops the run.
+- `execute-wave` posts a `wave-gate` item (Start wave / Review wave) under the session `wave-<epic or initiative>` when it stops at a wave boundary. The next run reads the answer with `board items --session wave-<id> --json` before asking in chat.
+- `verify-ticket` posts a `testable` item when it starts checking a deployed change, and an activity line with the verdict and the Agentic-Verification label it set.
+- When a skill asks a closed question, it also posts it as a `question` item. The first answer wins, in chat or in Ariadne.
+
+An Ariadne answer is always a person's: agent tokens can't answer items, so skills read answers and never give them.
+
+### The heartbeat hook
+
+Ariadne shows a session as stale 15 minutes after its last heartbeat, and a long implement step can be quiet for longer. The plugin's `PostToolUse` hook, `flight-rules hook board-heartbeat`, keeps the session alive between skill posts. A tool call works like this:
+
+1. The hook reads the session id from the hook input. It then looks for the last heartbeat a skill posted for that session in `$XDG_STATE_HOME/flight-rules/board/<session>.json` (default `~/.local/state/flight-rules/board/`). That file holds the ticket, step and state, never a token.
+2. It stops there, silently, when no skill has posted for the session, when the run aborted, when that post is more than an hour old, or when it sent one less than a minute ago.
+3. Otherwise it starts a detached child process that re-sends that same heartbeat, and exits at once. The tool call never waits on the network, and the session's step is never overwritten.
+
+When Ariadne is not configured, no skill heartbeat is ever recorded, so the hook does nothing.
 
 ## Failures
 

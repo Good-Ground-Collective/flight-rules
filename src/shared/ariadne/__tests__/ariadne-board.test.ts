@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AriadneBoard } from "../ariadne-board.js";
 import type { BoardConfigLayer } from "../ariadne-board.js";
 import { AriadneTokenStore } from "../ariadne-token-store.js";
+import { BoardSessionStore } from "../board-session-store.js";
 import { defaultAriadneUrl } from "../ariadne.schema.js";
 import { FakeTransport, agentToken, contract } from "./fake-transport.js";
 
@@ -25,12 +26,14 @@ describe("AriadneBoard", () => {
       config = {},
       layers,
       env = { ARIADNE_AGENT_TOKEN: agentToken, CLAUDE_CODE_SESSION_ID: "claude-session-1" },
+      sessions,
     }: {
       /** User-scope values. */
       config?: Record<string, unknown>;
       /** Every layer, replacing `config`. */
       layers?: BoardConfigLayer[];
       env?: Record<string, string | undefined>;
+      sessions?: BoardSessionStore;
     } = {},
   ) =>
     new AriadneBoard({
@@ -38,6 +41,7 @@ describe("AriadneBoard", () => {
       tokens: new AriadneTokenStore({ env, home }),
       env,
       transport,
+      ...(sessions !== undefined ? { sessions } : {}),
     });
 
   const heartbeat = { ticket: "FRT-1", step: "implement", state: "nominal" } as const;
@@ -256,8 +260,65 @@ describe("AriadneBoard", () => {
 
     it("reports invalid input without a request", async () => {
       const transport = new FakeTransport();
-      const outcome = await board(transport).heartbeat({ ...heartbeat, ticket: "not a key" });
-      expect(outcome.status === "failed" && outcome.message).toContain("invalid heartbeat: ticket");
+      const outcome = await board(transport).heartbeat({ ...heartbeat, step: "   " });
+      expect(outcome.status === "failed" && outcome.message).toContain("invalid heartbeat: step");
+      expect(transport.requests).toHaveLength(0);
+    });
+  });
+
+  describe("GitHub-tracked runs", () => {
+    it.each([
+      ["heartbeat", (b: AriadneBoard) => b.heartbeat({ ...heartbeat, ticket: "194" })],
+      ["item", (b: AriadneBoard) => b.item({ kind: "question", ticket: "#194", title: "t" })],
+      ["activity", (b: AriadneBoard) => b.activity({ ticket: "194", text: "t" })],
+    ] as const)("skips a %s whose ticket is not a Jira key, quietly and without a request", async (_kind, post) => {
+      const transport = new FakeTransport();
+      const outcome = await post(board(transport));
+      expect(outcome).toMatchObject({ status: "skipped", reason: "not-jira-ticket" });
+      expect(outcome.notices?.[0]).toContain("is not a Jira issue key");
+      expect(transport.requests).toHaveLength(0);
+    });
+  });
+
+  describe("remembering heartbeats for the hook", () => {
+    const store = () => new BoardSessionStore({ env: { XDG_STATE_HOME: join(home, "state") }, home });
+
+    it("remembers a skill heartbeat, then replays it unchanged", async () => {
+      const sessions = store();
+      const transport = new FakeTransport(
+        FakeTransport.json(200, { session: contract.session }),
+        FakeTransport.json(200, { session: contract.session }),
+      );
+      const reporter = board(transport, { sessions });
+      await reporter.heartbeat({ ticket: "FRT-1", step: "verify 2/3", state: "caution", branch: "feat/FRT-1-x" });
+      expect(sessions.read("claude-session-1")?.heartbeat).toEqual({
+        session: "claude-session-1",
+        ticket: "FRT-1",
+        step: "verify 2/3",
+        state: "caution",
+        branch: "feat/FRT-1-x",
+      });
+
+      await reporter.replay("claude-session-1");
+      expect(transport.bodies()[1]).toEqual(transport.bodies()[0]);
+    });
+
+    it("remembers a heartbeat that failed in transit, but not one that was invalid or skipped", async () => {
+      const offline = new TypeError("fetch failed");
+      const sessions = store();
+      await board(new FakeTransport(offline, offline), { sessions }).heartbeat(heartbeat);
+      expect(sessions.read("claude-session-1")).toBeDefined();
+
+      const other = store();
+      await board(new FakeTransport(), { sessions: other, env: { ARIADNE_AGENT_TOKEN: agentToken, CLAUDE_CODE_SESSION_ID: "s2" } }).heartbeat({ ...heartbeat, step: " " });
+      await board(new FakeTransport(), { sessions: other, env: { CLAUDE_CODE_SESSION_ID: "s3" } }).heartbeat(heartbeat);
+      await board(new FakeTransport(), { sessions: other, env: { ARIADNE_AGENT_TOKEN: agentToken, CLAUDE_CODE_SESSION_ID: "s4" } }).heartbeat({ ...heartbeat, ticket: "194" });
+      expect([other.read("s2"), other.read("s3"), other.read("s4")]).toEqual([undefined, undefined, undefined]);
+    });
+
+    it("replays nothing for a session no skill reported", async () => {
+      const transport = new FakeTransport();
+      expect(await board(transport, { sessions: store() }).replay("unknown")).toEqual({ status: "skipped", reason: "nothing-recorded" });
       expect(transport.requests).toHaveLength(0);
     });
   });

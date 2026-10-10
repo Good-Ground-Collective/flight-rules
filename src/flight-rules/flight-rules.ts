@@ -10,6 +10,7 @@ import { EvidenceLocation } from '../tasks/evidence/evidence-location.js'
 import { EnvLoader } from '../shared/env.js'
 import { AriadneBoard } from '../shared/ariadne/ariadne-board.js'
 import { AriadneTokenStore } from '../shared/ariadne/ariadne-token-store.js'
+import { BoardSessionStore } from '../shared/ariadne/board-session-store.js'
 import { GitHubTaskTracker } from '../tasks/github-task-tracker/github-task-tracker.js'
 import { JiraTaskTracker } from '../tasks/jira-task-tracker/jira-task-tracker.js'
 import type { TaskTracker } from '../tasks/task-tracker/task-tracker.js'
@@ -31,6 +32,8 @@ export interface FlightRules {
   /** Ariadne's Agents page reporter; reads only the `ariadne.*` keys from user and local scope, so it works without a valid tracker config. */
   board(): AriadneBoard
   ariadneTokens(): AriadneTokenStore
+  /** The last heartbeat each session's skill posted, outside every repo; read by the heartbeat hook. */
+  boardSessions(): BoardSessionStore
 }
 
 /** Constructs services on demand so config and credentials are only required by their consumers. */
@@ -145,11 +148,20 @@ export class DefaultFlightRules implements FlightRules {
   }
 
   board(): AriadneBoard {
-    return new AriadneBoard({ readLayers: () => this.configStore().layers(), tokens: this.ariadneTokens(), env: this.env })
+    return new AriadneBoard({
+      readLayers: () => this.configStore().layers(),
+      tokens: this.ariadneTokens(),
+      env: this.env,
+      sessions: this.boardSessions(),
+    })
   }
 
   ariadneTokens(): AriadneTokenStore {
     return new AriadneTokenStore({ env: this.env })
+  }
+
+  boardSessions(): BoardSessionStore {
+    return new BoardSessionStore({ env: this.env })
   }
 }
 
