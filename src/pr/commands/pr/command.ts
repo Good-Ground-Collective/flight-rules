@@ -26,6 +26,14 @@ type PrCommentOptions = {
   attach: string[]
 }
 
+type PrListOptions = {
+  ticket: string[]
+}
+
+type PrRequestReviewOptions = {
+  reviewer: string[]
+}
+
 export function createPrCommand(getHost: () => PullRequestHost): Command {
   const pr = new Command('pr')
 
@@ -73,6 +81,26 @@ export function createPrCommand(getHost: () => PullRequestHost): Command {
       const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile })
       const result = await getHost().commentOnPullRequest(Number(number), body, { attach: opts.attach })
       process.stdout.write(JSON.stringify(result) + '\n')
+    })
+
+  pr.command('list')
+    .exitOverride()
+    .requiredOption('--ticket <id>', 'ticket id (repeatable)', collect, [])
+    .action(async (opts: PrListOptions) => {
+      const matches = await getHost().listOpenPullRequestsForTickets(opts.ticket)
+      process.stdout.write(JSON.stringify(matches) + '\n')
+    })
+
+  pr.command('request-review')
+    .exitOverride()
+    .argument('<number>', 'pull request number')
+    .requiredOption('--reviewer <login>', 'reviewer to request (repeatable)', collect, [])
+    .action(async (number: string, opts: PrRequestReviewOptions) => {
+      const result = await getHost().requestReviewers(Number(number), opts.reviewer)
+      process.stdout.write(JSON.stringify(result) + '\n')
+      if (result.failed.length > 0) {
+        throw new Error(`reviewer request failed for: ${result.failed.map((f) => f.login).join(', ')}`)
+      }
     })
 
   return pr

@@ -9,6 +9,22 @@ export interface PullRequestComment {
   url: string
 }
 
+export interface OpenPullRequest {
+  ticket: string
+  number: number
+  url: string
+  headRefName: string
+  baseRefName: string
+  title: string
+}
+
+/** Per-login outcome of asking for reviewers on an existing pull request. */
+export interface ReviewerRequestResult {
+  number: number
+  requested: string[]
+  failed: { login: string; error: string }[]
+}
+
 /** Files to attach beside a PR or comment body, each formatted as `<path>#<caption>` and passed straight through to the hosting CLI. */
 export interface PullRequestAttachOptions {
   attach?: readonly string[]
@@ -23,4 +39,8 @@ export interface PullRequestAttachOptions {
 export interface PullRequestHost {
   createPullRequest(input: PullRequestTemplate, options?: PullRequestAttachOptions): Promise<CreatedPullRequest>
   commentOnPullRequest(number: number, body: string, options?: PullRequestAttachOptions): Promise<PullRequestComment>
+  /** Returns every open PR matched to each ticket id, so a ticket with several PRs shows all of them. */
+  listOpenPullRequestsForTickets(ticketIds: readonly string[]): Promise<OpenPullRequest[]>
+  /** Attempts every login and reports each outcome rather than stopping at the first failure. */
+  requestReviewers(number: number, logins: readonly string[]): Promise<ReviewerRequestResult>
 }

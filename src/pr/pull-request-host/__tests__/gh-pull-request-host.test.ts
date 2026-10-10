@@ -198,3 +198,110 @@ describe('GhPullRequestHost.commentOnPullRequest', () => {
     await expect(readFile(bodyFile, 'utf8')).rejects.toThrow()
   })
 })
+
+const listArgs = [
+  'pr', 'list',
+  '--repo', 'o/r',
+  '--state', 'open',
+  '--limit', '200',
+  '--json', 'number,url,headRefName,baseRefName,title',
+]
+
+const ghPr = (number: number, headRefName: string, title: string) => ({
+  number,
+  url: `https://github.com/o/r/pull/${number}`,
+  headRefName,
+  baseRefName: 'main',
+  title,
+})
+
+const listHost = (prs: unknown[]) => {
+  const calls: [string, readonly string[]][] = []
+  const execFileFn = vi.fn(async (file: string, args: readonly string[]) => {
+    calls.push([file, args])
+    return { stdout: JSON.stringify(prs), stderr: '' }
+  })
+  return { host: new GhPullRequestHost({ repo: 'o/r', execFileFn }), calls }
+}
+
+describe('GhPullRequestHost.listOpenPullRequestsForTickets', () => {
+  it('runs one gh pr list with the exact argv', async () => {
+    const { host, calls } = listHost([])
+    await host.listOpenPullRequestsForTickets(['42', '43'])
+    expect(calls).toEqual([['gh', listArgs]])
+  })
+
+  it('matches a head branch of <type>/<id> or <type>/<id>-slug', async () => {
+    const { host } = listHost([ghPr(1, 'feat/42-add-thing', 'unrelated'), ghPr(2, 'fix/43', 'unrelated')])
+    const result = await host.listOpenPullRequestsForTickets(['42', '43'])
+    expect(result).toEqual([
+      { ticket: '42', ...ghPr(1, 'feat/42-add-thing', 'unrelated') },
+      { ticket: '43', ...ghPr(2, 'fix/43', 'unrelated') },
+    ])
+  })
+
+  it('matches a title scope of (<id>) including a breaking-change bang', async () => {
+    const { host } = listHost([ghPr(3, 'wip', 'feat(42): add thing'), ghPr(4, 'wip2', 'fix(42)!: break it')])
+    const result = await host.listOpenPullRequestsForTickets(['42'])
+    expect(result.map((r) => r.number)).toEqual([3, 4])
+  })
+
+  it('does not match a ticket id that is a prefix of another', async () => {
+    const { host } = listHost([ghPr(1, 'feat/42-x', 'feat(42): x')])
+    expect(await host.listOpenPullRequestsForTickets(['4'])).toEqual([])
+  })
+
+  it('returns every match when a ticket has more than one open PR', async () => {
+    const { host } = listHost([ghPr(1, 'feat/42-a', 'feat(42): a'), ghPr(2, 'fix/42-b', 'fix(42): b')])
+    const result = await host.listOpenPullRequestsForTickets(['42'])
+    expect(result.map((r) => r.number)).toEqual([1, 2])
+  })
+
+  it('returns an empty array when nothing matches', async () => {
+    const { host } = listHost([ghPr(1, 'feat/99-x', 'feat(99): x')])
+    expect(await host.listOpenPullRequestsForTickets(['42'])).toEqual([])
+  })
+
+  it('treats regex metacharacters in the ticket id literally', async () => {
+    const { host } = listHost([ghPr(1, 'feat/KAN-31-x', 'feat(KAN-31): x')])
+    expect(await host.listOpenPullRequestsForTickets(['K.N-31'])).toEqual([])
+  })
+})
+
+describe('GhPullRequestHost.requestReviewers', () => {
+  it('attempts every login with the exact argv and reports each outcome', async () => {
+    const calls: [string, readonly string[]][] = []
+    const execFileFn = vi.fn(async (file: string, args: readonly string[]) => {
+      calls.push([file, args])
+      if (args.includes('bob')) {
+        const error: Error & { stderr?: string } = new Error('Command failed')
+        error.stderr = 'bob is not a collaborator\nsecond line'
+        throw error
+      }
+      return { stdout: '', stderr: '' }
+    })
+    const host = new GhPullRequestHost({ repo: 'o/r', execFileFn })
+
+    const result = await host.requestReviewers(7, ['alice', 'bob', 'carol'])
+
+    expect(calls).toEqual([
+      ['gh', ['pr', 'edit', '7', '--repo', 'o/r', '--add-reviewer', 'alice']],
+      ['gh', ['pr', 'edit', '7', '--repo', 'o/r', '--add-reviewer', 'bob']],
+      ['gh', ['pr', 'edit', '7', '--repo', 'o/r', '--add-reviewer', 'carol']],
+    ])
+    expect(result).toEqual({
+      number: 7,
+      requested: ['alice', 'carol'],
+      failed: [{ login: 'bob', error: 'bob is not a collaborator' }],
+    })
+  })
+
+  it('falls back to the error message when stderr is absent', async () => {
+    const execFileFn = vi.fn(async () => {
+      throw new Error('boom')
+    })
+    const host = new GhPullRequestHost({ repo: 'o/r', execFileFn })
+    const result = await host.requestReviewers(7, ['alice'])
+    expect(result.failed).toEqual([{ login: 'alice', error: 'boom' }])
+  })
+})
