@@ -25,7 +25,9 @@ export interface LoadedReviewPolicy {
   /** The core charter followed by each selected language charter, as one document. */
   charter: string;
   /** The same charters, one entry per document. */
-  charters: Pick<Charter, "id" | "language" | "appliesTo" | "contents">[];
+  charters: Pick<Charter, "id" | "language" | "appliesTo" | "tierA" | "contents">[];
+  /** Every Tier A mandate the selected charters define, core first; a review accounts for each one. */
+  tierA: string[];
   contract: string;
 }
 export interface ReviewPolicy {
@@ -58,7 +60,7 @@ export class FileReviewPolicy implements ReviewPolicy {
 
     const catalog = new DocCharterCatalog({ docs: new FileDocResolver({ docsDir: docs }) });
     const charters = (paths === undefined ? catalog.all() : catalog.select(paths)).map(
-      ({ id, language, appliesTo, contents }) => ({ id, language, appliesTo, contents }),
+      ({ id, language, appliesTo, tierA, contents }) => ({ id, language, appliesTo, tierA, contents }),
     );
 
     return {
@@ -67,6 +69,7 @@ export class FileReviewPolicy implements ReviewPolicy {
         .map(({ contents }) => (contents.endsWith("\n") ? contents : `${contents}\n`))
         .join("\n"),
       charters,
+      tierA: [...new Set(charters.flatMap(({ tierA }) => tierA))],
       contract: read("code-review-findings-contract"),
     };
   }

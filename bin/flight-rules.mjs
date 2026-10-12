@@ -48101,7 +48101,10 @@ var DocCharterCatalog = class {
   all() {
     const core = this.docs.resolve(coreCharterId);
     const languages = this.docs.list().filter((id) => id.startsWith(languageCharterPrefix)).map((id) => this.languageCharter(this.docs.resolve(id)));
-    return [{ id: core.id, language: null, appliesTo: [], path: core.path, contents: core.contents }, ...languages];
+    return [
+      { id: core.id, language: null, appliesTo: [], tierA: this.tierA(core.contents), path: core.path, contents: core.contents },
+      ...languages
+    ];
   }
   select(paths) {
     const normalized = paths.map((path3) => path3.trim().replace(/^\.\//, "")).filter((path3) => path3.length > 0);
@@ -48118,7 +48121,12 @@ var DocCharterCatalog = class {
     if (doc.id !== expectedId) {
       throw new CharterFormatError(`Charter "${doc.id}" declares language "${parsed.data.language}"; its file must be ${expectedId}.md`);
     }
-    return { id: doc.id, ...parsed.data, path: doc.path, contents: doc.contents };
+    return { id: doc.id, ...parsed.data, tierA: this.tierA(doc.contents), path: doc.path, contents: doc.contents };
+  }
+  tierA(contents) {
+    const tiers = contents.split(/^## Review tiers$/m)[1]?.split(/^## /m)[0] ?? "";
+    const table = tiers.split(/^\*\*Tier B/m)[0] ?? "";
+    return [...new Set([...table.matchAll(/^\|\s*([A-Z]+-\d+)\b/gm)].flatMap((match) => match[1] ?? []))];
   }
 };
 var CharterFormatError = class extends Error {
@@ -48494,13 +48502,14 @@ var FileReviewPolicy = class {
     };
     const catalog = new DocCharterCatalog({ docs: new FileDocResolver({ docsDir: docs }) });
     const charters = (paths === void 0 ? catalog.all() : catalog.select(paths)).map(
-      ({ id, language, appliesTo, contents }) => ({ id, language, appliesTo, contents })
+      ({ id, language, appliesTo, tierA, contents }) => ({ id, language, appliesTo, tierA, contents })
     );
     return {
       method: read("autonomous-review-method"),
       charter: charters.map(({ contents }) => contents.endsWith("\n") ? contents : `${contents}
 `).join("\n"),
       charters,
+      tierA: [...new Set(charters.flatMap(({ tierA }) => tierA))],
       contract: read("code-review-findings-contract")
     };
   }

@@ -31,6 +31,13 @@ describe('DocCharterCatalog', () => {
       ['coding-charter-typescript', 'typescript'],
     ])
   })
+  it('reads no Tier A mandates from a charter without review tiers', () => {
+    expect(catalog().all().map(charter => charter.tierA)).toEqual([[], [], []])
+  })
+  it('deduplicates Tier A rows and ignores Tier B rows', () => {
+    write('coding-charter', '# Core\n\n## Review tiers\n\n**Tier A**\n\n| Mandate | Rule |\n| --- | --- |\n| X-1 a | r |\n| X-1 b | r |\n| X-2 c | r |\n\n**Tier B**\n\n| X-3 d | j |\n')
+    expect(catalog().all()[0]?.tierA).toEqual(['X-1', 'X-2'])
+  })
   it('parses applies-to into camelCase globs', () => {
     expect(catalog().all()[2]).toMatchObject({ appliesTo: ['**/*.ts', '**/*.tsx'], contents: expect.stringContaining('# typescript') })
   })
@@ -71,7 +78,15 @@ describe('bundled charters', () => {
     expect(bundled.all().length).toBeGreaterThan(1)
   })
   it('each carry their own review tiers', () => {
-    for (const charter of bundled.all()) expect(charter.contents, charter.id).toMatch(/^## Review tiers$/m)
+    for (const charter of bundled.all()) {
+      expect(charter.contents, charter.id).toMatch(/^## Review tiers$/m)
+      expect(charter.tierA.length, charter.id).toBeGreaterThan(0)
+    }
+  })
+  it('parse Tier A mandates from the Tier A table only', () => {
+    const [core, typescript] = bundled.select(['src/index.ts'])
+    expect(core?.tierA).toEqual(['M-1', 'M-2', 'M-10', 'M-11'])
+    expect(typescript?.tierA).toEqual(['M-3', 'M-5', 'M-7'])
   })
   it('give TypeScript files the TypeScript charter', () => {
     expect(bundled.select(['src/index.ts']).map(charter => charter.id)).toContain('coding-charter-typescript')

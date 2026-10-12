@@ -30,6 +30,8 @@ export interface Charter {
   id: string
   language: string | null
   appliesTo: string[]
+  /** Tier A mandate IDs from the charter's Review tiers section, in table order. */
+  tierA: string[]
   path: string
   contents: string
 }
@@ -61,7 +63,10 @@ export class DocCharterCatalog implements CharterCatalog {
       .filter(id => id.startsWith(languageCharterPrefix))
       .map(id => this.languageCharter(this.docs.resolve(id)))
 
-    return [{ id: core.id, language: null, appliesTo: [], path: core.path, contents: core.contents }, ...languages]
+    return [
+      { id: core.id, language: null, appliesTo: [], tierA: this.tierA(core.contents), path: core.path, contents: core.contents },
+      ...languages,
+    ]
   }
 
   select(paths: readonly string[]): Charter[] {
@@ -84,7 +89,13 @@ export class DocCharterCatalog implements CharterCatalog {
       throw new CharterFormatError(`Charter "${doc.id}" declares language "${parsed.data.language}"; its file must be ${expectedId}.md`)
     }
 
-    return { id: doc.id, ...parsed.data, path: doc.path, contents: doc.contents }
+    return { id: doc.id, ...parsed.data, tierA: this.tierA(doc.contents), path: doc.path, contents: doc.contents }
+  }
+
+  private tierA(contents: string): string[] {
+    const tiers = contents.split(/^## Review tiers$/m)[1]?.split(/^## /m)[0] ?? ''
+    const table = tiers.split(/^\*\*Tier B/m)[0] ?? ''
+    return [...new Set([...table.matchAll(/^\|\s*([A-Z]+-\d+)\b/gm)].flatMap(match => match[1] ?? []))]
   }
 }
 
