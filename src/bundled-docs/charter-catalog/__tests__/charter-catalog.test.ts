@@ -70,6 +70,9 @@ describe('bundled charters', () => {
     expect(bundled.all()[0]?.id).toBe('coding-charter')
     expect(bundled.all().length).toBeGreaterThan(1)
   })
+  it('each carry their own review tiers', () => {
+    for (const charter of bundled.all()) expect(charter.contents, charter.id).toMatch(/^## Review tiers$/m)
+  })
   it('give TypeScript files the TypeScript charter', () => {
     expect(bundled.select(['src/index.ts']).map(charter => charter.id)).toContain('coding-charter-typescript')
   })

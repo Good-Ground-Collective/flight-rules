@@ -3,9 +3,12 @@ import { readFileSync, realpathSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
+import { DocCharterCatalog, type Charter } from "../bundled-docs/charter-catalog/charter-catalog.js";
+import { FileDocResolver } from "../bundled-docs/doc-resolver/doc-resolver.js";
 import { HeadShaSchema, ReviewPathSchema } from "./review.schema.js";
 
 const ReviewPolicyPropsSchema = z.strictObject({ home: z.string().min(1).optional() });
+const LoadPolicyPropsSchema = z.strictObject({ paths: z.array(z.string()).optional() });
 const RepositoryContextPropsSchema = z.strictObject({
   cwd: z.string().min(1),
   trustedRef: HeadShaSchema,
@@ -17,8 +20,20 @@ export interface RepositoryReviewContext {
   sources: { path: string; contents: string }[];
   missing: string[];
 }
+export interface LoadedReviewPolicy {
+  method: string;
+  /** The core charter followed by each selected language charter, as one document. */
+  charter: string;
+  /** The same charters, one entry per document. */
+  charters: Pick<Charter, "id" | "language" | "appliesTo" | "contents">[];
+  contract: string;
+}
 export interface ReviewPolicy {
-  load(): { method: string; charter: string; contract: string };
+  /**
+   * With `paths`, selects the core charter plus the language charters governing those files;
+   * without, every language charter, each scoped by its own `applies-to` globs.
+   */
+  load(input?: z.input<typeof LoadPolicyPropsSchema>): LoadedReviewPolicy;
   repository(input: z.input<typeof RepositoryContextPropsSchema>): RepositoryReviewContext;
 }
 
@@ -31,7 +46,8 @@ export class FileReviewPolicy implements ReviewPolicy {
     this.home = parsed.home ?? join(dirname(fileURLToPath(import.meta.url)), "..");
   }
 
-  load(): { method: string; charter: string; contract: string } {
+  load(input: z.input<typeof LoadPolicyPropsSchema> = {}): LoadedReviewPolicy {
+    const { paths } = LoadPolicyPropsSchema.parse(input);
     const docs = realpathSync(join(this.home, "docs"));
     const read = (id: string): string => {
       const path = realpathSync(join(docs, `${id}.md`));
@@ -39,9 +55,18 @@ export class FileReviewPolicy implements ReviewPolicy {
         throw new ReviewPolicyError("review policy path leaves the installed docs directory");
       return readFileSync(path, "utf8");
     };
+
+    const catalog = new DocCharterCatalog({ docs: new FileDocResolver({ docsDir: docs }) });
+    const charters = (paths === undefined ? catalog.all() : catalog.select(paths)).map(
+      ({ id, language, appliesTo, contents }) => ({ id, language, appliesTo, contents }),
+    );
+
     return {
       method: read("autonomous-review-method"),
-      charter: read("coding-charter"),
+      charter: charters
+        .map(({ contents }) => (contents.endsWith("\n") ? contents : `${contents}\n`))
+        .join("\n"),
+      charters,
       contract: read("code-review-findings-contract"),
     };
   }

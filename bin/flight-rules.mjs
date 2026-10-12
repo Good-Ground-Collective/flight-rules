@@ -48471,6 +48471,7 @@ import { readFileSync as readFileSync8, realpathSync as realpathSync2 } from "no
 import { dirname as dirname8, join as join9, relative } from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 var ReviewPolicyPropsSchema = external_exports.strictObject({ home: external_exports.string().min(1).optional() });
+var LoadPolicyPropsSchema = external_exports.strictObject({ paths: external_exports.array(external_exports.string()).optional() });
 var RepositoryContextPropsSchema = external_exports.strictObject({
   cwd: external_exports.string().min(1),
   trustedRef: HeadShaSchema2,
@@ -48482,7 +48483,8 @@ var FileReviewPolicy = class {
     const parsed = ReviewPolicyPropsSchema.parse(props);
     this.home = parsed.home ?? join9(dirname8(fileURLToPath2(import.meta.url)), "..");
   }
-  load() {
+  load(input2 = {}) {
+    const { paths } = LoadPolicyPropsSchema.parse(input2);
     const docs = realpathSync2(join9(this.home, "docs"));
     const read = (id) => {
       const path3 = realpathSync2(join9(docs, `${id}.md`));
@@ -48490,9 +48492,15 @@ var FileReviewPolicy = class {
         throw new ReviewPolicyError("review policy path leaves the installed docs directory");
       return readFileSync8(path3, "utf8");
     };
+    const catalog = new DocCharterCatalog({ docs: new FileDocResolver({ docsDir: docs }) });
+    const charters = (paths === void 0 ? catalog.all() : catalog.select(paths)).map(
+      ({ id, language, appliesTo, contents }) => ({ id, language, appliesTo, contents })
+    );
     return {
       method: read("autonomous-review-method"),
-      charter: read("coding-charter"),
+      charter: charters.map(({ contents }) => contents.endsWith("\n") ? contents : `${contents}
+`).join("\n"),
+      charters,
       contract: read("code-review-findings-contract")
     };
   }
