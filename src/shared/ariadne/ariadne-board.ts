@@ -27,6 +27,21 @@ export interface BoardCallOptions {
   strict?: boolean;
 }
 
+/** Options for an item or activity line, which may have to create its session first. */
+export interface BoardReportOptions extends BoardCallOptions {
+  /** The skill reporting, so a session this post creates names it instead of showing none. */
+  skill?: string | undefined;
+}
+
+/** The session an item or activity line may have to create first. */
+interface BootstrapTarget {
+  session: string;
+  ticket: string | undefined;
+  skill: string | undefined;
+  /** Whether the session is the default `<Claude Code session id>-<TICKET>` rather than an explicit `--session`. */
+  defaulted: boolean;
+}
+
 /**
  * `notices` name config the board ignored. They are diagnostics: callers
  * print them only when asked to be loud (`--strict`, `board items`).
@@ -68,6 +83,13 @@ export const claudeSessionEnv = "CLAUDE_CODE_SESSION_ID";
 
 /** The step a session gets when an item or activity line is its first report. */
 export const bootstrapStep = "started";
+
+/**
+ * How recent a recorded skill heartbeat must be to recreate a missing
+ * session with it. The heartbeat hook keeps a skill's session alive for the
+ * same hour; an older record belongs to a finished run.
+ */
+const bootstrapRecoveryMs = 60 * 60_000;
 
 /**
  * The layers a person controls and does not commit. A repo's committed
@@ -224,24 +246,31 @@ export class AriadneBoard {
 
   /**
    * Posts an item. A session that has never sent a heartbeat (or has aged
-   * out) gets one first, with step `started` and state `nominal`, and the item
-   * is posted again. A live session's step is never overwritten this way.
+   * out) gets one first, with step `started`, state `nominal` and the
+   * reporting skill when one is named, and the item is posted again. A live
+   * session's step is never overwritten this way.
    */
-  async item(input: BoardInput<ItemInput>, options: BoardCallOptions = {}): Promise<BoardOutcome<ItemResponse>> {
+  async item(input: BoardInput<ItemInput>, options: BoardReportOptions = {}): Promise<BoardOutcome<ItemResponse>> {
     return this.call(
       options,
       input.session,
-      (client, session) => this.withSession(client, session, input.ticket, () => client.postItem({ ...input, session })),
+      (client, session) =>
+        this.withSession(client, { session, ticket: input.ticket, skill: options.skill, defaulted: input.session === undefined }, () =>
+          client.postItem({ ...input, session }),
+        ),
       input.ticket,
     );
   }
 
   /** Posts one activity line, creating the session first as `item` does. */
-  async activity(input: BoardInput<ActivityInput>, options: BoardCallOptions = {}): Promise<BoardOutcome<ActivityResponse>> {
+  async activity(input: BoardInput<ActivityInput>, options: BoardReportOptions = {}): Promise<BoardOutcome<ActivityResponse>> {
     return this.call(
       options,
       input.session,
-      (client, session) => this.withSession(client, session, input.ticket, () => client.postActivity({ ...input, session })),
+      (client, session) =>
+        this.withSession(client, { session, ticket: input.ticket, skill: options.skill, defaulted: input.session === undefined }, () =>
+          client.postActivity({ ...input, session }),
+        ),
       input.ticket,
     );
   }
@@ -276,19 +305,49 @@ export class AriadneBoard {
     }
   }
 
-  private async withSession<T>(
-    client: AriadneClient,
-    session: string,
-    ticket: string | undefined,
-    post: () => Promise<T>,
-  ): Promise<T> {
+  /**
+   * Runs `post`, first creating the session when the API has none. A skill
+   * heartbeat recorded for the session in the last hour, such as one that
+   * failed in transit, creates it with its own step and state. Otherwise the
+   * session starts as `started`, and when a skill is named that placeholder
+   * is remembered as the skill's heartbeat, so the heartbeat hook keeps it
+   * alive and never replaces its skill with an agent type it infers. The
+   * placeholder never replaces a heartbeat a skill recorded meanwhile.
+   */
+  private async withSession<T>(client: AriadneClient, target: BootstrapTarget, post: () => Promise<T>): Promise<T> {
     try {
       return await post();
     } catch (err) {
       if (!(err instanceof AriadneError) || err.code !== "session_not_found") throw err;
     }
-    await client.heartbeat({ session, ticket, step: bootstrapStep, state: "nominal" });
+    const { session, ticket, skill, defaulted } = target;
+    const recorded = this.bestEffort(() => this.sessions?.recent(session, bootstrapRecoveryMs));
+    if (recorded !== undefined) {
+      await client.heartbeat(recorded);
+      return post();
+    }
+    const named = skill !== undefined && skill !== "";
+    const heartbeat: HeartbeatInput = { session, ticket, step: bootstrapStep, state: "nominal", ...(named ? { skill } : {}) };
+    await client.heartbeat(heartbeat);
+    if (named) this.rememberPlaceholder(heartbeat, defaulted);
     return post();
+  }
+
+  private rememberPlaceholder(heartbeat: HeartbeatInput, defaulted: boolean): void {
+    const remembered = this.bestEffort(() => this.sessions?.recordIfAbsent(heartbeat, bootstrapRecoveryMs));
+    const claudeSession = this.defaultSession();
+    if (remembered === true && defaulted && claudeSession !== undefined && claudeSession !== heartbeat.session) {
+      this.bestEffort(() => this.sessions?.pointThread(claudeSession, heartbeat.session));
+    }
+  }
+
+  /** Local state is best effort: a full or unreadable disk must not fail a report. */
+  private bestEffort<R>(run: () => R): R | undefined {
+    try {
+      return run();
+    } catch {
+      return undefined;
+    }
   }
 
   private async call<T>(

@@ -33,8 +33,8 @@ When an ignored or invalid value is found, `--strict` and `board items` print a 
 
 ```bash
 flight-rules board post heartbeat --ticket <key> --step <step> --state <nominal|caution|abort|hold> [--branch <branch>] [--repo <owner/name>] [--skill <skill>] [--detail <line>]
-flight-rules board post item --kind <question|blocker|testable|wave-gate> --ticket <key> --title <text> [--detail <text>] [--option <label>]… [--id <id>]
-flight-rules board post activity --ticket <key> --text <line> [--level <info|success|caution|abort>] [--id <id>]
+flight-rules board post item --kind <question|blocker|testable|wave-gate> --ticket <key> --title <text> [--detail <text>] [--option <label>]… [--id <id>] [--skill <skill>]
+flight-rules board post activity --ticket <key> --text <line> [--level <info|success|caution|abort>] [--id <id>] [--skill <skill>]
 flight-rules board items [--ticket <key>] [--json]
 ```
 
@@ -46,7 +46,7 @@ Every `post` command and `board items` also take:
 
 `--step` is one line of up to 60 characters, such as `implement`, `verify 2/3`, `pr` or `qa`. `--ticket` is a Jira issue key. A ticket that is not one, such as a GitHub issue number, is skipped quietly: Ariadne maps sessions to objectives through Jira, so a GitHub-tracked run reports nothing. `--strict` prints a one-line notice about the skip. An item takes up to six `--option` labels. Over-long text is cut to the API's limits and folded onto one line where the API wants one.
 
-An item or activity line needs its session to exist. When the session has no heartbeat yet, the post sends one first (step `started`, state `nominal`) and then retries; a live session's step is never overwritten.
+An item or activity line needs its session to exist. When the session has no heartbeat yet, the post sends one first (step `started`, state `nominal`, and the `--skill` given to the post) and then retries; a live session's step is never overwritten. Every plugin skill passes `--skill` on its posts, so no row it creates shows without a skill.
 
 Reposting an item with the same `--id` (or, without one, the same kind, ticket and title) stores nothing new and returns the stored item with any answer, so a run can read a decision by posting its question again. `board items` lists every item of the session, open and resolved, with `chosenOption`. To read back an item posted without `--session`, pass the same `--ticket`. It is read-only: people answer items in Ariadne, and an agent token cannot answer them.
 
@@ -56,7 +56,7 @@ The plugin's skills post at their step boundaries:
 
 - `execute-work` sends a heartbeat at each step: `implement`, `verify <n>/3`, `qa`, `pr`, then `pr` with state `hold` once the PR waits for review. It posts an activity line when it opens the PR, and a heartbeat with state `abort` and the reason when a gate stops the run.
 - `execute-wave` posts a `wave-gate` item (Start wave / Review wave) under the session `wave-<epic or initiative>` when it stops at a wave boundary. The next run reads the answer with `board items --session wave-<id> --json` before asking in chat.
-- `verify-ticket` posts a `testable` item when it starts checking a deployed change, and an activity line with the verdict and the Agentic-Verification label it set.
+- `verify-ticket` sends a `qa` heartbeat and posts a `testable` item when it starts checking a deployed change. When it finishes, it sends a closing `qa` heartbeat whose state and detail carry the verdict (`nominal` verified, `abort` failed, `caution` could not complete), and an activity line with the verdict and the Agentic-Verification label it set.
 - When a skill asks a closed question, it also posts it as a `question` item. The first answer wins, in chat or in Ariadne. The skill reads an Ariadne answer back with `board items --ticket <key> --json`.
 
 Work that runs through no skill reports too, from the plugin's hooks (below): a sub-agent dispatched for a Jira ticket, such as a `general-purpose` agent described as "Build FRT-1234 …", shows up as running on that ticket within a minute of its first tool call.
@@ -72,9 +72,9 @@ Ariadne shows a session as stale 15 minutes after its last heartbeat, and a long
 **On each tool call** (`PostToolUse`, `flight-rules hook board-heartbeat`):
 
 1. In a sub-agent, the first tool call works out its ticket once: Claude Code's `subagents/agent-<id>.meta.json` beside the session transcript names the dispatching call, whose record holds the ticket. Without a dispatch record, the hook reads a key from the meta description. Without `meta.json`, it reads one from the sub-agent's first prompt in `subagents/agent-<id>.jsonl`. A background Agent call returns the sub-agent's id at once, so its own `PostToolUse` maps the sub-agent even before it starts. The answer, "no ticket" included, is cached per sub-agent, so later calls cost one small file read.
-2. A sub-agent on a ticket reports to the session `<session id>-<TICKET>`, the same default `board post` uses. When a skill has posted to that session, the hook re-sends the skill's last heartbeat. Otherwise it sends one it infers: the step is the dispatch description (cut to 60 characters), the state `nominal` and the skill the agent type. An inferred heartbeat never overwrites a skill's step: once a skill has posted to a session in the last day, the hook only re-sends the skill's heartbeat, and stops when that run aborted or has been quiet for an hour.
+2. A sub-agent on a ticket reports to the session `<session id>-<TICKET>`, the same default `board post` uses. When a skill has posted to that session, the hook re-sends the skill's last heartbeat. Otherwise it sends one it infers: the step is the dispatch description (cut to 60 characters), the state `nominal`, and the skill the one the sub-agent last loaded through the Skill tool, or else its agent type. An inferred heartbeat never overwrites a skill's step: once a skill has posted to a session in the last day, the hook only re-sends the skill's heartbeat, and stops when that run aborted or has been quiet for an hour.
 3. Otherwise the hook keeps a skill's session for this Claude Code session alive: one posted under the session id itself, or the one a skill last posted to by default.
-4. On the main thread with no skill session, a Jira key in the working directory's name, or else in the current branch, names the ticket, and the hook sends a heartbeat with step `working`. The detached child reads the branch, at most once a minute. A main thread with neither reports nothing.
+4. On the main thread with no skill session, a Jira key in the working directory's name, or else in the current branch, names the ticket, and the hook sends a heartbeat with step `working` and the skill the main thread last loaded, if any. The detached child reads the branch, at most once a minute. A main thread with neither reports nothing.
 
 Each session gets at most one heartbeat a minute. A due heartbeat is sent by a detached child process, so the tool call never waits on the network.
 

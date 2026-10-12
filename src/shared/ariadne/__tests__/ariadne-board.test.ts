@@ -221,6 +221,25 @@ describe("AriadneBoard", () => {
       expect(transport.bodies()[1]).toEqual({ session: "claude-session-1-FRT-1", ticket: "FRT-1", step: "started", state: "nominal" });
     });
 
+    it.each([
+      ["item", (b: AriadneBoard) => b.item({ kind: "testable", ticket: "FRT-1", title: "Fix is on staging" }, { skill: "flight-rules:verify-ticket" })],
+      ["activity", (b: AriadneBoard) => b.activity({ ticket: "FRT-1", text: "Verified" }, { skill: "flight-rules:verify-ticket" })],
+    ] as const)("names the reporting skill on a session the %s has to create", async (_kind, post) => {
+      const transport = new FakeTransport(
+        FakeTransport.json(404, { error: "session_not_found", message: "Send a heartbeat for this session first." }),
+        FakeTransport.json(200, { session: contract.session }),
+        FakeTransport.json(200, { item: contract.item, activity: contract.activity, created: true }),
+      );
+      await post(board(transport));
+      expect(transport.bodies()[1]).toEqual({
+        session: "claude-session-1-FRT-1",
+        ticket: "FRT-1",
+        step: "started",
+        state: "nominal",
+        skill: "flight-rules:verify-ticket",
+      });
+    });
+
     it("does not loop when the session is still missing after the heartbeat", async () => {
       const missing = FakeTransport.json(404, { error: "session_not_found", message: "Send a heartbeat first." });
       const transport = new FakeTransport(missing, FakeTransport.json(200, { session: contract.session }), missing);

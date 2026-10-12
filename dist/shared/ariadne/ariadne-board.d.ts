@@ -17,6 +17,11 @@ export interface BoardCallOptions {
      */
     strict?: boolean;
 }
+/** Options for an item or activity line, which may have to create its session first. */
+export interface BoardReportOptions extends BoardCallOptions {
+    /** The skill reporting, so a session this post creates names it instead of showing none. */
+    skill?: string | undefined;
+}
 /**
  * `notices` name config the board ignored. They are diagnostics: callers
  * print them only when asked to be loud (`--strict`, `board items`).
@@ -108,12 +113,13 @@ export declare class AriadneBoard {
     replay(session: string, options?: BoardCallOptions): Promise<BoardOutcome<HeartbeatResponse>>;
     /**
      * Posts an item. A session that has never sent a heartbeat (or has aged
-     * out) gets one first, with step `started` and state `nominal`, and the item
-     * is posted again. A live session's step is never overwritten this way.
+     * out) gets one first, with step `started`, state `nominal` and the
+     * reporting skill when one is named, and the item is posted again. A live
+     * session's step is never overwritten this way.
      */
-    item(input: BoardInput<ItemInput>, options?: BoardCallOptions): Promise<BoardOutcome<ItemResponse>>;
+    item(input: BoardInput<ItemInput>, options?: BoardReportOptions): Promise<BoardOutcome<ItemResponse>>;
     /** Posts one activity line, creating the session first as `item` does. */
-    activity(input: BoardInput<ActivityInput>, options?: BoardCallOptions): Promise<BoardOutcome<ActivityResponse>>;
+    activity(input: BoardInput<ActivityInput>, options?: BoardReportOptions): Promise<BoardOutcome<ActivityResponse>>;
     /**
      * Every item of one of the caller's sessions, open and resolved, with any
      * chosen option. Without `session`, `ticket` picks the default session a
@@ -126,7 +132,19 @@ export declare class AriadneBoard {
      * session's current skill session, which the heartbeat hook keeps alive.
      */
     private remember;
+    /**
+     * Runs `post`, first creating the session when the API has none. A skill
+     * heartbeat recorded for the session in the last hour, such as one that
+     * failed in transit, creates it with its own step and state. Otherwise the
+     * session starts as `started`, and when a skill is named that placeholder
+     * is remembered as the skill's heartbeat, so the heartbeat hook keeps it
+     * alive and never replaces its skill with an agent type it infers. The
+     * placeholder never replaces a heartbeat a skill recorded meanwhile.
+     */
     private withSession;
+    private rememberPlaceholder;
+    /** Local state is best effort: a full or unreadable disk must not fail a report. */
+    private bestEffort;
     private call;
     private describe;
     /** Belt and braces: no message may ever carry the token. */

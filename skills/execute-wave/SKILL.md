@@ -79,7 +79,7 @@ someone means. Post that closed question to Ariadne too, and take whichever
 answer comes first, in chat or in `chosenOption` from `flight-rules board items --ticket <node id> --json`:
 
 ```bash
-flight-rules board post item --kind question --ticket <node id> --title "Drain the wave onto <base branch>, not the default branch?" --option Continue --option Stop
+flight-rules board post item --skill flight-rules:execute-wave --kind question --ticket <node id> --title "Drain the wave onto <base branch>, not the default branch?" --option Continue --option Stop
 ```
 
 ### 3. Plan the graph
@@ -173,7 +173,7 @@ Show the user the wave: each ticket id, its title, and the count. List what you
 dropped and why. Then ask for a go-ahead. Post the same closed question to Ariadne, and take whichever answer comes first, in chat or in `chosenOption` from `flight-rules board items --ticket <node id> --json`:
 
 ```bash
-flight-rules board post item --kind question --ticket <node id> --title "Start <count> tickets under <node id>?" --option Start --option Stop
+flight-rules board post item --skill flight-rules:execute-wave --kind question --ticket <node id> --title "Start <count> tickets under <node id>?" --option Start --option Stop
 ```
 
 **Past five tickets, make the cost explicit** before asking. Each ticket runs an
@@ -285,7 +285,7 @@ First post the wave gate, so a person can approve the next wave in Ariadne. Run 
 
 ```bash
 flight-rules board post heartbeat --session wave-<node id> --ticket <node id> --step "wave gate" --state hold --skill flight-rules:execute-wave
-flight-rules board post item --session wave-<node id> --kind wave-gate --ticket <node id> --id wave-<node id>-<n> --title "<k> PRs open for review; <m> tickets can start once they merge" --detail "<waves[1] ids>" --option "Start wave" --option "Review wave"
+flight-rules board post item --skill flight-rules:execute-wave --session wave-<node id> --kind wave-gate --ticket <node id> --id wave-<node id>-<n> --title "<k> PRs open for review; <m> tickets can start once they merge" --detail "<waves[1] ids>" --option "Start wave" --option "Review wave"
 ```
 
 Then give the user, in this order:

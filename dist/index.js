@@ -1056,7 +1056,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.66.0";
+var appVersion = false ? "0.0.0-dev" : "1.67.0";
 
 // src/shared/ariadne/review-packet.schema.ts
 import { z as z11 } from "zod";
@@ -1339,6 +1339,18 @@ var BoardStateFiles = class {
     mkdirSync3(this.folder(folder), { recursive: true, mode: 448 });
     writeFileSync3(path, JSON.stringify(value), { mode: 384 });
   }
+  /** Writes a file only if none exists, atomically; returns whether it wrote. */
+  create(folder, id, value) {
+    const path = this.pathFor(folder, id);
+    if (path === void 0) return false;
+    mkdirSync3(this.folder(folder), { recursive: true, mode: 448 });
+    try {
+      writeFileSync3(path, JSON.stringify(value), { mode: 384, flag: "wx" });
+      return true;
+    } catch {
+      return false;
+    }
+  }
   remove(folder, id) {
     const path = this.pathFor(folder, id);
     if (path !== void 0) rmSync(path, { force: true });
@@ -1394,8 +1406,10 @@ var ThreadRecordSchema = z12.object({
   /** When the hook last spawned a branch lookup for this Claude Code session's main thread. */
   branchCheckedAt: z12.number().optional()
 });
+var ThreadSkillRecordSchema = z12.object({ skill: z12.string() });
 var inferredFolder = "inferred";
 var threadsFolder = "threads";
+var threadSkillsFolder = "thread-skills";
 var unsafeSessionCharacters = /[^A-Za-z0-9_-]/g;
 var maxSessionLength = 80;
 var TicketSessionKey = class {
@@ -1423,6 +1437,28 @@ var BoardSessionStore = class {
   record(heartbeat) {
     const now = this.now();
     this.files.write(void 0, heartbeat.session, { heartbeat: this.compact(heartbeat), recordedAt: now, sentAt: now });
+  }
+  /**
+   * The skill heartbeat a skill recorded for the session within `maxAgeMs`,
+   * whatever its state; an older record counts as none.
+   */
+  recent(session, maxAgeMs) {
+    const record = this.read(session);
+    return record !== void 0 && this.now() - record.recordedAt <= maxAgeMs ? record.heartbeat : void 0;
+  }
+  /**
+   * Remembers a placeholder heartbeat only where no skill has recorded a
+   * recent one: a fresh record is never replaced, and a missing file is
+   * created atomically, so a skill's own heartbeat landing at the same
+   * moment from another process wins. Returns whether it was remembered.
+   */
+  recordIfAbsent(heartbeat, maxAgeMs) {
+    if (this.recent(heartbeat.session, maxAgeMs) !== void 0) return false;
+    const now = this.now();
+    const record = { heartbeat: this.compact(heartbeat), recordedAt: now, sentAt: now };
+    if (this.read(heartbeat.session) === void 0) return this.files.create(void 0, heartbeat.session, record);
+    this.files.write(void 0, heartbeat.session, record);
+    return true;
   }
   /**
    * Claims the next liveness heartbeat for a session: returns its record and
@@ -1481,10 +1517,20 @@ var BoardSessionStore = class {
     this.files.write(threadsFolder, claudeSession, { ...thread, branchCheckedAt: now });
     return true;
   }
+  /** Remembers the skill this Claude Code session's main thread just loaded. */
+  recordThreadSkill(claudeSession, skill) {
+    if (this.threadSkill(claudeSession) === skill) return;
+    this.files.write(threadSkillsFolder, claudeSession, { skill });
+  }
+  /** The skill this Claude Code session's main thread last loaded, if any. */
+  threadSkill(claudeSession) {
+    return this.files.read(threadSkillsFolder, claudeSession, ThreadSkillRecordSchema)?.skill;
+  }
   /** Deletes inferred heartbeats and thread records untouched for `maxAgeMs`. */
   prune(maxAgeMs) {
     this.files.prune(inferredFolder, maxAgeMs);
     this.files.prune(threadsFolder, maxAgeMs);
+    this.files.prune(threadSkillsFolder, maxAgeMs);
   }
   thread(claudeSession) {
     return this.files.read(threadsFolder, claudeSession, ThreadRecordSchema);
@@ -1501,6 +1547,7 @@ var BoardSessionStore = class {
 // src/shared/ariadne/ariadne-board.ts
 var claudeSessionEnv = "CLAUDE_CODE_SESSION_ID";
 var bootstrapStep = "started";
+var bootstrapRecoveryMs = 60 * 6e4;
 var personalScopes = /* @__PURE__ */ new Set(["user", "local"]);
 var scopeLabels = {
   user: "user settings",
@@ -1632,14 +1679,19 @@ var AriadneBoard = class {
   }
   /**
    * Posts an item. A session that has never sent a heartbeat (or has aged
-   * out) gets one first, with step `started` and state `nominal`, and the item
-   * is posted again. A live session's step is never overwritten this way.
+   * out) gets one first, with step `started`, state `nominal` and the
+   * reporting skill when one is named, and the item is posted again. A live
+   * session's step is never overwritten this way.
    */
   async item(input, options = {}) {
     return this.call(
       options,
       input.session,
-      (client, session) => this.withSession(client, session, input.ticket, () => client.postItem({ ...input, session })),
+      (client, session) => this.withSession(
+        client,
+        { session, ticket: input.ticket, skill: options.skill, defaulted: input.session === void 0 },
+        () => client.postItem({ ...input, session })
+      ),
       input.ticket
     );
   }
@@ -1648,7 +1700,11 @@ var AriadneBoard = class {
     return this.call(
       options,
       input.session,
-      (client, session) => this.withSession(client, session, input.ticket, () => client.postActivity({ ...input, session })),
+      (client, session) => this.withSession(
+        client,
+        { session, ticket: input.ticket, skill: options.skill, defaulted: input.session === void 0 },
+        () => client.postActivity({ ...input, session })
+      ),
       input.ticket
     );
   }
@@ -1676,14 +1732,47 @@ var AriadneBoard = class {
       return;
     }
   }
-  async withSession(client, session, ticket, post) {
+  /**
+   * Runs `post`, first creating the session when the API has none. A skill
+   * heartbeat recorded for the session in the last hour, such as one that
+   * failed in transit, creates it with its own step and state. Otherwise the
+   * session starts as `started`, and when a skill is named that placeholder
+   * is remembered as the skill's heartbeat, so the heartbeat hook keeps it
+   * alive and never replaces its skill with an agent type it infers. The
+   * placeholder never replaces a heartbeat a skill recorded meanwhile.
+   */
+  async withSession(client, target, post) {
     try {
       return await post();
     } catch (err) {
       if (!(err instanceof AriadneError) || err.code !== "session_not_found") throw err;
     }
-    await client.heartbeat({ session, ticket, step: bootstrapStep, state: "nominal" });
+    const { session, ticket, skill, defaulted } = target;
+    const recorded = this.bestEffort(() => this.sessions?.recent(session, bootstrapRecoveryMs));
+    if (recorded !== void 0) {
+      await client.heartbeat(recorded);
+      return post();
+    }
+    const named = skill !== void 0 && skill !== "";
+    const heartbeat = { session, ticket, step: bootstrapStep, state: "nominal", ...named ? { skill } : {} };
+    await client.heartbeat(heartbeat);
+    if (named) this.rememberPlaceholder(heartbeat, defaulted);
     return post();
+  }
+  rememberPlaceholder(heartbeat, defaulted) {
+    const remembered = this.bestEffort(() => this.sessions?.recordIfAbsent(heartbeat, bootstrapRecoveryMs));
+    const claudeSession = this.defaultSession();
+    if (remembered === true && defaulted && claudeSession !== void 0 && claudeSession !== heartbeat.session) {
+      this.bestEffort(() => this.sessions?.pointThread(claudeSession, heartbeat.session));
+    }
+  }
+  /** Local state is best effort: a full or unreadable disk must not fail a report. */
+  bestEffort(run) {
+    try {
+      return run();
+    } catch {
+      return void 0;
+    }
   }
   async call(options, requestedSession, run, ticket) {
     let settings;
@@ -2009,8 +2098,10 @@ var AgentRecordSchema = z13.object({
   session: z13.string(),
   at: z13.number()
 });
+var AgentSkillRecordSchema = z13.object({ skill: z13.string() });
 var dispatchFolder = "dispatch";
 var agentsFolder = "agents";
+var agentSkillsFolder = "agent-skills";
 var BoardAgentStore = class {
   files;
   constructor(props = {}) {
@@ -2047,11 +2138,21 @@ var BoardAgentStore = class {
   }
   removeAgent(agentId) {
     this.files.remove(agentsFolder, agentId);
+    this.files.remove(agentSkillsFolder, agentId);
+  }
+  /** Remembers the skill a sub-agent just loaded; rewrites nothing when it is unchanged. */
+  recordAgentSkill(agentId, skill) {
+    if (this.readAgentSkill(agentId) === skill) return;
+    this.files.write(agentSkillsFolder, agentId, { skill });
+  }
+  readAgentSkill(agentId) {
+    return this.files.read(agentSkillsFolder, agentId, AgentSkillRecordSchema)?.skill;
   }
   /** Deletes dispatch and sub-agent records untouched for `maxAgeMs`. */
   prune(maxAgeMs) {
     this.files.prune(dispatchFolder, maxAgeMs);
     this.files.prune(agentsFolder, maxAgeMs);
+    this.files.prune(agentSkillsFolder, maxAgeMs);
   }
 };
 

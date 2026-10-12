@@ -33,8 +33,12 @@ const PostToolUseInputSchema = z.looseObject({
   cwd: z.string().optional(),
   tool_name: z.string().optional(),
   tool_use_id: z.string().optional(),
+  tool_input: z.unknown().optional(),
   tool_response: z.unknown().optional(),
 });
+
+/** A Skill tool call names the skill it loads, such as `flight-rules:execute-work`. */
+const SkillCallSchema = z.looseObject({ skill: z.string() });
 
 /** A background Agent call answers at once with the sub-agent's id. */
 const AsyncLaunchSchema = z.looseObject({ status: z.literal("async_launched"), agentId: z.string() });
@@ -116,8 +120,10 @@ export class BoardHeartbeatHook {
     const input = parsed.data;
     const claudeSession = input.session_id;
     this.bridgeBackgroundLaunch(input);
+    const invoked = this.invokedSkill(input);
 
     if (input.agent_id !== undefined) {
+      if (invoked !== undefined) this.agents?.recordAgentSkill(input.agent_id, invoked);
       const mapping = this.resolver?.resolve({
         agentId: input.agent_id,
         session: claudeSession,
@@ -127,11 +133,13 @@ export class BoardHeartbeatHook {
       if (mapping !== undefined && mapping.ticket !== null) {
         const ticket = mapping.ticket;
         // A sub-agent mapped from its background launch has no agent type yet; its own tool calls carry one.
-        const agentType = mapping.agentType ?? input.agent_type;
+        const skill = this.agents?.readAgentSkill(input.agent_id) ?? mapping.agentType ?? input.agent_type;
         return this.dueForTicket(claudeSession, ticket, (session) =>
-          this.subagentHeartbeat(session, ticket, mapping.description, agentType),
+          this.subagentHeartbeat(session, ticket, mapping.description, skill),
         );
       }
+    } else if (invoked !== undefined) {
+      this.sessions.recordThreadSkill(claudeSession, invoked);
     }
 
     const skill = this.skillThread(claudeSession);
@@ -140,7 +148,7 @@ export class BoardHeartbeatHook {
 
     const fromCheckout = this.extractor.firstKey(basename(input.cwd));
     if (fromCheckout !== undefined) {
-      return this.dueForTicket(claudeSession, fromCheckout, (session) => this.checkoutHeartbeat(session, fromCheckout));
+      return this.dueForTicket(claudeSession, fromCheckout, (session) => this.checkoutHeartbeat(claudeSession, session, fromCheckout));
     }
     if (!this.sessions.claimBranchCheck(claudeSession, heartbeatIntervalMs) || !this.reportable()) return undefined;
     return { kind: "branch", claudeSession, cwd: input.cwd };
@@ -153,7 +161,7 @@ export class BoardHeartbeatHook {
   dueForBranch(claudeSession: string, branch: string): string | undefined {
     const ticket = this.extractor.firstKey(branch);
     if (ticket === undefined) return undefined;
-    const due = this.dueForTicket(claudeSession, ticket, (session) => this.checkoutHeartbeat(session, ticket, branch));
+    const due = this.dueForTicket(claudeSession, ticket, (session) => this.checkoutHeartbeat(claudeSession, session, ticket, branch));
     return due?.kind === "send" ? due.session : undefined;
   }
 
@@ -209,15 +217,24 @@ export class BoardHeartbeatHook {
     return pointed !== undefined && this.sessions.isLive(pointed, heartbeatMaxAgeMs) ? pointed : undefined;
   }
 
+  /** The skill a Skill tool call just loaded, when it is a name Ariadne accepts. */
+  private invokedSkill(input: z.infer<typeof PostToolUseInputSchema>): string | undefined {
+    if (input.tool_name !== "Skill") return undefined;
+    const call = SkillCallSchema.safeParse(input.tool_input);
+    if (!call.success) return undefined;
+    const skill = SkillNameSchema.safeParse(call.data.skill);
+    return skill.success ? skill.data : undefined;
+  }
+
   private bridgeBackgroundLaunch(input: z.infer<typeof PostToolUseInputSchema>): void {
     if (input.tool_name !== "Agent" || input.tool_use_id === undefined) return;
     const launch = AsyncLaunchSchema.safeParse(input.tool_response);
     if (launch.success) this.resolver?.bridge(launch.data.agentId, input.tool_use_id, input.session_id);
   }
 
-  private subagentHeartbeat(session: string, ticket: string, description: string | undefined, agentType: string | undefined): HeartbeatInput {
+  private subagentHeartbeat(session: string, ticket: string, description: string | undefined, skillName: string | undefined): HeartbeatInput {
     const step = StepSchema.safeParse(description ?? "");
-    const skill = SkillNameSchema.safeParse(agentType);
+    const skill = SkillNameSchema.safeParse(skillName);
     return {
       session,
       ticket,
@@ -227,8 +244,17 @@ export class BoardHeartbeatHook {
     };
   }
 
-  private checkoutHeartbeat(session: string, ticket: string, branch?: string): HeartbeatInput {
-    return { session, ticket, step: checkoutStep, state: "nominal", ...(branch !== undefined ? { branch } : {}) };
+  /** A main thread's heartbeat names the skill it last loaded, when it loaded one. */
+  private checkoutHeartbeat(claudeSession: string, session: string, ticket: string, branch?: string): HeartbeatInput {
+    const skill = this.sessions.threadSkill(claudeSession);
+    return {
+      session,
+      ticket,
+      step: checkoutStep,
+      state: "nominal",
+      ...(branch !== undefined ? { branch } : {}),
+      ...(skill !== undefined ? { skill } : {}),
+    };
   }
 
   private send(session: string | undefined): HeartbeatDue | undefined {
