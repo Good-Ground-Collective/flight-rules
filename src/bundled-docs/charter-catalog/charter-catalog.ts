@@ -16,7 +16,7 @@ const LanguageFrontmatterSchema = z
 const FrontmatterSchema = z
   .string()
   .transform((contents, ctx) => {
-    const block = /^---\n([\s\S]*?)\n---\n/.exec(contents)?.[1]
+    const block = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/.exec(contents)?.[1]
     if (block === undefined) {
       ctx.addIssue({ code: 'custom', message: 'missing YAML frontmatter' })
       return z.NEVER

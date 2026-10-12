@@ -28,25 +28,37 @@ export class GitRepositoryPaths implements RepositoryPaths {
   }
 
   async inventory(): Promise<string[]> {
-    return this.lines(['ls-files', '--cached', '--others', '--exclude-standard'])
+    const root = await this.root()
+    return this.paths(root, ['ls-files', '-z', '--cached', '--others', '--exclude-standard'])
   }
 
   async changedSince(base: string): Promise<string[]> {
     const ref = BaseRefSchema.parse(base)
-    const [mergeBase] = await this.lines(['merge-base', ref, 'HEAD'])
-    if (mergeBase === undefined) throw new RepositoryPathsError(`No merge base between ${ref} and HEAD`)
+    const root = await this.root()
+    const mergeBase = (await this.git(root, ['merge-base', ref, 'HEAD'])).trim()
+    if (mergeBase.length === 0) throw new RepositoryPathsError(`No merge base between ${ref} and HEAD`)
 
-    const changed = await this.lines(['diff', '--name-only', mergeBase])
-    const untracked = await this.lines(['ls-files', '--others', '--exclude-standard'])
+    const changed = await this.paths(root, ['diff', '-z', '--name-only', mergeBase])
+    const untracked = await this.paths(root, ['ls-files', '-z', '--others', '--exclude-standard'])
     return [...new Set([...changed, ...untracked])]
   }
 
-  private async lines(args: string[]): Promise<string[]> {
+  // Path queries run from the top level so the result never depends on which subdirectory the caller is in.
+  private async root(): Promise<string> {
+    return (await this.git(this.cwd, ['rev-parse', '--show-toplevel'])).replace(/\r?\n$/, '')
+  }
+
+  // NUL-delimited output keeps paths verbatim; newline output quotes non-ASCII and special characters.
+  private async paths(root: string, args: string[]): Promise<string[]> {
+    return (await this.git(root, args)).split('\0').filter(path => path.length > 0)
+  }
+
+  private async git(cwd: string, args: string[]): Promise<string> {
     try {
-      const { stdout } = await run('git', args, { cwd: this.cwd, maxBuffer: 64 * 1024 * 1024 })
-      return stdout.split('\n').filter(line => line.length > 0)
+      const { stdout } = await run('git', args, { cwd, maxBuffer: 64 * 1024 * 1024 })
+      return stdout
     } catch (cause) {
-      throw new RepositoryPathsError(`git ${args[0]} failed in ${this.cwd}`, { cause })
+      throw new RepositoryPathsError(`git ${args[0]} failed in ${cwd}`, { cause })
     }
   }
 }

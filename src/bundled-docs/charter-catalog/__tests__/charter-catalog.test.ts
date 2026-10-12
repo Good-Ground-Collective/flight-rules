@@ -52,6 +52,10 @@ describe('DocCharterCatalog', () => {
   ])('selects %j as %j', (paths, expected) => {
     expect(ids(paths)).toEqual(expected)
   })
+  it('reads frontmatter from a CRLF checkout', () => {
+    write('coding-charter-apex', languageCharter('apex', ['**/*.cls']).replaceAll('\n', '\r\n'))
+    expect(ids(['classes/Incident.cls'])).toEqual(['coding-charter', 'coding-charter-apex'])
+  })
   it('requires the core charter', () => {
     rmSync(join(docsDir, 'coding-charter.md'))
     expect(() => catalog().select(['a.ts'])).toThrow(DocNotFoundError)
