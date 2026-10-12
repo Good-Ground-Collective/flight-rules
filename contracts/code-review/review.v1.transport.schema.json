@@ -1,0 +1,819 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "contract_version": {
+      "type": "number",
+      "const": 1
+    },
+    "schema_revision": {
+      "type": "number",
+      "const": 1
+    },
+    "head_sha": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{40}$"
+    },
+    "review_complete": {
+      "type": "boolean"
+    },
+    "incomplete_reason": {
+      "type": "string",
+      "maxLength": 16000
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 16000
+    },
+    "outcome": {
+      "type": "string",
+      "enum": [
+        "APPROVED",
+        "CHANGES_NEEDED",
+        "ESCALATE",
+        "INCOMPLETE"
+      ]
+    },
+    "outcome_reason": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 16000
+    },
+    "remaining_risk": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 16000
+    },
+    "extensions": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {
+        "$ref": "#/definitions/__schema0"
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "maxLength": 400,
+            "pattern": "^(?!\\/)(?!.*\\\\)(?!.*(?:^|\\/)\\.{1,2}(?:\\/|$))[^\\p{Cc}]*$"
+          },
+          "line": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "start_line": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "security",
+              "correctness",
+              "data",
+              "deployment",
+              "design",
+              "testing",
+              "performance",
+              "readability",
+              "docs"
+            ]
+          },
+          "subject": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 400,
+            "pattern": "^[^\\r\\n]+$"
+          },
+          "discussion": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 16000
+          },
+          "related_finding_id": {
+            "type": "string",
+            "pattern": "^f-[a-f0-9]{10}$"
+          },
+          "label": {
+            "type": "string",
+            "enum": [
+              "issue",
+              "todo",
+              "suggestion",
+              "question",
+              "chore",
+              "nitpick",
+              "typo",
+              "polish",
+              "praise",
+              "note",
+              "thought"
+            ]
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "fix",
+              "clarify",
+              "decide"
+            ]
+          },
+          "blocking": {
+            "type": "boolean"
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "critical",
+              "major",
+              "minor",
+              "trivial"
+            ]
+          },
+          "details": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 16000
+          },
+          "resolved_when": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 16000
+          },
+          "decision_owner": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 400,
+            "pattern": "^[^\\r\\n]+$"
+          },
+          "decision_options": {
+            "minItems": 2,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9-]{0,79}$"
+                },
+                "description": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 16000
+                }
+              },
+              "required": [
+                "id",
+                "description"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "path",
+          "line",
+          "subject",
+          "discussion",
+          "label",
+          "blocking"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "prior_findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^f-[a-f0-9]{10}$"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 16000
+          },
+          "reply": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 16000
+          },
+          "decision": {
+            "type": "object",
+            "properties": {
+              "comment_id": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "author_id": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "option_id": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "comment_id",
+              "author_id",
+              "option_id"
+            ],
+            "additionalProperties": false
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "resolved",
+              "still_open",
+              "withdrawn"
+            ]
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "github_comment"
+                    },
+                    "comment_id": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "url": {
+                      "type": "string",
+                      "pattern": "^https:\\/\\/"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "comment_id",
+                    "url"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "code"
+                    },
+                    "commit_sha": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{40}$"
+                    },
+                    "path": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 400,
+                      "pattern": "^(?!\\/)(?!.*\\\\)(?!.*(?:^|\\/)\\.{1,2}(?:\\/|$))[^\\p{Cc}]*$"
+                    },
+                    "line": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "commit_sha",
+                    "path",
+                    "line"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "commit"
+                    },
+                    "sha": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{40}$"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "sha"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "check_run"
+                    },
+                    "check_run_id": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "commit_sha": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{40}$"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "check_run_id",
+                    "commit_sha"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "document"
+                    },
+                    "url": {
+                      "type": "string",
+                      "pattern": "^https:\\/\\/"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "url"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "verification"
+                    },
+                    "commit_sha": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{40}$"
+                    },
+                    "command": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 16000
+                    },
+                    "result": {
+                      "type": "string",
+                      "const": "passed"
+                    },
+                    "report_url": {
+                      "type": "string",
+                      "pattern": "^https:\\/\\/"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "commit_sha",
+                    "command",
+                    "result",
+                    "report_url"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "thread_resolution"
+                    },
+                    "thread_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "author_id": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "thread_id",
+                    "author_id"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "withdrawal_basis": {
+            "type": "string",
+            "enum": [
+              "incorrect",
+              "no_longer_applicable",
+              "dismissed"
+            ]
+          },
+          "updated_finding": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "maxLength": 400,
+                    "pattern": "^(?!\\/)(?!.*\\\\)(?!.*(?:^|\\/)\\.{1,2}(?:\\/|$))[^\\p{Cc}]*$"
+                  },
+                  "line": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "start_line": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "category": {
+                    "type": "string",
+                    "enum": [
+                      "security",
+                      "correctness",
+                      "data",
+                      "deployment",
+                      "design",
+                      "testing",
+                      "performance",
+                      "readability",
+                      "docs"
+                    ]
+                  },
+                  "subject": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 400,
+                    "pattern": "^[^\\r\\n]+$"
+                  },
+                  "discussion": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 16000
+                  },
+                  "related_finding_id": {
+                    "type": "string",
+                    "pattern": "^f-[a-f0-9]{10}$"
+                  },
+                  "label": {
+                    "type": "string",
+                    "enum": [
+                      "issue",
+                      "todo",
+                      "suggestion",
+                      "question",
+                      "chore",
+                      "nitpick",
+                      "typo",
+                      "polish"
+                    ]
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "fix",
+                      "clarify"
+                    ]
+                  },
+                  "blocking": {
+                    "type": "boolean"
+                  },
+                  "severity": {
+                    "type": "string",
+                    "enum": [
+                      "critical",
+                      "major",
+                      "minor",
+                      "trivial"
+                    ]
+                  },
+                  "details": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 16000
+                  },
+                  "resolved_when": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 16000
+                  },
+                  "id": {
+                    "type": "string",
+                    "pattern": "^f-[a-f0-9]{10}$"
+                  }
+                },
+                "required": [
+                  "path",
+                  "line",
+                  "subject",
+                  "discussion",
+                  "label",
+                  "type",
+                  "blocking",
+                  "severity",
+                  "details",
+                  "resolved_when",
+                  "id"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "maxLength": 400,
+                    "pattern": "^(?!\\/)(?!.*\\\\)(?!.*(?:^|\\/)\\.{1,2}(?:\\/|$))[^\\p{Cc}]*$"
+                  },
+                  "line": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "start_line": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "category": {
+                    "type": "string",
+                    "enum": [
+                      "security",
+                      "correctness",
+                      "data",
+                      "deployment",
+                      "design",
+                      "testing",
+                      "performance",
+                      "readability",
+                      "docs"
+                    ]
+                  },
+                  "subject": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 400,
+                    "pattern": "^[^\\r\\n]+$"
+                  },
+                  "discussion": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 16000
+                  },
+                  "related_finding_id": {
+                    "type": "string",
+                    "pattern": "^f-[a-f0-9]{10}$"
+                  },
+                  "label": {
+                    "type": "string",
+                    "enum": [
+                      "issue",
+                      "todo",
+                      "suggestion",
+                      "question",
+                      "chore",
+                      "nitpick",
+                      "typo",
+                      "polish"
+                    ]
+                  },
+                  "type": {
+                    "type": "string",
+                    "const": "decide"
+                  },
+                  "blocking": {
+                    "type": "boolean"
+                  },
+                  "severity": {
+                    "type": "string",
+                    "enum": [
+                      "critical",
+                      "major",
+                      "minor",
+                      "trivial"
+                    ]
+                  },
+                  "details": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 16000
+                  },
+                  "resolved_when": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 16000
+                  },
+                  "decision_owner": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 400,
+                    "pattern": "^[^\\r\\n]+$"
+                  },
+                  "decision_options": {
+                    "minItems": 2,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "pattern": "^[a-z][a-z0-9-]{0,79}$"
+                        },
+                        "description": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 16000
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "description"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "id": {
+                    "type": "string",
+                    "pattern": "^f-[a-f0-9]{10}$"
+                  }
+                },
+                "required": [
+                  "path",
+                  "line",
+                  "subject",
+                  "discussion",
+                  "label",
+                  "type",
+                  "blocking",
+                  "severity",
+                  "details",
+                  "resolved_when",
+                  "decision_owner",
+                  "decision_options",
+                  "id"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "maxLength": 400,
+                    "pattern": "^(?!\\/)(?!.*\\\\)(?!.*(?:^|\\/)\\.{1,2}(?:\\/|$))[^\\p{Cc}]*$"
+                  },
+                  "line": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "start_line": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "category": {
+                    "type": "string",
+                    "enum": [
+                      "security",
+                      "correctness",
+                      "data",
+                      "deployment",
+                      "design",
+                      "testing",
+                      "performance",
+                      "readability",
+                      "docs"
+                    ]
+                  },
+                  "subject": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 400,
+                    "pattern": "^[^\\r\\n]+$"
+                  },
+                  "discussion": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 16000
+                  },
+                  "related_finding_id": {
+                    "type": "string",
+                    "pattern": "^f-[a-f0-9]{10}$"
+                  },
+                  "label": {
+                    "type": "string",
+                    "enum": [
+                      "praise",
+                      "note",
+                      "thought"
+                    ]
+                  },
+                  "blocking": {
+                    "type": "boolean",
+                    "const": false
+                  },
+                  "details": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 16000
+                  },
+                  "id": {
+                    "type": "string",
+                    "pattern": "^f-[a-f0-9]{10}$"
+                  }
+                },
+                "required": [
+                  "path",
+                  "line",
+                  "subject",
+                  "discussion",
+                  "label",
+                  "blocking",
+                  "id"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "reason",
+          "status"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "contract_version",
+    "schema_revision",
+    "head_sha",
+    "review_complete",
+    "summary",
+    "outcome",
+    "outcome_reason",
+    "remaining_risk",
+    "findings",
+    "prior_findings"
+  ],
+  "additionalProperties": false,
+  "definitions": {
+    "__schema0": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/__schema0"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/definitions/__schema0"
+          }
+        }
+      ]
+    }
+  }
+}

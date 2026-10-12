@@ -3,21 +3,21 @@
 // Used by `npm run build`; semantic-release's prepareCmd runs set-version.mjs
 // (which writes the released version into package.json) and then this build,
 // so the binary always reports the version it was released as.
-import { chmodSync, readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
-import * as esbuild from 'esbuild'
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import * as esbuild from "esbuild";
 
 const pkg = JSON.parse(
-  readFileSync(fileURLToPath(new URL('../package.json', import.meta.url)), 'utf8'),
-)
+  readFileSync(fileURLToPath(new URL("../package.json", import.meta.url)), "utf8"),
+);
 // .mjs, not extensionless: Node refuses extensionless ESM entries under "type": "module"
-const outfile = fileURLToPath(new URL('../bin/flight-rules.mjs', import.meta.url))
+const outfile = fileURLToPath(new URL("../bin/flight-rules.mjs", import.meta.url));
 
 await esbuild.build({
-  entryPoints: [fileURLToPath(new URL('../src/main.ts', import.meta.url))],
+  entryPoints: [fileURLToPath(new URL("../src/main.ts", import.meta.url))],
   bundle: true,
-  platform: 'node',
-  format: 'esm',
+  platform: "node",
+  format: "esm",
   outfile,
   // Bundled CommonJS deps (yaml, @octokit/*) call require() at runtime; under
   // "type": "module" the ESM binary has no global require without this.
@@ -25,16 +25,37 @@ await esbuild.build({
     js: "import { createRequire } from 'module'; const require = createRequire(import.meta.url);",
   },
   define: { _appVersion: JSON.stringify(pkg.version) },
-})
+});
 
-chmodSync(outfile, 0o755)
+chmodSync(outfile, 0o755);
 
 await esbuild.build({
-  entryPoints: [fileURLToPath(new URL('../src/index.ts', import.meta.url))],
+  entryPoints: [fileURLToPath(new URL("../src/index.ts", import.meta.url))],
   bundle: true,
-  platform: 'node',
-  format: 'esm',
-  packages: 'external',
-  outfile: fileURLToPath(new URL('../dist/index.js', import.meta.url)),
+  platform: "node",
+  format: "esm",
+  packages: "external",
+  outfile: fileURLToPath(new URL("../dist/index.js", import.meta.url)),
   define: { _appVersion: JSON.stringify(pkg.version) },
-})
+});
+
+await esbuild.build({
+  entryPoints: [fileURLToPath(new URL("../src/code-review/index.ts", import.meta.url))],
+  bundle: true,
+  platform: "node",
+  format: "esm",
+  packages: "external",
+  outfile: fileURLToPath(new URL("../dist/review.js", import.meta.url)),
+});
+const { reviewContract } = await import(new URL("../dist/review.js", import.meta.url));
+const contractsDir = fileURLToPath(new URL("../contracts/code-review", import.meta.url));
+mkdirSync(contractsDir, { recursive: true });
+const schemas = reviewContract.schemas();
+writeFileSync(
+  `${contractsDir}/review.v1.schema.json`,
+  `${JSON.stringify(schemas.full, null, 2)}\n`,
+);
+writeFileSync(
+  `${contractsDir}/review.v1.transport.schema.json`,
+  `${JSON.stringify(schemas.transport, null, 2)}\n`,
+);

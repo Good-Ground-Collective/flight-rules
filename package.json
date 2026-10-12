@@ -2,6 +2,10 @@
   "name": "@good-ground-collective/flight-rules",
   "version": "1.66.0",
   "description": "Claude Code Skills for the Good Ground Collective org",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Good-Ground-Collective/flight-rules.git"
+  },
   "license": "MIT",
   "author": "",
   "type": "module",
@@ -10,7 +14,13 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./review": {
+      "types": "./dist/code-review/index.d.ts",
+      "import": "./dist/review.js"
+    },
+    "./review/schema": "./contracts/code-review/review.v1.schema.json",
+    "./review/transport-schema": "./contracts/code-review/review.v1.transport.schema.json"
   },
   "types": "./dist/index.d.ts",
   "bin": {
@@ -22,7 +32,8 @@
     "skills/",
     "agents/",
     ".claude-plugin/",
-    "dist/"
+    "dist/",
+    "contracts/"
   ],
   "scripts": {
     "build": "node scripts/build.mjs && tsc -p tsconfig.build.json",
@@ -42,7 +53,8 @@
       [
         "@semantic-release/exec",
         {
-          "prepareCmd": "node scripts/set-version.mjs ${nextRelease.version} && npm run build"
+          "prepareCmd": "node scripts/set-version.mjs ${nextRelease.version} && npm run build",
+          "publishCmd": "npm publish --registry https://npm.pkg.github.com"
         }
       ],
       [
@@ -94,5 +106,8 @@
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.60.0",
     "vitest": "^4.1.8"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
   }
 }

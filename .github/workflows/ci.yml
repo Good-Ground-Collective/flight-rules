@@ -46,7 +46,7 @@ jobs:
       contents: write
       pull-requests: write
       issues: write
-      packages: read
+      packages: write
     steps:
       - uses: actions/checkout@v4
         with:
