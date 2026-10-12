@@ -33,6 +33,7 @@ Some harnesses refuse any command that runs git on the agent's behalf; a worktre
   ```
 
   If that count is `0`, the current branch has no upstream, it is not the default branch, and no `--from` base was given (or HEAD already sits on it), rename it: `git branch -m <branch>`. Otherwise `git checkout -b <branch> [<base>]`.
+
 - **Commit (step 7).** Write the message with the CLI, then commit that file by path:
 
   ```bash
@@ -42,6 +43,7 @@ Some harnesses refuse any command that runs git on the agent's behalf; a worktre
   ```
 
   The commit guard lets this through because the file carries the CLI's `Flight-Rules-Version` trailer. Use the same `<path>` set the CLI form would take.
+
 - **Push (step 7).** `git push --set-upstream origin <branch>`. There is still no force push.
 
 ## Process
@@ -437,7 +439,7 @@ flight-rules ticket status <id> --to "<inReviewStatus>"
 flight-rules ticket comment <id> --body-file <path> --attach <path>#<caption> --attach <path>#<caption>
 ```
 
-One `--attach` per manifest item, the same `<path>#<caption>` pairs you passed to `pr create`, referenced in the body as `![<caption>](<path>)` with that same path. The command uploads each file to the ticket and rewrites the matching reference in the body so it renders inline; a file the body does not reference is appended at the end. Pass no `--attach` when the capture step recorded `No visual evidence: <reason>`; the PR URL goes in the body either way. This comes *after* the transition for the same reason step 8's review does: it is commentary on a state that already exists.
+One `--attach` per manifest item, the same `<path>#<caption>` pairs you passed to `pr create`, referenced in the body as `![<caption>](<path>)` with that same path. The command uploads each file to the ticket and rewrites the matching reference in the body so it renders inline; a file the body does not reference is appended at the end. Pass no `--attach` when the capture step recorded `No visual evidence: <reason>`; the PR URL goes in the body either way. This comes _after_ the transition for the same reason step 8's review does: it is commentary on a state that already exists.
 
 Report that the run now waits on a person:
 
@@ -449,17 +451,17 @@ Then **stop.** Do not merge. Do not approve your own PR.
 
 ### 8. Review the PR
 
-Invoke the **`autonomous-code-review`** skill against the PR you just opened. It is unattended and it never edits code — it posts a `COMMENT` review enumerating every objective charter violation on the diff, and ends in a machine-readable `verdict` of `ESCALATE` or `CLEAR`.
+Invoke the **`autonomous-code-review`** skill against the PR you just opened. It is unattended and it never edits code — it posts a `COMMENT` review enumerating every objective charter violation on the diff, and records a shared `outcome` of `APPROVED`, `CHANGES_NEEDED`, `ESCALATE` or `INCOMPLETE`.
 
 Hand it three things:
 
 - **The PR number or URL** from `pr create`.
 - **The verifier's `charterConcerns`**, verbatim. This is the step where they stop being a line in a run summary and start being review comments on the diff. The reviewer confirms each one against the PR before raising it, so passing a concern is not asserting it.
-- **Any `UNVERIFIABLE` criteria or `openQuestions`** still outstanding. They force `ESCALATE` on their own.
+- **Any `UNVERIFIABLE` criteria or `openQuestions`** still outstanding. The reviewer turns each into a concrete `clarify` or `decide` finding; their presence alone does not force human escalation.
 
 Run this **after** the in-review transition, not before. The review is commentary on a PR that already exists and is already on the board; sequencing it earlier only widens the window where the ticket's status lies about reality.
 
-**The verdict does not gate anything here.** `ESCALATE` doesn't reopen the loop and `CLEAR` doesn't approve anything — this skill's terminal state is unchanged either way. The verdict is a routing hint for whoever picks the PR up, and you pass it through to the report.
+**The review outcome does not reopen this implementation loop.** `CHANGES_NEEDED` names follow-up remediation, `ESCALATE` names a human decision, `INCOMPLETE` needs review repair/retry, and `APPROVED` is a recommendation conditional on green CI; it does not approve anything — this skill's terminal state is unchanged either way. The outcome is a routing hint for whoever picks the PR up, and you pass it through to the report.
 
 If the review fails to post, report that and carry on to step 9. A failed review is a missing signal, not a failed run: the PR is open, verified, and on the board, and re-running the review costs nothing. Do not retry the loop, and do not roll back the ticket status.
 
@@ -471,7 +473,7 @@ Give the user, in this order:
 - **Per-criterion verdicts** — every criterion with its verdict and the verifier's evidence, including any `UNVERIFIABLE`.
 - **The PR URL**, and the branch name.
 - **Evidence** — each manifest item's caption and path, the PR's OTS Materials, and the ticket comment that carries them; or the `No visual evidence: <reason>` line.
-- **The review verdict** — `ESCALATE` or `CLEAR`, its reasons, and the finding counts. Say plainly whether a human still needs to run `guided-code-review`.
+- **The review outcome** — the shared outcome, its reasons, and the finding counts by `fix`, `clarify` and `decide`. Name required fixes, evidence requests and human decisions.
 - **Every `charterConcerns` entry** the verifier raised, verbatim. These didn't block the PR — so don't quietly drop them, even where the review picked them up.
 - **Any `openQuestions`** from either agent, still unanswered.
 
@@ -481,7 +483,7 @@ Give the user, in this order:
 - **The implementer escalates to opus only on iteration 3, and the verifier never escalates.** Iterations 1 and 2 run the frontmatter default. A ticket that "looks hard" is not a reason to escalate early — two recorded FAILs is the only one.
 - **Never merge.** This skill opens a PR and stops. Merging is a human decision.
 - **Never let an unverified change reach a PR.** `verified: true` is the only key that unlocks step 7.
-- **The autonomous review's verdict gates nothing.** `ESCALATE` does not reopen the implement/verify loop, `CLEAR` does not approve anything, and neither changes where this skill stops. Acting on a review finding here would put an unverified edit on the branch after the verifier signed off.
+- **Review remediation is a separate, verified pass.** The review outcome does not restart this hard-capped implementation loop or authorize approval. Acting on a review finding here would put an unverified edit on the branch after the verifier signed off.
 - **Never tick contract checkboxes.** The `items[].done` flags are read-only to this skill; the verifier's itemized verdict is the record of what passed. A ticked box in a tracker is a claim nobody checked.
 - **All git and tracker mutations go through `flight-rules`.** Never hand-rolled `git commit`/`checkout`/`push`, never Claude Code auto-generated commits, never native tracker APIs (`gh issue edit`, the Jira REST API) for state changes. Read-only inspection with plain `git` or `gh` is fine. The plugin's commit guard hook blocks a raw `git commit` in any repo with flight-rules config. When it fires, switch to `flight-rules git commit`; do not reach for the `FLIGHT_RULES_RAW_GIT=1` bypass during a run. The one exception to running git through `flight-rules` is plain-git mode, above, which still takes its message and branch name from the CLI.
 - **`openQuestions` and `UNVERIFIABLE` always reach the user, unanswered.** The agents ask when they are genuinely unsure. Answering on their behalf converts a flagged unknown into a silent guess — which is the exact failure the loop exists to prevent.
@@ -519,9 +521,9 @@ A reviewer can grade a run against this list:
 - A visible change produced evidence under the directory `flight-rules qa evidence-dir <ticket>` prints, or the run recorded `No visual evidence: <reason>`; nothing from that directory was committed.
 - The ticket carries a comment linking the PR and, for a visible change, the same evidence the PR shows; it was posted after the in-review transition.
 - The PR body matches `docs/pr-body-format.md`: tech-writer-authored What/Why sections, the ticket linked, and — when present — an OTS Materials block whose images and video render from GitHub-hosted assets, not relative paths, or which states `No visual evidence: <reason>`.
-- The ticket's status trail reads to-do → in-progress → in-review, with the in-review transition happening *after* the PR exists.
+- The ticket's status trail reads to-do → in-progress → in-review, with the in-review transition happening _after_ the PR exists.
 - No contract item — acceptance criterion or Fixed When item — shipped without a PASS verdict backed by evidence, and no checkbox was ticked.
 - The run summary states the iteration count, and every `charterConcerns` and `openQuestions` entry reached the user.
 - Iterations 1 and 2 ran the implementer at its default tier; opus appears only if a third iteration was reached, and never on the verifier.
-- The PR carries a submitted `COMMENT` review from `autonomous-code-review`, posted after the in-review transition, and the run summary states its verdict.
+- The PR carries a submitted `COMMENT` review from `autonomous-code-review`, posted after the in-review transition, and the run summary states its outcome.
 - The PR is open and unmerged, waiting on a human.
