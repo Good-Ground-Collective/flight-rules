@@ -125,12 +125,16 @@ Rules named here are PMD rules run through Salesforce Code Analyzer. Whether a r
 | A-2 ApexDoc on public API                    | PMD: `ApexDoc`                                                                                                |
 | A-3 no SOQL or DML in a loop                 | PMD: `OperationWithLimitsInLoop`                                                                              |
 | A-4 explicit field lists                     | _(no rule — always reviewed by reading)_                                                                      |
-| A-5 sharing keyword on database classes      | PMD: `ApexSharingViolations`                                                                                  |
-| A-11 no bare `Exception`, no empty `catch`   | PMD: `EmptyCatchBlock` (empty blocks only; bare `Exception` is reviewed)                                       |
-| A-12 `Assert` with a message                 | PMD: `ApexAssertionsShouldIncludeMessage` (`System.assert*` use is reviewed)                                  |
+| A-5 a sharing keyword on database classes    | PMD: `ApexSharingViolations`                                                                                  |
+| A-5 `with sharing` on `SYSTEM_MODE` writers  | _(no rule — always reviewed by reading; `ApexSharingViolations` accepts any keyword)_                         |
+| A-11 no empty `catch`                        | PMD: `EmptyCatchBlock`                                                                                        |
+| A-11 no bare `Exception`                     | _(no rule — always reviewed by reading)_                                                                      |
+| A-12 `Assert` calls carry a message          | PMD: `ApexAssertionsShouldIncludeMessage`                                                                     |
+| A-12 `Assert` instead of `System.assert*`    | _(no rule — always reviewed by reading)_                                                                      |
 | A-14 braces always                           | PMD: `IfStmtsMustUseBraces`, `IfElseStmtsMustUseBraces`, `ForLoopsMustUseBraces`, `WhileLoopsMustUseBraces`   |
 | A-16 no logic in triggers                    | PMD: `AvoidLogicInTrigger`                                                                                    |
-| A-17 no hard-coded IDs                       | PMD: `AvoidHardcodingId` (IDs only; other environment values are reviewed)                                    |
+| A-17 no hard-coded IDs                       | PMD: `AvoidHardcodingId`                                                                                      |
+| A-17 no other hard-coded environment values  | _(no rule — always reviewed by reading)_                                                                      |
 
 **Tier B — judgment**
 
