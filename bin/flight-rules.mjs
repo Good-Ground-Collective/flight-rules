@@ -31699,6 +31699,200 @@ var AriadneClient = class {
   }
 };
 
+// src/shared/ariadne/board-state-files.ts
+import { existsSync as existsSync5, mkdirSync as mkdirSync3, readFileSync as readFileSync5, readdirSync as readdirSync2, rmSync, statSync as statSync3, writeFileSync as writeFileSync3 } from "node:fs";
+import { homedir as homedir2 } from "node:os";
+import { join as join6 } from "node:path";
+var stateIdPattern = /^[A-Za-z0-9_-]{1,80}$/;
+var BoardStateFiles = class {
+  now;
+  env;
+  home;
+  constructor(props = {}) {
+    this.env = props.env ?? process.env;
+    this.home = props.home ?? homedir2();
+    this.now = props.now ?? Date.now;
+  }
+  root() {
+    const stateHome = this.env["XDG_STATE_HOME"];
+    const base = stateHome !== void 0 && stateHome !== "" ? stateHome : join6(this.home, ".local", "state");
+    return join6(base, "flight-rules", "board");
+  }
+  read(folder, id, schema) {
+    const path3 = this.pathFor(folder, id);
+    if (path3 === void 0 || !existsSync5(path3)) return void 0;
+    try {
+      const parsed = schema.safeParse(JSON.parse(readFileSync5(path3, "utf-8")));
+      return parsed.success ? parsed.data : void 0;
+    } catch {
+      return void 0;
+    }
+  }
+  write(folder, id, value) {
+    const path3 = this.pathFor(folder, id);
+    if (path3 === void 0) return;
+    mkdirSync3(this.folder(folder), { recursive: true, mode: 448 });
+    writeFileSync3(path3, JSON.stringify(value), { mode: 384 });
+  }
+  remove(folder, id) {
+    const path3 = this.pathFor(folder, id);
+    if (path3 !== void 0) rmSync(path3, { force: true });
+  }
+  /** Deletes a folder's files last written more than `maxAgeMs` ago. */
+  prune(folder, maxAgeMs) {
+    const dir = this.folder(folder);
+    if (!existsSync5(dir)) return;
+    const cutoff = this.now() - maxAgeMs;
+    for (const name of readdirSync2(dir)) {
+      const path3 = join6(dir, name);
+      try {
+        if (statSync3(path3).mtimeMs < cutoff) rmSync(path3, { force: true });
+      } catch {
+        continue;
+      }
+    }
+  }
+  folder(folder) {
+    return folder === void 0 ? this.root() : join6(this.root(), folder);
+  }
+  pathFor(folder, id) {
+    return stateIdPattern.test(id) ? join6(this.folder(folder), `${id}.json`) : void 0;
+  }
+};
+
+// src/shared/ariadne/board-session-store.ts
+var HeartbeatRecordSchema = external_exports.object({
+  session: external_exports.string(),
+  step: external_exports.string(),
+  state: external_exports.enum(agentStates),
+  ticket: external_exports.string().optional(),
+  repo: external_exports.string().optional(),
+  branch: external_exports.string().optional(),
+  skill: external_exports.string().optional(),
+  detail: external_exports.string().optional()
+});
+var SessionRecordSchema = external_exports.object({
+  heartbeat: HeartbeatRecordSchema,
+  /** When a skill last posted this heartbeat. */
+  recordedAt: external_exports.number(),
+  /** When any heartbeat for the session was last sent, by a skill or the hook. */
+  sentAt: external_exports.number()
+});
+var InferredRecordSchema = external_exports.object({
+  heartbeat: HeartbeatRecordSchema,
+  /** When the hook last sent this inferred heartbeat. */
+  sentAt: external_exports.number()
+});
+var ThreadRecordSchema = external_exports.object({
+  /** The board session a skill last posted to by default from this Claude Code session. */
+  board: external_exports.string().optional(),
+  /** When the hook last spawned a branch lookup for this Claude Code session's main thread. */
+  branchCheckedAt: external_exports.number().optional()
+});
+var inferredFolder = "inferred";
+var threadsFolder = "threads";
+var unsafeSessionCharacters = /[^A-Za-z0-9_-]/g;
+var maxSessionLength = 80;
+var TicketSessionKey = class {
+  key(claudeSession, ticket) {
+    const prefix = claudeSession.trim().replace(unsafeSessionCharacters, "_");
+    if (prefix === "" || ticket === "") return void 0;
+    return `${prefix.slice(0, Math.max(0, maxSessionLength - ticket.length - 1))}-${ticket}`;
+  }
+};
+var ticketSessionKey = new TicketSessionKey();
+var BoardSessionStore = class {
+  files;
+  now;
+  constructor(props = {}) {
+    this.files = new BoardStateFiles(props);
+    this.now = this.files.now;
+  }
+  dir() {
+    return this.files.root();
+  }
+  read(session) {
+    return this.files.read(void 0, session, SessionRecordSchema);
+  }
+  /** Remembers a heartbeat a skill just sent. */
+  record(heartbeat) {
+    const now = this.now();
+    this.files.write(void 0, heartbeat.session, { heartbeat: this.compact(heartbeat), recordedAt: now, sentAt: now });
+  }
+  /**
+   * Claims the next liveness heartbeat for a session: returns its record and
+   * marks it sent, or returns undefined when there is nothing to keep alive.
+   * That is when no skill has recorded one, the record is older than
+   * `maxAgeMs`, the run aborted, or one was sent less than `intervalMs` ago.
+   */
+  claim(session, intervalMs, maxAgeMs) {
+    const record2 = this.read(session);
+    if (record2 === void 0) return void 0;
+    const now = this.now();
+    if (record2.heartbeat.state === "abort") return void 0;
+    if (now - record2.recordedAt > maxAgeMs) return void 0;
+    if (now - record2.sentAt < intervalMs) return void 0;
+    const claimed = { ...record2, sentAt: now };
+    this.files.write(void 0, session, claimed);
+    return claimed;
+  }
+  /** Whether a skill has posted to this session within `maxAgeMs`, whatever its state. */
+  hasSkillRecord(session, maxAgeMs) {
+    const record2 = this.read(session);
+    return record2 !== void 0 && this.now() - record2.recordedAt <= maxAgeMs;
+  }
+  /** Whether a skill record is one the hook keeps alive: not aborted and within `maxAgeMs`. */
+  isLive(session, maxAgeMs) {
+    const record2 = this.read(session);
+    return record2 !== void 0 && record2.heartbeat.state !== "abort" && this.now() - record2.recordedAt <= maxAgeMs;
+  }
+  readInferred(session) {
+    return this.files.read(inferredFolder, session, InferredRecordSchema);
+  }
+  /**
+   * Claims a liveness heartbeat the hook inferred: stores it and returns true,
+   * or returns false when one was sent for the session less than `intervalMs` ago.
+   */
+  claimInferred(heartbeat, intervalMs) {
+    const now = this.now();
+    const previous3 = this.readInferred(heartbeat.session);
+    if (previous3 !== void 0 && now - previous3.sentAt < intervalMs) return false;
+    this.files.write(inferredFolder, heartbeat.session, { heartbeat: this.compact(heartbeat), sentAt: now });
+    return true;
+  }
+  /** Remembers that a skill posted to `board` by default from this Claude Code session. */
+  pointThread(claudeSession, board) {
+    this.files.write(threadsFolder, claudeSession, { ...this.thread(claudeSession), board });
+  }
+  /** The board session a skill last posted to by default from this Claude Code session. */
+  threadSession(claudeSession) {
+    return this.thread(claudeSession)?.board;
+  }
+  /** At most one main-thread branch lookup per `intervalMs` per Claude Code session. */
+  claimBranchCheck(claudeSession, intervalMs) {
+    const now = this.now();
+    const thread = this.thread(claudeSession);
+    if (thread?.branchCheckedAt !== void 0 && now - thread.branchCheckedAt < intervalMs) return false;
+    this.files.write(threadsFolder, claudeSession, { ...thread, branchCheckedAt: now });
+    return true;
+  }
+  /** Deletes inferred heartbeats and thread records untouched for `maxAgeMs`. */
+  prune(maxAgeMs) {
+    this.files.prune(inferredFolder, maxAgeMs);
+    this.files.prune(threadsFolder, maxAgeMs);
+  }
+  thread(claudeSession) {
+    return this.files.read(threadsFolder, claudeSession, ThreadRecordSchema);
+  }
+  compact(heartbeat) {
+    const { session, step, state } = heartbeat;
+    const optional2 = Object.fromEntries(
+      ["ticket", "repo", "branch", "skill", "detail"].map((key) => [key, heartbeat[key]]).filter(([, value]) => value !== void 0 && value !== "")
+    );
+    return { session, step, state, ...optional2 };
+  }
+};
+
 // src/shared/ariadne/ariadne-board.ts
 var claudeSessionEnv = "CLAUDE_CODE_SESSION_ID";
 var bootstrapStep = "started";
@@ -31771,10 +31965,32 @@ var AriadneBoard = class {
     }
     return { url: url2, enabled, notices };
   }
-  /** The Claude Code session id, when this process runs inside a session. */
-  defaultSession() {
+  /**
+   * The session a call reports to without `--session`: with a Jira ticket,
+   * `<Claude Code session id>-<TICKET>`, the same row the heartbeat hook
+   * keeps alive for a sub-agent on that ticket; without one, the Claude Code
+   * session id. Undefined outside a Claude Code session.
+   */
+  defaultSession(ticket) {
     const value = this.env[claudeSessionEnv]?.trim();
-    return value === void 0 || value === "" ? void 0 : value;
+    if (value === void 0 || value === "") return void 0;
+    const key = ticket !== void 0 ? TicketKeySchema.safeParse(ticket) : void 0;
+    return key?.success === true ? ticketSessionKey.key(value, key.data) : value;
+  }
+  /**
+   * Whether a post would be sent: a token, enabled and a valid URL. Read by
+   * the hooks before they start a child process; never touches the network.
+   * The token is checked first because it is cheap, and reading the config
+   * layers is not, so a machine without a token pays for neither.
+   */
+  reportable() {
+    try {
+      if (this.tokens.resolve() === void 0) return false;
+      const settings = this.settings();
+      return settings.enabled && settings.url !== void 0;
+    } catch {
+      return false;
+    }
   }
   /**
    * Posts a heartbeat and remembers it for the session, so the heartbeat
@@ -31788,10 +32004,10 @@ var AriadneBoard = class {
         const sent = { ...input2, session };
         try {
           const response = await client.heartbeat(sent);
-          this.remember(sent);
+          this.remember(sent, input2.session === void 0);
           return response;
         } catch (err) {
-          if (!(err instanceof AriadneError) || err.failure !== "invalid-input") this.remember(sent);
+          if (!(err instanceof AriadneError) || err.failure !== "invalid-input") this.remember(sent, input2.session === void 0);
           throw err;
         }
       },
@@ -31800,10 +32016,12 @@ var AriadneBoard = class {
   }
   /**
    * Re-sends the last heartbeat a skill posted for `session`, without
-   * refreshing when it was recorded. The heartbeat hook's liveness ping.
+   * refreshing when it was recorded, or else the one the heartbeat hook
+   * inferred for it. The heartbeat hook's liveness ping; a skill's heartbeat
+   * always wins, so its step is never overwritten.
    */
   async replay(session, options = {}) {
-    const record2 = this.sessions?.read(session);
+    const record2 = this.sessions?.read(session) ?? this.sessions?.readInferred(session);
     if (record2 === void 0) return { status: "skipped", reason: "nothing-recorded" };
     return this.call(options, session, (client) => client.heartbeat(record2.heartbeat), record2.heartbeat.ticket);
   }
@@ -31829,14 +32047,26 @@ var AriadneBoard = class {
       input2.ticket
     );
   }
-  /** Every item of one of the caller's sessions, open and resolved, with any chosen option. */
-  async items(session, options = {}) {
-    return this.call(options, session, (client, id) => client.listItems(id));
+  /**
+   * Every item of one of the caller's sessions, open and resolved, with any
+   * chosen option. Without `session`, `ticket` picks the default session a
+   * post on that ticket uses.
+   */
+  async items(session, options = {}, ticket) {
+    return this.call(options, session, (client, id) => client.listItems(id), ticket);
   }
-  /** Remembering is best effort: a full disk must not fail a report. */
-  remember(heartbeat) {
+  /**
+   * Remembering is best effort: a full disk must not fail a report. A
+   * heartbeat sent to the default session also becomes the Claude Code
+   * session's current skill session, which the heartbeat hook keeps alive.
+   */
+  remember(heartbeat, defaulted) {
     try {
       this.sessions?.record(heartbeat);
+      const claudeSession = this.defaultSession();
+      if (defaulted && claudeSession !== void 0 && claudeSession !== heartbeat.session) {
+        this.sessions?.pointThread(claudeSession, heartbeat.session);
+      }
     } catch {
       return;
     }
@@ -31875,7 +32105,7 @@ var AriadneBoard = class {
       return noted({ status: "failed", message: err instanceof Error ? err.message : String(err) });
     }
     if (token === void 0 && options.strict !== true) return noted({ status: "skipped", reason: "no-token" });
-    const session = requestedSession ?? this.defaultSession();
+    const session = requestedSession ?? this.defaultSession(ticket);
     if (session === void 0) {
       return noted({
         status: "failed",
@@ -32091,9 +32321,9 @@ var AriadnePackets = class {
 };
 
 // src/shared/ariadne/ariadne-token-store.ts
-import { chmodSync, existsSync as existsSync5, mkdirSync as mkdirSync3, readFileSync as readFileSync5, rmSync, writeFileSync as writeFileSync3 } from "node:fs";
-import { homedir as homedir2 } from "node:os";
-import { dirname as dirname7, join as join6 } from "node:path";
+import { chmodSync, existsSync as existsSync6, mkdirSync as mkdirSync4, readFileSync as readFileSync6, rmSync as rmSync2, writeFileSync as writeFileSync4 } from "node:fs";
+import { homedir as homedir3 } from "node:os";
+import { dirname as dirname7, join as join7 } from "node:path";
 var agentTokenPattern = /^ariadne_agent_[0-9a-f]{16}_[A-Za-z0-9_-]{43}$/;
 var ariadneTokenEnvNames = ["ARIADNE_AGENT_TOKEN", "ARIADNE_TOKEN"];
 var AriadneTokenStore = class {
@@ -32101,7 +32331,7 @@ var AriadneTokenStore = class {
   home;
   constructor(props = {}) {
     this.env = props.env ?? process.env;
-    this.home = props.home ?? homedir2();
+    this.home = props.home ?? homedir3();
   }
   isAgentToken(value) {
     return agentTokenPattern.test(value);
@@ -32109,8 +32339,8 @@ var AriadneTokenStore = class {
   /** `$XDG_CONFIG_HOME/flight-rules/ariadne-token`, else `~/.config/flight-rules/ariadne-token`. */
   path() {
     const configHome = this.env["XDG_CONFIG_HOME"];
-    const base = configHome !== void 0 && configHome !== "" ? configHome : join6(this.home, ".config");
-    return join6(base, "flight-rules", "ariadne-token");
+    const base = configHome !== void 0 && configHome !== "" ? configHome : join7(this.home, ".config");
+    return join7(base, "flight-rules", "ariadne-token");
   }
   resolve() {
     for (const name of ariadneTokenEnvNames) {
@@ -32118,8 +32348,8 @@ var AriadneTokenStore = class {
       if (value2 !== void 0 && value2 !== "") return { token: value2, source: name };
     }
     const path3 = this.path();
-    if (!existsSync5(path3)) return void 0;
-    const value = readFileSync5(path3, "utf-8").trim();
+    if (!existsSync6(path3)) return void 0;
+    const value = readFileSync6(path3, "utf-8").trim();
     return value === "" ? void 0 : { token: value, source: "file" };
   }
   /** The environment variable that would win over a saved file, if one is set. */
@@ -32135,8 +32365,8 @@ var AriadneTokenStore = class {
       );
     }
     const path3 = this.path();
-    mkdirSync3(dirname7(path3), { recursive: true, mode: 448 });
-    writeFileSync3(path3, `${value}
+    mkdirSync4(dirname7(path3), { recursive: true, mode: 448 });
+    writeFileSync4(path3, `${value}
 `, { mode: 384 });
     chmodSync(path3, 384);
     return path3;
@@ -32144,91 +32374,78 @@ var AriadneTokenStore = class {
   /** Deletes the saved token; returns whether one existed. */
   remove() {
     const path3 = this.path();
-    if (!existsSync5(path3)) return false;
-    rmSync(path3);
+    if (!existsSync6(path3)) return false;
+    rmSync2(path3);
     return true;
   }
 };
 
-// src/shared/ariadne/board-session-store.ts
-import { existsSync as existsSync6, mkdirSync as mkdirSync4, readFileSync as readFileSync6, writeFileSync as writeFileSync4 } from "node:fs";
-import { homedir as homedir3 } from "node:os";
-import { join as join7 } from "node:path";
-var SessionRecordSchema = external_exports.object({
-  heartbeat: external_exports.object({
-    session: external_exports.string(),
-    step: external_exports.string(),
-    state: external_exports.enum(agentStates),
-    ticket: external_exports.string().optional(),
-    repo: external_exports.string().optional(),
-    branch: external_exports.string().optional(),
-    skill: external_exports.string().optional(),
-    detail: external_exports.string().optional()
-  }),
-  /** When a skill last posted this heartbeat. */
-  recordedAt: external_exports.number(),
-  /** When any heartbeat for the session was last sent, by a skill or the hook. */
-  sentAt: external_exports.number()
+// src/shared/ariadne/board-agent-store.ts
+import { existsSync as existsSync7, readdirSync as readdirSync3 } from "node:fs";
+import { join as join8 } from "node:path";
+var DispatchRecordSchema = external_exports.object({
+  /** The Jira key the dispatch named, or null when it named none. */
+  ticket: external_exports.string().nullable(),
+  description: external_exports.string(),
+  /** The dispatching Claude Code session. */
+  session: external_exports.string(),
+  /** A digest of the prompt, so a sub-agent found only through its transcript still finds its dispatch. */
+  promptDigest: external_exports.string().optional(),
+  at: external_exports.number()
 });
-var sessionFilePattern = /^[A-Za-z0-9_-]{1,80}$/;
-var BoardSessionStore = class {
-  env;
-  home;
-  now;
+var AgentRecordSchema = external_exports.object({
+  /** The Jira key the sub-agent works on, or null once resolved to none. */
+  ticket: external_exports.string().nullable(),
+  description: external_exports.string().optional(),
+  agentType: external_exports.string().optional(),
+  toolUseId: external_exports.string().optional(),
+  /** The Claude Code session the sub-agent runs in. */
+  session: external_exports.string(),
+  at: external_exports.number()
+});
+var dispatchFolder = "dispatch";
+var agentsFolder = "agents";
+var BoardAgentStore = class {
+  files;
   constructor(props = {}) {
-    this.env = props.env ?? process.env;
-    this.home = props.home ?? homedir3();
-    this.now = props.now ?? Date.now;
+    this.files = new BoardStateFiles(props);
   }
-  dir() {
-    const stateHome = this.env["XDG_STATE_HOME"];
-    const base = stateHome !== void 0 && stateHome !== "" ? stateHome : join7(this.home, ".local", "state");
-    return join7(base, "flight-rules", "board");
+  now() {
+    return this.files.now();
   }
-  read(session) {
-    const path3 = this.pathFor(session);
-    if (path3 === void 0 || !existsSync6(path3)) return void 0;
-    try {
-      const parsed = SessionRecordSchema.safeParse(JSON.parse(readFileSync6(path3, "utf-8")));
-      return parsed.success ? parsed.data : void 0;
-    } catch {
-      return void 0;
+  recordDispatch(toolUseId, record2) {
+    this.files.write(dispatchFolder, toolUseId, record2);
+  }
+  readDispatch(toolUseId) {
+    return this.files.read(dispatchFolder, toolUseId, DispatchRecordSchema);
+  }
+  /** The dispatch in `session` whose prompt has this digest; reads every dispatch file, so only a fallback uses it. */
+  findDispatchByPrompt(session, promptDigest) {
+    const dir = join8(this.files.root(), dispatchFolder);
+    if (!existsSync7(dir)) return void 0;
+    for (const name of readdirSync3(dir)) {
+      if (!name.endsWith(".json")) continue;
+      const record2 = this.readDispatch(name.slice(0, -".json".length));
+      if (record2?.session === session && record2.promptDigest === promptDigest) return record2;
     }
+    return void 0;
   }
-  /** Remembers a heartbeat a skill just sent. */
-  record(heartbeat) {
-    const now = this.now();
-    const { session, step, state } = heartbeat;
-    const optional2 = Object.fromEntries(
-      ["ticket", "repo", "branch", "skill", "detail"].map((key) => [key, heartbeat[key]]).filter(([, value]) => value !== void 0 && value !== "")
-    );
-    this.write({ heartbeat: { session, step, state, ...optional2 }, recordedAt: now, sentAt: now });
+  removeDispatch(toolUseId) {
+    this.files.remove(dispatchFolder, toolUseId);
   }
-  /**
-   * Claims the next liveness heartbeat for a session: returns its record and
-   * marks it sent, or returns undefined when there is nothing to keep alive.
-   * That is when no skill has recorded one, the record is older than
-   * `maxAgeMs`, the run aborted, or one was sent less than `intervalMs` ago.
-   */
-  claim(session, intervalMs, maxAgeMs) {
-    const record2 = this.read(session);
-    if (record2 === void 0) return void 0;
-    const now = this.now();
-    if (record2.heartbeat.state === "abort") return void 0;
-    if (now - record2.recordedAt > maxAgeMs) return void 0;
-    if (now - record2.sentAt < intervalMs) return void 0;
-    const claimed = { ...record2, sentAt: now };
-    this.write(claimed);
-    return claimed;
+  recordAgent(agentId, record2) {
+    this.files.write(agentsFolder, agentId, record2);
   }
-  write(record2) {
-    const path3 = this.pathFor(record2.heartbeat.session);
-    if (path3 === void 0) return;
-    mkdirSync4(this.dir(), { recursive: true, mode: 448 });
-    writeFileSync4(path3, JSON.stringify(record2), { mode: 384 });
+  readAgent(agentId) {
+    return this.files.read(agentsFolder, agentId, AgentRecordSchema);
   }
-  pathFor(session) {
-    return sessionFilePattern.test(session) ? join7(this.dir(), `${session}.json`) : void 0;
+  removeAgent(agentId) {
+    this.files.remove(agentsFolder, agentId);
+  }
+  /** Deletes dispatch and sub-agent records untouched for `maxAgeMs`. */
+  prune(maxAgeMs) {
+    this.files.prune(dispatchFolder, maxAgeMs);
+    this.files.prune(agentsFolder, maxAgeMs);
   }
 };
 
@@ -46219,8 +46436,8 @@ var LayeredBodyAdfConverter = class {
   }
   /** Looks up a target's basename as an OWN entry, so inherited names (`constructor`, `__proto__`) never resolve. */
   mediaByName(target, media) {
-    const basename4 = target.slice(target.lastIndexOf("/") + 1);
-    return Object.hasOwn(media, basename4) ? media[basename4] : void 0;
+    const basename6 = target.slice(target.lastIndexOf("/") + 1);
+    return Object.hasOwn(media, basename6) ? media[basename6] : void 0;
   }
   /** The ADF block type an mdast node maps to, or `''` when it only degrades to literal text. */
   adfType(node3) {
@@ -47787,6 +48004,9 @@ var DefaultFlightRules = class {
   boardSessions() {
     return new BoardSessionStore({ env: this.env });
   }
+  boardAgents() {
+    return new BoardAgentStore({ env: this.env });
+  }
 };
 function createFlightRules(props = {}) {
   return new DefaultFlightRules(props);
@@ -47872,7 +48092,8 @@ var HiddenPrompt = class {
   }
 };
 var ticketHelp = "Jira issue key";
-var sessionHelp = "session id; defaults to the Claude Code session ($CLAUDE_CODE_SESSION_ID)";
+var sessionHelp = "session id; defaults to <$CLAUDE_CODE_SESSION_ID>-<TICKET>, the row the heartbeat hook keeps alive for that ticket";
+var itemsSessionHelp = "session id; defaults to <$CLAUDE_CODE_SESSION_ID>-<TICKET> with --ticket, else $CLAUDE_CODE_SESSION_ID";
 var strictHelp = "exit 1 when the post fails, and post even without a token so a missing one fails with 401";
 function createBoardCommand(getBoard, getTokens = () => new AriadneTokenStore(), readSecret = () => new HiddenPrompt().read("Ariadne agent token: ")) {
   const board = new Command("board").description("report this run to Ariadne's Agents page (opt-in; silent unless an Ariadne token is set)").addHelpText(
@@ -47889,7 +48110,7 @@ function createBoardCommand(getBoard, getTokens = () => new AriadneTokenStore(),
     ].join("\n")
   );
   board.exitOverride();
-  const withReportOptions = (command, jsonHelp) => command.option("--session <id>", sessionHelp).option("--strict", strictHelp).option("--json", jsonHelp).exitOverride();
+  const withReportOptions = (command, jsonHelp, session = sessionHelp) => command.option("--session <id>", session).option("--strict", strictHelp).option("--json", jsonHelp).exitOverride();
   const finish = (outcome, opts, print, loud = opts.strict === true) => {
     if (loud) for (const notice of outcome.notices ?? []) process.stderr.write(`flight-rules board: ${notice}
 `);
@@ -47960,10 +48181,11 @@ function createBoardCommand(getBoard, getTokens = () => new AriadneTokenStore(),
   });
   board.addCommand(post);
   withReportOptions(
-    board.command("items").description("list a session's items, open and resolved, with any chosen option"),
-    "print {items} as JSON"
+    board.command("items").description("list a session's items, open and resolved, with any chosen option").option("--ticket <key>", "the Jira key the items were posted on; picks the same default session as the post"),
+    "print {items} as JSON",
+    itemsSessionHelp
   ).action(async (opts) => {
-    const outcome = await getBoard().items(opts.session, { strict: opts.strict === true });
+    const outcome = await getBoard().items(opts.session, { strict: opts.strict === true }, opts.ticket);
     finish(
       outcome,
       opts,
@@ -48885,11 +49107,11 @@ function createUsersCommand(getTracker) {
 }
 
 // src/tasks/commands/rfc/command.ts
-import { readdirSync as readdirSync2 } from "node:fs";
+import { readdirSync as readdirSync4 } from "node:fs";
 function getNextRfcId(rfcDir) {
   let files;
   try {
-    files = readdirSync2(rfcDir);
+    files = readdirSync4(rfcDir);
   } catch {
     return "RFC-001";
   }
@@ -48912,14 +49134,14 @@ function createRfcCommand(getConfig, getCwd = () => process.cwd()) {
 }
 
 // src/tasks/qa-instructions/qa-instructions.ts
-import { existsSync as existsSync7, readFileSync as readFileSync10, statSync as statSync3 } from "node:fs";
-import { dirname as dirname8, join as join8, resolve as resolve3 } from "node:path";
+import { existsSync as existsSync8, readFileSync as readFileSync10, statSync as statSync4 } from "node:fs";
+import { dirname as dirname8, join as join9, resolve as resolve3 } from "node:path";
 var atxHeading = /^ {0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$/;
 var fenceRun2 = /^ {0,3}(`{3,}|~{3,})/;
 var legacyHint = 'Legacy QA recipe in use. Move its content into a QA.md at the repo root (or a "QA" section of AGENTS.md); see docs/qa-instructions.md.';
 var nodeFileSystem = {
-  isFile: (path3) => existsSync7(path3) && statSync3(path3).isFile(),
-  exists: (path3) => existsSync7(path3),
+  isFile: (path3) => existsSync8(path3) && statSync4(path3).isFile(),
+  exists: (path3) => existsSync8(path3),
   readFile: (path3) => readFileSync10(path3, "utf8")
 };
 var QaInstructionsFinder = class {
@@ -48975,20 +49197,20 @@ var QaInstructionsFinder = class {
     let current = start;
     for (; ; ) {
       levels.push(current);
-      if (this.fs.exists(join8(current, ".git"))) return levels;
+      if (this.fs.exists(join9(current, ".git"))) return levels;
       const parent = dirname8(current);
       if (parent === current) return [start];
       current = parent;
     }
   }
   sourceAt(dir) {
-    const agentsMd = join8(dir, "AGENTS.md");
+    const agentsMd = join9(dir, "AGENTS.md");
     if (this.fs.isFile(agentsMd)) {
       const section = this.extractQaSection(this.fs.readFile(agentsMd));
       if (section !== void 0)
         return { path: agentsMd, kind: "agents-md-section", dir, content: section };
     }
-    return this.fileSource(join8(dir, "QA.md"), "qa-md", dir) ?? this.fileSource(join8(dir, ".agents", "QA.md"), "agents-dir-qa-md", dir);
+    return this.fileSource(join9(dir, "QA.md"), "qa-md", dir) ?? this.fileSource(join9(dir, ".agents", "QA.md"), "agents-dir-qa-md", dir);
   }
   fileSource(path3, kind, dir) {
     if (!this.fs.isFile(path3)) return void 0;
@@ -49153,20 +49375,259 @@ import { text as text5 } from "node:stream/consumers";
 
 // src/hooks/board-heartbeat/board-heartbeat.ts
 import { spawn } from "node:child_process";
+import { basename as basename4 } from "node:path";
+
+// src/shared/ariadne/ticket-key-extractor.ts
+var keyPattern = /(?<![A-Za-z0-9_])(?<![A-Z0-9]-)[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,8}(?![A-Za-z0-9_])/g;
+var phrasePattern = /\b(?:ticket|building)\s*:?\s+([A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,8})(?![A-Za-z0-9_])/gi;
+var urlPattern = /\b[a-z][a-z0-9+.-]*:\/\/\S+/gi;
+var notProjectKeys = /* @__PURE__ */ new Set([
+  "AES",
+  "CVE",
+  "ES",
+  "GPT",
+  "HTTP",
+  "ISO",
+  "MD",
+  "PEP",
+  "RFC",
+  "SHA",
+  "TLS",
+  "SSL",
+  "UTF",
+  "WCAG"
+]);
+var TicketKeyExtractor = class {
+  /**
+   * The ticket an Agent dispatch is about: a key in the description, then a
+   * "ticket <KEY>" or "building <KEY>" phrase in the prompt, then the first
+   * key in the prompt.
+   */
+  fromDispatch(description, prompt) {
+    return this.firstKey(description) ?? this.fromPrompt(prompt);
+  }
+  /** A "ticket <KEY>" or "building <KEY>" phrase, then the first key. */
+  fromPrompt(prompt) {
+    if (prompt === void 0) return void 0;
+    const text6 = this.withoutUrls(prompt);
+    for (const match of text6.matchAll(phrasePattern)) {
+      const key = this.valid(match[1]);
+      if (key !== void 0) return key;
+    }
+    return this.firstKey(text6);
+  }
+  /** The first key in a description, a branch name or a directory name. */
+  firstKey(text6) {
+    if (text6 === void 0) return void 0;
+    for (const match of this.withoutUrls(text6).matchAll(keyPattern)) {
+      const key = this.valid(match[0]);
+      if (key !== void 0) return key;
+    }
+    return void 0;
+  }
+  withoutUrls(text6) {
+    return text6.replace(urlPattern, " ");
+  }
+  valid(candidate) {
+    if (candidate === void 0) return void 0;
+    const parsed = TicketKeySchema.safeParse(candidate);
+    if (!parsed.success) return void 0;
+    const project = parsed.data.slice(0, parsed.data.indexOf("-"));
+    return notProjectKeys.has(project) ? void 0 : parsed.data;
+  }
+};
+
+// src/hooks/board-heartbeat/agent-dispatch-hook.ts
+var boardStateMaxAgeMs = 24 * 60 * 6e4;
+var maxDescriptionLength = 200;
+var AgentDispatchInputSchema = external_exports.looseObject({
+  session_id: external_exports.string(),
+  tool_use_id: external_exports.string(),
+  tool_input: external_exports.looseObject({
+    description: external_exports.string().optional(),
+    prompt: external_exports.string().optional()
+  }),
+  /** Present when a sub-agent dispatches its own sub-agent. */
+  agent_id: external_exports.string().optional()
+});
+var AgentDispatchHook = class {
+  agents;
+  sessions;
+  resolver;
+  extractor;
+  constructor(props) {
+    this.agents = props.agents;
+    this.sessions = props.sessions;
+    this.resolver = props.resolver;
+    this.extractor = props.extractor ?? new TicketKeyExtractor();
+  }
+  record(payload) {
+    const parsed = AgentDispatchInputSchema.safeParse(payload);
+    if (!parsed.success) return;
+    const { session_id: session, tool_use_id: toolUseId, tool_input: input2, agent_id: parentAgent } = parsed.data;
+    const description = (input2.description ?? "").trim().slice(0, maxDescriptionLength);
+    const ticket = this.extractor.fromDispatch(input2.description, input2.prompt) ?? (parentAgent !== void 0 ? this.agents.readAgent(parentAgent)?.ticket : void 0) ?? null;
+    this.agents.recordDispatch(toolUseId, {
+      ticket,
+      description,
+      session,
+      ...input2.prompt !== void 0 ? { promptDigest: this.resolver.digest(input2.prompt) } : {},
+      at: this.agents.now()
+    });
+    this.agents.prune(boardStateMaxAgeMs);
+    this.sessions.prune(boardStateMaxAgeMs);
+  }
+};
+
+// src/hooks/board-heartbeat/board-heartbeat.ts
 var heartbeatIntervalMs = 6e4;
 var heartbeatMaxAgeMs = 60 * 6e4;
-var PostToolUseInputSchema = external_exports.looseObject({ session_id: external_exports.string() });
+var checkoutStep = "working";
+var subagentStep = "sub-agent";
+var PostToolUseInputSchema = external_exports.looseObject({
+  session_id: external_exports.string(),
+  agent_id: external_exports.string().optional(),
+  agent_type: external_exports.string().optional(),
+  transcript_path: external_exports.string().optional(),
+  cwd: external_exports.string().optional(),
+  tool_name: external_exports.string().optional(),
+  tool_use_id: external_exports.string().optional(),
+  tool_response: external_exports.unknown().optional()
+});
+var AsyncLaunchSchema = external_exports.looseObject({ status: external_exports.literal("async_launched"), agentId: external_exports.string() });
+var SubagentStopInputSchema = external_exports.looseObject({
+  session_id: external_exports.string(),
+  agent_id: external_exports.string(),
+  agent_type: external_exports.string().optional(),
+  transcript_path: external_exports.string().optional(),
+  agent_transcript_path: external_exports.string().optional()
+});
+var SkillNameSchema = HeartbeatInputSchema.shape.skill;
+var StepSchema = HeartbeatInputSchema.shape.step;
 var BoardHeartbeatHook = class {
   sessions;
+  agents;
+  resolver;
+  extractor;
+  reportable;
   constructor(props) {
     this.sessions = props.sessions;
+    this.agents = props.agents;
+    this.resolver = props.resolver;
+    this.extractor = props.extractor ?? new TicketKeyExtractor();
+    this.reportable = props.reportable ?? (() => true);
   }
-  /** The session to send a heartbeat for now, already claimed, or undefined. */
+  /** The heartbeat to send now, already claimed, or undefined. */
   due(payload) {
     const parsed = PostToolUseInputSchema.safeParse(payload);
     if (!parsed.success) return void 0;
-    const claimed = this.sessions.claim(parsed.data.session_id, heartbeatIntervalMs, heartbeatMaxAgeMs);
-    return claimed?.heartbeat.session;
+    const input2 = parsed.data;
+    const claudeSession = input2.session_id;
+    this.bridgeBackgroundLaunch(input2);
+    if (input2.agent_id !== void 0) {
+      const mapping = this.resolver?.resolve({
+        agentId: input2.agent_id,
+        session: claudeSession,
+        transcriptPath: input2.transcript_path,
+        agentType: input2.agent_type
+      });
+      if (mapping !== void 0 && mapping.ticket !== null) {
+        const ticket = mapping.ticket;
+        const agentType = mapping.agentType ?? input2.agent_type;
+        return this.dueForTicket(
+          claudeSession,
+          ticket,
+          (session) => this.subagentHeartbeat(session, ticket, mapping.description, agentType)
+        );
+      }
+    }
+    const skill = this.skillThread(claudeSession);
+    if (skill !== void 0) return this.send(this.sessions.claim(skill, heartbeatIntervalMs, heartbeatMaxAgeMs)?.heartbeat.session);
+    if (input2.agent_id !== void 0 || input2.cwd === void 0) return void 0;
+    const fromCheckout = this.extractor.firstKey(basename4(input2.cwd));
+    if (fromCheckout !== void 0) {
+      return this.dueForTicket(claudeSession, fromCheckout, (session) => this.checkoutHeartbeat(session, fromCheckout));
+    }
+    if (!this.sessions.claimBranchCheck(claudeSession, heartbeatIntervalMs) || !this.reportable()) return void 0;
+    return { kind: "branch", claudeSession, cwd: input2.cwd };
+  }
+  /**
+   * Run by the detached child for a main thread: `branch` is what git
+   * printed. Returns the session to replay, already claimed, or undefined.
+   */
+  dueForBranch(claudeSession, branch) {
+    const ticket = this.extractor.firstKey(branch);
+    if (ticket === void 0) return void 0;
+    const due = this.dueForTicket(claudeSession, ticket, (session) => this.checkoutHeartbeat(session, ticket, branch));
+    return due?.kind === "send" ? due.session : void 0;
+  }
+  /**
+   * A sub-agent stopped: forgets it, and returns the activity line to post
+   * when it was working on a Jira ticket and Ariadne is configured.
+   */
+  stopped(payload) {
+    const parsed = SubagentStopInputSchema.safeParse(payload);
+    if (!parsed.success || this.agents === void 0) return void 0;
+    const input2 = parsed.data;
+    const mapping = this.resolver?.resolve({
+      agentId: input2.agent_id,
+      session: input2.session_id,
+      transcriptPath: input2.transcript_path,
+      agentTranscriptPath: input2.agent_transcript_path,
+      agentType: input2.agent_type
+    });
+    this.agents.removeAgent(input2.agent_id);
+    if (mapping?.toolUseId !== void 0) this.agents.removeDispatch(mapping.toolUseId);
+    if (mapping === void 0 || mapping.ticket === null) return void 0;
+    const session = ticketSessionKey.key(input2.session_id, mapping.ticket);
+    if (session === void 0 || !this.reportable()) return void 0;
+    const what = mapping.description !== void 0 && mapping.description !== "" ? mapping.description : mapping.agentType ?? input2.agent_type ?? subagentStep;
+    return { session, ticket: mapping.ticket, text: `Finished: ${what}`, id: `finished-${input2.agent_id}` };
+  }
+  /**
+   * A skill's heartbeat replayed if a skill posted to the ticket's session
+   * within a day (only while it is live), else a heartbeat the hook infers.
+   */
+  dueForTicket(claudeSession, ticket, infer) {
+    const session = ticketSessionKey.key(claudeSession, ticket);
+    if (session === void 0) return void 0;
+    if (this.sessions.hasSkillRecord(session, boardStateMaxAgeMs)) {
+      return this.send(this.sessions.claim(session, heartbeatIntervalMs, heartbeatMaxAgeMs)?.heartbeat.session);
+    }
+    if (!this.sessions.claimInferred(infer(session), heartbeatIntervalMs) || !this.reportable()) return void 0;
+    return { kind: "send", session };
+  }
+  /**
+   * The live skill session for this Claude Code session: one recorded under
+   * the session id itself (an explicit `--session`, or an older CLI), else
+   * the one a skill last posted to by default from it.
+   */
+  skillThread(claudeSession) {
+    if (this.sessions.isLive(claudeSession, heartbeatMaxAgeMs)) return claudeSession;
+    const pointed = this.sessions.threadSession(claudeSession);
+    return pointed !== void 0 && this.sessions.isLive(pointed, heartbeatMaxAgeMs) ? pointed : void 0;
+  }
+  bridgeBackgroundLaunch(input2) {
+    if (input2.tool_name !== "Agent" || input2.tool_use_id === void 0) return;
+    const launch = AsyncLaunchSchema.safeParse(input2.tool_response);
+    if (launch.success) this.resolver?.bridge(launch.data.agentId, input2.tool_use_id, input2.session_id);
+  }
+  subagentHeartbeat(session, ticket, description, agentType) {
+    const step = StepSchema.safeParse(description ?? "");
+    const skill = SkillNameSchema.safeParse(agentType);
+    return {
+      session,
+      ticket,
+      step: step.success ? step.data : subagentStep,
+      state: "nominal",
+      ...skill.success && skill.data !== void 0 ? { skill: skill.data } : {}
+    };
+  }
+  checkoutHeartbeat(session, ticket, branch) {
+    return { session, ticket, step: checkoutStep, state: "nominal", ...branch !== void 0 ? { branch } : {} };
+  }
+  send(session) {
+    return session === void 0 ? void 0 : { kind: "send", session };
   }
 };
 var DetachedHeartbeatSender = class {
@@ -49177,13 +49638,200 @@ var DetachedHeartbeatSender = class {
     this.entry = "entry" in props ? props.entry : process.argv[1];
   }
   send(session) {
+    this.spawnHook(["board-heartbeat", "--send", session]);
+  }
+  sendBranch(claudeSession, cwd) {
+    this.spawnHook(["board-heartbeat", "--branch", claudeSession, "--cwd", cwd]);
+  }
+  sendFinished(report) {
+    this.spawnHook(["agent-stop", "--send", report.session, "--ticket", report.ticket, "--text", report.text, "--id", report.id]);
+  }
+  spawnHook(args) {
     if (this.entry === void 0) return;
-    const child = spawn(this.execPath, [this.entry, "hook", "board-heartbeat", "--send", session], {
-      detached: true,
-      stdio: "ignore"
-    });
+    const child = spawn(this.execPath, [this.entry, "hook", ...args], { detached: true, stdio: "ignore" });
     child.on("error", () => void 0);
     child.unref();
+  }
+};
+
+// src/hooks/board-heartbeat/board-hook-kit.ts
+import { execFileSync as execFileSync3 } from "node:child_process";
+
+// src/hooks/board-heartbeat/agent-ticket-resolver.ts
+import { createHash } from "node:crypto";
+import { closeSync, existsSync as existsSync9, openSync, readFileSync as readFileSync11, readSync } from "node:fs";
+import { basename as basename5, dirname as dirname9, join as join10 } from "node:path";
+var SubagentMetaSchema = external_exports.looseObject({
+  agentType: external_exports.string().optional(),
+  description: external_exports.string().optional(),
+  toolUseId: external_exports.string().optional()
+});
+var TranscriptLineSchema = external_exports.looseObject({
+  type: external_exports.string().optional(),
+  message: external_exports.looseObject({
+    role: external_exports.string().optional(),
+    content: external_exports.union([external_exports.string(), external_exports.array(external_exports.looseObject({ type: external_exports.string().optional(), text: external_exports.string().optional() }))])
+  }).optional()
+});
+var transcriptHeadBytes = 256 * 1024;
+var AgentTicketResolver = class {
+  agents;
+  extractor;
+  constructor(props) {
+    this.agents = props.agents;
+    this.extractor = props.extractor ?? new TicketKeyExtractor();
+  }
+  /** The cached or freshly resolved record, or undefined while Claude Code has written nothing to read yet. */
+  resolve(location) {
+    if (!stateIdPattern.test(location.agentId)) return void 0;
+    const cached2 = this.agents.readAgent(location.agentId);
+    if (cached2 !== void 0) return cached2;
+    const dir = this.subagentsDir(location);
+    if (dir === void 0) return void 0;
+    const meta3 = this.readMeta(join10(dir, `agent-${location.agentId}.meta.json`));
+    const resolved = meta3 !== void 0 ? this.fromMeta(location, meta3) : this.fromTranscript(location, join10(dir, `agent-${location.agentId}.jsonl`));
+    if (resolved !== void 0) this.agents.recordAgent(location.agentId, resolved);
+    return resolved;
+  }
+  /**
+   * A background Agent call returns the sub-agent's id at once, so its
+   * PostToolUse can map the sub-agent to its dispatch before the sub-agent's
+   * first tool call. A sub-agent that is already mapped is left alone.
+   */
+  bridge(agentId, toolUseId, session) {
+    if (!stateIdPattern.test(agentId) || this.agents.readAgent(agentId) !== void 0) return;
+    const dispatch = this.agents.readDispatch(toolUseId);
+    if (dispatch === void 0) return;
+    this.agents.recordAgent(agentId, {
+      ticket: dispatch.ticket,
+      description: dispatch.description,
+      toolUseId,
+      session,
+      at: this.agents.now()
+    });
+  }
+  /** A stable digest of a prompt, recorded at dispatch and matched against a transcript's first message. */
+  digest(prompt) {
+    return createHash("sha256").update(prompt.trim()).digest("hex").slice(0, 32);
+  }
+  fromMeta(location, meta3) {
+    const dispatch = meta3.toolUseId !== void 0 ? this.agents.readDispatch(meta3.toolUseId) : void 0;
+    const description = dispatch?.description ?? meta3.description;
+    return {
+      ticket: dispatch !== void 0 ? dispatch.ticket : this.extractor.firstKey(meta3.description) ?? null,
+      ...description !== void 0 ? { description } : {},
+      ...this.agentType(meta3.agentType ?? location.agentType),
+      ...meta3.toolUseId !== void 0 ? { toolUseId: meta3.toolUseId } : {},
+      session: location.session,
+      at: this.agents.now()
+    };
+  }
+  fromTranscript(location, path3) {
+    const prompt = this.firstUserMessage(path3);
+    if (prompt === void 0) return void 0;
+    const dispatch = this.agents.findDispatchByPrompt(location.session, this.digest(prompt));
+    return {
+      ticket: dispatch !== void 0 ? dispatch.ticket : this.extractor.fromPrompt(prompt) ?? null,
+      ...dispatch !== void 0 ? { description: dispatch.description } : {},
+      ...this.agentType(location.agentType),
+      session: location.session,
+      at: this.agents.now()
+    };
+  }
+  agentType(value) {
+    return value !== void 0 && value !== "" ? { agentType: value } : {};
+  }
+  subagentsDir(location) {
+    if (location.agentTranscriptPath !== void 0 && location.agentTranscriptPath !== "") {
+      return dirname9(location.agentTranscriptPath);
+    }
+    const transcript = location.transcriptPath;
+    if (transcript === void 0 || !transcript.endsWith(".jsonl")) return void 0;
+    return join10(dirname9(transcript), basename5(transcript, ".jsonl"), "subagents");
+  }
+  readMeta(path3) {
+    if (!existsSync9(path3)) return void 0;
+    try {
+      const parsed = SubagentMetaSchema.safeParse(JSON.parse(readFileSync11(path3, "utf-8")));
+      return parsed.success ? parsed.data : void 0;
+    } catch {
+      return void 0;
+    }
+  }
+  firstUserMessage(path3) {
+    if (!existsSync9(path3)) return void 0;
+    let head;
+    try {
+      const fd = openSync(path3, "r");
+      try {
+        const buffer = Buffer.alloc(transcriptHeadBytes);
+        head = buffer.subarray(0, readSync(fd, buffer, 0, transcriptHeadBytes, 0)).toString("utf-8");
+      } finally {
+        closeSync(fd);
+      }
+    } catch {
+      return void 0;
+    }
+    for (const line of head.split("\n")) {
+      const text6 = this.userText(line);
+      if (text6 !== void 0) return text6;
+    }
+    return void 0;
+  }
+  userText(line) {
+    let parsed;
+    try {
+      const result = TranscriptLineSchema.safeParse(JSON.parse(line));
+      if (!result.success) return void 0;
+      parsed = result.data;
+    } catch {
+      return void 0;
+    }
+    if (parsed.type !== "user" || parsed.message === void 0) return void 0;
+    const content3 = parsed.message.content;
+    if (typeof content3 === "string") return content3;
+    const text6 = content3.filter((part) => part.type === "text" && part.text !== void 0).map((part) => part.text).join("\n");
+    return text6 === "" ? void 0 : text6;
+  }
+};
+
+// src/hooks/board-heartbeat/board-hook-kit.ts
+var BoardHookKit = class {
+  sessions;
+  agents;
+  board;
+  resolver;
+  constructor(props) {
+    this.sessions = props.sessions;
+    this.agents = props.agents;
+    this.board = props.board;
+    this.resolver = new AgentTicketResolver({ agents: this.agents });
+  }
+  heartbeatHook() {
+    return new BoardHeartbeatHook({
+      sessions: this.sessions,
+      agents: this.agents,
+      resolver: this.resolver,
+      reportable: () => this.board().reportable()
+    });
+  }
+  dispatchHook() {
+    return new AgentDispatchHook({ agents: this.agents, sessions: this.sessions, resolver: this.resolver });
+  }
+};
+var GitBranchReader = class {
+  read(cwd) {
+    try {
+      const branch = execFileSync3("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+        cwd,
+        encoding: "utf-8",
+        stdio: ["ignore", "pipe", "ignore"],
+        timeout: 2e3
+      }).trim();
+      return branch === "" || branch === "HEAD" ? void 0 : branch;
+    } catch {
+      return void 0;
+    }
   }
 };
 
@@ -49216,7 +49864,7 @@ ${line.trim()}`) === "";
 };
 
 // src/hooks/commit-guard/commit-guard.ts
-import { readFileSync as readFileSync11 } from "node:fs";
+import { readFileSync as readFileSync12 } from "node:fs";
 import { isAbsolute as isAbsolute2, resolve as resolve4 } from "node:path";
 var PreToolUseInputSchema = external_exports.looseObject({
   tool_name: external_exports.string().optional(),
@@ -49309,7 +49957,7 @@ var CommitGuard = class {
     const unquoted = file2.replace(/^["']|["']$/g, "");
     if (unquoted === "-" || !isAbsolute2(unquoted) && cwd === void 0) return false;
     try {
-      const contents = readFileSync11(isAbsolute2(unquoted) ? unquoted : resolve4(cwd ?? "", unquoted), "utf8");
+      const contents = readFileSync12(isAbsolute2(unquoted) ? unquoted : resolve4(cwd ?? "", unquoted), "utf8");
       return /^Flight-Rules-Version: /m.test(contents);
     } catch {
       return false;
@@ -49346,14 +49994,28 @@ var PreBashHook = class {
 
 // src/hooks/commands/hook/command.ts
 var DefaultBoardHookServices = class {
+  kit;
   heartbeatHook() {
-    return new BoardHeartbeatHook({ sessions: createFlightRules().boardSessions() });
+    return this.hooks().heartbeatHook();
+  }
+  dispatchHook() {
+    return this.hooks().dispatchHook();
   }
   sender() {
     return new DetachedHeartbeatSender();
   }
   board() {
     return createFlightRules().board();
+  }
+  branch() {
+    return new GitBranchReader();
+  }
+  hooks() {
+    if (this.kit === void 0) {
+      const core = createFlightRules();
+      this.kit = new BoardHookKit({ sessions: core.boardSessions(), agents: core.boardAgents(), board: () => core.board() });
+    }
+    return this.kit;
   }
 };
 var defaultBoardServices = new DefaultBoardHookServices();
@@ -49370,15 +50032,44 @@ function createHookCommand(getHandler = () => new PreBashHook(), readStdin = () 
     }
   });
   hook2.command("board-heartbeat").description(
-    "PostToolUse: keep this session alive on Ariadne's Agents page, at most once a minute, while a skill has a ticket in progress; silent, never blocks"
-  ).option("--send <session>", "internal: replay the session's last heartbeat (run detached by the hook)").exitOverride().action(async (opts) => {
+    "PostToolUse: keep this run's Ariadne sessions alive, at most once a minute each: a skill's ticket, a sub-agent's ticket from its dispatch, or the main thread's ticket from its directory or branch; silent, never blocks"
+  ).option("--send <session>", "internal: replay the session's last heartbeat (run detached by the hook)").option("--branch <session>", "internal: heartbeat the ticket in the main thread's branch (run detached by the hook)").option("--cwd <dir>", "internal: the main thread's working directory, with --branch").exitOverride().action(async (opts) => {
     try {
       if (opts.send !== void 0) {
         await boardServices.board().replay(opts.send);
         return;
       }
-      const session = boardServices.heartbeatHook().due(JSON.parse(await readStdin()));
-      if (session !== void 0) boardServices.sender().send(session);
+      if (opts.branch !== void 0) {
+        const branch = opts.cwd !== void 0 ? boardServices.branch().read(opts.cwd) : void 0;
+        const session = branch !== void 0 ? boardServices.heartbeatHook().dueForBranch(opts.branch, branch) : void 0;
+        if (session !== void 0) await boardServices.board().replay(session);
+        return;
+      }
+      const due = boardServices.heartbeatHook().due(JSON.parse(await readStdin()));
+      if (due?.kind === "send") boardServices.sender().send(due.session);
+      else if (due?.kind === "branch") boardServices.sender().sendBranch(due.claudeSession, due.cwd);
+    } catch {
+      return;
+    }
+  });
+  hook2.command("agent-dispatch").description(
+    "PreToolUse(Agent): remember which Jira ticket a sub-agent is dispatched for, so the heartbeat hook can report it; local only, no output, never blocks or changes the call"
+  ).exitOverride().action(async () => {
+    try {
+      boardServices.dispatchHook().record(JSON.parse(await readStdin()));
+    } catch {
+      return;
+    }
+  });
+  hook2.command("agent-stop").description("SubagentStop: post `Finished: <description>` to the sub-agent's Ariadne session and forget the sub-agent; silent, never blocks").option("--send <session>", "internal: post the activity line (run detached by the hook)").option("--ticket <key>", "internal: with --send").option("--text <line>", "internal: with --send").option("--id <id>", "internal: with --send").exitOverride().action(async (opts) => {
+    try {
+      if (opts.send !== void 0) {
+        if (opts.ticket === void 0 || opts.text === void 0) return;
+        await boardServices.board().activity({ session: opts.send, ticket: opts.ticket, text: opts.text, id: opts.id });
+        return;
+      }
+      const report = boardServices.heartbeatHook().stopped(JSON.parse(await readStdin()));
+      if (report !== void 0) boardServices.sender().sendFinished(report);
     } catch {
       return;
     }
@@ -49387,11 +50078,11 @@ function createHookCommand(getHandler = () => new PreBashHook(), readStdin = () 
 }
 
 // src/git/commands/commit/command.ts
-import { readFileSync as readFileSync13 } from "node:fs";
+import { readFileSync as readFileSync14 } from "node:fs";
 
 // src/git/commit-message-builder/commit-message-builder.ts
-import { readFileSync as readFileSync12 } from "node:fs";
-import { dirname as dirname9, join as join9 } from "node:path";
+import { readFileSync as readFileSync13 } from "node:fs";
+import { dirname as dirname10, join as join11 } from "node:path";
 
 // src/git/commit-message-builder/commit-message.schema.ts
 var CommitMessageInputSchema = external_exports.object({
@@ -49449,8 +50140,8 @@ var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
   }
   static readPluginVersion(binPath) {
     try {
-      const pkgPath = join9(dirname9(binPath), "..", "package.json");
-      const parsed = JSON.parse(readFileSync12(pkgPath, "utf-8"));
+      const pkgPath = join11(dirname10(binPath), "..", "package.json");
+      const parsed = JSON.parse(readFileSync13(pkgPath, "utf-8"));
       if (typeof parsed === "object" && parsed !== null && "version" in parsed && typeof parsed.version === "string") {
         return parsed.version;
       }
@@ -49487,7 +50178,7 @@ function createGitCommand(getExecutor) {
       type: opts.type,
       scope: opts.scope,
       description: opts.description,
-      body: opts.bodyFile !== void 0 ? readFileSync13(opts.bodyFile, "utf8") : opts.body,
+      body: opts.bodyFile !== void 0 ? readFileSync14(opts.bodyFile, "utf8") : opts.body,
       footers: opts.footer,
       model: opts.model ?? void 0
     });
@@ -49525,16 +50216,16 @@ function createGitCommand(getExecutor) {
 }
 
 // src/git/commands/message/command.ts
-import { mkdtempSync, readFileSync as readFileSync14, writeFileSync as writeFileSync6 } from "node:fs";
+import { mkdtempSync, readFileSync as readFileSync15, writeFileSync as writeFileSync6 } from "node:fs";
 import { tmpdir as tmpdir2 } from "node:os";
-import { join as join10 } from "node:path";
+import { join as join12 } from "node:path";
 function createCommitMessageCommand() {
   return new Command("commit-message").description("write the conventional commit message `flight-rules git commit` would use to a file, without committing").exitOverride().requiredOption("--type <type>", "conventional commit type").requiredOption("--scope <scope>", "conventional commit scope").requiredOption("--description <description>", "commit description").option("--body <body>", "commit body (or use --body-file)").option("--body-file <path>", "read the commit body from a file; wins over --body").option("--footer <footer>", "commit footer (repeatable)", (value, previous3) => [...previous3, value], []).option("--model <model>", "model identifier").option("--out <path>", "where to write the message; defaults to a new file in the temp directory").action((opts) => {
     const input2 = CommitMessageInputSchema.parse({
       type: opts.type,
       scope: opts.scope,
       description: opts.description,
-      body: opts.bodyFile !== void 0 ? readFileSync14(opts.bodyFile, "utf8") : opts.body,
+      body: opts.bodyFile !== void 0 ? readFileSync15(opts.bodyFile, "utf8") : opts.body,
       footers: opts.footer,
       model: opts.model
     });
@@ -49542,7 +50233,7 @@ function createCommitMessageCommand() {
       binPath: process.argv[1] ?? "",
       agentEnv: process.env["AI_AGENT"]
     }).build(input2);
-    const path3 = opts.out ?? join10(mkdtempSync(join10(tmpdir2(), "flight-rules-commit-")), "message.txt");
+    const path3 = opts.out ?? join12(mkdtempSync(join12(tmpdir2(), "flight-rules-commit-")), "message.txt");
     writeFileSync6(path3, `${message}
 `);
     process.stdout.write(JSON.stringify({ path: path3, message }) + "\n");
@@ -49626,11 +50317,14 @@ function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = () => cr
   program2.addCommand(createUsersCommand(tracker));
   program2.addCommand(createRfcCommand(config2));
   program2.addCommand(createConfigCommand(() => services.configStore()));
+  const boardHooks = () => new BoardHookKit({ sessions: services.boardSessions(), agents: services.boardAgents(), board: () => services.board() });
   program2.addCommand(
     createHookCommand(void 0, void 0, {
-      heartbeatHook: () => new BoardHeartbeatHook({ sessions: services.boardSessions() }),
+      heartbeatHook: () => boardHooks().heartbeatHook(),
+      dispatchHook: () => boardHooks().dispatchHook(),
       sender: () => new DetachedHeartbeatSender(),
-      board: () => services.board()
+      board: () => services.board(),
+      branch: () => new GitBranchReader()
     })
   );
   program2.addCommand(createQaCommand(config2, getConfigPath, void 0, () => services.evidence()));

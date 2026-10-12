@@ -11,6 +11,7 @@ import { EnvLoader } from '../shared/env.js'
 import { AriadneBoard } from '../shared/ariadne/ariadne-board.js'
 import { AriadnePackets } from '../shared/ariadne/ariadne-packets.js'
 import { AriadneTokenStore } from '../shared/ariadne/ariadne-token-store.js'
+import { BoardAgentStore } from '../shared/ariadne/board-agent-store.js'
 import { BoardSessionStore } from '../shared/ariadne/board-session-store.js'
 import { GitHubTaskTracker } from '../tasks/github-task-tracker/github-task-tracker.js'
 import { JiraTaskTracker } from '../tasks/jira-task-tracker/jira-task-tracker.js'
@@ -36,6 +37,8 @@ export interface FlightRules {
   ariadneTokens(): AriadneTokenStore
   /** The last heartbeat each session's skill posted, outside every repo; read by the heartbeat hook. */
   boardSessions(): BoardSessionStore
+  /** Which Jira ticket each sub-agent works on, outside every repo; written and read by the board hooks. */
+  boardAgents(): BoardAgentStore
 }
 
 /** Constructs services on demand so config and credentials are only required by their consumers. */
@@ -171,6 +174,10 @@ export class DefaultFlightRules implements FlightRules {
 
   boardSessions(): BoardSessionStore {
     return new BoardSessionStore({ env: this.env })
+  }
+
+  boardAgents(): BoardAgentStore {
+    return new BoardAgentStore({ env: this.env })
   }
 }
 

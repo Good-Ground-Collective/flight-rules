@@ -150,16 +150,44 @@ describe("AriadneBoard", () => {
   });
 
   describe("sessions", () => {
-    it("defaults the session to $CLAUDE_CODE_SESSION_ID", async () => {
+    it("defaults the session to <$CLAUDE_CODE_SESSION_ID>-<TICKET>", async () => {
       const transport = new FakeTransport(FakeTransport.json(200, { session: contract.session }));
       await board(transport).heartbeat(heartbeat);
-      expect(transport.bodies()[0]).toMatchObject({ session: "claude-session-1" });
+      expect(transport.bodies()[0]).toMatchObject({ session: "claude-session-1-FRT-1" });
     });
 
     it("prefers an explicit session", async () => {
       const transport = new FakeTransport(FakeTransport.json(200, { items: [] }));
       await board(transport).items("explicit");
       expect(transport.requests[0]?.url).toContain("?session=explicit");
+    });
+
+    it("keeps an explicit session on a post with a ticket, such as execute-wave's wave-<node>", async () => {
+      const transport = new FakeTransport(FakeTransport.json(200, { session: contract.session }));
+      await board(transport).heartbeat({ ...heartbeat, session: "wave-FRT-9" });
+      expect(transport.bodies()[0]).toMatchObject({ session: "wave-FRT-9" });
+    });
+
+    it("reads items from the same default session a post on that ticket used", async () => {
+      const transport = new FakeTransport(FakeTransport.json(200, { items: [] }), FakeTransport.json(200, { items: [] }));
+      await board(transport).items(undefined, {}, "frt-1");
+      await board(transport).items(undefined);
+      expect(transport.requests.map((r) => new URL(r.url).searchParams.get("session"))).toEqual(["claude-session-1-FRT-1", "claude-session-1"]);
+    });
+
+    it("cuts a long Claude Code session id so the default session fits 80 characters, keeping the ticket", () => {
+      const reporter = board(new FakeTransport(), { env: { CLAUDE_CODE_SESSION_ID: `${"a".repeat(90)}.x` } });
+      const session = reporter.defaultSession("FRT-12345");
+      expect(session).toBe(`${"a".repeat(70)}-FRT-12345`);
+      expect(session).toMatch(/^[A-Za-z0-9_-]{1,80}$/);
+      expect(board(new FakeTransport(), { env: { CLAUDE_CODE_SESSION_ID: "s.1" } }).defaultSession("FRT-1")).toBe("s_1-FRT-1");
+    });
+
+    it("is reportable only when enabled with a token", () => {
+      expect(board(new FakeTransport()).reportable()).toBe(true);
+      expect(board(new FakeTransport(), { env: {} }).reportable()).toBe(false);
+      expect(board(new FakeTransport(), { config: { "ariadne.enabled": false } }).reportable()).toBe(false);
+      expect(board(new FakeTransport(), { config: { "ariadne.url": "http://example.com" } }).reportable()).toBe(false);
     });
 
     it("fails without a request when there is no session id", async () => {
@@ -190,7 +218,7 @@ describe("AriadneBoard", () => {
       const outcome = await post(board(transport));
       expect(outcome.status).toBe("posted");
       expect(transport.requests.map((r) => r.url.replace(defaultAriadneUrl, ""))).toEqual([path, "/v1/agents/heartbeat", path]);
-      expect(transport.bodies()[1]).toEqual({ session: "claude-session-1", ticket: "FRT-1", step: "started", state: "nominal" });
+      expect(transport.bodies()[1]).toEqual({ session: "claude-session-1-FRT-1", ticket: "FRT-1", step: "started", state: "nominal" });
     });
 
     it("does not loop when the session is still missing after the heartbeat", async () => {
@@ -291,15 +319,15 @@ describe("AriadneBoard", () => {
       );
       const reporter = board(transport, { sessions });
       await reporter.heartbeat({ ticket: "FRT-1", step: "verify 2/3", state: "caution", branch: "feat/FRT-1-x" });
-      expect(sessions.read("claude-session-1")?.heartbeat).toEqual({
-        session: "claude-session-1",
+      expect(sessions.read("claude-session-1-FRT-1")?.heartbeat).toEqual({
+        session: "claude-session-1-FRT-1",
         ticket: "FRT-1",
         step: "verify 2/3",
         state: "caution",
         branch: "feat/FRT-1-x",
       });
 
-      await reporter.replay("claude-session-1");
+      await reporter.replay("claude-session-1-FRT-1");
       expect(transport.bodies()[1]).toEqual(transport.bodies()[0]);
     });
 
@@ -307,13 +335,32 @@ describe("AriadneBoard", () => {
       const offline = new TypeError("fetch failed");
       const sessions = store();
       await board(new FakeTransport(offline, offline), { sessions }).heartbeat(heartbeat);
-      expect(sessions.read("claude-session-1")).toBeDefined();
+      expect(sessions.read("claude-session-1-FRT-1")).toBeDefined();
 
       const other = store();
       await board(new FakeTransport(), { sessions: other, env: { ARIADNE_AGENT_TOKEN: agentToken, CLAUDE_CODE_SESSION_ID: "s2" } }).heartbeat({ ...heartbeat, step: " " });
       await board(new FakeTransport(), { sessions: other, env: { CLAUDE_CODE_SESSION_ID: "s3" } }).heartbeat(heartbeat);
       await board(new FakeTransport(), { sessions: other, env: { ARIADNE_AGENT_TOKEN: agentToken, CLAUDE_CODE_SESSION_ID: "s4" } }).heartbeat({ ...heartbeat, ticket: "194" });
-      expect([other.read("s2"), other.read("s3"), other.read("s4")]).toEqual([undefined, undefined, undefined]);
+      expect([other.read("s2-FRT-1"), other.read("s3-FRT-1"), other.read("s4")]).toEqual([undefined, undefined, undefined]);
+    });
+
+    it("points the Claude Code session at a default-session heartbeat, but not at an explicit one", async () => {
+      const sessions = store();
+      const ok = () => new FakeTransport(FakeTransport.json(200, { session: contract.session }));
+      await board(ok(), { sessions }).heartbeat({ ...heartbeat, session: "wave-FRT-9" });
+      expect(sessions.threadSession("claude-session-1")).toBeUndefined();
+      await board(ok(), { sessions }).heartbeat(heartbeat);
+      expect(sessions.threadSession("claude-session-1")).toBe("claude-session-1-FRT-1");
+    });
+
+    it("replays the hook's inferred heartbeat when no skill posted, and the skill's once one has", async () => {
+      const sessions = store();
+      sessions.claimInferred({ session: "s-FRT-1", ticket: "FRT-1", step: "Build FRT-1 probe", state: "nominal", skill: "general-purpose" }, 60_000);
+      const transport = new FakeTransport(FakeTransport.json(200, { session: contract.session }), FakeTransport.json(200, { session: contract.session }));
+      await board(transport, { sessions }).replay("s-FRT-1");
+      sessions.record({ session: "s-FRT-1", ticket: "FRT-1", step: "verify 2/3", state: "nominal" });
+      await board(transport, { sessions }).replay("s-FRT-1");
+      expect(transport.bodies().map((body) => (body as { step: string }).step)).toEqual(["Build FRT-1 probe", "verify 2/3"]);
     });
 
     it("replays nothing for a session no skill reported", async () => {

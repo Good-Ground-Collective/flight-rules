@@ -1056,7 +1056,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.64.1";
+var appVersion = false ? "0.0.0-dev" : "1.64.2";
 
 // src/shared/ariadne/review-packet.schema.ts
 import { z as z11 } from "zod";
@@ -1301,6 +1301,203 @@ var AriadneClient = class {
   }
 };
 
+// src/shared/ariadne/board-session-store.ts
+import { z as z12 } from "zod";
+
+// src/shared/ariadne/board-state-files.ts
+import { existsSync as existsSync5, mkdirSync as mkdirSync3, readFileSync as readFileSync5, readdirSync as readdirSync2, rmSync, statSync as statSync3, writeFileSync as writeFileSync3 } from "node:fs";
+import { homedir as homedir2 } from "node:os";
+import { join as join6 } from "node:path";
+var stateIdPattern = /^[A-Za-z0-9_-]{1,80}$/;
+var BoardStateFiles = class {
+  now;
+  env;
+  home;
+  constructor(props = {}) {
+    this.env = props.env ?? process.env;
+    this.home = props.home ?? homedir2();
+    this.now = props.now ?? Date.now;
+  }
+  root() {
+    const stateHome = this.env["XDG_STATE_HOME"];
+    const base = stateHome !== void 0 && stateHome !== "" ? stateHome : join6(this.home, ".local", "state");
+    return join6(base, "flight-rules", "board");
+  }
+  read(folder, id, schema) {
+    const path = this.pathFor(folder, id);
+    if (path === void 0 || !existsSync5(path)) return void 0;
+    try {
+      const parsed = schema.safeParse(JSON.parse(readFileSync5(path, "utf-8")));
+      return parsed.success ? parsed.data : void 0;
+    } catch {
+      return void 0;
+    }
+  }
+  write(folder, id, value) {
+    const path = this.pathFor(folder, id);
+    if (path === void 0) return;
+    mkdirSync3(this.folder(folder), { recursive: true, mode: 448 });
+    writeFileSync3(path, JSON.stringify(value), { mode: 384 });
+  }
+  remove(folder, id) {
+    const path = this.pathFor(folder, id);
+    if (path !== void 0) rmSync(path, { force: true });
+  }
+  /** Deletes a folder's files last written more than `maxAgeMs` ago. */
+  prune(folder, maxAgeMs) {
+    const dir = this.folder(folder);
+    if (!existsSync5(dir)) return;
+    const cutoff = this.now() - maxAgeMs;
+    for (const name of readdirSync2(dir)) {
+      const path = join6(dir, name);
+      try {
+        if (statSync3(path).mtimeMs < cutoff) rmSync(path, { force: true });
+      } catch {
+        continue;
+      }
+    }
+  }
+  folder(folder) {
+    return folder === void 0 ? this.root() : join6(this.root(), folder);
+  }
+  pathFor(folder, id) {
+    return stateIdPattern.test(id) ? join6(this.folder(folder), `${id}.json`) : void 0;
+  }
+};
+
+// src/shared/ariadne/board-session-store.ts
+var HeartbeatRecordSchema = z12.object({
+  session: z12.string(),
+  step: z12.string(),
+  state: z12.enum(agentStates),
+  ticket: z12.string().optional(),
+  repo: z12.string().optional(),
+  branch: z12.string().optional(),
+  skill: z12.string().optional(),
+  detail: z12.string().optional()
+});
+var SessionRecordSchema = z12.object({
+  heartbeat: HeartbeatRecordSchema,
+  /** When a skill last posted this heartbeat. */
+  recordedAt: z12.number(),
+  /** When any heartbeat for the session was last sent, by a skill or the hook. */
+  sentAt: z12.number()
+});
+var InferredRecordSchema = z12.object({
+  heartbeat: HeartbeatRecordSchema,
+  /** When the hook last sent this inferred heartbeat. */
+  sentAt: z12.number()
+});
+var ThreadRecordSchema = z12.object({
+  /** The board session a skill last posted to by default from this Claude Code session. */
+  board: z12.string().optional(),
+  /** When the hook last spawned a branch lookup for this Claude Code session's main thread. */
+  branchCheckedAt: z12.number().optional()
+});
+var inferredFolder = "inferred";
+var threadsFolder = "threads";
+var unsafeSessionCharacters = /[^A-Za-z0-9_-]/g;
+var maxSessionLength = 80;
+var TicketSessionKey = class {
+  key(claudeSession, ticket) {
+    const prefix = claudeSession.trim().replace(unsafeSessionCharacters, "_");
+    if (prefix === "" || ticket === "") return void 0;
+    return `${prefix.slice(0, Math.max(0, maxSessionLength - ticket.length - 1))}-${ticket}`;
+  }
+};
+var ticketSessionKey = new TicketSessionKey();
+var BoardSessionStore = class {
+  files;
+  now;
+  constructor(props = {}) {
+    this.files = new BoardStateFiles(props);
+    this.now = this.files.now;
+  }
+  dir() {
+    return this.files.root();
+  }
+  read(session) {
+    return this.files.read(void 0, session, SessionRecordSchema);
+  }
+  /** Remembers a heartbeat a skill just sent. */
+  record(heartbeat) {
+    const now = this.now();
+    this.files.write(void 0, heartbeat.session, { heartbeat: this.compact(heartbeat), recordedAt: now, sentAt: now });
+  }
+  /**
+   * Claims the next liveness heartbeat for a session: returns its record and
+   * marks it sent, or returns undefined when there is nothing to keep alive.
+   * That is when no skill has recorded one, the record is older than
+   * `maxAgeMs`, the run aborted, or one was sent less than `intervalMs` ago.
+   */
+  claim(session, intervalMs, maxAgeMs) {
+    const record = this.read(session);
+    if (record === void 0) return void 0;
+    const now = this.now();
+    if (record.heartbeat.state === "abort") return void 0;
+    if (now - record.recordedAt > maxAgeMs) return void 0;
+    if (now - record.sentAt < intervalMs) return void 0;
+    const claimed = { ...record, sentAt: now };
+    this.files.write(void 0, session, claimed);
+    return claimed;
+  }
+  /** Whether a skill has posted to this session within `maxAgeMs`, whatever its state. */
+  hasSkillRecord(session, maxAgeMs) {
+    const record = this.read(session);
+    return record !== void 0 && this.now() - record.recordedAt <= maxAgeMs;
+  }
+  /** Whether a skill record is one the hook keeps alive: not aborted and within `maxAgeMs`. */
+  isLive(session, maxAgeMs) {
+    const record = this.read(session);
+    return record !== void 0 && record.heartbeat.state !== "abort" && this.now() - record.recordedAt <= maxAgeMs;
+  }
+  readInferred(session) {
+    return this.files.read(inferredFolder, session, InferredRecordSchema);
+  }
+  /**
+   * Claims a liveness heartbeat the hook inferred: stores it and returns true,
+   * or returns false when one was sent for the session less than `intervalMs` ago.
+   */
+  claimInferred(heartbeat, intervalMs) {
+    const now = this.now();
+    const previous = this.readInferred(heartbeat.session);
+    if (previous !== void 0 && now - previous.sentAt < intervalMs) return false;
+    this.files.write(inferredFolder, heartbeat.session, { heartbeat: this.compact(heartbeat), sentAt: now });
+    return true;
+  }
+  /** Remembers that a skill posted to `board` by default from this Claude Code session. */
+  pointThread(claudeSession, board) {
+    this.files.write(threadsFolder, claudeSession, { ...this.thread(claudeSession), board });
+  }
+  /** The board session a skill last posted to by default from this Claude Code session. */
+  threadSession(claudeSession) {
+    return this.thread(claudeSession)?.board;
+  }
+  /** At most one main-thread branch lookup per `intervalMs` per Claude Code session. */
+  claimBranchCheck(claudeSession, intervalMs) {
+    const now = this.now();
+    const thread = this.thread(claudeSession);
+    if (thread?.branchCheckedAt !== void 0 && now - thread.branchCheckedAt < intervalMs) return false;
+    this.files.write(threadsFolder, claudeSession, { ...thread, branchCheckedAt: now });
+    return true;
+  }
+  /** Deletes inferred heartbeats and thread records untouched for `maxAgeMs`. */
+  prune(maxAgeMs) {
+    this.files.prune(inferredFolder, maxAgeMs);
+    this.files.prune(threadsFolder, maxAgeMs);
+  }
+  thread(claudeSession) {
+    return this.files.read(threadsFolder, claudeSession, ThreadRecordSchema);
+  }
+  compact(heartbeat) {
+    const { session, step, state } = heartbeat;
+    const optional = Object.fromEntries(
+      ["ticket", "repo", "branch", "skill", "detail"].map((key) => [key, heartbeat[key]]).filter(([, value]) => value !== void 0 && value !== "")
+    );
+    return { session, step, state, ...optional };
+  }
+};
+
 // src/shared/ariadne/ariadne-board.ts
 var claudeSessionEnv = "CLAUDE_CODE_SESSION_ID";
 var bootstrapStep = "started";
@@ -1373,10 +1570,32 @@ var AriadneBoard = class {
     }
     return { url, enabled, notices };
   }
-  /** The Claude Code session id, when this process runs inside a session. */
-  defaultSession() {
+  /**
+   * The session a call reports to without `--session`: with a Jira ticket,
+   * `<Claude Code session id>-<TICKET>`, the same row the heartbeat hook
+   * keeps alive for a sub-agent on that ticket; without one, the Claude Code
+   * session id. Undefined outside a Claude Code session.
+   */
+  defaultSession(ticket) {
     const value = this.env[claudeSessionEnv]?.trim();
-    return value === void 0 || value === "" ? void 0 : value;
+    if (value === void 0 || value === "") return void 0;
+    const key = ticket !== void 0 ? TicketKeySchema.safeParse(ticket) : void 0;
+    return key?.success === true ? ticketSessionKey.key(value, key.data) : value;
+  }
+  /**
+   * Whether a post would be sent: a token, enabled and a valid URL. Read by
+   * the hooks before they start a child process; never touches the network.
+   * The token is checked first because it is cheap, and reading the config
+   * layers is not, so a machine without a token pays for neither.
+   */
+  reportable() {
+    try {
+      if (this.tokens.resolve() === void 0) return false;
+      const settings = this.settings();
+      return settings.enabled && settings.url !== void 0;
+    } catch {
+      return false;
+    }
   }
   /**
    * Posts a heartbeat and remembers it for the session, so the heartbeat
@@ -1390,10 +1609,10 @@ var AriadneBoard = class {
         const sent = { ...input, session };
         try {
           const response = await client.heartbeat(sent);
-          this.remember(sent);
+          this.remember(sent, input.session === void 0);
           return response;
         } catch (err) {
-          if (!(err instanceof AriadneError) || err.failure !== "invalid-input") this.remember(sent);
+          if (!(err instanceof AriadneError) || err.failure !== "invalid-input") this.remember(sent, input.session === void 0);
           throw err;
         }
       },
@@ -1402,10 +1621,12 @@ var AriadneBoard = class {
   }
   /**
    * Re-sends the last heartbeat a skill posted for `session`, without
-   * refreshing when it was recorded. The heartbeat hook's liveness ping.
+   * refreshing when it was recorded, or else the one the heartbeat hook
+   * inferred for it. The heartbeat hook's liveness ping; a skill's heartbeat
+   * always wins, so its step is never overwritten.
    */
   async replay(session, options = {}) {
-    const record = this.sessions?.read(session);
+    const record = this.sessions?.read(session) ?? this.sessions?.readInferred(session);
     if (record === void 0) return { status: "skipped", reason: "nothing-recorded" };
     return this.call(options, session, (client) => client.heartbeat(record.heartbeat), record.heartbeat.ticket);
   }
@@ -1431,14 +1652,26 @@ var AriadneBoard = class {
       input.ticket
     );
   }
-  /** Every item of one of the caller's sessions, open and resolved, with any chosen option. */
-  async items(session, options = {}) {
-    return this.call(options, session, (client, id) => client.listItems(id));
+  /**
+   * Every item of one of the caller's sessions, open and resolved, with any
+   * chosen option. Without `session`, `ticket` picks the default session a
+   * post on that ticket uses.
+   */
+  async items(session, options = {}, ticket) {
+    return this.call(options, session, (client, id) => client.listItems(id), ticket);
   }
-  /** Remembering is best effort: a full disk must not fail a report. */
-  remember(heartbeat) {
+  /**
+   * Remembering is best effort: a full disk must not fail a report. A
+   * heartbeat sent to the default session also becomes the Claude Code
+   * session's current skill session, which the heartbeat hook keeps alive.
+   */
+  remember(heartbeat, defaulted) {
     try {
       this.sessions?.record(heartbeat);
+      const claudeSession = this.defaultSession();
+      if (defaulted && claudeSession !== void 0 && claudeSession !== heartbeat.session) {
+        this.sessions?.pointThread(claudeSession, heartbeat.session);
+      }
     } catch {
       return;
     }
@@ -1477,7 +1710,7 @@ var AriadneBoard = class {
       return noted({ status: "failed", message: err instanceof Error ? err.message : String(err) });
     }
     if (token === void 0 && options.strict !== true) return noted({ status: "skipped", reason: "no-token" });
-    const session = requestedSession ?? this.defaultSession();
+    const session = requestedSession ?? this.defaultSession(ticket);
     if (session === void 0) {
       return noted({
         status: "failed",
@@ -1693,9 +1926,9 @@ var AriadnePackets = class {
 };
 
 // src/shared/ariadne/ariadne-token-store.ts
-import { chmodSync, existsSync as existsSync5, mkdirSync as mkdirSync3, readFileSync as readFileSync5, rmSync, writeFileSync as writeFileSync3 } from "node:fs";
-import { homedir as homedir2 } from "node:os";
-import { dirname as dirname7, join as join6 } from "node:path";
+import { chmodSync, existsSync as existsSync6, mkdirSync as mkdirSync4, readFileSync as readFileSync6, rmSync as rmSync2, writeFileSync as writeFileSync4 } from "node:fs";
+import { homedir as homedir3 } from "node:os";
+import { dirname as dirname7, join as join7 } from "node:path";
 var agentTokenPattern = /^ariadne_agent_[0-9a-f]{16}_[A-Za-z0-9_-]{43}$/;
 var ariadneTokenEnvNames = ["ARIADNE_AGENT_TOKEN", "ARIADNE_TOKEN"];
 var AriadneTokenStore = class {
@@ -1703,7 +1936,7 @@ var AriadneTokenStore = class {
   home;
   constructor(props = {}) {
     this.env = props.env ?? process.env;
-    this.home = props.home ?? homedir2();
+    this.home = props.home ?? homedir3();
   }
   isAgentToken(value) {
     return agentTokenPattern.test(value);
@@ -1711,8 +1944,8 @@ var AriadneTokenStore = class {
   /** `$XDG_CONFIG_HOME/flight-rules/ariadne-token`, else `~/.config/flight-rules/ariadne-token`. */
   path() {
     const configHome = this.env["XDG_CONFIG_HOME"];
-    const base = configHome !== void 0 && configHome !== "" ? configHome : join6(this.home, ".config");
-    return join6(base, "flight-rules", "ariadne-token");
+    const base = configHome !== void 0 && configHome !== "" ? configHome : join7(this.home, ".config");
+    return join7(base, "flight-rules", "ariadne-token");
   }
   resolve() {
     for (const name of ariadneTokenEnvNames) {
@@ -1720,8 +1953,8 @@ var AriadneTokenStore = class {
       if (value2 !== void 0 && value2 !== "") return { token: value2, source: name };
     }
     const path = this.path();
-    if (!existsSync5(path)) return void 0;
-    const value = readFileSync5(path, "utf-8").trim();
+    if (!existsSync6(path)) return void 0;
+    const value = readFileSync6(path, "utf-8").trim();
     return value === "" ? void 0 : { token: value, source: "file" };
   }
   /** The environment variable that would win over a saved file, if one is set. */
@@ -1737,8 +1970,8 @@ var AriadneTokenStore = class {
       );
     }
     const path = this.path();
-    mkdirSync3(dirname7(path), { recursive: true, mode: 448 });
-    writeFileSync3(path, `${value}
+    mkdirSync4(dirname7(path), { recursive: true, mode: 448 });
+    writeFileSync4(path, `${value}
 `, { mode: 384 });
     chmodSync(path, 384);
     return path;
@@ -1746,92 +1979,79 @@ var AriadneTokenStore = class {
   /** Deletes the saved token; returns whether one existed. */
   remove() {
     const path = this.path();
-    if (!existsSync5(path)) return false;
-    rmSync(path);
+    if (!existsSync6(path)) return false;
+    rmSync2(path);
     return true;
   }
 };
 
-// src/shared/ariadne/board-session-store.ts
-import { existsSync as existsSync6, mkdirSync as mkdirSync4, readFileSync as readFileSync6, writeFileSync as writeFileSync4 } from "node:fs";
-import { homedir as homedir3 } from "node:os";
-import { join as join7 } from "node:path";
-import { z as z12 } from "zod";
-var SessionRecordSchema = z12.object({
-  heartbeat: z12.object({
-    session: z12.string(),
-    step: z12.string(),
-    state: z12.enum(agentStates),
-    ticket: z12.string().optional(),
-    repo: z12.string().optional(),
-    branch: z12.string().optional(),
-    skill: z12.string().optional(),
-    detail: z12.string().optional()
-  }),
-  /** When a skill last posted this heartbeat. */
-  recordedAt: z12.number(),
-  /** When any heartbeat for the session was last sent, by a skill or the hook. */
-  sentAt: z12.number()
+// src/shared/ariadne/board-agent-store.ts
+import { existsSync as existsSync7, readdirSync as readdirSync3 } from "node:fs";
+import { join as join8 } from "node:path";
+import { z as z13 } from "zod";
+var DispatchRecordSchema = z13.object({
+  /** The Jira key the dispatch named, or null when it named none. */
+  ticket: z13.string().nullable(),
+  description: z13.string(),
+  /** The dispatching Claude Code session. */
+  session: z13.string(),
+  /** A digest of the prompt, so a sub-agent found only through its transcript still finds its dispatch. */
+  promptDigest: z13.string().optional(),
+  at: z13.number()
 });
-var sessionFilePattern = /^[A-Za-z0-9_-]{1,80}$/;
-var BoardSessionStore = class {
-  env;
-  home;
-  now;
+var AgentRecordSchema = z13.object({
+  /** The Jira key the sub-agent works on, or null once resolved to none. */
+  ticket: z13.string().nullable(),
+  description: z13.string().optional(),
+  agentType: z13.string().optional(),
+  toolUseId: z13.string().optional(),
+  /** The Claude Code session the sub-agent runs in. */
+  session: z13.string(),
+  at: z13.number()
+});
+var dispatchFolder = "dispatch";
+var agentsFolder = "agents";
+var BoardAgentStore = class {
+  files;
   constructor(props = {}) {
-    this.env = props.env ?? process.env;
-    this.home = props.home ?? homedir3();
-    this.now = props.now ?? Date.now;
+    this.files = new BoardStateFiles(props);
   }
-  dir() {
-    const stateHome = this.env["XDG_STATE_HOME"];
-    const base = stateHome !== void 0 && stateHome !== "" ? stateHome : join7(this.home, ".local", "state");
-    return join7(base, "flight-rules", "board");
+  now() {
+    return this.files.now();
   }
-  read(session) {
-    const path = this.pathFor(session);
-    if (path === void 0 || !existsSync6(path)) return void 0;
-    try {
-      const parsed = SessionRecordSchema.safeParse(JSON.parse(readFileSync6(path, "utf-8")));
-      return parsed.success ? parsed.data : void 0;
-    } catch {
-      return void 0;
+  recordDispatch(toolUseId, record) {
+    this.files.write(dispatchFolder, toolUseId, record);
+  }
+  readDispatch(toolUseId) {
+    return this.files.read(dispatchFolder, toolUseId, DispatchRecordSchema);
+  }
+  /** The dispatch in `session` whose prompt has this digest; reads every dispatch file, so only a fallback uses it. */
+  findDispatchByPrompt(session, promptDigest) {
+    const dir = join8(this.files.root(), dispatchFolder);
+    if (!existsSync7(dir)) return void 0;
+    for (const name of readdirSync3(dir)) {
+      if (!name.endsWith(".json")) continue;
+      const record = this.readDispatch(name.slice(0, -".json".length));
+      if (record?.session === session && record.promptDigest === promptDigest) return record;
     }
+    return void 0;
   }
-  /** Remembers a heartbeat a skill just sent. */
-  record(heartbeat) {
-    const now = this.now();
-    const { session, step, state } = heartbeat;
-    const optional = Object.fromEntries(
-      ["ticket", "repo", "branch", "skill", "detail"].map((key) => [key, heartbeat[key]]).filter(([, value]) => value !== void 0 && value !== "")
-    );
-    this.write({ heartbeat: { session, step, state, ...optional }, recordedAt: now, sentAt: now });
+  removeDispatch(toolUseId) {
+    this.files.remove(dispatchFolder, toolUseId);
   }
-  /**
-   * Claims the next liveness heartbeat for a session: returns its record and
-   * marks it sent, or returns undefined when there is nothing to keep alive.
-   * That is when no skill has recorded one, the record is older than
-   * `maxAgeMs`, the run aborted, or one was sent less than `intervalMs` ago.
-   */
-  claim(session, intervalMs, maxAgeMs) {
-    const record = this.read(session);
-    if (record === void 0) return void 0;
-    const now = this.now();
-    if (record.heartbeat.state === "abort") return void 0;
-    if (now - record.recordedAt > maxAgeMs) return void 0;
-    if (now - record.sentAt < intervalMs) return void 0;
-    const claimed = { ...record, sentAt: now };
-    this.write(claimed);
-    return claimed;
+  recordAgent(agentId, record) {
+    this.files.write(agentsFolder, agentId, record);
   }
-  write(record) {
-    const path = this.pathFor(record.heartbeat.session);
-    if (path === void 0) return;
-    mkdirSync4(this.dir(), { recursive: true, mode: 448 });
-    writeFileSync4(path, JSON.stringify(record), { mode: 384 });
+  readAgent(agentId) {
+    return this.files.read(agentsFolder, agentId, AgentRecordSchema);
   }
-  pathFor(session) {
-    return sessionFilePattern.test(session) ? join7(this.dir(), `${session}.json`) : void 0;
+  removeAgent(agentId) {
+    this.files.remove(agentsFolder, agentId);
+  }
+  /** Deletes dispatch and sub-agent records untouched for `maxAgeMs`. */
+  prune(maxAgeMs) {
+    this.files.prune(dispatchFolder, maxAgeMs);
+    this.files.prune(agentsFolder, maxAgeMs);
   }
 };
 
@@ -1843,116 +2063,116 @@ import { graphql } from "@octokit/graphql";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
 // src/tasks/task-tracker/task-tracker.ts
-import { z as z13 } from "zod";
-var TrackerUserSchema = z13.object({
-  accountId: z13.string(),
-  displayName: z13.string()
+import { z as z14 } from "zod";
+var TrackerUserSchema = z14.object({
+  accountId: z14.string(),
+  displayName: z14.string()
 });
-var EntityMetadataSchema = z13.object({
-  tddId: z13.number().optional(),
-  epicId: z13.number().optional(),
-  notes: z13.string().optional(),
+var EntityMetadataSchema = z14.object({
+  tddId: z14.number().optional(),
+  epicId: z14.number().optional(),
+  notes: z14.string().optional(),
   /** Explicit body-format override read first by BodyFormatDetector (docs/bug-report-format.md). */
-  kind: z13.enum(["bug", "story"]).optional()
+  kind: z14.enum(["bug", "story"]).optional()
 }).passthrough();
-var CommentSchema = z13.object({
-  id: z13.string(),
-  body: z13.string(),
-  author: z13.string(),
-  createdAt: z13.string(),
-  updatedAt: z13.string()
+var CommentSchema = z14.object({
+  id: z14.string(),
+  body: z14.string(),
+  author: z14.string(),
+  createdAt: z14.string(),
+  updatedAt: z14.string()
 });
-var AttachmentSchema = z13.object({
-  id: z13.string(),
-  filename: z13.string(),
-  mimeType: z13.string(),
-  size: z13.number().optional(),
-  mediaUuid: z13.string().optional()
+var AttachmentSchema = z14.object({
+  id: z14.string(),
+  filename: z14.string(),
+  mimeType: z14.string(),
+  size: z14.number().optional(),
+  mediaUuid: z14.string().optional()
 });
-var TechnicalDesignSchema = z13.object({
-  id: z13.string(),
-  epicId: z13.string(),
-  url: z13.string().optional(),
-  body: z13.string(),
-  comments: z13.array(CommentSchema),
+var TechnicalDesignSchema = z14.object({
+  id: z14.string(),
+  epicId: z14.string(),
+  url: z14.string().optional(),
+  body: z14.string(),
+  comments: z14.array(CommentSchema),
   metadata: EntityMetadataSchema.default({}),
-  updatedAt: z13.string()
+  updatedAt: z14.string()
 });
-var TicketSchema = z13.object({
-  id: z13.string(),
-  size: z13.literal("ticket"),
-  status: z13.string(),
-  labels: z13.array(z13.string()),
-  title: z13.string(),
-  body: z13.string(),
-  comments: z13.array(CommentSchema),
-  assignee: z13.string().nullable(),
-  attachments: z13.array(AttachmentSchema).default([]),
-  reporter: z13.string().nullable().default(null),
-  issueType: z13.string().default("unknown"),
-  blockedBy: z13.array(z13.string()).default([]),
-  blocking: z13.array(z13.string()).default([]),
+var TicketSchema = z14.object({
+  id: z14.string(),
+  size: z14.literal("ticket"),
+  status: z14.string(),
+  labels: z14.array(z14.string()),
+  title: z14.string(),
+  body: z14.string(),
+  comments: z14.array(CommentSchema),
+  assignee: z14.string().nullable(),
+  attachments: z14.array(AttachmentSchema).default([]),
+  reporter: z14.string().nullable().default(null),
+  issueType: z14.string().default("unknown"),
+  blockedBy: z14.array(z14.string()).default([]),
+  blocking: z14.array(z14.string()).default([]),
   metadata: EntityMetadataSchema.default({}),
-  updatedAt: z13.string()
+  updatedAt: z14.string()
 });
-var EpicSchema = z13.object({
-  id: z13.string(),
-  size: z13.literal("epic"),
-  status: z13.string(),
-  labels: z13.array(z13.string()),
-  title: z13.string(),
-  body: z13.string(),
-  childIssues: z13.array(TicketSchema),
-  comments: z13.array(CommentSchema),
+var EpicSchema = z14.object({
+  id: z14.string(),
+  size: z14.literal("epic"),
+  status: z14.string(),
+  labels: z14.array(z14.string()),
+  title: z14.string(),
+  body: z14.string(),
+  childIssues: z14.array(TicketSchema),
+  comments: z14.array(CommentSchema),
   tdd: TechnicalDesignSchema.optional(),
   metadata: EntityMetadataSchema.default({}),
-  updatedAt: z13.string()
+  updatedAt: z14.string()
 });
-var CreateEpicInputSchema = z13.object({
-  title: z13.string(),
-  body: z13.string(),
-  labels: z13.array(z13.string()).default([]),
+var CreateEpicInputSchema = z14.object({
+  title: z14.string(),
+  body: z14.string(),
+  labels: z14.array(z14.string()).default([]),
   metadata: EntityMetadataSchema.partial().optional()
 });
-var CreateTicketInputSchema = z13.object({
-  title: z13.string(),
-  body: z13.string(),
+var CreateTicketInputSchema = z14.object({
+  title: z14.string(),
+  body: z14.string(),
   /** Absent for a standalone ticket: a ticket-sized RFC has no epic to parent to. */
-  epicId: z13.string().optional(),
-  labels: z13.array(z13.string()).default([]),
-  assignee: z13.string().optional(),
+  epicId: z14.string().optional(),
+  labels: z14.array(z14.string()).default([]),
+  assignee: z14.string().optional(),
   metadata: EntityMetadataSchema.partial().optional()
 });
-var CreateTechnicalDesignInputSchema = z13.object({
-  title: z13.string(),
-  body: z13.string(),
-  epicId: z13.string(),
+var CreateTechnicalDesignInputSchema = z14.object({
+  title: z14.string(),
+  body: z14.string(),
+  epicId: z14.string(),
   metadata: EntityMetadataSchema.partial().optional()
 });
-var UpdateEpicInputSchema = z13.object({
-  body: z13.string(),
-  title: z13.string().optional(),
-  labels: z13.array(z13.string()).optional()
+var UpdateEpicInputSchema = z14.object({
+  body: z14.string(),
+  title: z14.string().optional(),
+  labels: z14.array(z14.string()).optional()
 });
-var UpdateTicketInputSchema = z13.object({
-  body: z13.string(),
-  title: z13.string().optional(),
-  labels: z13.array(z13.string()).optional()
+var UpdateTicketInputSchema = z14.object({
+  body: z14.string(),
+  title: z14.string().optional(),
+  labels: z14.array(z14.string()).optional()
 });
-var UpdateInitiativeInputSchema = z13.object({
-  body: z13.string(),
-  title: z13.string().optional()
+var UpdateInitiativeInputSchema = z14.object({
+  body: z14.string(),
+  title: z14.string().optional()
 });
-var InitiativeSchema = z13.object({
-  id: z13.string(),
-  size: z13.literal("initiative"),
-  title: z13.string(),
-  body: z13.string(),
-  epics: z13.array(z13.object({ id: z13.string(), title: z13.string() })).default([])
+var InitiativeSchema = z14.object({
+  id: z14.string(),
+  size: z14.literal("initiative"),
+  title: z14.string(),
+  body: z14.string(),
+  epics: z14.array(z14.object({ id: z14.string(), title: z14.string() })).default([])
 });
-var CreateInitiativeInputSchema = z13.object({
-  title: z13.string(),
-  body: z13.string()
+var CreateInitiativeInputSchema = z14.object({
+  title: z14.string(),
+  body: z14.string()
 });
 
 // src/tasks/body-metadata/body-metadata.ts
@@ -2000,14 +2220,14 @@ ${block}`;
 };
 
 // src/tasks/github-task-tracker/github-task-tracker.ts
-import { z as z15 } from "zod";
+import { z as z16 } from "zod";
 
 // src/tasks/task-tracker/unsupported-tracker-operation-error.ts
-import { z as z14 } from "zod";
-var UnsupportedTrackerOperationPropsSchema = z14.object({
-  tracker: z14.string().min(1),
-  operation: z14.string().min(1),
-  remedy: z14.string().min(1).optional()
+import { z as z15 } from "zod";
+var UnsupportedTrackerOperationPropsSchema = z15.object({
+  tracker: z15.string().min(1),
+  operation: z15.string().min(1),
+  remedy: z15.string().min(1).optional()
 });
 var UnsupportedTrackerOperationError = class extends Error {
   tracker;
@@ -2024,7 +2244,7 @@ var UnsupportedTrackerOperationError = class extends Error {
 };
 
 // src/tasks/github-task-tracker/github-task-tracker.ts
-var IssueRefListSchema = z15.array(z15.object({ number: z15.number() }));
+var IssueRefListSchema = z16.array(z16.object({ number: z16.number() }));
 var GitHubTaskTracker = class {
   octokit;
   gql;
@@ -2538,10 +2758,10 @@ var GitHubTaskTracker = class {
 // src/tasks/jira-task-tracker/jira-task-tracker.ts
 import { readFileSync as readFileSync7 } from "node:fs";
 import { basename as basename2 } from "node:path";
-import { z as z19 } from "zod";
+import { z as z20 } from "zod";
 
 // src/tasks/jira-task-tracker/jira-client.ts
-import { z as z16 } from "zod";
+import { z as z17 } from "zod";
 
 // src/tasks/jira-task-tracker/jira-api-error.ts
 var JiraApiError = class extends Error {
@@ -2564,11 +2784,11 @@ var defaultRetryAfterSeconds = 2;
 var maxBackoffMs = 3e4;
 var attachmentXsrfHeader = "no-check";
 var redirectStatuses = /* @__PURE__ */ new Set([301, 302, 303, 307, 308]);
-var JiraErrorBodySchema = z16.object({
-  errorMessages: z16.array(z16.string()).optional(),
+var JiraErrorBodySchema = z17.object({
+  errorMessages: z17.array(z17.string()).optional(),
   // Caught per-field so an off-contract `errors` map cannot discard a valid sibling `errorMessages`.
-  errors: z16.record(z16.string(), z16.string()).optional().catch(void 0),
-  message: z16.string().optional()
+  errors: z17.record(z17.string(), z17.string()).optional().catch(void 0),
+  message: z17.string().optional()
 });
 var JiraClient = class {
   baseUrl;
@@ -2654,13 +2874,13 @@ var JiraClient = class {
 };
 
 // src/tasks/jira-task-tracker/confluence-client.ts
-import { z as z17 } from "zod";
+import { z as z18 } from "zod";
 var maxRetries2 = 4;
 var defaultRetryAfterSeconds2 = 2;
 var maxBackoffMs2 = 3e4;
-var ConfluenceErrorBodySchema = z17.object({
-  errors: z17.array(z17.object({ title: z17.string().optional(), detail: z17.string().optional() })).optional().catch(void 0),
-  message: z17.string().optional()
+var ConfluenceErrorBodySchema = z18.object({
+  errors: z18.array(z18.object({ title: z18.string().optional(), detail: z18.string().optional() })).optional().catch(void 0),
+  message: z18.string().optional()
 });
 var ConfluenceClient = class {
   siteBaseUrl;
@@ -2735,14 +2955,14 @@ import { fromMarkdown } from "mdast-util-from-markdown";
 import { gfmFromMarkdown } from "mdast-util-gfm";
 import { gfm } from "micromark-extension-gfm";
 import { decodeString } from "micromark-util-decode-string";
-import { z as z18 } from "zod";
-var MediaRefSchema = z18.object({
-  mediaUuid: z18.string().min(1),
-  collection: z18.string().default(""),
-  width: z18.number().int().positive().optional(),
-  height: z18.number().int().positive().optional()
+import { z as z19 } from "zod";
+var MediaRefSchema = z19.object({
+  mediaUuid: z19.string().min(1),
+  collection: z19.string().default(""),
+  width: z19.number().int().positive().optional(),
+  height: z19.number().int().positive().optional()
 });
-var MediaLookupSchema = z18.record(z18.string(), MediaRefSchema);
+var MediaLookupSchema = z19.record(z19.string(), MediaRefSchema);
 var attachmentPrefix = /^attachment:/;
 var externalTarget = /^[a-zA-Z][a-zA-Z0-9+.-]*:|^\/\//;
 var detailsOpen = /^<details>/;
@@ -3735,13 +3955,13 @@ var deliveryLinkOutward = "implements";
 var tddMetadataPropertyKey = "flight-rules-metadata";
 var mediaFilePath = /^\/file\/([0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12})\/binary$/;
 var mediaLocationBase = "https://media.invalid/";
-var JiraUploadedAttachmentSchema = z19.object({
-  id: z19.union([z19.string(), z19.number()]).transform(String),
-  filename: z19.string(),
-  mimeType: z19.string(),
-  size: z19.number().optional()
+var JiraUploadedAttachmentSchema = z20.object({
+  id: z20.union([z20.string(), z20.number()]).transform(String),
+  filename: z20.string(),
+  mimeType: z20.string(),
+  size: z20.number().optional()
 });
-var JiraUploadedAttachmentsSchema = z19.array(JiraUploadedAttachmentSchema);
+var JiraUploadedAttachmentsSchema = z20.array(JiraUploadedAttachmentSchema);
 var JiraTaskTracker = class {
   client;
   confluence;
@@ -4354,11 +4574,11 @@ var NodeToolProbe = class {
 var nodeToolProbe = new NodeToolProbe();
 
 // src/flight-rules/flight-rules.schema.ts
-import { z as z20 } from "zod";
-var FlightRulesPropsSchema = z20.object({
-  cwd: z20.string().optional().describe("Directory used for config discovery; defaults to process.cwd()"),
-  env: z20.record(z20.string(), z20.string().optional()).optional().describe("Live environment record; defaults to process.env"),
-  configPath: z20.string().optional().describe("Explicit config file, taking precedence over FLIGHT_RULES_CONFIG and discovery")
+import { z as z21 } from "zod";
+var FlightRulesPropsSchema = z21.object({
+  cwd: z21.string().optional().describe("Directory used for config discovery; defaults to process.cwd()"),
+  env: z21.record(z21.string(), z21.string().optional()).optional().describe("Live environment record; defaults to process.env"),
+  configPath: z21.string().optional().describe("Explicit config file, taking precedence over FLIGHT_RULES_CONFIG and discovery")
 });
 
 // src/flight-rules/flight-rules.ts
@@ -4469,6 +4689,9 @@ var DefaultFlightRules = class {
   boardSessions() {
     return new BoardSessionStore({ env: this.env });
   }
+  boardAgents() {
+    return new BoardAgentStore({ env: this.env });
+  }
 };
 function createFlightRules(props = {}) {
   return new DefaultFlightRules(props);
@@ -4476,7 +4699,7 @@ function createFlightRules(props = {}) {
 
 // src/git/commit-message-builder/commit-message-builder.ts
 import { readFileSync as readFileSync8 } from "node:fs";
-import { dirname as dirname8, join as join8 } from "node:path";
+import { dirname as dirname8, join as join9 } from "node:path";
 
 // src/shared/attribution-stripper/attribution-stripper.ts
 var trailerText = String.raw`(?:Co-Authored-By:[^\n"']*(?:Claude|anthropic\.com)[^\n"']*|Claude-Session:[^\n"']*|https://claude\.ai/code/session_[A-Za-z0-9_-]+)`;
@@ -4507,25 +4730,25 @@ ${line.trim()}`) === "";
 };
 
 // src/git/commit-message-builder/commit-message.schema.ts
-import { z as z21 } from "zod";
-var CommitMessageInputSchema = z21.object({
+import { z as z22 } from "zod";
+var CommitMessageInputSchema = z22.object({
   type: SemanticTypeSchema,
   // Bare issue numbers make one-character scopes legitimate; 32 clears a 10-character tracker key plus a six-digit number.
-  scope: z21.string().min(1).max(32),
-  description: z21.string().min(2).max(50),
-  body: z21.string().optional(),
-  model: z21.string().max(72).optional(),
-  footers: z21.array(z21.string().regex(/^[a-zA-Z0-9-]+(: |=).*$/)).default([])
+  scope: z22.string().min(1).max(32),
+  description: z22.string().min(2).max(50),
+  body: z22.string().optional(),
+  model: z22.string().max(72).optional(),
+  footers: z22.array(z22.string().regex(/^[a-zA-Z0-9-]+(: |=).*$/)).default([])
 });
-var CommitMessageHeaderSchema = z21.preprocess(
+var CommitMessageHeaderSchema = z22.preprocess(
   (arg) => {
-    return z21.string({ error: "Git Commit headers should be 72 characters or less" }).max(72).parse(arg);
+    return z22.string({ error: "Git Commit headers should be 72 characters or less" }).max(72).parse(arg);
   },
-  z21.templateLiteral([SemanticTypeSchema, "(", z21.string(), "): ", z21.string()])
+  z22.templateLiteral([SemanticTypeSchema, "(", z22.string(), "): ", z22.string()])
 );
-var CommitMessageBuilderPropsSchema = z21.object({
-  binPath: z21.string().min(1),
-  agentEnv: z21.string().optional()
+var CommitMessageBuilderPropsSchema = z22.object({
+  binPath: z22.string().min(1),
+  agentEnv: z22.string().optional()
 });
 
 // src/git/commit-message-builder/commit-message-builder.ts
@@ -4563,7 +4786,7 @@ var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
   }
   static readPluginVersion(binPath) {
     try {
-      const pkgPath = join8(dirname8(binPath), "..", "package.json");
+      const pkgPath = join9(dirname8(binPath), "..", "package.json");
       const parsed = JSON.parse(readFileSync8(pkgPath, "utf-8"));
       if (typeof parsed === "object" && parsed !== null && "version" in parsed && typeof parsed.version === "string") {
         return parsed.version;
@@ -4818,12 +5041,12 @@ var bodyFormatDetector = new PrecedenceBodyFormatDetector();
 
 // src/tasks/evidence/evidence.ts
 import { basename as basename3 } from "node:path/posix";
-import { z as z22 } from "zod";
+import { z as z23 } from "zod";
 var mediaReference = /(!?)\[([^\]]*)\]\(\s*<?([^\s()<>]+)>?(?:\s+"[^"]*")?\s*\)/g;
 var absoluteTarget = /^[a-zA-Z][a-zA-Z0-9+.-]*:|^\/\/|^#/;
 var localPrefix = /^(?:\.\/)+/;
 var fenceRun = /^ {0,3}(`{3,}|~{3,})(.*)$/;
-var AttachmentSpecSchema = z22.string().min(1).transform((spec) => {
+var AttachmentSpecSchema = z23.string().min(1).transform((spec) => {
   const hash = spec.lastIndexOf("#");
   const path = hash > 0 ? spec.slice(0, hash) : spec;
   const caption = hash > 0 ? spec.slice(hash + 1).trim() : "";
@@ -4945,31 +5168,31 @@ var TrackerEvidenceService = class {
 var settingsScopes = ["user", "project", "local"];
 
 // src/agents/agent-frontmatter/agent-frontmatter.schema.ts
-import { z as z23 } from "zod";
+import { z as z24 } from "zod";
 var agentCapabilities = ["read", "edit", "shell", "web", "spawn", "ask"];
 var modelTiers = ["standard", "escalated", "expert"];
 var reasoningLevels = ["low", "medium", "high"];
 var claudeAgentColors = ["red", "blue", "green", "yellow", "purple", "orange", "pink", "cyan"];
-var AgentCapabilitySchema = z23.enum(agentCapabilities);
-var ModelTierSchema = z23.enum(modelTiers);
-var AgentFrontmatterSchema = z23.strictObject({
-  name: z23.string().regex(/^[a-z][a-z0-9-]*$/),
-  description: z23.string().min(1),
-  capabilities: z23.array(AgentCapabilitySchema).min(1).refine(
+var AgentCapabilitySchema = z24.enum(agentCapabilities);
+var ModelTierSchema = z24.enum(modelTiers);
+var AgentFrontmatterSchema = z24.strictObject({
+  name: z24.string().regex(/^[a-z][a-z0-9-]*$/),
+  description: z24.string().min(1),
+  capabilities: z24.array(AgentCapabilitySchema).min(1).refine(
     (capabilities) => new Set(capabilities).size === capabilities.length,
     { message: "duplicate capability" }
   ),
   model: ModelTierSchema,
-  reasoning: z23.enum(reasoningLevels).optional(),
-  sandbox: z23.strictObject({
-    fs: z23.enum(["read-only", "workspace-write"]),
-    network: z23.enum(["none", "enabled"])
+  reasoning: z24.enum(reasoningLevels).optional(),
+  sandbox: z24.strictObject({
+    fs: z24.enum(["read-only", "workspace-write"]),
+    network: z24.enum(["none", "enabled"])
   }).optional(),
-  dispatch: z23.strictObject({
-    maxConcurrent: z23.int().positive(),
-    maxDepth: z23.int().positive()
+  dispatch: z24.strictObject({
+    maxConcurrent: z24.int().positive(),
+    maxDepth: z24.int().positive()
   }).optional(),
-  "x-claude": z23.strictObject({ color: z23.enum(claudeAgentColors).optional() }).optional()
+  "x-claude": z24.strictObject({ color: z24.enum(claudeAgentColors).optional() }).optional()
 });
 
 // src/agents/agent-frontmatter/agent-frontmatter.ts

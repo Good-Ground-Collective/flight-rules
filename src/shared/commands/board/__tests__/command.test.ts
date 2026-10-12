@@ -186,7 +186,7 @@ describe("board command", () => {
         { transport },
       );
       expect(transport.bodies()[0]).toEqual({
-        session: "claude-session-1",
+        session: "claude-session-1-FRT-1200",
         kind: "wave-gate",
         ticket: "FRT-1200",
         title: "Wave 2 merged 4 of 4; wave 3 can start 3 tickets",
@@ -199,7 +199,7 @@ describe("board command", () => {
     it("posts an activity line with a level", async () => {
       const transport = new FakeTransport(FakeTransport.json(200, { activity: contract.activity, created: true }));
       await run(["post", "activity", "--ticket", "FRT-1", "--text", "Opened PR #86", "--level", "success"], { transport });
-      expect(transport.bodies()[0]).toEqual({ session: "claude-session-1", ticket: "FRT-1", text: "Opened PR #86", level: "success" });
+      expect(transport.bodies()[0]).toEqual({ session: "claude-session-1-FRT-1", ticket: "FRT-1", text: "Opened PR #86", level: "success" });
     });
 
     it("rejects an unknown state or kind before posting", async () => {
@@ -273,6 +273,12 @@ describe("board command", () => {
         ["resolved", "Start wave"],
         ["open", null],
       ]);
+    });
+
+    it("--ticket reads the session a post on that ticket defaulted to", async () => {
+      const transport = listed();
+      await run(["items", "--ticket", "FRT-1", "--json"], { transport });
+      expect(transport.requests[0]?.url).toBe(`${defaultAriadneUrl}/v1/agents/items?session=claude-session-1-FRT-1`);
     });
 
     it("prints one line per item with its status and answer", async () => {

@@ -133,7 +133,7 @@ The repo question is closed, so also post it to Ariadne when you ask it in chat:
 flight-rules board post item --kind question --ticket <id> --title "Open PRs against <owner/repo>?" --option Yes --option No
 ```
 
-The first answer wins. If the person says they answered in Ariadne, read the answer from `chosenOption` in `flight-rules board items --json`. A `No` still needs the right `owner/repo` from chat.
+The first answer wins. If the person says they answered in Ariadne, read the answer from `chosenOption` in `flight-rules board items --ticket <id> --json`. A `No` still needs the right `owner/repo` from chat.
 
 **Store** each answer with `flight-rules config set`, one call per field:
 
