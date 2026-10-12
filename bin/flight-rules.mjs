@@ -48124,7 +48124,7 @@ var DocCharterCatalog = class {
     return { id: doc.id, ...parsed.data, tierA: this.tierA(doc.contents), path: doc.path, contents: doc.contents };
   }
   tierA(contents) {
-    const tiers = contents.split(/^## Review tiers$/m)[1]?.split(/^## /m)[0] ?? "";
+    const tiers = contents.split(/^## Review tiers\r?$/m)[1]?.split(/^## /m)[0] ?? "";
     const table = tiers.split(/^\*\*Tier B/m)[0] ?? "";
     return [...new Set([...table.matchAll(/^\|\s*([A-Z]+-\d+)\b/gm)].flatMap((match) => match[1] ?? []))];
   }

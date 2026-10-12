@@ -34,8 +34,9 @@ describe('DocCharterCatalog', () => {
   it('reads no Tier A mandates from a charter without review tiers', () => {
     expect(catalog().all().map(charter => charter.tierA)).toEqual([[], [], []])
   })
-  it('deduplicates Tier A rows and ignores Tier B rows', () => {
-    write('coding-charter', '# Core\n\n## Review tiers\n\n**Tier A**\n\n| Mandate | Rule |\n| --- | --- |\n| X-1 a | r |\n| X-1 b | r |\n| X-2 c | r |\n\n**Tier B**\n\n| X-3 d | j |\n')
+  it.each(['\n', '\r\n'])('deduplicates Tier A rows and ignores Tier B rows with %j line endings', eol => {
+    const core = '# Core\n\n## Review tiers\n\n**Tier A**\n\n| Mandate | Rule |\n| --- | --- |\n| X-1 a | r |\n| X-1 b | r |\n| X-2 c | r |\n\n**Tier B**\n\n| X-3 d | j |\n'
+    write('coding-charter', core.replaceAll('\n', eol))
     expect(catalog().all()[0]?.tierA).toEqual(['X-1', 'X-2'])
   })
   it('parses applies-to into camelCase globs', () => {
