@@ -7,6 +7,7 @@ import { EvidenceLocation } from '../tasks/evidence/evidence-location.js';
 import { AriadneBoard } from '../shared/ariadne/ariadne-board.js';
 import { AriadnePackets } from '../shared/ariadne/ariadne-packets.js';
 import { AriadneTokenStore } from '../shared/ariadne/ariadne-token-store.js';
+import { BoardAgentStore } from '../shared/ariadne/board-agent-store.js';
 import { BoardSessionStore } from '../shared/ariadne/board-session-store.js';
 import type { TaskTracker } from '../tasks/task-tracker/task-tracker.js';
 import { type ToolProbe } from '../tasks/tool-probe/tool-probe.js';
@@ -29,6 +30,8 @@ export interface FlightRules {
     ariadneTokens(): AriadneTokenStore;
     /** The last heartbeat each session's skill posted, outside every repo; read by the heartbeat hook. */
     boardSessions(): BoardSessionStore;
+    /** Which Jira ticket each sub-agent works on, outside every repo; written and read by the board hooks. */
+    boardAgents(): BoardAgentStore;
 }
 /** Constructs services on demand so config and credentials are only required by their consumers. */
 export declare class DefaultFlightRules implements FlightRules {
@@ -53,5 +56,6 @@ export declare class DefaultFlightRules implements FlightRules {
     packets(): AriadnePackets;
     ariadneTokens(): AriadneTokenStore;
     boardSessions(): BoardSessionStore;
+    boardAgents(): BoardAgentStore;
 }
 export declare function createFlightRules(props?: FlightRulesProps): FlightRules;

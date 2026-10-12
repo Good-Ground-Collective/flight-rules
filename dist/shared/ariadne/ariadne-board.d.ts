@@ -3,7 +3,7 @@ import type { AriadneTransport } from "./ariadne-transport.js";
 import type { ActivityInput, ActivityResponse, HeartbeatInput, HeartbeatResponse, ItemInput, ItemListResponse, ItemResponse } from "./ariadne.schema.js";
 import type { AriadneTokenStore } from "./ariadne-token-store.js";
 import type { BoardSessionStore } from "./board-session-store.js";
-/** A board call whose `session` falls back to the Claude Code session id. */
+/** A board call whose `session` falls back to `<Claude Code session id>-<TICKET>`. */
 export type BoardInput<T extends {
     session: string;
 }> = Omit<T, "session"> & {
@@ -80,8 +80,20 @@ export declare class AriadneBoard {
      * http on localhost) leaves `url` undefined, so nothing is ever sent to it.
      */
     settings(): AriadneBoardSettings;
-    /** The Claude Code session id, when this process runs inside a session. */
-    defaultSession(): string | undefined;
+    /**
+     * The session a call reports to without `--session`: with a Jira ticket,
+     * `<Claude Code session id>-<TICKET>`, the same row the heartbeat hook
+     * keeps alive for a sub-agent on that ticket; without one, the Claude Code
+     * session id. Undefined outside a Claude Code session.
+     */
+    defaultSession(ticket?: string): string | undefined;
+    /**
+     * Whether a post would be sent: a token, enabled and a valid URL. Read by
+     * the hooks before they start a child process; never touches the network.
+     * The token is checked first because it is cheap, and reading the config
+     * layers is not, so a machine without a token pays for neither.
+     */
+    reportable(): boolean;
     /**
      * Posts a heartbeat and remembers it for the session, so the heartbeat
      * hook can keep the session alive with the same ticket and step.
@@ -89,7 +101,9 @@ export declare class AriadneBoard {
     heartbeat(input: BoardInput<HeartbeatInput>, options?: BoardCallOptions): Promise<BoardOutcome<HeartbeatResponse>>;
     /**
      * Re-sends the last heartbeat a skill posted for `session`, without
-     * refreshing when it was recorded. The heartbeat hook's liveness ping.
+     * refreshing when it was recorded, or else the one the heartbeat hook
+     * inferred for it. The heartbeat hook's liveness ping; a skill's heartbeat
+     * always wins, so its step is never overwritten.
      */
     replay(session: string, options?: BoardCallOptions): Promise<BoardOutcome<HeartbeatResponse>>;
     /**
@@ -100,9 +114,17 @@ export declare class AriadneBoard {
     item(input: BoardInput<ItemInput>, options?: BoardCallOptions): Promise<BoardOutcome<ItemResponse>>;
     /** Posts one activity line, creating the session first as `item` does. */
     activity(input: BoardInput<ActivityInput>, options?: BoardCallOptions): Promise<BoardOutcome<ActivityResponse>>;
-    /** Every item of one of the caller's sessions, open and resolved, with any chosen option. */
-    items(session: string | undefined, options?: BoardCallOptions): Promise<BoardOutcome<ItemListResponse>>;
-    /** Remembering is best effort: a full disk must not fail a report. */
+    /**
+     * Every item of one of the caller's sessions, open and resolved, with any
+     * chosen option. Without `session`, `ticket` picks the default session a
+     * post on that ticket uses.
+     */
+    items(session: string | undefined, options?: BoardCallOptions, ticket?: string): Promise<BoardOutcome<ItemListResponse>>;
+    /**
+     * Remembering is best effort: a full disk must not fail a report. A
+     * heartbeat sent to the default session also becomes the Claude Code
+     * session's current skill session, which the heartbeat hook keeps alive.
+     */
     private remember;
     private withSession;
     private call;

@@ -76,7 +76,7 @@ the wave branches from it.
 If the base branch is not the repo's default branch, say so and confirm before
 continuing. Draining a wave onto a feature branch is legitimate but rarely what
 someone means. Post that closed question to Ariadne too, and take whichever
-answer comes first, in chat or in `chosenOption` from `flight-rules board items --json`:
+answer comes first, in chat or in `chosenOption` from `flight-rules board items --ticket <node id> --json`:
 
 ```bash
 flight-rules board post item --kind question --ticket <node id> --title "Drain the wave onto <base branch>, not the default branch?" --option Continue --option Stop
@@ -139,7 +139,7 @@ flight-rules board items --session wave-<node id> --json
 Take the newest `wave-gate` item, and remember how many `wave-gate` items there are (zero when nothing prints) for step 10. If its `chosenOption` is `Start wave` and its `detail` lists exactly the tickets you selected, that answer is the go-ahead: say so and start draining without asking. `Review wave` means stop and tell the user they asked to review first. Otherwise there is no answer yet, so continue below.
 
 Show the user the wave: each ticket id, its title, and the count. List what you
-dropped and why. Then ask for a go-ahead. Post the same closed question to Ariadne, and take whichever answer comes first, in chat or in `chosenOption` from `flight-rules board items --json`:
+dropped and why. Then ask for a go-ahead. Post the same closed question to Ariadne, and take whichever answer comes first, in chat or in `chosenOption` from `flight-rules board items --ticket <node id> --json`:
 
 ```bash
 flight-rules board post item --kind question --ticket <node id> --title "Start <count> tickets under <node id>?" --option Start --option Stop

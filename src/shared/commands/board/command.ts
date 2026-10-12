@@ -57,7 +57,8 @@ export class HiddenPrompt {
 }
 
 const ticketHelp = "Jira issue key";
-const sessionHelp = "session id; defaults to the Claude Code session ($CLAUDE_CODE_SESSION_ID)";
+const sessionHelp = "session id; defaults to <$CLAUDE_CODE_SESSION_ID>-<TICKET>, the row the heartbeat hook keeps alive for that ticket";
+const itemsSessionHelp = "session id; defaults to <$CLAUDE_CODE_SESSION_ID>-<TICKET> with --ticket, else $CLAUDE_CODE_SESSION_ID";
 const strictHelp = "exit 1 when the post fails, and post even without a token so a missing one fails with 401";
 
 /**
@@ -87,9 +88,9 @@ export function createBoardCommand(
     );
   board.exitOverride();
 
-  const withReportOptions = (command: Command, jsonHelp: string): Command =>
+  const withReportOptions = (command: Command, jsonHelp: string, session: string = sessionHelp): Command =>
     command
-      .option("--session <id>", sessionHelp)
+      .option("--session <id>", session)
       .option("--strict", strictHelp)
       .option("--json", jsonHelp)
       .exitOverride();
@@ -209,10 +210,14 @@ export function createBoardCommand(
   board.addCommand(post);
 
   withReportOptions(
-    board.command("items").description("list a session's items, open and resolved, with any chosen option"),
+    board
+      .command("items")
+      .description("list a session's items, open and resolved, with any chosen option")
+      .option("--ticket <key>", "the Jira key the items were posted on; picks the same default session as the post"),
     "print {items} as JSON",
-  ).action(async (opts: ReportOptions) => {
-    const outcome = await getBoard().items(opts.session, { strict: opts.strict === true });
+    itemsSessionHelp,
+  ).action(async (opts: ReportOptions & { ticket?: string }) => {
+    const outcome = await getBoard().items(opts.session, { strict: opts.strict === true }, opts.ticket);
     finish(
       outcome,
       opts,

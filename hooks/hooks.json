@@ -1,5 +1,5 @@
 {
-  "description": "Route commits through the flight-rules CLI in repos that use flight-rules, strip Claude Code's attribution trailers from commits and PR bodies, and keep a run's session alive on Ariadne's Agents page when Ariadne is configured",
+  "description": "Route commits through the flight-rules CLI in repos that use flight-rules, strip Claude Code's attribution trailers from commits and PR bodies, and, when Ariadne is configured, report Jira work to its Agents page: keep skill sessions alive, and show any sub-agent dispatched for a Jira ticket (or a main thread whose directory or branch names one) as running on that ticket",
   "hooks": {
     "PreToolUse": [
       {
@@ -27,6 +27,17 @@
             "timeout": 15
           }
         ]
+      },
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/bin/flight-rules.mjs", "hook", "agent-dispatch"],
+            "timeout": 5
+          }
+        ]
       }
     ],
     "PostToolUse": [
@@ -37,6 +48,18 @@
             "type": "command",
             "command": "node",
             "args": ["${CLAUDE_PLUGIN_ROOT}/bin/flight-rules.mjs", "hook", "board-heartbeat"],
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/bin/flight-rules.mjs", "hook", "agent-stop"],
             "timeout": 5
           }
         ]

@@ -12,9 +12,10 @@ import type {
   ItemResponse,
 } from "./ariadne.schema.js";
 import type { AriadneTokenStore } from "./ariadne-token-store.js";
+import { ticketSessionKey } from "./board-session-store.js";
 import type { BoardSessionStore } from "./board-session-store.js";
 
-/** A board call whose `session` falls back to the Claude Code session id. */
+/** A board call whose `session` falls back to `<Claude Code session id>-<TICKET>`. */
 export type BoardInput<T extends { session: string }> = Omit<T, "session"> & { session?: string | undefined };
 
 export interface BoardCallOptions {
@@ -156,10 +157,33 @@ export class AriadneBoard {
     return { url, enabled, notices };
   }
 
-  /** The Claude Code session id, when this process runs inside a session. */
-  defaultSession(): string | undefined {
+  /**
+   * The session a call reports to without `--session`: with a Jira ticket,
+   * `<Claude Code session id>-<TICKET>`, the same row the heartbeat hook
+   * keeps alive for a sub-agent on that ticket; without one, the Claude Code
+   * session id. Undefined outside a Claude Code session.
+   */
+  defaultSession(ticket?: string): string | undefined {
     const value = this.env[claudeSessionEnv]?.trim();
-    return value === undefined || value === "" ? undefined : value;
+    if (value === undefined || value === "") return undefined;
+    const key = ticket !== undefined ? TicketKeySchema.safeParse(ticket) : undefined;
+    return key?.success === true ? ticketSessionKey.key(value, key.data) : value;
+  }
+
+  /**
+   * Whether a post would be sent: a token, enabled and a valid URL. Read by
+   * the hooks before they start a child process; never touches the network.
+   * The token is checked first because it is cheap, and reading the config
+   * layers is not, so a machine without a token pays for neither.
+   */
+  reportable(): boolean {
+    try {
+      if (this.tokens.resolve() === undefined) return false;
+      const settings = this.settings();
+      return settings.enabled && settings.url !== undefined;
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -174,11 +198,11 @@ export class AriadneBoard {
         const sent = { ...input, session };
         try {
           const response = await client.heartbeat(sent);
-          this.remember(sent);
+          this.remember(sent, input.session === undefined);
           return response;
         } catch (err) {
           // A heartbeat that failed in transit still says what the run is doing.
-          if (!(err instanceof AriadneError) || err.failure !== "invalid-input") this.remember(sent);
+          if (!(err instanceof AriadneError) || err.failure !== "invalid-input") this.remember(sent, input.session === undefined);
           throw err;
         }
       },
@@ -188,10 +212,12 @@ export class AriadneBoard {
 
   /**
    * Re-sends the last heartbeat a skill posted for `session`, without
-   * refreshing when it was recorded. The heartbeat hook's liveness ping.
+   * refreshing when it was recorded, or else the one the heartbeat hook
+   * inferred for it. The heartbeat hook's liveness ping; a skill's heartbeat
+   * always wins, so its step is never overwritten.
    */
   async replay(session: string, options: BoardCallOptions = {}): Promise<BoardOutcome<HeartbeatResponse>> {
-    const record = this.sessions?.read(session);
+    const record = this.sessions?.read(session) ?? this.sessions?.readInferred(session);
     if (record === undefined) return { status: "skipped", reason: "nothing-recorded" };
     return this.call(options, session, (client) => client.heartbeat(record.heartbeat), record.heartbeat.ticket);
   }
@@ -220,15 +246,31 @@ export class AriadneBoard {
     );
   }
 
-  /** Every item of one of the caller's sessions, open and resolved, with any chosen option. */
-  async items(session: string | undefined, options: BoardCallOptions = {}): Promise<BoardOutcome<ItemListResponse>> {
-    return this.call(options, session, (client, id) => client.listItems(id));
+  /**
+   * Every item of one of the caller's sessions, open and resolved, with any
+   * chosen option. Without `session`, `ticket` picks the default session a
+   * post on that ticket uses.
+   */
+  async items(
+    session: string | undefined,
+    options: BoardCallOptions = {},
+    ticket?: string,
+  ): Promise<BoardOutcome<ItemListResponse>> {
+    return this.call(options, session, (client, id) => client.listItems(id), ticket);
   }
 
-  /** Remembering is best effort: a full disk must not fail a report. */
-  private remember(heartbeat: HeartbeatInput): void {
+  /**
+   * Remembering is best effort: a full disk must not fail a report. A
+   * heartbeat sent to the default session also becomes the Claude Code
+   * session's current skill session, which the heartbeat hook keeps alive.
+   */
+  private remember(heartbeat: HeartbeatInput, defaulted: boolean): void {
     try {
       this.sessions?.record(heartbeat);
+      const claudeSession = this.defaultSession();
+      if (defaulted && claudeSession !== undefined && claudeSession !== heartbeat.session) {
+        this.sessions?.pointThread(claudeSession, heartbeat.session);
+      }
     } catch {
       return;
     }
@@ -283,7 +325,7 @@ export class AriadneBoard {
     }
     if (token === undefined && options.strict !== true) return noted({ status: "skipped", reason: "no-token" });
 
-    const session = requestedSession ?? this.defaultSession();
+    const session = requestedSession ?? this.defaultSession(ticket);
     if (session === undefined) {
       return noted({
         status: "failed",
