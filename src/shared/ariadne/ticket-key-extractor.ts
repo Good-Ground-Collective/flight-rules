@@ -1,7 +1,12 @@
 import { TicketKeySchema } from "./ariadne.schema.js";
 
-/** A Jira-shaped key anywhere in free text; validated again with TicketKeySchema. */
-const keyPattern = /(?<![A-Za-z0-9_-])[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,8}(?![A-Za-z0-9_])/g;
+/**
+ * A Jira-shaped key anywhere in free text; validated again with TicketKeySchema.
+ * A hyphen may come before it when it follows a lower-case word, as in a clone
+ * directory named after its repository and ticket, but not when it continues an
+ * upper-case chain of hyphenated parts.
+ */
+const keyPattern = /(?<![A-Za-z0-9_])(?<![A-Z0-9]-)[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,8}(?![A-Za-z0-9_])/g;
 
 /** "ticket FRT-1", "building FRT-1", "Ticket: FRT-1". */
 const phrasePattern = /\b(?:ticket|building)\s*:?\s+([A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,8})(?![A-Za-z0-9_])/gi;

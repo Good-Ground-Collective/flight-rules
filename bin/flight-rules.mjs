@@ -49378,7 +49378,7 @@ import { spawn } from "node:child_process";
 import { basename as basename4 } from "node:path";
 
 // src/shared/ariadne/ticket-key-extractor.ts
-var keyPattern = /(?<![A-Za-z0-9_-])[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,8}(?![A-Za-z0-9_])/g;
+var keyPattern = /(?<![A-Za-z0-9_])(?<![A-Z0-9]-)[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,8}(?![A-Za-z0-9_])/g;
 var phrasePattern = /\b(?:ticket|building)\s*:?\s+([A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,8})(?![A-Za-z0-9_])/gi;
 var urlPattern = /\b[a-z][a-z0-9+.-]*:\/\/\S+/gi;
 var notProjectKeys = /* @__PURE__ */ new Set([

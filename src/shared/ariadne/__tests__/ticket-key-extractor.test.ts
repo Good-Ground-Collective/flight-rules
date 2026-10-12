@@ -43,4 +43,9 @@ describe("TicketKeyExtractor", () => {
     expect(extractor.firstKey("FRT-42-login")).toBe("FRT-42");
     expect(extractor.firstKey("ariadne-agent-hook")).toBeUndefined();
   });
+
+  it("finds a key after a hyphenated clone name, but not inside an upper-case chain", () => {
+    expect(extractor.firstKey("crime-linking-aws-FRT-2835")).toBe("FRT-2835");
+    expect(extractor.firstKey("ABC-DEF-12")).toBeUndefined();
+  });
 });
