@@ -48086,7 +48086,7 @@ var LanguageFrontmatterSchema = external_exports.strictObject({
   "applies-to": external_exports.array(external_exports.string().min(1)).min(1)
 }).transform(({ language, "applies-to": appliesTo }) => ({ language, appliesTo }));
 var FrontmatterSchema = external_exports.string().transform((contents, ctx) => {
-  const block = /^---\n([\s\S]*?)\n---\n/.exec(contents)?.[1];
+  const block = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/.exec(contents)?.[1];
   if (block === void 0) {
     ctx.addIssue({ code: "custom", message: "missing YAML frontmatter" });
     return external_exports.NEVER;
@@ -48137,22 +48137,32 @@ var GitRepositoryPaths = class {
     this.cwd = GitRepositoryPathsPropsSchema.parse(props).cwd;
   }
   async inventory() {
-    return this.lines(["ls-files", "--cached", "--others", "--exclude-standard"]);
+    const root = await this.root();
+    return this.paths(root, ["ls-files", "-z", "--cached", "--others", "--exclude-standard"]);
   }
   async changedSince(base) {
     const ref = BaseRefSchema.parse(base);
-    const [mergeBase] = await this.lines(["merge-base", ref, "HEAD"]);
-    if (mergeBase === void 0) throw new RepositoryPathsError(`No merge base between ${ref} and HEAD`);
-    const changed = await this.lines(["diff", "--name-only", mergeBase]);
-    const untracked = await this.lines(["ls-files", "--others", "--exclude-standard"]);
+    const root = await this.root();
+    const mergeBase = (await this.git(root, ["merge-base", ref, "HEAD"])).trim();
+    if (mergeBase.length === 0) throw new RepositoryPathsError(`No merge base between ${ref} and HEAD`);
+    const changed = await this.paths(root, ["diff", "-z", "--name-only", mergeBase]);
+    const untracked = await this.paths(root, ["ls-files", "-z", "--others", "--exclude-standard"]);
     return [.../* @__PURE__ */ new Set([...changed, ...untracked])];
   }
-  async lines(args) {
+  // Path queries run from the top level so the result never depends on which subdirectory the caller is in.
+  async root() {
+    return (await this.git(this.cwd, ["rev-parse", "--show-toplevel"])).replace(/\r?\n$/, "");
+  }
+  // NUL-delimited output keeps paths verbatim; newline output quotes non-ASCII and special characters.
+  async paths(root, args) {
+    return (await this.git(root, args)).split("\0").filter((path3) => path3.length > 0);
+  }
+  async git(cwd, args) {
     try {
-      const { stdout } = await run("git", args, { cwd: this.cwd, maxBuffer: 64 * 1024 * 1024 });
-      return stdout.split("\n").filter((line) => line.length > 0);
+      const { stdout } = await run("git", args, { cwd, maxBuffer: 64 * 1024 * 1024 });
+      return stdout;
     } catch (cause) {
-      throw new RepositoryPathsError(`git ${args[0]} failed in ${this.cwd}`, { cause });
+      throw new RepositoryPathsError(`git ${args[0]} failed in ${cwd}`, { cause });
     }
   }
 };

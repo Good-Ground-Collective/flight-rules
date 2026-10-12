@@ -25,6 +25,7 @@ describe('GitRepositoryPaths', () => {
     git('commit', '-q', '-m', 'base')
     git('checkout', '-q', '-b', 'feature')
     write('classes/Committed.cls')
+    write('classes/Café.cls')
     git('add', '.')
     git('commit', '-q', '-m', 'feature')
     write('src/edited.ts', 'changed\n')
@@ -33,17 +34,19 @@ describe('GitRepositoryPaths', () => {
   })
   afterAll(() => rmSync(repo, { recursive: true, force: true }))
 
-  it('lists tracked and untracked files, skipping ignored ones', async () => {
-    expect((await new GitRepositoryPaths({ cwd: repo }).inventory()).sort()).toEqual([
+  it.each(['.', 'src'])('lists tracked and untracked files from %j, skipping ignored ones', async dir => {
+    expect((await new GitRepositoryPaths({ cwd: join(repo, dir) }).inventory()).sort()).toEqual([
       '.gitignore',
+      'classes/Café.cls',
       'classes/Committed.cls',
       'src/base.ts',
       'src/edited.ts',
       'untracked/New.trigger',
     ])
   })
-  it('lists committed, uncommitted and untracked changes since the merge base', async () => {
-    expect((await new GitRepositoryPaths({ cwd: repo }).changedSince('main')).sort()).toEqual([
+  it.each(['.', 'src'])('lists committed, uncommitted and untracked changes since the merge base from %j', async dir => {
+    expect((await new GitRepositoryPaths({ cwd: join(repo, dir) }).changedSince('main')).sort()).toEqual([
+      'classes/Café.cls',
       'classes/Committed.cls',
       'src/edited.ts',
       'untracked/New.trigger',

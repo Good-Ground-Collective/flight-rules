@@ -5199,7 +5199,7 @@ var LanguageFrontmatterSchema = z24.strictObject({
   "applies-to": z24.array(z24.string().min(1)).min(1)
 }).transform(({ language, "applies-to": appliesTo }) => ({ language, appliesTo }));
 var FrontmatterSchema = z24.string().transform((contents, ctx) => {
-  const block = /^---\n([\s\S]*?)\n---\n/.exec(contents)?.[1];
+  const block = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/.exec(contents)?.[1];
   if (block === void 0) {
     ctx.addIssue({ code: "custom", message: "missing YAML frontmatter" });
     return z24.NEVER;
