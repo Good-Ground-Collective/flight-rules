@@ -3,11 +3,12 @@ import { createCharterCommand } from '../command.js'
 import type { Charter, CharterCatalog } from '../../../charter-catalog/charter-catalog.js'
 import type { RepositoryPaths } from '../../../charter-catalog/repository-paths.js'
 
-const core: Charter = { id: 'coding-charter', language: null, appliesTo: [], path: '/docs/coding-charter.md', contents: '# Core\n' }
+const core: Charter = { id: 'coding-charter', language: null, appliesTo: [], tierA: [], path: '/docs/coding-charter.md', contents: '# Core\n' }
 const typescript: Charter = {
   id: 'coding-charter-typescript',
   language: 'typescript',
   appliesTo: ['**/*.ts'],
+  tierA: [],
   path: '/docs/coding-charter-typescript.md',
   contents: '# TypeScript',
 }
