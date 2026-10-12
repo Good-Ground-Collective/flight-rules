@@ -36512,7 +36512,9 @@ var EntityMetadataSchema = external_exports.object({
   epicId: external_exports.number().optional(),
   notes: external_exports.string().optional(),
   /** Explicit body-format override read first by BodyFormatDetector (docs/bug-report-format.md). */
-  kind: external_exports.enum(["bug", "story"]).optional()
+  kind: external_exports.enum(["bug", "story"]).optional(),
+  /** Why a blocked-by edge leaves this ticket's epic, keyed by blocker id (docs/epic-boundaries.md). */
+  crossEpicReasons: external_exports.record(external_exports.string(), external_exports.string()).optional()
 }).passthrough();
 var CommentSchema = external_exports.object({
   id: external_exports.string(),
@@ -36679,7 +36681,9 @@ var UnsupportedTrackerOperationError = class extends Error {
 };
 
 // src/tasks/github-task-tracker/github-task-tracker.ts
-var IssueRefListSchema = external_exports.array(external_exports.object({ number: external_exports.number() }));
+var IssueRefSchema = external_exports.object({ number: external_exports.number() });
+var IssueRefListSchema = external_exports.array(IssueRefSchema);
+var ParentNotFoundSchema = external_exports.object({ status: external_exports.literal(404) });
 var GitHubTaskTracker = class {
   octokit;
   gql;
@@ -36850,6 +36854,19 @@ var GitHubTaskTracker = class {
       issue_number: epicNumber,
       sub_issue_id: subIssueId
     });
+  }
+  async getTicketEpicId(ticketId) {
+    try {
+      const { data } = await this.octokit.request("GET /repos/{owner}/{repo}/issues/{issue_number}/parent", {
+        owner: this.owner,
+        repo: this.repo,
+        issue_number: parseInt(ticketId, 10)
+      });
+      return String(IssueRefSchema.parse(data).number);
+    } catch (error62) {
+      if (ParentNotFoundSchema.safeParse(error62).success) return null;
+      throw error62;
+    }
   }
   async blockTicket(ticketId, blockedById) {
     if (ticketId === blockedById) throw new Error("a ticket cannot block itself");
@@ -47357,6 +47374,10 @@ var JiraTaskTracker = class {
     if (issue2.fields.parent?.key === epicId) return;
     await this.client.request("PUT", `/issue/${ticketId}`, { fields: { parent: { key: epicId } } });
   }
+  async getTicketEpicId(ticketId) {
+    const issue2 = await this.client.request("GET", `/issue/${ticketId}`, void 0, { fields: "parent" });
+    return issue2.fields.parent?.key ?? null;
+  }
   async blockTicket(ticketId, blockedById) {
     if (ticketId === blockedById) throw new Error("a ticket cannot block itself");
     const blocksLinkType = await this.resolveBlocksLinkType();
@@ -48516,6 +48537,146 @@ var DependencyPlannerService = class {
   }
 };
 
+// src/tasks/epic-boundary/epic-boundary.ts
+var TrackerRefFormatter = class {
+  format(id) {
+    return /^\d+$/.test(id) ? `#${id}` : id;
+  }
+};
+var refs = new TrackerRefFormatter();
+var CrossEpicDependencyError = class extends Error {
+  name = "CrossEpicDependencyError";
+  constructor(props) {
+    const ticket = refs.format(props.ticketId);
+    const blocker = refs.format(props.blockerId);
+    const ticketEpic = refs.format(props.ticketEpic);
+    const blockerEpic = refs.format(props.blockerEpic);
+    super(
+      `refusing to block ${ticket} (epic ${ticketEpic}) on ${blocker} (epic ${blockerEpic}): blocked-by edges stay inside one epic. Move ${ticket} into epic ${blockerEpic}, merge the two tickets, or finish epic ${blockerEpic} before epic ${ticketEpic} starts. If the edge is absolutely necessary, pass --cross-epic-reason "<why>" and it is recorded on ${ticket}.`
+    );
+  }
+};
+var EpicBoundaryGuard = class {
+  constructor(tracker) {
+    this.tracker = tracker;
+  }
+  tracker;
+  async block(request2) {
+    const reason = this.normalizeReason(request2.reason);
+    const [ticket, blocker] = await Promise.all([
+      this.lookupParent(request2.ticketId),
+      this.lookupParent(request2.blockerId)
+    ]);
+    const warnings = [ticket.warning, blocker.warning].filter((w) => w !== null);
+    const sameEpic = ticket.epic !== null && ticket.epic === blocker.epic;
+    const crossEpic = ticket.epic !== null && blocker.epic !== null && ticket.epic !== blocker.epic;
+    if (crossEpic && reason === void 0) {
+      throw new CrossEpicDependencyError({
+        ticketId: request2.ticketId,
+        ticketEpic: ticket.epic ?? "",
+        blockerId: request2.blockerId,
+        blockerEpic: blocker.epic ?? ""
+      });
+    }
+    await this.tracker.blockTicket(request2.ticketId, request2.blockerId);
+    const reasonRecorded = reason !== void 0 && !sameEpic;
+    if (reasonRecorded) await this.recordReason(request2, ticket.epic, blocker.epic, reason);
+    return {
+      ticketEpic: ticket.epic,
+      blockerEpic: blocker.epic,
+      crossEpic,
+      reasonRecorded,
+      warnings
+    };
+  }
+  normalizeReason(reason) {
+    if (reason === void 0) return void 0;
+    const oneLine = reason.replace(/\s+/g, " ").trim();
+    if (oneLine === "")
+      throw new Error("--cross-epic-reason needs a one-line justification, not an empty string");
+    return oneLine;
+  }
+  async lookupParent(ticketId) {
+    try {
+      const epic = await this.tracker.getTicketEpicId(ticketId) ?? null;
+      if (epic !== null) return { epic, warning: null };
+      return {
+        epic: null,
+        warning: `${refs.format(ticketId)} has no parent epic; the epic-boundary check was skipped`
+      };
+    } catch (error62) {
+      return {
+        epic: null,
+        warning: `could not resolve the parent epic of ${refs.format(ticketId)} (${error62 instanceof Error ? error62.message : String(error62)}); the epic-boundary check was skipped`
+      };
+    }
+  }
+  /**
+   * The reason lands twice: a comment for people reading the ticket, and the
+   * ticket's metadata so the plan verbs can show it without reading comments
+   * (Jira's ticket read carries none). An identical reason already on record
+   * is left alone, so re-running the same link does not repeat the comment.
+   */
+  async recordReason(request2, ticketEpic, blockerEpic, reason) {
+    const { ticketId, blockerId } = request2;
+    const existing = (await this.tracker.getTicket(ticketId)).metadata.crossEpicReasons ?? {};
+    if (existing[blockerId] === reason) return;
+    const blocker = refs.format(blockerId);
+    const blockerPart = blockerEpic === null ? blocker : `${blocker} (epic ${refs.format(blockerEpic)})`;
+    const ticketPart = ticketEpic === null ? "" : `, while this ticket is in epic ${refs.format(ticketEpic)}`;
+    await this.tracker.addComment(
+      ticketId,
+      `Cross-epic dependency: blocked by ${blockerPart}${ticketPart}. Reason: ${reason}`
+    );
+    await this.tracker.updateTicketMetadata(ticketId, {
+      crossEpicReasons: { ...existing, [blockerId]: reason }
+    });
+  }
+};
+var CrossEpicEdgeFinder = class {
+  constructor(tracker) {
+    this.tracker = tracker;
+  }
+  tracker;
+  async find(epics) {
+    const epicOf = /* @__PURE__ */ new Map();
+    for (const epic of epics) for (const ticket of epic.childIssues) epicOf.set(ticket.id, epic.id);
+    const external = [
+      ...new Set(
+        epics.flatMap(
+          (epic) => epic.childIssues.flatMap((ticket) => ticket.blockedBy.filter((id) => !epicOf.has(id)))
+        )
+      )
+    ];
+    const resolved = await Promise.all(
+      external.map(
+        async (id) => [id, await this.tracker.getTicketEpicId(id).catch(() => null)]
+      )
+    );
+    for (const [id, epic] of resolved)
+      if (epic !== null && epic !== void 0) epicOf.set(id, epic);
+    return epics.flatMap(
+      (epic) => epic.childIssues.filter((ticket) => ticket.status !== "closed").flatMap(
+        (ticket) => ticket.blockedBy.filter((blockerId) => epicOf.get(blockerId) !== epic.id).map((blockerId) => ({
+          ticket: ticket.id,
+          ticketEpic: epic.id,
+          blockedBy: blockerId,
+          blockerEpic: epicOf.get(blockerId) ?? null,
+          justification: ticket.metadata.crossEpicReasons?.[blockerId] ?? null
+        }))
+      )
+    );
+  }
+  /** One human-readable warning line per edge, for stderr. */
+  warnings(edges) {
+    return edges.map((edge) => {
+      const blockerEpic = edge.blockerEpic === null ? "epic unknown" : `epic ${refs.format(edge.blockerEpic)}`;
+      const why = edge.justification === null ? "no justification recorded" : `justification: ${edge.justification}`;
+      return `warning: cross-epic dependency: ${refs.format(edge.ticket)} (epic ${refs.format(edge.ticketEpic)}) is blocked by ${refs.format(edge.blockedBy)} (${blockerEpic}); ${why}`;
+    });
+  }
+};
+
 // src/tasks/commands/epic/command.ts
 function createEpicCommand(getTracker, getPrHost, getConfig = () => ({})) {
   const epic = new Command("epic");
@@ -48544,7 +48705,8 @@ function createEpicCommand(getTracker, getPrHost, getConfig = () => ({})) {
     process.stdout.write(JSON.stringify(result) + "\n");
   });
   epic.command("plan").exitOverride().argument("<id>", "epic id").action(async (id) => {
-    const epicData = await getTracker().getEpic(id);
+    const tracker = getTracker();
+    const epicData = await tracker.getEpic(id);
     const planner = new DependencyPlannerService();
     const plan = planner.plan(
       epicData.childIssues.map((ticket) => ({
@@ -48553,13 +48715,17 @@ function createEpicCommand(getTracker, getPrHost, getConfig = () => ({})) {
         blockedBy: ticket.blockedBy
       }))
     );
-    process.stdout.write(JSON.stringify(plan) + "\n");
+    const edges = new CrossEpicEdgeFinder(tracker);
+    const crossEpicEdges = await edges.find([epicData]);
+    for (const warning of edges.warnings(crossEpicEdges)) process.stderr.write(warning + "\n");
+    process.stdout.write(JSON.stringify({ ...plan, crossEpicEdges }) + "\n");
     if (plan.cycles.length > 0) {
       throw new Error(`dependency cycle detected among tickets: ${plan.cycles.join(", ")}`);
     }
   });
   epic.command("review-plan").exitOverride().argument("<id>", "epic id").action(async (id) => {
-    const epicData = await getTracker().getEpic(id);
+    const tracker = getTracker();
+    const epicData = await tracker.getEpic(id);
     const plan = new DependencyPlannerService().plan(
       epicData.childIssues.map((ticket) => ({
         id: ticket.id,
@@ -48580,6 +48746,9 @@ function createEpicCommand(getTracker, getPrHost, getConfig = () => ({})) {
       defaultBranch,
       inReviewStatus
     });
+    const edges = new CrossEpicEdgeFinder(tracker);
+    const crossEpicEdges = await edges.find([epicData]);
+    for (const warning of edges.warnings(crossEpicEdges)) process.stderr.write(warning + "\n");
     process.stdout.write(
       JSON.stringify({
         epic: { id: epicData.id, title: epicData.title },
@@ -48588,7 +48757,8 @@ function createEpicCommand(getTracker, getPrHost, getConfig = () => ({})) {
         reasons: result.reasons,
         missing: result.missing,
         blocked: result.blocked,
-        unblocksOnMerge: result.unblocksOnMerge
+        unblocksOnMerge: result.unblocksOnMerge,
+        crossEpicEdges
       }) + "\n"
     );
     if (plan.cycles.length > 0) {
@@ -48632,13 +48802,19 @@ function createInitiativeCommand(getTracker, getPrHost, getConfig = () => ({})) 
     const epics = await Promise.all(initiativeData.epics.map((e) => tracker.getEpic(e.id)));
     const planner = new DependencyPlannerService();
     const plan = planner.plan(
-      epics.flatMap((e) => e.childIssues).map((ticket) => ({
-        id: ticket.id,
-        status: ticket.status,
-        blockedBy: ticket.blockedBy
-      }))
+      epics.flatMap(
+        (e) => e.childIssues.map((ticket) => ({
+          id: ticket.id,
+          status: ticket.status,
+          blockedBy: ticket.blockedBy,
+          epicId: e.id
+        }))
+      )
     );
-    process.stdout.write(JSON.stringify(plan) + "\n");
+    const edges = new CrossEpicEdgeFinder(tracker);
+    const crossEpicEdges = await edges.find(epics);
+    for (const warning of edges.warnings(crossEpicEdges)) process.stderr.write(warning + "\n");
+    process.stdout.write(JSON.stringify({ ...plan, crossEpicEdges }) + "\n");
     if (plan.cycles.length > 0) {
       throw new Error(`dependency cycle detected among tickets: ${plan.cycles.join(", ")}`);
     }
@@ -48662,6 +48838,9 @@ function createInitiativeCommand(getTracker, getPrHost, getConfig = () => ({})) 
     const pullRequests = inReviewIds.length > 0 ? await host.listOpenPullRequestsForTickets(inReviewIds) : [];
     const defaultBranch = await host.defaultBranch();
     const result = reviewPlan.build({ plan, tickets, pullRequests, defaultBranch, inReviewStatus });
+    const edges = new CrossEpicEdgeFinder(tracker);
+    const crossEpicEdges = await edges.find(epics);
+    for (const warning of edges.warnings(crossEpicEdges)) process.stderr.write(warning + "\n");
     process.stdout.write(
       JSON.stringify({
         initiative: { id: initiativeData.id, title: initiativeData.title },
@@ -48670,7 +48849,8 @@ function createInitiativeCommand(getTracker, getPrHost, getConfig = () => ({})) 
         reasons: result.reasons,
         missing: result.missing,
         blocked: result.blocked,
-        unblocksOnMerge: result.unblocksOnMerge
+        unblocksOnMerge: result.unblocksOnMerge,
+        crossEpicEdges
       }) + "\n"
     );
     if (plan.cycles.length > 0) {
@@ -49043,8 +49223,17 @@ function createTicketCommand(getTracker) {
     const sections = blobSectionSource.read({ body: result.body, format });
     process.stdout.write(JSON.stringify(sectionSelector.select(id, sections, opts.section)) + "\n");
   });
-  ticket.command("block").exitOverride().argument("<id>", "ticket id to block").requiredOption("--by <blockerId>", "id of the ticket that must close first").action(async (id, opts) => {
-    await getTracker().blockTicket(id, opts.by);
+  ticket.command("block").exitOverride().argument("<id>", "ticket id to block").requiredOption("--by <blockerId>", "id of the ticket that must close first").option(
+    "--cross-epic-reason <why>",
+    "one-line justification, required when the two tickets sit in different epics (see docs/epic-boundaries.md)"
+  ).action(async (id, opts) => {
+    const outcome = await new EpicBoundaryGuard(getTracker()).block({
+      ticketId: id,
+      blockerId: opts.by,
+      reason: opts.crossEpicReason
+    });
+    for (const warning of outcome.warnings) process.stderr.write(`warning: ${warning}
+`);
   });
   ticket.command("unblock").exitOverride().argument("<id>", "ticket id to unblock").requiredOption("--by <blockerId>", "id of the blocking ticket to remove").action(async (id, opts) => {
     await getTracker().unblockTicket(id, opts.by);

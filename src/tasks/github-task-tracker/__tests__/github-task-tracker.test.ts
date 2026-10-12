@@ -254,6 +254,42 @@ describe('GitHubTracker.linkTicketToEpic', () => {
   })
 })
 
+describe('GitHubTracker.getTicketEpicId', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('returns the parent issue number from the sub-issue parent endpoint', async () => {
+    const tracker = makeTracker()
+    // @ts-expect-error — accessing private field for test setup
+    const mockRequest = vi.mocked(tracker.octokit.request)
+    mockRequest.mockResolvedValueOnce({ data: { number: 166, title: 'E1' } } as never)
+
+    await expect(tracker.getTicketEpicId('177')).resolves.toBe('166')
+    expect(mockRequest).toHaveBeenCalledWith('GET /repos/{owner}/{repo}/issues/{issue_number}/parent', {
+      owner: 'acme',
+      repo: 'proj',
+      issue_number: 177,
+    })
+  })
+
+  it('returns null when the issue has no parent', async () => {
+    const tracker = makeTracker()
+    // @ts-expect-error — accessing private field for test setup
+    const mockRequest = vi.mocked(tracker.octokit.request)
+    mockRequest.mockRejectedValueOnce(Object.assign(new Error('No parent issue found'), { status: 404 }))
+
+    await expect(tracker.getTicketEpicId('216')).resolves.toBeNull()
+  })
+
+  it('rethrows any other failure', async () => {
+    const tracker = makeTracker()
+    // @ts-expect-error — accessing private field for test setup
+    const mockRequest = vi.mocked(tracker.octokit.request)
+    mockRequest.mockRejectedValueOnce(Object.assign(new Error('Bad credentials'), { status: 401 }))
+
+    await expect(tracker.getTicketEpicId('216')).rejects.toThrow('Bad credentials')
+  })
+})
+
 describe('GitHubTracker.blockTicket', () => {
   beforeEach(() => vi.clearAllMocks())
 

@@ -6,6 +6,7 @@ import { blobSectionSource, sectionSelector } from '../../body-sections/body-sec
 import { bodyFormatDetector } from '../../body-sections/body-format-detector.js'
 import { collect } from '../../../shared/collect.js'
 import { TrackerEvidenceService } from '../../evidence/evidence.js'
+import { EpicBoundaryGuard } from '../../epic-boundary/epic-boundary.js'
 
 type CreateTicketOptions = {
   title: string
@@ -105,8 +106,17 @@ export function createTicketCommand(getTracker: () => TaskTracker): Command {
     .exitOverride()
     .argument('<id>', 'ticket id to block')
     .requiredOption('--by <blockerId>', 'id of the ticket that must close first')
-    .action(async (id: string, opts: { by: string }) => {
-      await getTracker().blockTicket(id, opts.by)
+    .option(
+      '--cross-epic-reason <why>',
+      'one-line justification, required when the two tickets sit in different epics (see docs/epic-boundaries.md)',
+    )
+    .action(async (id: string, opts: { by: string; crossEpicReason?: string }) => {
+      const outcome = await new EpicBoundaryGuard(getTracker()).block({
+        ticketId: id,
+        blockerId: opts.by,
+        reason: opts.crossEpicReason,
+      })
+      for (const warning of outcome.warnings) process.stderr.write(`warning: ${warning}\n`)
     })
 
   ticket

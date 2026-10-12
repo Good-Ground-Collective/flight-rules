@@ -45,7 +45,7 @@ const child = (id: string, blockedBy: string[] = [], status = "open"): Ticket =>
 
 type InitiativeTracker = Pick<
   TaskTracker,
-  "createInitiative" | "getInitiative" | "getEpic" | "updateInitiativeDescription"
+  "createInitiative" | "getInitiative" | "getEpic" | "updateInitiativeDescription" | "getTicketEpicId"
 >;
 
 const makeTracker = (): InitiativeTracker => ({
@@ -53,6 +53,7 @@ const makeTracker = (): InitiativeTracker => ({
   getInitiative: vi.fn().mockResolvedValue(mockInitiative),
   getEpic: vi.fn().mockResolvedValue(epicWith("19", [])),
   updateInitiativeDescription: vi.fn().mockResolvedValue(mockInitiative),
+  getTicketEpicId: vi.fn().mockResolvedValue(null),
 });
 
 const makeHost = (open: OpenPullRequest[] = []): PullRequestHost => ({
@@ -173,14 +174,56 @@ describe("initiative command", () => {
       id === "19" ? epicWith("19", [child("1")]) : epicWith("20", [child("2", ["1"])]),
     );
     const output = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const errors = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 
     await run(tracker, ["plan", "7"]);
 
-    const parsed: { waves: { id: string }[][] } = JSON.parse(
+    const parsed: { waves: { id: string; epicId: string }[][] } = JSON.parse(
       String(vi.mocked(output).mock.calls[0]?.[0]),
     );
     expect(parsed.waves.map((w) => w.map((t) => t.id))).toEqual([["1"], ["2"]]);
+    expect(parsed.waves.map((w) => w.map((t) => t.epicId))).toEqual([["19"], ["20"]]);
     output.mockRestore();
+    errors.mockRestore();
+  });
+
+  it('warns about every edge between sibling epics for "plan"', async () => {
+    const tracker = makeTracker();
+    vi.mocked(tracker.getInitiative).mockResolvedValue({
+      ...mockInitiative,
+      epics: [
+        { id: "19", title: "First" },
+        { id: "20", title: "Second" },
+      ],
+    });
+    vi.mocked(tracker.getEpic).mockImplementation(async (id: string) =>
+      id === "19"
+        ? epicWith("19", [child("1")])
+        : epicWith("20", [
+            { ...child("2", ["1"]), metadata: { crossEpicReasons: { "1": "needs the shared auth client" } } },
+            child("3", ["1", "2"]),
+          ]),
+    );
+    const output = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const errors = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+
+    await run(tracker, ["plan", "7"]);
+
+    const parsed: { crossEpicEdges: unknown[] } = JSON.parse(String(vi.mocked(output).mock.calls[0]?.[0]));
+    expect(parsed.crossEpicEdges).toEqual([
+      { ticket: "2", ticketEpic: "20", blockedBy: "1", blockerEpic: "19", justification: "needs the shared auth client" },
+      { ticket: "3", ticketEpic: "20", blockedBy: "1", blockerEpic: "19", justification: null },
+    ]);
+    expect(tracker.getTicketEpicId).not.toHaveBeenCalled();
+    expect(errors).toHaveBeenCalledWith(
+      "warning: cross-epic dependency: #2 (epic #20) is blocked by #1 (epic #19); justification: needs the shared auth client\n",
+    );
+    expect(errors).toHaveBeenCalledWith(
+      "warning: cross-epic dependency: #3 (epic #20) is blocked by #1 (epic #19); no justification recorded\n",
+    );
+    expect(errors).toHaveBeenCalledTimes(2);
+    output.mockRestore();
+    errors.mockRestore();
   });
 
   it('exits non-zero when a cycle spans two epics for "plan"', async () => {
@@ -196,11 +239,14 @@ describe("initiative command", () => {
       id === "19" ? epicWith("19", [child("1", ["2"])]) : epicWith("20", [child("2", ["1"])]),
     );
     const output = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const errors = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 
     await expect(run(tracker, ["plan", "7"])).rejects.toThrow("dependency cycle");
 
     expect(output).toHaveBeenCalled();
+    expect(errors).toHaveBeenCalledTimes(2);
     output.mockRestore();
+    errors.mockRestore();
   });
 
   it('returns empty waves for an initiative with no epics for "plan"', async () => {
@@ -238,6 +284,7 @@ describe("initiative command", () => {
       { ticket: "2", number: 12, url: "https://x/pull/12", headRefName: "feat/2-b", baseRefName: "main", title: "feat(2): b" },
     ]);
     const output = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const errors = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 
     await run(tracker, ["review-plan", "7"], host);
 
@@ -249,6 +296,7 @@ describe("initiative command", () => {
       missing: string[];
       blocked: { ticketId: string; wave: number; blockedBy: string[] }[];
       unblocksOnMerge: string[];
+      crossEpicEdges: unknown[];
     } = JSON.parse(String(vi.mocked(output).mock.calls[0]?.[0]));
     expect(parsed.initiative.id).toBe("7");
     expect(parsed.blocked.map((b) => [b.ticketId, b.wave, b.blockedBy])).toEqual([
@@ -260,7 +308,12 @@ describe("initiative command", () => {
     expect(parsed.reasons[0]).toContain("spans more than one wave");
     expect(parsed.missing).toEqual([]);
     expect(parsed.unblocksOnMerge).toEqual(["3"]);
+    expect(parsed.crossEpicEdges).toEqual([
+      { ticket: "2", ticketEpic: "20", blockedBy: "1", blockerEpic: "19", justification: null },
+    ]);
+    expect(errors).toHaveBeenCalledTimes(1);
     output.mockRestore();
+    errors.mockRestore();
   });
 
   it('reports an incomplete route when a blocked ticket has no PR for "review-plan"', async () => {
@@ -289,10 +342,13 @@ describe("initiative command", () => {
       id === "19" ? epicWith("19", [child("1", ["2"])]) : epicWith("20", [child("2", ["1"])]),
     );
     const output = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const errors = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 
     await expect(run(tracker, ["review-plan", "7"])).rejects.toThrow("dependency cycle");
 
     expect(output).toHaveBeenCalled();
+    expect(errors).toHaveBeenCalledTimes(2);
     output.mockRestore();
+    errors.mockRestore();
   });
 });

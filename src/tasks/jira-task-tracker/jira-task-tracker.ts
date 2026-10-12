@@ -175,6 +175,11 @@ export class JiraTaskTracker implements TaskTracker {
     await this.client.request('PUT', `/issue/${ticketId}`, { fields: { parent: { key: epicId } } })
   }
 
+  async getTicketEpicId(ticketId: string): Promise<string | null> {
+    const issue = await this.client.request<JiraIssue>('GET', `/issue/${ticketId}`, undefined, { fields: 'parent' })
+    return issue.fields.parent?.key ?? null
+  }
+
   async blockTicket(ticketId: string, blockedById: string): Promise<void> {
     if (ticketId === blockedById) throw new Error('a ticket cannot block itself')
 

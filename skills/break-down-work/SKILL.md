@@ -33,6 +33,18 @@ Never point a body at a local path, an uncommitted or unmerged file, a `specs/` 
 
 The CLI rejects bodies with home paths, `~/` paths, and `file://` URLs. It cannot catch an unmerged repo-relative path or a decision you never wrote down. Step 11 catches those.
 
+## The second hard rule: epics are self-contained
+
+Every epic you emit must be finishable on its own. Keep every blocked-by edge inside one epic. Cross-epic dependencies are avoided at all cost: each one keeps two epics in flight, and a reviewer cannot hold five open epics in their head any better than the author can. Run `flight-rules doc epic-boundaries` and read the full output.
+
+When a dependency would cross epics, restructure before you emit anything:
+
+1. **Move the dependent ticket** into its blocker's epic.
+2. **Merge the two tickets**, when one PR would carry both.
+3. **Sequence the epics**, so the blocking epic finishes before the dependent one starts.
+
+A cross-epic edge is allowed only when it is absolutely necessary, and only with a one-line justification recorded on the dependent ticket (`ticket block --cross-epic-reason`, step 9). Step 10 fails a breakdown that has a cross-epic edge without one.
+
 ## Input — an RFC file or a node id
 
 Two entry modes:
@@ -110,8 +122,8 @@ Collect every findings report before synthesizing.
 
 You hold the RFC context and every findings report. Now decide the children:
 
-- **initiative → epics:** group the work into coherent, independently-shippable epics. Each epic's `High-level technical writeup` reflects the *survey* findings (cross-repo shape, integration points). No Guided Walkthrough (epics don't get one).
-- **epic → tickets:** break the work into executable tickets, each roughly one PR. Use the *deep* findings to write each ticket's **Guided Walkthrough** so a Sonnet/Haiku-tier agent can build it — name the exact files, patterns to follow, integration points, and the test approach, drawn straight from the findings (`files`, `patterns`, `integrationPoints`, `risks`). Decide the dependency ordering between tickets.
+- **initiative → epics:** group the work into coherent, independently-shippable epics, each finishable on its own. Draw the epic lines so that no ticket you can foresee would need a blocker in another epic; where one would, move the work or sequence the epics instead. Each epic's `High-level technical writeup` reflects the *survey* findings (cross-repo shape, integration points). No Guided Walkthrough (epics don't get one). **Propose an epic order** that keeps as few epics in flight as possible, ideally one: the next epic starts only when the one before it is done. Write the order and its reason into the initiative body's `### Decisions`.
+- **epic → tickets:** break the work into executable tickets, each roughly one PR. Use the *deep* findings to write each ticket's **Guided Walkthrough** so a Sonnet/Haiku-tier agent can build it — name the exact files, patterns to follow, integration points, and the test approach, drawn straight from the findings (`files`, `patterns`, `integrationPoints`, `risks`). Decide the dependency ordering between tickets. Every blocker must be a ticket in this epic. If a ticket needs work owned by another epic, restructure (see "The second hard rule") rather than wire the edge; keep it only when it is absolutely necessary, with a one-line justification.
 - **ticket:** the single deep node.
 
 **Collect the decisions.** List every choice you or the human made that shapes the work: a slicing call, a rejected approach, a naming rule, an answer to an `AskUserQuestion`. Each one belongs in the parent body or the technical artifact before any ticket references it (step 9). Decide now whether the context fits in the bodies or needs a technical artifact. Reach for the artifact when the shared context runs past a screen, or when several tickets need the same long explanation.
@@ -145,7 +157,7 @@ Stripping the label makes the ticket flow through the pipeline like any other �
 **Before authoring or creating anything**, present the proposed breakdown to the human and wait for an explicit go-ahead. Creating tracker nodes is irreversible — never skip this. Show the **shape**, not full bodies (those come next), so a wrong call is caught before the authoring effort:
 
 - The parent (milestone/epic) and each child's **title + one-line summary**.
-- The **dependency ordering** between children (what blocks what).
+- The **dependency ordering** between children (what blocks what). On an initiative hop, the **proposed epic order**. Call out any **cross-epic edge** with its one-line justification, or say there are none.
 - The **Sharpen-the-Saw pick**, if any — which ticket, which competency, and why (or "none").
 - Any **assumptions or open judgment calls** you made during synthesis.
 - **Where the context will live** — the decisions list, and whether a technical artifact will be published, with its title.
@@ -158,7 +170,7 @@ Run `flight-rules doc layered-body-format`, read the full output, and follow it 
 
 - `## Problem Statement`, `## Solution`, `## Acceptance Criteria` (as a `- [ ]` checklist), `## High-level technical writeup`.
 - **Open the writeup with a `**Context:**` line** linking the parent initiative, the parent epic, and the technical artifact by key or URL. Leave out any that don't exist. `execute-work` follows this line to the initiative, which an epic payload does not name.
-- **Parents carry the decisions.** An epic or initiative body records the breakdown's decisions under `### Decisions` in its writeup, one bullet per choice with its reason. A ticket repeats any decision that shapes its own code. It doesn't send the implementer elsewhere for it.
+- **Parents carry the decisions.** An epic or initiative body records the breakdown's decisions under `### Decisions` in its writeup, one bullet per choice with its reason. An initiative's decisions include the epic order. A ticket repeats any decision that shapes its own code. It doesn't send the implementer elsewhere for it.
 - **Repo-relative paths only for code on the default branch**, or for files the ticket itself creates. Research ran against your checkout, so confirm a cited path exists on the default branch with `git ls-tree -r --name-only origin/HEAD -- <path>` before you write it in.
 - **Tickets only:** a `<details><summary>Guided Walkthrough</summary>` plain-markdown section (never inside the YAML — a nested fence would break it).
 - The `size` of the **child** is implied by the create command you run (`epic create` → epic, `ticket create` → ticket); it is derived from the entity's kind on read, never stored in the LLM-Context block.
@@ -192,9 +204,13 @@ On an initiative hop, run it after each `epic create` that needs one. On an epic
 flight-rules ticket create --title "<title>" --body-file ticket-N.md --epic-id <epicId>   # → { "id": <ticketId> }
 # the one Sharpen-the-Saw leaf (if any) additionally carries the label:
 flight-rules ticket create --title "<title>" --body-file ticket-saw.md --epic-id <epicId> --labels sharpen-the-saw:<slug>
-# then wire dependencies discovered during synthesis
+# then wire dependencies discovered during synthesis (blocker in the same epic)
 flight-rules ticket block <ticketId> --by <blockerTicketId>
+# only an edge that is absolutely necessary may leave the epic; the CLI refuses it without a reason
+flight-rules ticket block <ticketId> --by <blockerInAnotherEpic> --cross-epic-reason "<one-line justification>"
 ```
+
+`ticket block` refuses an edge between two epics unless `--cross-epic-reason` is passed, and records the reason on the dependent ticket. Never reach for the flag to get a refused edge through: a refusal means the breakdown needs restructuring first.
 
 **ticket:**
 ```bash
@@ -208,9 +224,13 @@ Only pass `--epic-id` when this hop really does sit under an existing epic. Do *
 
 For an epic hop, sanity-check the dependency graph:
 ```bash
-flight-rules epic plan <epicId>   # expect clean waves, no cycles
+flight-rules epic plan <epicId>   # expect clean waves, no cycles, no unjustified crossEpicEdges
 ```
 If `cycles` is non-empty, fix the offending `block` edges.
+
+Then check `crossEpicEdges`. **The breakdown fails this check if any entry has `"justification": null`.** Fix it by restructuring (move the ticket, merge the tickets, or sequence the epics) and removing the edge with `flight-rules ticket unblock <ticketId> --by <blockerTicketId>`. Only if the edge is absolutely necessary, record the reason by re-running `ticket block` with `--cross-epic-reason`. A justified edge still goes in your report, so the human sees every edge that leaves the epic.
+
+For an initiative hop, there are no tickets yet. Check instead that the initiative body states the epic order and that no epic's writeup assumes work another epic owns.
 
 ### 11. Read each node as a stranger
 
@@ -237,6 +257,7 @@ Report the created node ids and their links. **Stop — one altitude only.** Do 
 - **Never create nodes without the go-ahead.** Preview first (step 6); creating is irreversible.
 - **Check in when unsure, don't guess.** Ambiguity, RFC/code contradiction, real forks, and size mismatches are all `AskUserQuestion` triggers (see "Working with the human").
 - **Everything through `flight-rules`.** The skill stays tracker-agnostic; the CLI resolves GitHub/Jira.
+- **Epics are self-contained.** Every blocked-by edge stays inside one epic. A cross-epic edge needs to be absolutely necessary and carry a one-line justification; an unjustified one fails step 10.
 - **At most one Sharpen-the-Saw leaf per epic** (step 6), only on a non-blocking leaf, always with a written justification. Never label silently; never exceed one.
 - **Portable context only.** No body references a local path, an unmerged file, or an unwritten decision. Never pass `--allow-local-paths` to get a context pointer past the CLI; publish the context instead.
 
@@ -246,7 +267,8 @@ Report the created node ids and their links. **Stop — one altitude only.** Do 
 - Exactly one altitude was created; the invocation stopped there.
 - Every child is a layered-body artifact grounded in real code (its writeup cites what the research actually found, not guesses).
 - Tickets carry a Guided Walkthrough concrete enough for a Sonnet/Haiku agent to execute; epics don't.
-- Children are natively linked (epics→milestone, tickets→epic sub-issues) with a clean, cycle-free dependency graph.
+- Children are natively linked (epics→milestone, tickets→epic sub-issues) with a clean, cycle-free dependency graph whose edges stay inside one epic, apart from any absolutely necessary edge that carries a recorded justification.
+- An initiative breakdown names an epic order that keeps one epic in flight at a time wherever it can.
 - An epic→ticket pass labels **at most one** leaf `sharpen-the-saw:<slug>`, with a justification and reduced walkthrough — or none, if nothing fits the rubric.
 - Each emitted node could itself be handed straight back into this skill for the next hop down.
 - An engineer on another machine could run `/execute-work` on any emitted ticket with no input beyond the ticket id. Every decision lives in a body or a published artifact, and every reference resolves from a fresh clone or a URL.

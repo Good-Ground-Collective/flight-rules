@@ -96,15 +96,22 @@ For an initiative:
 flight-rules initiative plan <id>
 ```
 
-Both print `{"waves": [[…]], "cycles": []}` and both **throw on a cycle**, after
+Both print `{"waves": [[…]], "cycles": [], "crossEpicEdges": […]}` and both **throw on a cycle**, after
 printing. A cycle is a breakdown bug, not a work item: stop, show the cycle, and
 send the user to `/break-down-work`. Never try to pick a starting point inside a
 cycle.
 
+`crossEpicEdges` lists every blocked-by edge that leaves its epic, with the
+justification recorded on the dependent ticket or `null`. The CLI also prints
+each one as a warning on stderr. They don't stop the run, but every one goes in
+the report (step 10), and an unjustified one is a breakdown defect to send back
+to `/break-down-work`. See `flight-rules doc epic-boundaries`.
+
 Use `initiative plan` — never a loop of `epic plan` calls — when the node is an
 initiative. It builds one graph across every child epic, so a ticket blocked by a
 ticket in a sibling epic is correctly held back. Per-epic planning cannot see
-that edge and would report the blocked ticket as ready.
+that edge and would report the blocked ticket as ready. Each ticket in an
+initiative plan carries its `epicId`, which step 4 uses to work one epic at a time.
 
 ### 4. Select the wave
 
@@ -118,13 +125,37 @@ Then filter `waves[0]` down to what is genuinely startable:
 - **Drop** tickets already in-progress or in-review. They stay in the graph as blockers — that is correct and load-bearing, because a dependent must not start until the blocker merges — but they are not work. `execute-work` leaves a ticket in **in-review**, not closed, so an already-driven ticket reappears in `waves[0]` on every subsequent run. Re-driving it would cut a second branch for work that already has a PR.
 - **Drop** tickets labeled `sharpen-the-saw`. That work is reserved for a human, and `execute-work` redirects on the label anyway.
 
+**For an initiative, narrow to one epic.** Finish the in-flight epic before
+starting another, so the reviewer only ever holds one epic in their head:
+
+1. **Pick the in-flight epic.** It is the epic that already has tickets in
+   progress, in review or closed while others are still open. If more than one
+   has started, take the earliest in the epic order and name the others in the
+   report as also in flight. If no epic has
+   started, take the first epic with open tickets in the epic order the
+   initiative body records under `### Decisions`. With no recorded order, take
+   the first in `flight-rules initiative get <id>`'s `epics` list, and say that
+   no order was recorded.
+2. **Keep only that epic's tickets** (`epicId`) from the filtered `waves[0]`.
+   Drop the others with the reason "another epic is in flight: <epic id>".
+3. **Open a second epic only when the in-flight epic is fully blocked on
+   something outside the factory's control**: every one of its open tickets is
+   reserved for a human (`sharpen-the-saw`), parked on a question only a person
+   can answer, or blocked by a ticket or system outside this initiative. Waiting
+   on the in-flight epic's own PRs to merge is **not** such a block. That is the
+   normal wave boundary, so go to step 9 and stop. When you do open a second
+   epic, take the next one in the epic order, say which epic is blocked and on
+   what, and put the same sentence in the go-ahead (step 5) and the report.
+
+Never work tickets from two epics because they happen to share wave 0.
+
 Report every dropped ticket with its reason. A silently skipped ticket reads as a
 ticket that didn't exist.
 
 **If nothing is startable, say precisely why.** The three causes are different
 and the user needs to know which one they have:
 
-- Everything in wave 0 is in-review → the wave is already drained; you are waiting on their merges. Go to step 9 to route those PRs for review, then stop.
+- Everything in wave 0 is in-review → the wave is already drained; you are waiting on their merges. Go to step 9 to route those PRs for review, then stop. For an initiative, this applies to the in-flight epic: its PRs awaiting merge never justify opening the next epic.
 - Wave 0 is empty but later waves aren't → shouldn't happen; report it as a planner inconsistency rather than guessing.
 - No open tickets at all → the epic or initiative is done.
 
@@ -259,11 +290,12 @@ flight-rules board post item --session wave-<node id> --kind wave-gate --ticket 
 
 Then give the user, in this order:
 
-- **The node** — epic or initiative, id and title, and which you resolved it as.
+- **The node** — epic or initiative, id and title, and which you resolved it as. For an initiative, the in-flight epic and how it was picked, and any second epic you opened with the outside block that justified it.
 - **Wave size** — how many tickets were startable, out of how many open.
 - **Per ticket, one line each**: id, outcome, iterations used, PR URL.
 - **Parked tickets** — for each, why it parked, the branch holding the work, whether you committed to free the tree, and the verifier's final evidence.
 - **Every `charterConcerns` and `openQuestions`** raised across every ticket, verbatim and unanswered.
+- **Cross-epic edges** — every entry in `crossEpicEdges`, with its justification or "no justification recorded".
 - **What unblocks on merge** — read `waves[1]` from the plan and name those tickets. This is what the user gets by reviewing, and it is the reason to stop here rather than push on.
 - **Review routing** — the block from step 9: the route taken (`simple`, `complex` or `incomplete`), reasons, per-PR request results or the packet id, every failed login with its PR, and tickets in review with no open PR found.
 - **The next step, plainly:** review and merge these PRs, then run this skill again on the same id.
@@ -272,6 +304,7 @@ Then give the user, in this order:
 
 - **One wave per invocation.** Never re-plan and continue after draining. The user merges, then re-invokes.
 - **Never work a ticket outside `waves[0]`.** Later waves are blocked by construction.
+- **One epic in flight.** On an initiative, work only the in-flight epic's tickets. Open a second epic only when the first is fully blocked on something outside the factory's control, and say so.
 - **Never re-drive a ticket that is in-progress or in-review.** It already has a branch, and probably a PR.
 - **Never merge.** This skill opens PRs and stops, exactly as `execute-work` does.
 - **The review hand-off requests review only.** It never merges, never starts the next wave, and requests nothing without the human's confirmation. Blocked tickets with no matching PR are reported, not guessed, and a failed review request never stops the rest of the set.
@@ -295,7 +328,7 @@ Then give the user, in this order:
 
 ## What Good Looks Like
 
-- Exactly the tickets in `waves[0]` that were in the to-do status got worked — no more, no fewer.
+- Exactly the tickets in `waves[0]` that were in the to-do status got worked — no more, no fewer. On an initiative, only the in-flight epic's tickets, unless the report names the outside block that opened a second epic.
 - Every PR's diff contains only its own ticket's commits. No accidental stacking.
 - The tracker shows each worked ticket in in-review, each parked ticket in in-progress.
 - HEAD is back on the base branch and the tree is clean.

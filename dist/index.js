@@ -1056,7 +1056,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.64.2";
+var appVersion = false ? "0.0.0-dev" : "1.65.0";
 
 // src/shared/ariadne/review-packet.schema.ts
 import { z as z11 } from "zod";
@@ -2073,7 +2073,9 @@ var EntityMetadataSchema = z14.object({
   epicId: z14.number().optional(),
   notes: z14.string().optional(),
   /** Explicit body-format override read first by BodyFormatDetector (docs/bug-report-format.md). */
-  kind: z14.enum(["bug", "story"]).optional()
+  kind: z14.enum(["bug", "story"]).optional(),
+  /** Why a blocked-by edge leaves this ticket's epic, keyed by blocker id (docs/epic-boundaries.md). */
+  crossEpicReasons: z14.record(z14.string(), z14.string()).optional()
 }).passthrough();
 var CommentSchema = z14.object({
   id: z14.string(),
@@ -2244,7 +2246,9 @@ var UnsupportedTrackerOperationError = class extends Error {
 };
 
 // src/tasks/github-task-tracker/github-task-tracker.ts
-var IssueRefListSchema = z16.array(z16.object({ number: z16.number() }));
+var IssueRefSchema = z16.object({ number: z16.number() });
+var IssueRefListSchema = z16.array(IssueRefSchema);
+var ParentNotFoundSchema = z16.object({ status: z16.literal(404) });
 var GitHubTaskTracker = class {
   octokit;
   gql;
@@ -2415,6 +2419,19 @@ var GitHubTaskTracker = class {
       issue_number: epicNumber,
       sub_issue_id: subIssueId
     });
+  }
+  async getTicketEpicId(ticketId) {
+    try {
+      const { data } = await this.octokit.request("GET /repos/{owner}/{repo}/issues/{issue_number}/parent", {
+        owner: this.owner,
+        repo: this.repo,
+        issue_number: parseInt(ticketId, 10)
+      });
+      return String(IssueRefSchema.parse(data).number);
+    } catch (error) {
+      if (ParentNotFoundSchema.safeParse(error).success) return null;
+      throw error;
+    }
   }
   async blockTicket(ticketId, blockedById) {
     if (ticketId === blockedById) throw new Error("a ticket cannot block itself");
@@ -4040,6 +4057,10 @@ var JiraTaskTracker = class {
     const issue = await this.client.request("GET", `/issue/${ticketId}`, void 0, { fields: "parent" });
     if (issue.fields.parent?.key === epicId) return;
     await this.client.request("PUT", `/issue/${ticketId}`, { fields: { parent: { key: epicId } } });
+  }
+  async getTicketEpicId(ticketId) {
+    const issue = await this.client.request("GET", `/issue/${ticketId}`, void 0, { fields: "parent" });
+    return issue.fields.parent?.key ?? null;
   }
   async blockTicket(ticketId, blockedById) {
     if (ticketId === blockedById) throw new Error("a ticket cannot block itself");

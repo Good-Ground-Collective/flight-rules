@@ -32,7 +32,9 @@ type OctokitIssueData = Awaited<ReturnType<Octokit['rest']['issues']['get']>>['d
 type OctokitCommentData = Awaited<ReturnType<Octokit['rest']['issues']['listComments']>>['data'][number]
 type OctokitLabelData = OctokitIssueData['labels'][number]
 
-const IssueRefListSchema = z.array(z.object({ number: z.number() }))
+const IssueRefSchema = z.object({ number: z.number() })
+const IssueRefListSchema = z.array(IssueRefSchema)
+const ParentNotFoundSchema = z.object({ status: z.literal(404) })
 
 export class GitHubTaskTracker implements TaskTracker {
   private octokit: Octokit
@@ -216,6 +218,21 @@ export class GitHubTaskTracker implements TaskTracker {
       issue_number: epicNumber,
       sub_issue_id: subIssueId,
     })
+  }
+
+  async getTicketEpicId(ticketId: string): Promise<string | null> {
+    try {
+      const { data } = await this.octokit.request('GET /repos/{owner}/{repo}/issues/{issue_number}/parent', {
+        owner: this.owner,
+        repo: this.repo,
+        issue_number: parseInt(ticketId, 10),
+      })
+      return String(IssueRefSchema.parse(data).number)
+    } catch (error) {
+      // GitHub answers 404 "No parent issue found" for an issue that is not a sub-issue.
+      if (ParentNotFoundSchema.safeParse(error).success) return null
+      throw error
+    }
   }
 
   async blockTicket(ticketId: string, blockedById: string): Promise<void> {

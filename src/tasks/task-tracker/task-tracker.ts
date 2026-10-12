@@ -17,6 +17,8 @@ export const EntityMetadataSchema = z
     notes: z.string().optional(),
     /** Explicit body-format override read first by BodyFormatDetector (docs/bug-report-format.md). */
     kind: z.enum(['bug', 'story']).optional(),
+    /** Why a blocked-by edge leaves this ticket's epic, keyed by blocker id (docs/epic-boundaries.md). */
+    crossEpicReasons: z.record(z.string(), z.string()).optional(),
   })
   .passthrough()
 
@@ -160,6 +162,8 @@ export interface TaskTracker {
   createTicket(input: CreateTicketInput): Promise<Ticket>
   getTicket(id: string): Promise<Ticket>
   linkTicketToEpic(ticketId: string, epicId: string): Promise<void>
+  /** The ticket's parent epic id, or null when the ticket has no parent. */
+  getTicketEpicId(ticketId: string): Promise<string | null>
   blockTicket(ticketId: string, blockedById: string): Promise<void>
   unblockTicket(ticketId: string, blockedById: string): Promise<void>
   transitionTicket(ticketId: string, status: string): Promise<void>

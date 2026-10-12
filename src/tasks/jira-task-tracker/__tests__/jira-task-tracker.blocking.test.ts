@@ -26,6 +26,28 @@ const postLinkBody = (): Record<string, unknown> => {
   return call?.[2] as Record<string, unknown>
 }
 
+describe('JiraTaskTracker.getTicketEpicId', () => {
+  beforeEach(() => {
+    request.mockReset()
+  })
+
+  it('reads the parent key from the native parent field', async () => {
+    request.mockImplementation((method: string, path: string, _body: unknown, query: unknown) => {
+      if (method === 'GET' && path === '/issue/PROJ-2' && JSON.stringify(query) === '{"fields":"parent"}')
+        return Promise.resolve({ id: '1', key: 'PROJ-2', fields: { summary: 'S', parent: { key: 'PROJ-1' } } })
+      throw new Error(`unexpected ${method} ${path}`)
+    })
+
+    await expect(makeTracker().getTicketEpicId('PROJ-2')).resolves.toBe('PROJ-1')
+  })
+
+  it('returns null for an issue with no parent', async () => {
+    request.mockResolvedValue({ id: '1', key: 'PROJ-2', fields: { summary: 'S' } })
+
+    await expect(makeTracker().getTicketEpicId('PROJ-2')).resolves.toBeNull()
+  })
+})
+
 describe('JiraTaskTracker.blockTicket', () => {
   beforeEach(() => {
     request.mockReset()

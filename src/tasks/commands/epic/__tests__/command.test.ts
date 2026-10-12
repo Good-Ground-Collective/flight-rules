@@ -41,6 +41,7 @@ const makeTracker = (): TaskTracker => ({
   createTicket: vi.fn(),
   getTicket: vi.fn(),
   linkTicketToEpic: vi.fn(),
+  getTicketEpicId: vi.fn().mockResolvedValue(null),
   blockTicket: vi.fn(),
   unblockTicket: vi.fn(),
   transitionTicket: vi.fn(),
@@ -222,9 +223,101 @@ describe('epic command', () => {
           },
         ],
         unblocksOnMerge: ['2'],
+        crossEpicEdges: [],
       }) + '\n',
     )
     output.mockRestore()
+  })
+
+  it('reports no cross-epic edges for "plan" when every blocker is in the epic', async () => {
+    const tracker = makeTracker()
+    vi.mocked(tracker.getEpic).mockResolvedValue({
+      ...mockEpic,
+      childIssues: [child('1'), child('2', ['1'])],
+    })
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    const errors = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+
+    await run(tracker, ['plan', '42'])
+
+    const parsed: { crossEpicEdges: unknown[] } = JSON.parse(String(vi.mocked(output).mock.calls[0]?.[0]))
+    expect(parsed.crossEpicEdges).toEqual([])
+    expect(tracker.getTicketEpicId).not.toHaveBeenCalled()
+    expect(errors).not.toHaveBeenCalled()
+    output.mockRestore()
+    errors.mockRestore()
+  })
+
+  it('warns about a blocker in another epic for "plan", with its recorded justification', async () => {
+    const tracker = makeTracker()
+    vi.mocked(tracker.getEpic).mockResolvedValue({
+      ...mockEpic,
+      childIssues: [
+        { ...child('1', ['90']), metadata: { crossEpicReasons: { '90': 'shared schema migration' } } },
+        child('2', ['91']),
+      ],
+    })
+    vi.mocked(tracker.getTicketEpicId).mockImplementation(async (id: string) => (id === '90' ? '50' : null))
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    const errors = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+
+    await run(tracker, ['plan', '42'])
+
+    const parsed: { waves: { id: string }[][]; crossEpicEdges: unknown[] } = JSON.parse(
+      String(vi.mocked(output).mock.calls[0]?.[0]),
+    )
+    expect(parsed.waves.map((w) => w.map((t) => t.id))).toEqual([['1', '2']])
+    expect(parsed.crossEpicEdges).toEqual([
+      { ticket: '1', ticketEpic: '42', blockedBy: '90', blockerEpic: '50', justification: 'shared schema migration' },
+      { ticket: '2', ticketEpic: '42', blockedBy: '91', blockerEpic: null, justification: null },
+    ])
+    expect(errors).toHaveBeenCalledWith(
+      'warning: cross-epic dependency: #1 (epic #42) is blocked by #90 (epic #50); justification: shared schema migration\n',
+    )
+    expect(errors).toHaveBeenCalledWith(
+      'warning: cross-epic dependency: #2 (epic #42) is blocked by #91 (epic unknown); no justification recorded\n',
+    )
+    output.mockRestore()
+    errors.mockRestore()
+  })
+
+  it('still plans when a blocker\'s parent epic lookup fails for "plan"', async () => {
+    const tracker = makeTracker()
+    vi.mocked(tracker.getEpic).mockResolvedValue({ ...mockEpic, childIssues: [child('1', ['90'])] })
+    vi.mocked(tracker.getTicketEpicId).mockRejectedValue(new Error('boom'))
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    const errors = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+
+    await run(tracker, ['plan', '42'])
+
+    const parsed: { crossEpicEdges: { blockerEpic: string | null }[] } = JSON.parse(
+      String(vi.mocked(output).mock.calls[0]?.[0]),
+    )
+    expect(parsed.crossEpicEdges.map((edge) => edge.blockerEpic)).toEqual([null])
+    output.mockRestore()
+    errors.mockRestore()
+  })
+
+  it('lists cross-epic edges in the "review-plan" hand-off', async () => {
+    const tracker = makeTracker()
+    vi.mocked(tracker.getEpic).mockResolvedValue({ ...mockEpic, childIssues: [child('1', ['90'], 'In Review')] })
+    vi.mocked(tracker.getTicketEpicId).mockResolvedValue('50')
+    const host = makeHost([
+      { ticket: '1', number: 7, url: 'https://x/pull/7', headRefName: 'feat/1-a', baseRefName: 'main', title: 'feat(1): a' },
+    ])
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    const errors = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+
+    await run(tracker, ['review-plan', '42'], host)
+
+    const parsed: { route: string; crossEpicEdges: unknown[] } = JSON.parse(String(vi.mocked(output).mock.calls[0]?.[0]))
+    expect(parsed.route).toBe('simple')
+    expect(parsed.crossEpicEdges).toEqual([
+      { ticket: '1', ticketEpic: '42', blockedBy: '90', blockerEpic: '50', justification: null },
+    ])
+    expect(errors).toHaveBeenCalledTimes(1)
+    output.mockRestore()
+    errors.mockRestore()
   })
 
   it('throws after printing when "review-plan" finds a cycle', async () => {
