@@ -1,6 +1,9 @@
 import { createFlightRules, type FlightRules } from "../flight-rules/flight-rules.js";
 import { Command } from "commander";
 import { createDocCommand } from "../bundled-docs/commands/doc/command.js";
+import { createCharterCommand } from "../bundled-docs/commands/charter/command.js";
+import { DocCharterCatalog } from "../bundled-docs/charter-catalog/charter-catalog.js";
+import { GitRepositoryPaths } from "../bundled-docs/charter-catalog/repository-paths.js";
 import { createReviewCommand } from "../code-review/commands/command.js";
 import type { Config } from "../shared/config.js";
 import { createConfigCommand } from "../shared/commands/config/command.js";
@@ -91,6 +94,12 @@ export function buildProgram(
   program.addCommand(createQaCommand(config, getConfigPath, undefined, () => services.evidence()));
   program.addCommand(createCompetenciesCommand(config));
   program.addCommand(createDocCommand(() => services.docs()));
+  program.addCommand(
+    createCharterCommand(
+      () => new DocCharterCatalog({ docs: services.docs() }),
+      () => new GitRepositoryPaths({ cwd: process.cwd() }),
+    ),
+  );
   program.addCommand(createReviewCommand());
   program.addCommand(createCheckCommand(config, tracker, getConfigPath, () => services.probe()));
   program.addCommand(

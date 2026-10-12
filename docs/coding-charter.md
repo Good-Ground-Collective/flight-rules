@@ -1,7 +1,8 @@
 # Code Standards
 
-=
 These are mandates, not preferences. Violations are reviewable findings.
+
+This is the language-agnostic core charter. It applies to every file, together with each language charter whose `applies-to` paths match the files in play: `flight-rules charter` always loads both. Where a language charter is more specific than the core, it governs that language's files. Mandate IDs are stable; the gaps in this charter's numbering are mandates that moved to the TypeScript charter.
 
 ## M-1 — No planning-system identifiers in source code
 
@@ -9,54 +10,16 @@ Banned tokens in production source: `Phase N`, `D-NN` decision codes, `T-X-NN` t
 
 **Why:** code outlives planning systems. Six months from now no one knows what "T-4-05" or "D-09" means.
 
-**Where it belongs instead:** architectural rationale in JSDoc on the relevant declaration *in application terms* ("Same-origin returnTo guards against open-redirect through the OAuth callback" — NOT "T-4-05 open-redirect defense"). Threat-model IDs, decision codes, and phase references stay in planning artifacts, never source.
+**Where it belongs instead:** architectural rationale in the doc comment on the relevant declaration (JSDoc, ApexDoc, docstrings) *in application terms* ("Same-origin returnTo guards against open-redirect through the OAuth callback" — NOT "T-4-05 open-redirect defense"). Threat-model IDs, decision codes, and phase references stay in planning artifacts, never source.
 
-## M-2 — JSDoc on declarations, not paragraph block comments
+## M-2 — Doc comments on declarations, not paragraph block comments
 
 - Banned: multi-line `// ...` paragraph comments at file top. 
 - Banned: paragraph block comments above non-declaration code.
 
-Required: file-level concepts as JSDoc on the primary exported declaration; class/method concepts as `/** ... */` JSDoc directly above the declaration. Why-this-line comments are at most one short line, only when the *why* is non-obvious.
+Required: file-level concepts as a doc comment on the primary exported declaration; class/method concepts as a doc comment (`/** ... */` in TypeScript, Apex and Java) directly above the declaration. Why-this-line comments are at most one short line, only when the *why* is non-obvious.
 
-No dumb comments. If a reader who knows TypeScript and the codebase can derive the comment from the code, the comment is noise. **This applies inside JSDoc blocks too.** JSDoc on a declaration is allowed and often required for non-obvious framing, but the body of that JSDoc still has to clear the no-dumb-comments bar. "Callers should pass a fresh snapshot" on a pure function that takes `state: AuthState` as a parameter is a dumb comment regardless of whether it lives in `// ...` or `/** ... */`.
-
-## M-3 — Services follow `interface → class → optional singleton`
-
-Every service-shaped concept uses this exact shape:
-
-```typescript
-export interface TokenStore {
-  get(): AccessToken | null;
-  set(token: AccessToken | null): void;
-}
-
-export class MemoryTokenStore implements TokenStore { /* ... */ }
-
-export const tokenStore: TokenStore = new MemoryTokenStore();
-```
-
-- Banned: `interface Foo` + `defaultFoo: Foo = { ... }` object-literal default. Banned: `interface Foo` + `createFoo()` factory returning a closure. 
-- Banned: loose top-level helper functions for service behavior.
-
-Naming: interface is the abstract role with no `I`-prefix. Class name carries the implementation detail as a prefix (`MemoryTokenStore`, `BrowserNavigation`, `OslojsPkceGenerator`). Optional singleton is camelCase, typed as the interface. DI parameter types are interfaces, never concrete classes.
-
-## M-4 — Don't over-engineer DI seams
-
-A seam exists only when there's a real second implementation. If the only second implementation is the test fake, the seam is over-engineering. Examples of over-engineering (do NOT do): `Clock` interface for fake-timer injection (use `vi.useFakeTimers()`), `Navigation` injected as a function, splitting constructor parameters into Config + Deps.
-
-The test: "Does anyone OTHER than the test suite ever want to swap this?" If no, no seam.
-
-## M-5 — Constructor takes a single Zod-validated props object
-
-Constructors that take both a config object AND a deps object are banned. Use one props object, validated by a Zod schema at the constructor boundary. Where the value benefits from runtime validation (env URLs, primitives), encode it as a Zod schema and parse at construction. Class instances flow through TS-typed. If a prop has a sensible default, use Zod's `.default()`.
-
-## M-6 — Declarative parsing over procedural decoding
-
-Multi-step procedural decoders (split → decode → check → decode → check → JSON.parse → check) are banned when Zod's `z.string().transform()` + `.preprocess()` + `.pipe()` can express the same flow declaratively.
-
-## M-7 — TypeScript object keys are camelCase
-
-Even when the wire format uses snake_case, TS objects use camelCase. Map at the boundary in the Zod schema's `.transform()`, not in consuming code.
+No dumb comments. If a reader who knows the language and the codebase can derive the comment from the code, the comment is noise. **This applies inside doc comments too.** A doc comment on a declaration is allowed and often required for non-obvious framing, but its body still has to clear the no-dumb-comments bar. "Callers should pass a fresh snapshot" on a pure function that takes `state: AuthState` as a parameter is a dumb comment regardless of whether it lives in `// ...` or `/** ... */`.
 
 ## M-8 — Method names use ordinary English
 
@@ -76,7 +39,7 @@ Sentinel/throw-helper functions whose entire job is to throw are banned. Define 
 
 ## M-12 — READMEs document concepts, never linter rules
 
-READMEs describe architecture, intent, and how features fit into the app. They never restate ESLint-enforced rules — the linter does that work.
+READMEs describe architecture, intent, and how features fit into the app. They never restate rules a linter enforces — the linter does that work.
 
 ## M-13 The Code Models Reality, Not The Other Way Around
 
@@ -86,7 +49,7 @@ In some scenarios, we may use our software to drive a specific workflow pattern 
 
 This should extend into every corner of the system. Even technical subsystems should express their purpose from a product lense, as oppsoed to a technical one. Every piece of our stack is meant to serve our users, and our domain.
 
-An example of how to reframe something as technically bland as an S3 Adaptor:
+An example of how to reframe something as technically bland as an S3 Adaptor (the example is TypeScript; the principle is not):
 
 **Bad**
 

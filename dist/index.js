@@ -1056,7 +1056,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.66.0";
+var appVersion = false ? "0.0.0-dev" : "1.67.0";
 
 // src/shared/ariadne/review-packet.schema.ts
 import { z as z11 } from "zod";
@@ -5188,36 +5188,86 @@ var TrackerEvidenceService = class {
 // src/shared/host-settings/host-settings-source.ts
 var settingsScopes = ["user", "project", "local"];
 
-// src/agents/agent-frontmatter/agent-frontmatter.schema.ts
+// src/bundled-docs/charter-catalog/charter-catalog.ts
+import { matchesGlob } from "node:path";
+import { parse as parseYaml3 } from "yaml";
 import { z as z24 } from "zod";
+var coreCharterId = "coding-charter";
+var languageCharterPrefix = `${coreCharterId}-`;
+var LanguageFrontmatterSchema = z24.strictObject({
+  language: z24.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+  "applies-to": z24.array(z24.string().min(1)).min(1)
+}).transform(({ language, "applies-to": appliesTo }) => ({ language, appliesTo }));
+var FrontmatterSchema = z24.string().transform((contents, ctx) => {
+  const block = /^---\n([\s\S]*?)\n---\n/.exec(contents)?.[1];
+  if (block === void 0) {
+    ctx.addIssue({ code: "custom", message: "missing YAML frontmatter" });
+    return z24.NEVER;
+  }
+  return parseYaml3(block);
+}).pipe(LanguageFrontmatterSchema);
+var DocCharterCatalog = class {
+  docs;
+  constructor(props) {
+    this.docs = props.docs;
+  }
+  all() {
+    const core = this.docs.resolve(coreCharterId);
+    const languages = this.docs.list().filter((id) => id.startsWith(languageCharterPrefix)).map((id) => this.languageCharter(this.docs.resolve(id)));
+    return [{ id: core.id, language: null, appliesTo: [], path: core.path, contents: core.contents }, ...languages];
+  }
+  select(paths) {
+    const normalized = paths.map((path) => path.trim().replace(/^\.\//, "")).filter((path) => path.length > 0);
+    return this.all().filter(
+      (charter) => charter.language === null || normalized.some((path) => charter.appliesTo.some((glob) => matchesGlob(path, glob)))
+    );
+  }
+  languageCharter(doc) {
+    const parsed = FrontmatterSchema.safeParse(doc.contents);
+    if (!parsed.success) {
+      throw new CharterFormatError(`Charter "${doc.id}" has invalid frontmatter: ${z24.prettifyError(parsed.error)}`);
+    }
+    const expectedId = `${languageCharterPrefix}${parsed.data.language}`;
+    if (doc.id !== expectedId) {
+      throw new CharterFormatError(`Charter "${doc.id}" declares language "${parsed.data.language}"; its file must be ${expectedId}.md`);
+    }
+    return { id: doc.id, ...parsed.data, path: doc.path, contents: doc.contents };
+  }
+};
+var CharterFormatError = class extends Error {
+  name = "CharterFormatError";
+};
+
+// src/agents/agent-frontmatter/agent-frontmatter.schema.ts
+import { z as z25 } from "zod";
 var agentCapabilities = ["read", "edit", "shell", "web", "spawn", "ask"];
 var modelTiers = ["standard", "escalated", "expert"];
 var reasoningLevels = ["low", "medium", "high"];
 var claudeAgentColors = ["red", "blue", "green", "yellow", "purple", "orange", "pink", "cyan"];
-var AgentCapabilitySchema = z24.enum(agentCapabilities);
-var ModelTierSchema = z24.enum(modelTiers);
-var AgentFrontmatterSchema = z24.strictObject({
-  name: z24.string().regex(/^[a-z][a-z0-9-]*$/),
-  description: z24.string().min(1),
-  capabilities: z24.array(AgentCapabilitySchema).min(1).refine(
+var AgentCapabilitySchema = z25.enum(agentCapabilities);
+var ModelTierSchema = z25.enum(modelTiers);
+var AgentFrontmatterSchema = z25.strictObject({
+  name: z25.string().regex(/^[a-z][a-z0-9-]*$/),
+  description: z25.string().min(1),
+  capabilities: z25.array(AgentCapabilitySchema).min(1).refine(
     (capabilities) => new Set(capabilities).size === capabilities.length,
     { message: "duplicate capability" }
   ),
   model: ModelTierSchema,
-  reasoning: z24.enum(reasoningLevels).optional(),
-  sandbox: z24.strictObject({
-    fs: z24.enum(["read-only", "workspace-write"]),
-    network: z24.enum(["none", "enabled"])
+  reasoning: z25.enum(reasoningLevels).optional(),
+  sandbox: z25.strictObject({
+    fs: z25.enum(["read-only", "workspace-write"]),
+    network: z25.enum(["none", "enabled"])
   }).optional(),
-  dispatch: z24.strictObject({
-    maxConcurrent: z24.int().positive(),
-    maxDepth: z24.int().positive()
+  dispatch: z25.strictObject({
+    maxConcurrent: z25.int().positive(),
+    maxDepth: z25.int().positive()
   }).optional(),
-  "x-claude": z24.strictObject({ color: z24.enum(claudeAgentColors).optional() }).optional()
+  "x-claude": z25.strictObject({ color: z25.enum(claudeAgentColors).optional() }).optional()
 });
 
 // src/agents/agent-frontmatter/agent-frontmatter.ts
-import { parse as parseYaml3 } from "yaml";
+import { parse as parseYaml4 } from "yaml";
 var MissingFrontmatterError = class extends Error {
   name = "MissingFrontmatterError";
 };
@@ -5227,7 +5277,7 @@ var YamlAgentFrontmatterParser = class {
     if (match === null || match.index !== 0 || match[1] === void 0) {
       throw new MissingFrontmatterError("agent file has no leading --- frontmatter block");
     }
-    const raw = parseYaml3(match[1]);
+    const raw = parseYaml4(match[1]);
     if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
       throw new MissingFrontmatterError("frontmatter is not a YAML mapping");
     }
@@ -5243,6 +5293,7 @@ export {
   BlobSectionSource,
   BodyMetadataService,
   BodySectionSelector,
+  CharterFormatError,
   ClaudeSettingsSource,
   CommentSchema,
   CommitMessageInputSchema,
@@ -5256,6 +5307,7 @@ export {
   DefaultFlightRules,
   DefaultPullRequestBuilder,
   DependencyPlannerService,
+  DocCharterCatalog,
   DocIdSchema,
   DuplicateEvidenceNameError,
   EntityMetadataSchema,
