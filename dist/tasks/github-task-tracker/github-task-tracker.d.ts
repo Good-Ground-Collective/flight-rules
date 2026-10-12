@@ -19,6 +19,7 @@ export declare class GitHubTaskTracker implements TaskTracker {
     createTicket(input: CreateTicketInput): Promise<Ticket>;
     getTicket(id: string): Promise<Ticket>;
     linkTicketToEpic(ticketId: string, epicId: string): Promise<void>;
+    getTicketEpicId(ticketId: string): Promise<string | null>;
     blockTicket(ticketId: string, blockedById: string): Promise<void>;
     unblockTicket(ticketId: string, blockedById: string): Promise<void>;
     transitionTicket(ticketId: string, status: string): Promise<void>;

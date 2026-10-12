@@ -4,6 +4,7 @@ import { resolveBody } from "../resolve-body.js";
 import { portableContextGuard } from "../../portable-context/portable-context.js";
 import { DependencyPlannerService } from "../../dependency-planner/dependency-planner.js";
 import { ReviewPlanService } from "../../review-plan/review-plan.js";
+import { CrossEpicEdgeFinder } from "../../epic-boundary/epic-boundary.js";
 import type { PullRequestHost } from "../../../pr/pull-request-host/pull-request-host.js";
 import type { Config } from "../../../shared/config.js";
 
@@ -71,15 +72,19 @@ export function createInitiativeCommand(
       const epics = await Promise.all(initiativeData.epics.map((e) => tracker.getEpic(e.id)));
       const planner = new DependencyPlannerService();
       const plan = planner.plan(
-        epics
-          .flatMap((e) => e.childIssues)
-          .map((ticket) => ({
+        epics.flatMap((e) =>
+          e.childIssues.map((ticket) => ({
             id: ticket.id,
             status: ticket.status,
             blockedBy: ticket.blockedBy,
+            epicId: e.id,
           })),
+        ),
       );
-      process.stdout.write(JSON.stringify(plan) + "\n");
+      const edges = new CrossEpicEdgeFinder(tracker);
+      const crossEpicEdges = await edges.find(epics);
+      for (const warning of edges.warnings(crossEpicEdges)) process.stderr.write(warning + "\n");
+      process.stdout.write(JSON.stringify({ ...plan, crossEpicEdges }) + "\n");
       if (plan.cycles.length > 0) {
         throw new Error(`dependency cycle detected among tickets: ${plan.cycles.join(", ")}`);
       }
@@ -110,6 +115,9 @@ export function createInitiativeCommand(
       const defaultBranch = await host.defaultBranch();
 
       const result = reviewPlan.build({ plan, tickets, pullRequests, defaultBranch, inReviewStatus });
+      const edges = new CrossEpicEdgeFinder(tracker);
+      const crossEpicEdges = await edges.find(epics);
+      for (const warning of edges.warnings(crossEpicEdges)) process.stderr.write(warning + "\n");
       process.stdout.write(
         JSON.stringify({
           initiative: { id: initiativeData.id, title: initiativeData.title },
@@ -119,6 +127,7 @@ export function createInitiativeCommand(
           missing: result.missing,
           blocked: result.blocked,
           unblocksOnMerge: result.unblocksOnMerge,
+          crossEpicEdges,
         }) + "\n",
       );
       if (plan.cycles.length > 0) {

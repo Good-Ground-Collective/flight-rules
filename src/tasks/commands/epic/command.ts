@@ -6,6 +6,7 @@ import type { PullRequestHost } from '../../../pr/pull-request-host/pull-request
 import type { Config } from '../../../shared/config.js'
 import { ReviewPlanService } from '../../review-plan/review-plan.js'
 import { DependencyPlannerService } from '../../dependency-planner/dependency-planner.js'
+import { CrossEpicEdgeFinder } from '../../epic-boundary/epic-boundary.js'
 
 type CreateEpicOptions = {
   title: string
@@ -83,7 +84,8 @@ export function createEpicCommand(
     .exitOverride()
     .argument('<id>', 'epic id')
     .action(async (id: string) => {
-      const epicData = await getTracker().getEpic(id)
+      const tracker = getTracker()
+      const epicData = await tracker.getEpic(id)
       const planner = new DependencyPlannerService()
       const plan = planner.plan(
         epicData.childIssues.map((ticket) => ({
@@ -92,7 +94,10 @@ export function createEpicCommand(
           blockedBy: ticket.blockedBy,
         })),
       )
-      process.stdout.write(JSON.stringify(plan) + '\n')
+      const edges = new CrossEpicEdgeFinder(tracker)
+      const crossEpicEdges = await edges.find([epicData])
+      for (const warning of edges.warnings(crossEpicEdges)) process.stderr.write(warning + '\n')
+      process.stdout.write(JSON.stringify({ ...plan, crossEpicEdges }) + '\n')
       if (plan.cycles.length > 0) {
         throw new Error(`dependency cycle detected among tickets: ${plan.cycles.join(', ')}`)
       }
@@ -103,7 +108,8 @@ export function createEpicCommand(
     .exitOverride()
     .argument('<id>', 'epic id')
     .action(async (id: string) => {
-      const epicData = await getTracker().getEpic(id)
+      const tracker = getTracker()
+      const epicData = await tracker.getEpic(id)
       const plan = new DependencyPlannerService().plan(
         epicData.childIssues.map((ticket) => ({
           id: ticket.id,
@@ -126,6 +132,9 @@ export function createEpicCommand(
         defaultBranch,
         inReviewStatus,
       })
+      const edges = new CrossEpicEdgeFinder(tracker)
+      const crossEpicEdges = await edges.find([epicData])
+      for (const warning of edges.warnings(crossEpicEdges)) process.stderr.write(warning + '\n')
       process.stdout.write(
         JSON.stringify({
           epic: { id: epicData.id, title: epicData.title },
@@ -135,6 +144,7 @@ export function createEpicCommand(
           missing: result.missing,
           blocked: result.blocked,
           unblocksOnMerge: result.unblocksOnMerge,
+          crossEpicEdges,
         }) + '\n',
       )
       if (plan.cycles.length > 0) {

@@ -33,6 +33,7 @@ const makeTracker = (): TaskTracker => ({
   createTicket: vi.fn().mockResolvedValue(mockTicket),
   getTicket: vi.fn().mockResolvedValue(mockTicket),
   linkTicketToEpic: vi.fn(),
+  getTicketEpicId: vi.fn().mockResolvedValue(null),
   blockTicket: vi.fn(),
   unblockTicket: vi.fn(),
   transitionTicket: vi.fn(),
@@ -333,10 +334,118 @@ describe('ticket command', () => {
     output.mockRestore()
   })
 
-  it('calls blockTicket for "block"', async () => {
-    const tracker = makeTracker()
-    await run(tracker, ['block', '7', '--by', '3'])
-    expect(tracker.blockTicket).toHaveBeenCalledWith('7', '3')
+  describe('"block" epic boundary', () => {
+    const parents = (tracker: TaskTracker, epics: Record<string, string | null>) =>
+      vi.mocked(tracker.getTicketEpicId).mockImplementation(async (id: string) => epics[id] ?? null)
+
+    it('links two tickets in the same epic without a reason', async () => {
+      const tracker = makeTracker()
+      parents(tracker, { '7': '40', '3': '40' })
+      const errors = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+
+      await run(tracker, ['block', '7', '--by', '3'])
+
+      expect(tracker.getTicketEpicId).toHaveBeenCalledWith('7')
+      expect(tracker.getTicketEpicId).toHaveBeenCalledWith('3')
+      expect(tracker.blockTicket).toHaveBeenCalledWith('7', '3')
+      expect(tracker.addComment).not.toHaveBeenCalled()
+      expect(tracker.updateTicketMetadata).not.toHaveBeenCalled()
+      expect(errors).not.toHaveBeenCalled()
+      errors.mockRestore()
+    })
+
+    it('refuses a cross-epic link without --cross-epic-reason', async () => {
+      const tracker = makeTracker()
+      parents(tracker, { '7': '40', '3': '50' })
+
+      await expect(run(tracker, ['block', '7', '--by', '3'])).rejects.toThrow(
+        /refusing to block #7 \(epic #40\) on #3 \(epic #50\).*--cross-epic-reason/,
+      )
+
+      expect(tracker.blockTicket).not.toHaveBeenCalled()
+      expect(tracker.addComment).not.toHaveBeenCalled()
+    })
+
+    it('links across epics with a reason and records it on the dependent ticket', async () => {
+      const tracker = makeTracker()
+      parents(tracker, { '7': '40', '3': '50' })
+      vi.mocked(tracker.getTicket).mockResolvedValue({ ...mockTicket, metadata: { crossEpicReasons: { '9': 'older' } } })
+
+      await run(tracker, ['block', '7', '--by', '3', '--cross-epic-reason', '  the API contract ships\n in epic 50 '])
+
+      expect(tracker.blockTicket).toHaveBeenCalledWith('7', '3')
+      expect(tracker.addComment).toHaveBeenCalledWith(
+        '7',
+        'Cross-epic dependency: blocked by #3 (epic #50), while this ticket is in epic #40. Reason: the API contract ships in epic 50',
+      )
+      expect(tracker.updateTicketMetadata).toHaveBeenCalledWith('7', {
+        crossEpicReasons: { '9': 'older', '3': 'the API contract ships in epic 50' },
+      })
+      expect(vi.mocked(tracker.blockTicket).mock.invocationCallOrder[0]).toBeLessThan(
+        vi.mocked(tracker.addComment).mock.invocationCallOrder[0] ?? 0,
+      )
+    })
+
+    it('does not repeat the comment when the same reason is already recorded', async () => {
+      const tracker = makeTracker()
+      parents(tracker, { '7': '40', '3': '50' })
+      vi.mocked(tracker.getTicket).mockResolvedValue({ ...mockTicket, metadata: { crossEpicReasons: { '3': 'why' } } })
+
+      await run(tracker, ['block', '7', '--by', '3', '--cross-epic-reason', 'why'])
+
+      expect(tracker.blockTicket).toHaveBeenCalledWith('7', '3')
+      expect(tracker.addComment).not.toHaveBeenCalled()
+      expect(tracker.updateTicketMetadata).not.toHaveBeenCalled()
+    })
+
+    it('rejects an empty --cross-epic-reason before linking', async () => {
+      const tracker = makeTracker()
+      parents(tracker, { '7': '40', '3': '50' })
+
+      await expect(run(tracker, ['block', '7', '--by', '3', '--cross-epic-reason', '  '])).rejects.toThrow(
+        /one-line justification/,
+      )
+      expect(tracker.blockTicket).not.toHaveBeenCalled()
+    })
+
+    it('does not record a reason passed for a same-epic link', async () => {
+      const tracker = makeTracker()
+      parents(tracker, { '7': '40', '3': '40' })
+
+      await run(tracker, ['block', '7', '--by', '3', '--cross-epic-reason', 'not needed'])
+
+      expect(tracker.blockTicket).toHaveBeenCalledWith('7', '3')
+      expect(tracker.addComment).not.toHaveBeenCalled()
+    })
+
+    it('warns and links when a ticket has no parent epic', async () => {
+      const tracker = makeTracker()
+      parents(tracker, { '7': '40', '3': null })
+      const errors = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+
+      await run(tracker, ['block', '7', '--by', '3'])
+
+      expect(tracker.blockTicket).toHaveBeenCalledWith('7', '3')
+      expect(errors).toHaveBeenCalledWith('warning: #3 has no parent epic; the epic-boundary check was skipped\n')
+      errors.mockRestore()
+    })
+
+    it('warns and links when a parent epic lookup fails', async () => {
+      const tracker = makeTracker()
+      vi.mocked(tracker.getTicketEpicId).mockImplementation(async (id: string) => {
+        if (id === 'PROJ-7') throw new Error('Jira said 503')
+        return 'PROJ-1'
+      })
+      const errors = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+
+      await run(tracker, ['block', 'PROJ-7', '--by', 'PROJ-3'])
+
+      expect(tracker.blockTicket).toHaveBeenCalledWith('PROJ-7', 'PROJ-3')
+      expect(errors).toHaveBeenCalledWith(
+        'warning: could not resolve the parent epic of PROJ-7 (Jira said 503); the epic-boundary check was skipped\n',
+      )
+      errors.mockRestore()
+    })
   })
 
   it('calls unblockTicket for "unblock"', async () => {

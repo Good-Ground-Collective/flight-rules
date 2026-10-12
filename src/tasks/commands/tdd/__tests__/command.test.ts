@@ -21,6 +21,7 @@ const makeTracker = (): TaskTracker => ({
   createTicket: vi.fn(),
   getTicket: vi.fn(),
   linkTicketToEpic: vi.fn(),
+  getTicketEpicId: vi.fn(),
   blockTicket: vi.fn(),
   unblockTicket: vi.fn(),
   transitionTicket: vi.fn(),

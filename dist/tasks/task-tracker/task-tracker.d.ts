@@ -14,6 +14,7 @@ export declare const EntityMetadataSchema: z.ZodObject<{
         bug: "bug";
         story: "story";
     }>>;
+    crossEpicReasons: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
 }, z.core.$loose>;
 export type EntityMetadata = z.infer<typeof EntityMetadataSchema>;
 export declare const CommentSchema: z.ZodObject<{
@@ -50,6 +51,7 @@ export declare const TechnicalDesignSchema: z.ZodObject<{
             bug: "bug";
             story: "story";
         }>>;
+        crossEpicReasons: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
     }, z.core.$loose>>;
     updatedAt: z.ZodString;
 }, z.core.$strip>;
@@ -87,6 +89,7 @@ export declare const TicketSchema: z.ZodObject<{
             bug: "bug";
             story: "story";
         }>>;
+        crossEpicReasons: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
     }, z.core.$loose>>;
     updatedAt: z.ZodString;
 }, z.core.$strip>;
@@ -131,6 +134,7 @@ export declare const EpicSchema: z.ZodObject<{
                 bug: "bug";
                 story: "story";
             }>>;
+            crossEpicReasons: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
         }, z.core.$loose>>;
         updatedAt: z.ZodString;
     }, z.core.$strip>>;
@@ -161,6 +165,7 @@ export declare const EpicSchema: z.ZodObject<{
                 bug: "bug";
                 story: "story";
             }>>;
+            crossEpicReasons: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
         }, z.core.$loose>>;
         updatedAt: z.ZodString;
     }, z.core.$strip>>;
@@ -172,6 +177,7 @@ export declare const EpicSchema: z.ZodObject<{
             bug: "bug";
             story: "story";
         }>>;
+        crossEpicReasons: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
     }, z.core.$loose>>;
     updatedAt: z.ZodString;
 }, z.core.$strip>;
@@ -187,6 +193,7 @@ export declare const CreateEpicInputSchema: z.ZodObject<{
             bug: "bug";
             story: "story";
         }>>>;
+        crossEpicReasons: z.ZodOptional<z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>>;
     }, z.core.$loose>>;
 }, z.core.$strip>;
 export declare const CreateTicketInputSchema: z.ZodObject<{
@@ -203,6 +210,7 @@ export declare const CreateTicketInputSchema: z.ZodObject<{
             bug: "bug";
             story: "story";
         }>>>;
+        crossEpicReasons: z.ZodOptional<z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>>;
     }, z.core.$loose>>;
 }, z.core.$strip>;
 export declare const CreateTechnicalDesignInputSchema: z.ZodObject<{
@@ -217,6 +225,7 @@ export declare const CreateTechnicalDesignInputSchema: z.ZodObject<{
             bug: "bug";
             story: "story";
         }>>>;
+        crossEpicReasons: z.ZodOptional<z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>>;
     }, z.core.$loose>>;
 }, z.core.$strip>;
 /**
@@ -272,6 +281,8 @@ export interface TaskTracker {
     createTicket(input: CreateTicketInput): Promise<Ticket>;
     getTicket(id: string): Promise<Ticket>;
     linkTicketToEpic(ticketId: string, epicId: string): Promise<void>;
+    /** The ticket's parent epic id, or null when the ticket has no parent. */
+    getTicketEpicId(ticketId: string): Promise<string | null>;
     blockTicket(ticketId: string, blockedById: string): Promise<void>;
     unblockTicket(ticketId: string, blockedById: string): Promise<void>;
     transitionTicket(ticketId: string, status: string): Promise<void>;
