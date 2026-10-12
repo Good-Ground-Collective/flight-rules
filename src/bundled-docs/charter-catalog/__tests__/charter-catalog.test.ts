@@ -96,6 +96,15 @@ describe('bundled charters', () => {
   it('give TypeScript files the TypeScript charter', () => {
     expect(bundled.select(['src/index.ts']).map(charter => charter.id)).toContain('coding-charter-typescript')
   })
+  it('give Apex classes and triggers the Apex charter, not the TypeScript one', () => {
+    expect(bundled.select(['force-app/main/default/classes/IncidentService.cls', 'force-app/main/default/triggers/Incident.trigger']).map(charter => charter.id)).toEqual([
+      'coding-charter',
+      'coding-charter-apex',
+    ])
+  })
+  it('stay organization-neutral, leaving framework bindings to each repository', () => {
+    for (const charter of bundled.all()) expect(charter.contents, charter.id).not.toMatch(/think-?lp|thinksdk|ServiceRegistry__mdt|RestApiRouter/i)
+  })
   it('keep TypeScript mandates out of the core', () => {
     const core = bundled.select([])[0]?.contents ?? ''
     for (const mandate of ['M-3', 'M-4', 'M-5', 'M-6', 'M-7']) expect(core).not.toContain(`## ${mandate} `)
