@@ -31734,6 +31734,18 @@ var BoardStateFiles = class {
     mkdirSync3(this.folder(folder), { recursive: true, mode: 448 });
     writeFileSync3(path3, JSON.stringify(value), { mode: 384 });
   }
+  /** Writes a file only if none exists, atomically; returns whether it wrote. */
+  create(folder, id, value) {
+    const path3 = this.pathFor(folder, id);
+    if (path3 === void 0) return false;
+    mkdirSync3(this.folder(folder), { recursive: true, mode: 448 });
+    try {
+      writeFileSync3(path3, JSON.stringify(value), { mode: 384, flag: "wx" });
+      return true;
+    } catch {
+      return false;
+    }
+  }
   remove(folder, id) {
     const path3 = this.pathFor(folder, id);
     if (path3 !== void 0) rmSync(path3, { force: true });
@@ -31789,8 +31801,10 @@ var ThreadRecordSchema = external_exports.object({
   /** When the hook last spawned a branch lookup for this Claude Code session's main thread. */
   branchCheckedAt: external_exports.number().optional()
 });
+var ThreadSkillRecordSchema = external_exports.object({ skill: external_exports.string() });
 var inferredFolder = "inferred";
 var threadsFolder = "threads";
+var threadSkillsFolder = "thread-skills";
 var unsafeSessionCharacters = /[^A-Za-z0-9_-]/g;
 var maxSessionLength = 80;
 var TicketSessionKey = class {
@@ -31818,6 +31832,28 @@ var BoardSessionStore = class {
   record(heartbeat) {
     const now = this.now();
     this.files.write(void 0, heartbeat.session, { heartbeat: this.compact(heartbeat), recordedAt: now, sentAt: now });
+  }
+  /**
+   * The skill heartbeat a skill recorded for the session within `maxAgeMs`,
+   * whatever its state; an older record counts as none.
+   */
+  recent(session, maxAgeMs) {
+    const record2 = this.read(session);
+    return record2 !== void 0 && this.now() - record2.recordedAt <= maxAgeMs ? record2.heartbeat : void 0;
+  }
+  /**
+   * Remembers a placeholder heartbeat only where no skill has recorded a
+   * recent one: a fresh record is never replaced, and a missing file is
+   * created atomically, so a skill's own heartbeat landing at the same
+   * moment from another process wins. Returns whether it was remembered.
+   */
+  recordIfAbsent(heartbeat, maxAgeMs) {
+    if (this.recent(heartbeat.session, maxAgeMs) !== void 0) return false;
+    const now = this.now();
+    const record2 = { heartbeat: this.compact(heartbeat), recordedAt: now, sentAt: now };
+    if (this.read(heartbeat.session) === void 0) return this.files.create(void 0, heartbeat.session, record2);
+    this.files.write(void 0, heartbeat.session, record2);
+    return true;
   }
   /**
    * Claims the next liveness heartbeat for a session: returns its record and
@@ -31876,10 +31912,20 @@ var BoardSessionStore = class {
     this.files.write(threadsFolder, claudeSession, { ...thread, branchCheckedAt: now });
     return true;
   }
+  /** Remembers the skill this Claude Code session's main thread just loaded. */
+  recordThreadSkill(claudeSession, skill) {
+    if (this.threadSkill(claudeSession) === skill) return;
+    this.files.write(threadSkillsFolder, claudeSession, { skill });
+  }
+  /** The skill this Claude Code session's main thread last loaded, if any. */
+  threadSkill(claudeSession) {
+    return this.files.read(threadSkillsFolder, claudeSession, ThreadSkillRecordSchema)?.skill;
+  }
   /** Deletes inferred heartbeats and thread records untouched for `maxAgeMs`. */
   prune(maxAgeMs) {
     this.files.prune(inferredFolder, maxAgeMs);
     this.files.prune(threadsFolder, maxAgeMs);
+    this.files.prune(threadSkillsFolder, maxAgeMs);
   }
   thread(claudeSession) {
     return this.files.read(threadsFolder, claudeSession, ThreadRecordSchema);
@@ -31896,6 +31942,7 @@ var BoardSessionStore = class {
 // src/shared/ariadne/ariadne-board.ts
 var claudeSessionEnv = "CLAUDE_CODE_SESSION_ID";
 var bootstrapStep = "started";
+var bootstrapRecoveryMs = 60 * 6e4;
 var personalScopes = /* @__PURE__ */ new Set(["user", "local"]);
 var scopeLabels = {
   user: "user settings",
@@ -32027,14 +32074,19 @@ var AriadneBoard = class {
   }
   /**
    * Posts an item. A session that has never sent a heartbeat (or has aged
-   * out) gets one first, with step `started` and state `nominal`, and the item
-   * is posted again. A live session's step is never overwritten this way.
+   * out) gets one first, with step `started`, state `nominal` and the
+   * reporting skill when one is named, and the item is posted again. A live
+   * session's step is never overwritten this way.
    */
   async item(input2, options = {}) {
     return this.call(
       options,
       input2.session,
-      (client, session) => this.withSession(client, session, input2.ticket, () => client.postItem({ ...input2, session })),
+      (client, session) => this.withSession(
+        client,
+        { session, ticket: input2.ticket, skill: options.skill, defaulted: input2.session === void 0 },
+        () => client.postItem({ ...input2, session })
+      ),
       input2.ticket
     );
   }
@@ -32043,7 +32095,11 @@ var AriadneBoard = class {
     return this.call(
       options,
       input2.session,
-      (client, session) => this.withSession(client, session, input2.ticket, () => client.postActivity({ ...input2, session })),
+      (client, session) => this.withSession(
+        client,
+        { session, ticket: input2.ticket, skill: options.skill, defaulted: input2.session === void 0 },
+        () => client.postActivity({ ...input2, session })
+      ),
       input2.ticket
     );
   }
@@ -32071,14 +32127,47 @@ var AriadneBoard = class {
       return;
     }
   }
-  async withSession(client, session, ticket, post) {
+  /**
+   * Runs `post`, first creating the session when the API has none. A skill
+   * heartbeat recorded for the session in the last hour, such as one that
+   * failed in transit, creates it with its own step and state. Otherwise the
+   * session starts as `started`, and when a skill is named that placeholder
+   * is remembered as the skill's heartbeat, so the heartbeat hook keeps it
+   * alive and never replaces its skill with an agent type it infers. The
+   * placeholder never replaces a heartbeat a skill recorded meanwhile.
+   */
+  async withSession(client, target, post) {
     try {
       return await post();
     } catch (err) {
       if (!(err instanceof AriadneError) || err.code !== "session_not_found") throw err;
     }
-    await client.heartbeat({ session, ticket, step: bootstrapStep, state: "nominal" });
+    const { session, ticket, skill, defaulted } = target;
+    const recorded = this.bestEffort(() => this.sessions?.recent(session, bootstrapRecoveryMs));
+    if (recorded !== void 0) {
+      await client.heartbeat(recorded);
+      return post();
+    }
+    const named = skill !== void 0 && skill !== "";
+    const heartbeat = { session, ticket, step: bootstrapStep, state: "nominal", ...named ? { skill } : {} };
+    await client.heartbeat(heartbeat);
+    if (named) this.rememberPlaceholder(heartbeat, defaulted);
     return post();
+  }
+  rememberPlaceholder(heartbeat, defaulted) {
+    const remembered = this.bestEffort(() => this.sessions?.recordIfAbsent(heartbeat, bootstrapRecoveryMs));
+    const claudeSession = this.defaultSession();
+    if (remembered === true && defaulted && claudeSession !== void 0 && claudeSession !== heartbeat.session) {
+      this.bestEffort(() => this.sessions?.pointThread(claudeSession, heartbeat.session));
+    }
+  }
+  /** Local state is best effort: a full or unreadable disk must not fail a report. */
+  bestEffort(run2) {
+    try {
+      return run2();
+    } catch {
+      return void 0;
+    }
   }
   async call(options, requestedSession, run2, ticket) {
     let settings;
@@ -32403,8 +32492,10 @@ var AgentRecordSchema = external_exports.object({
   session: external_exports.string(),
   at: external_exports.number()
 });
+var AgentSkillRecordSchema = external_exports.object({ skill: external_exports.string() });
 var dispatchFolder = "dispatch";
 var agentsFolder = "agents";
+var agentSkillsFolder = "agent-skills";
 var BoardAgentStore = class {
   files;
   constructor(props = {}) {
@@ -32441,11 +32532,21 @@ var BoardAgentStore = class {
   }
   removeAgent(agentId) {
     this.files.remove(agentsFolder, agentId);
+    this.files.remove(agentSkillsFolder, agentId);
+  }
+  /** Remembers the skill a sub-agent just loaded; rewrites nothing when it is unchanged. */
+  recordAgentSkill(agentId, skill) {
+    if (this.readAgentSkill(agentId) === skill) return;
+    this.files.write(agentSkillsFolder, agentId, { skill });
+  }
+  readAgentSkill(agentId) {
+    return this.files.read(agentSkillsFolder, agentId, AgentSkillRecordSchema)?.skill;
   }
   /** Deletes dispatch and sub-agent records untouched for `maxAgeMs`. */
   prune(maxAgeMs) {
     this.files.prune(dispatchFolder, maxAgeMs);
     this.files.prune(agentsFolder, maxAgeMs);
+    this.files.prune(agentSkillsFolder, maxAgeMs);
   }
 };
 
@@ -48945,6 +49046,8 @@ var HiddenPrompt = class {
 var ticketHelp = "Jira issue key";
 var sessionHelp = "session id; defaults to <$CLAUDE_CODE_SESSION_ID>-<TICKET>, the row the heartbeat hook keeps alive for that ticket";
 var itemsSessionHelp = "session id; defaults to <$CLAUDE_CODE_SESSION_ID>-<TICKET> with --ticket, else $CLAUDE_CODE_SESSION_ID";
+var skillHelp = "the skill reporting, e.g. flight-rules:execute-work";
+var bootstrapSkillHelp = `${skillHelp}; names the skill on a session this post has to create`;
 var strictHelp = "exit 1 when the post fails, and post even without a token so a missing one fails with 401";
 function createBoardCommand(getBoard, getTokens = () => new AriadneTokenStore(), readSecret = () => new HiddenPrompt().read("Ariadne agent token: ")) {
   const board = new Command("board").description("report this run to Ariadne's Agents page (opt-in; silent unless an Ariadne token is set)").addHelpText(
@@ -48984,7 +49087,7 @@ function createBoardCommand(getBoard, getTokens = () => new AriadneTokenStore(),
   const post = new Command("post").description("send a heartbeat, an item that needs a person, or an activity line");
   post.exitOverride();
   withReportOptions(
-    post.command("heartbeat").description("create or update this session: ticket, step and state").requiredOption("--ticket <key>", ticketHelp).requiredOption("--step <step>", "one line up to 60 characters: implement, verify 2/3, pr, qa").addOption(new Option("--state <state>", "how the run is going").choices(agentStates).makeOptionMandatory()).option("--branch <branch>", "the branch as git prints it").option("--repo <repo>", "owner/name").option("--skill <skill>", "the skill reporting, e.g. flight-rules:execute-work").option("--detail <line>", "one line up to 500 characters"),
+    post.command("heartbeat").description("create or update this session: ticket, step and state").requiredOption("--ticket <key>", ticketHelp).requiredOption("--step <step>", "one line up to 60 characters: implement, verify 2/3, pr, qa").addOption(new Option("--state <state>", "how the run is going").choices(agentStates).makeOptionMandatory()).option("--branch <branch>", "the branch as git prints it").option("--repo <repo>", "owner/name").option("--skill <skill>", skillHelp).option("--detail <line>", "one line up to 500 characters"),
     "print the API response {session} as JSON"
   ).action(async (opts) => {
     const outcome = await getBoard().heartbeat(
@@ -49003,7 +49106,7 @@ function createBoardCommand(getBoard, getTokens = () => new AriadneTokenStore(),
     finish(outcome, opts, printJson(opts));
   });
   withReportOptions(
-    post.command("item").description("ask a person for something: a question, blocker, testable or wave gate, with up to 6 options").addOption(new Option("--kind <kind>", "what the person is asked for").choices(agentItemKinds).makeOptionMandatory()).requiredOption("--ticket <key>", ticketHelp).requiredOption("--title <text>", "one line up to 200 characters").option("--detail <text>", "up to 2,000 characters; line breaks allowed").option("--option <label>", "an answer the person can choose (repeatable, up to 6)", collect, []).option("--id <id>", "client id; reposting the same id returns the stored item and its chosenOption"),
+    post.command("item").description("ask a person for something: a question, blocker, testable or wave gate, with up to 6 options").addOption(new Option("--kind <kind>", "what the person is asked for").choices(agentItemKinds).makeOptionMandatory()).requiredOption("--ticket <key>", ticketHelp).requiredOption("--title <text>", "one line up to 200 characters").option("--detail <text>", "up to 2,000 characters; line breaks allowed").option("--option <label>", "an answer the person can choose (repeatable, up to 6)", collect, []).option("--id <id>", "client id; reposting the same id returns the stored item and its chosenOption").option("--skill <skill>", bootstrapSkillHelp),
     "print the API response {item, created} as JSON, including any chosenOption"
   ).action(async (opts) => {
     const outcome = await getBoard().item(
@@ -49016,17 +49119,17 @@ function createBoardCommand(getBoard, getTokens = () => new AriadneTokenStore(),
         ...opts.option.length > 0 ? { options: opts.option } : {},
         id: opts.id
       },
-      { strict: opts.strict === true }
+      { strict: opts.strict === true, skill: opts.skill }
     );
     finish(outcome, opts, printJson(opts));
   });
   withReportOptions(
-    post.command("activity").description("add one line to the session's activity stream").requiredOption("--ticket <key>", ticketHelp).requiredOption("--text <line>", "one line up to 500 characters").addOption(new Option("--level <level>", "defaults to info").choices(agentActivityLevels)).option("--id <id>", "client id; reposting the same id stores nothing new"),
+    post.command("activity").description("add one line to the session's activity stream").requiredOption("--ticket <key>", ticketHelp).requiredOption("--text <line>", "one line up to 500 characters").addOption(new Option("--level <level>", "defaults to info").choices(agentActivityLevels)).option("--id <id>", "client id; reposting the same id stores nothing new").option("--skill <skill>", bootstrapSkillHelp),
     "print the API response {activity, created} as JSON"
   ).action(async (opts) => {
     const outcome = await getBoard().activity(
       { session: opts.session, ticket: opts.ticket, text: opts.text, level: opts.level, id: opts.id },
-      { strict: opts.strict === true }
+      { strict: opts.strict === true, skill: opts.skill }
     );
     finish(outcome, opts, printJson(opts));
   });
@@ -50511,8 +50614,10 @@ var PostToolUseInputSchema = external_exports.looseObject({
   cwd: external_exports.string().optional(),
   tool_name: external_exports.string().optional(),
   tool_use_id: external_exports.string().optional(),
+  tool_input: external_exports.unknown().optional(),
   tool_response: external_exports.unknown().optional()
 });
+var SkillCallSchema = external_exports.looseObject({ skill: external_exports.string() });
 var AsyncLaunchSchema = external_exports.looseObject({ status: external_exports.literal("async_launched"), agentId: external_exports.string() });
 var SubagentStopInputSchema = external_exports.looseObject({
   session_id: external_exports.string(),
@@ -50543,7 +50648,9 @@ var BoardHeartbeatHook = class {
     const input2 = parsed.data;
     const claudeSession = input2.session_id;
     this.bridgeBackgroundLaunch(input2);
+    const invoked = this.invokedSkill(input2);
     if (input2.agent_id !== void 0) {
+      if (invoked !== void 0) this.agents?.recordAgentSkill(input2.agent_id, invoked);
       const mapping = this.resolver?.resolve({
         agentId: input2.agent_id,
         session: claudeSession,
@@ -50552,20 +50659,22 @@ var BoardHeartbeatHook = class {
       });
       if (mapping !== void 0 && mapping.ticket !== null) {
         const ticket = mapping.ticket;
-        const agentType = mapping.agentType ?? input2.agent_type;
+        const skill2 = this.agents?.readAgentSkill(input2.agent_id) ?? mapping.agentType ?? input2.agent_type;
         return this.dueForTicket(
           claudeSession,
           ticket,
-          (session) => this.subagentHeartbeat(session, ticket, mapping.description, agentType)
+          (session) => this.subagentHeartbeat(session, ticket, mapping.description, skill2)
         );
       }
+    } else if (invoked !== void 0) {
+      this.sessions.recordThreadSkill(claudeSession, invoked);
     }
     const skill = this.skillThread(claudeSession);
     if (skill !== void 0) return this.send(this.sessions.claim(skill, heartbeatIntervalMs, heartbeatMaxAgeMs)?.heartbeat.session);
     if (input2.agent_id !== void 0 || input2.cwd === void 0) return void 0;
     const fromCheckout = this.extractor.firstKey(basename4(input2.cwd));
     if (fromCheckout !== void 0) {
-      return this.dueForTicket(claudeSession, fromCheckout, (session) => this.checkoutHeartbeat(session, fromCheckout));
+      return this.dueForTicket(claudeSession, fromCheckout, (session) => this.checkoutHeartbeat(claudeSession, session, fromCheckout));
     }
     if (!this.sessions.claimBranchCheck(claudeSession, heartbeatIntervalMs) || !this.reportable()) return void 0;
     return { kind: "branch", claudeSession, cwd: input2.cwd };
@@ -50577,7 +50686,7 @@ var BoardHeartbeatHook = class {
   dueForBranch(claudeSession, branch) {
     const ticket = this.extractor.firstKey(branch);
     if (ticket === void 0) return void 0;
-    const due = this.dueForTicket(claudeSession, ticket, (session) => this.checkoutHeartbeat(session, ticket, branch));
+    const due = this.dueForTicket(claudeSession, ticket, (session) => this.checkoutHeartbeat(claudeSession, session, ticket, branch));
     return due?.kind === "send" ? due.session : void 0;
   }
   /**
@@ -50626,14 +50735,22 @@ var BoardHeartbeatHook = class {
     const pointed = this.sessions.threadSession(claudeSession);
     return pointed !== void 0 && this.sessions.isLive(pointed, heartbeatMaxAgeMs) ? pointed : void 0;
   }
+  /** The skill a Skill tool call just loaded, when it is a name Ariadne accepts. */
+  invokedSkill(input2) {
+    if (input2.tool_name !== "Skill") return void 0;
+    const call = SkillCallSchema.safeParse(input2.tool_input);
+    if (!call.success) return void 0;
+    const skill = SkillNameSchema.safeParse(call.data.skill);
+    return skill.success ? skill.data : void 0;
+  }
   bridgeBackgroundLaunch(input2) {
     if (input2.tool_name !== "Agent" || input2.tool_use_id === void 0) return;
     const launch = AsyncLaunchSchema.safeParse(input2.tool_response);
     if (launch.success) this.resolver?.bridge(launch.data.agentId, input2.tool_use_id, input2.session_id);
   }
-  subagentHeartbeat(session, ticket, description, agentType) {
+  subagentHeartbeat(session, ticket, description, skillName) {
     const step = StepSchema.safeParse(description ?? "");
-    const skill = SkillNameSchema.safeParse(agentType);
+    const skill = SkillNameSchema.safeParse(skillName);
     return {
       session,
       ticket,
@@ -50642,8 +50759,17 @@ var BoardHeartbeatHook = class {
       ...skill.success && skill.data !== void 0 ? { skill: skill.data } : {}
     };
   }
-  checkoutHeartbeat(session, ticket, branch) {
-    return { session, ticket, step: checkoutStep, state: "nominal", ...branch !== void 0 ? { branch } : {} };
+  /** A main thread's heartbeat names the skill it last loaded, when it loaded one. */
+  checkoutHeartbeat(claudeSession, session, ticket, branch) {
+    const skill = this.sessions.threadSkill(claudeSession);
+    return {
+      session,
+      ticket,
+      step: checkoutStep,
+      state: "nominal",
+      ...branch !== void 0 ? { branch } : {},
+      ...skill !== void 0 ? { skill } : {}
+    };
   }
   send(session) {
     return session === void 0 ? void 0 : { kind: "send", session };

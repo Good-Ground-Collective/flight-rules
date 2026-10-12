@@ -26,17 +26,25 @@ const AgentRecordSchema = z.object({
   at: z.number(),
 });
 
+/** The skill a sub-agent last loaded through the Skill tool; reported in place of its agent type. */
+const AgentSkillRecordSchema = z.object({ skill: z.string() });
+
 export type AgentDispatchRecord = z.infer<typeof DispatchRecordSchema>;
 export type AgentTicketRecord = z.infer<typeof AgentRecordSchema>;
 
 const dispatchFolder = "dispatch";
 const agentsFolder = "agents";
+const agentSkillsFolder = "agent-skills";
 
 /**
  * Which Jira ticket each sub-agent works on, kept beside the board session
  * records: `dispatch/<tool_use_id>.json` is written when an Agent call is
  * made, and `agents/<agent_id>.json` caches what each sub-agent resolved to,
  * including "no ticket", so it is worked out once per sub-agent.
+ * `agent-skills/<agent_id>.json` holds the skill it loaded. It is a separate
+ * file because the parent's background-launch hook and the sub-agent's own
+ * hooks write the mapping from different processes, and neither may undo the
+ * other's skill.
  */
 export class BoardAgentStore {
   private readonly files: BoardStateFiles;
@@ -83,11 +91,23 @@ export class BoardAgentStore {
 
   removeAgent(agentId: string): void {
     this.files.remove(agentsFolder, agentId);
+    this.files.remove(agentSkillsFolder, agentId);
+  }
+
+  /** Remembers the skill a sub-agent just loaded; rewrites nothing when it is unchanged. */
+  recordAgentSkill(agentId: string, skill: string): void {
+    if (this.readAgentSkill(agentId) === skill) return;
+    this.files.write(agentSkillsFolder, agentId, { skill });
+  }
+
+  readAgentSkill(agentId: string): string | undefined {
+    return this.files.read(agentSkillsFolder, agentId, AgentSkillRecordSchema)?.skill;
   }
 
   /** Deletes dispatch and sub-agent records untouched for `maxAgeMs`. */
   prune(maxAgeMs: number): void {
     this.files.prune(dispatchFolder, maxAgeMs);
     this.files.prune(agentsFolder, maxAgeMs);
+    this.files.prune(agentSkillsFolder, maxAgeMs);
   }
 }

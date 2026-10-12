@@ -132,7 +132,7 @@ Questions to ask: "Which status means work has started?", "Which status means a 
 The repo question is closed, so also post it to Ariadne when you ask it in chat:
 
 ```bash
-flight-rules board post item --kind question --ticket <id> --title "Open PRs against <owner/repo>?" --option Yes --option No
+flight-rules board post item --skill flight-rules:execute-work --kind question --ticket <id> --title "Open PRs against <owner/repo>?" --option Yes --option No
 ```
 
 The first answer wins. If the person says they answered in Ariadne, read the answer from `chosenOption` in `flight-rules board items --ticket <id> --json`. A `No` still needs the right `owner/repo` from chat.
@@ -424,7 +424,7 @@ flight-rules pr create --type <type> --scope <id> --description "<description>" 
 Report the open PR, with `<number>` from the URL `pr create` printed:
 
 ```bash
-flight-rules board post activity --ticket <id> --text "Opened PR #<number>" --level success
+flight-rules board post activity --skill flight-rules:execute-work --ticket <id> --text "Opened PR #<number>" --level success
 ```
 
 **Move the ticket:**

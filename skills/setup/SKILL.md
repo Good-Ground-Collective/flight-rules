@@ -291,7 +291,7 @@ If not, skip this step; every `flight-rules board` command stays silent without 
 Never ask the user to paste the token into this conversation, and never print it. Once they say it is set, check it:
 
 ```bash
-flight-rules board post heartbeat --ticket <any Jira key> --step setup --state nominal --session setup-check --strict
+flight-rules board post heartbeat --skill flight-rules:setup --ticket <any Jira key> --step setup --state nominal --session setup-check --strict
 ```
 
 Exit 0 means reporting works. Otherwise show the one-line reason it printed; `agents_opt_in_required` means Agents is still off in Ariadne, and `401` means the token is missing, expired or not recognised.

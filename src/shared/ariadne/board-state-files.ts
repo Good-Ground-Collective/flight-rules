@@ -52,6 +52,19 @@ export class BoardStateFiles {
     writeFileSync(path, JSON.stringify(value), { mode: 0o600 });
   }
 
+  /** Writes a file only if none exists, atomically; returns whether it wrote. */
+  create(folder: string | undefined, id: string, value: unknown): boolean {
+    const path = this.pathFor(folder, id);
+    if (path === undefined) return false;
+    mkdirSync(this.folder(folder), { recursive: true, mode: 0o700 });
+    try {
+      writeFileSync(path, JSON.stringify(value), { mode: 0o600, flag: "wx" });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   remove(folder: string | undefined, id: string): void {
     const path = this.pathFor(folder, id);
     if (path !== undefined) rmSync(path, { force: true });

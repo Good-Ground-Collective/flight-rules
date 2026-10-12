@@ -71,10 +71,11 @@ flight-rules ticket label <id> --add Agentic-Verification-In-Progress
 
 This is the lock. From here on, a CLI error must clear it before you stop (see Error handling).
 
-The change is deployed and about to be checked, so report it as testable:
+The change is deployed and about to be checked, so put the run on its QA step and report it as testable:
 
 ```bash
-flight-rules board post item --kind testable --ticket <id> --title "<id> is deployed to <environment> and ready to test"
+flight-rules board post heartbeat --ticket <id> --step qa --state nominal --skill flight-rules:verify-ticket --detail "Verifying on <environment>"
+flight-rules board post item --kind testable --ticket <id> --skill flight-rules:verify-ticket --title "<id> is deployed to <environment> and ready to test"
 ```
 
 ### 4. Fetch the contract fresh
@@ -126,7 +127,8 @@ Read the single trailing `yaml` block it returns: `items[].{item, verdict, evide
    ```
 
    ```bash
-   flight-rules board post activity --ticket <id> --level success --text "Verified on <environment>: <m> of <m> passed; labelled Agentic-Verification-Success"
+   flight-rules board post heartbeat --ticket <id> --step qa --state nominal --skill flight-rules:verify-ticket --detail "Verified on <environment>: <m> of <m> passed"
+   flight-rules board post activity --ticket <id> --level success --skill flight-rules:verify-ticket --text "Verified on <environment>: <m> of <m> passed; labelled Agentic-Verification-Success"
    ```
 
    Repeat `--attach` once per manifest item, referencing each in the body as `![<caption>](./<basename>)` with the same basename.
@@ -138,7 +140,8 @@ Read the single trailing `yaml` block it returns: `items[].{item, verdict, evide
    ```
 
    ```bash
-   flight-rules board post activity --ticket <id> --level abort --text "Verification failed on <environment>: <n> of <m> failed; labelled Agentic-Verification-Failure"
+   flight-rules board post heartbeat --ticket <id> --step qa --state abort --skill flight-rules:verify-ticket --detail "Verification failed on <environment>: <n> of <m> failed"
+   flight-rules board post activity --ticket <id> --level abort --skill flight-rules:verify-ticket --text "Verification failed on <environment>: <n> of <m> failed; labelled Agentic-Verification-Failure"
    ```
 
 3. **Any UNVERIFIABLE and no FAIL** — the item could not be tested as handed over, which is a contract or environment problem, not a demonstrated defect. Write a comment: `Verification could not complete.` then one line per UNVERIFIABLE item with its evidence and the matching `openQuestions` entry. Post it with `ticket comment`, then remove the lock and add **no** outcome label:
@@ -148,7 +151,8 @@ Read the single trailing `yaml` block it returns: `items[].{item, verdict, evide
    ```
 
    ```bash
-   flight-rules board post activity --ticket <id> --level caution --text "Verification could not complete on <environment>; no outcome label"
+   flight-rules board post heartbeat --ticket <id> --step qa --state caution --skill flight-rules:verify-ticket --detail "Verification could not complete on <environment>"
+   flight-rules board post activity --ticket <id> --level caution --skill flight-rules:verify-ticket --text "Verification could not complete on <environment>; no outcome label"
    ```
 
    Surface every `openQuestions` entry to the user in the report.
