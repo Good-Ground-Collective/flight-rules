@@ -25,12 +25,13 @@ describe("review policy charters", () => {
     expect(ids(["README.md"])).toEqual(["coding-charter"]);
   });
   it("lists every Tier A mandate of the selected charters", () => {
-    expect(policy.load({ paths: ["README.md"] }).tierA).toEqual(["M-1", "M-2", "M-10", "M-11"]);
+    expect(policy.load({ paths: ["README.md"] }).tierA).toEqual(["M-1", "M-2", "M-10", "M-11", "M-14"]);
     expect(policy.load({ paths: ["src/review.ts"] }).tierA).toEqual([
       "M-1",
       "M-2",
       "M-10",
       "M-11",
+      "M-14",
       "M-3",
       "M-5",
       "M-7",
