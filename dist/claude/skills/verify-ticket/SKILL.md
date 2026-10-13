@@ -11,6 +11,12 @@ This is the skill that confirms the thing. You are handed a **ticket id**; you h
 
 **Terminal state:** the ticket carries a verdict comment with a per-item verdict and after evidence, plus exactly one of `Agentic-Verification-Success` or `Agentic-Verification-Failure` — or, when an item was UNVERIFIABLE, no outcome label and a comment stating what blocked verification.
 
+## Orchestration context
+
+Read `flight-rules doc orchestration-interface` and `flight-rules doc native-orchestration`. Preserve or initialize the ticket's caller context (run/task IDs, active checkout, working directory, fixed base and attempt 1). Use `dispatch` with `qa-engineer-verify`; validate its role report against the original request identity and context. Missing dispatch/capability evidence or insufficient depth is a named stop before the first ticket mutation. Invoke sibling skills in the same caller context, without an extra worker level.
+
+This invocation is unattended: `allowHumanQuestions` is always false. Return `needs`/`openQuestions` with the named failure, without invoking `ask`, publishing a question or inferring an answer. A failed or malformed worker outcome is not a product FAIL verdict. Preserve the existing per-item QA verdict and label rules below.
+
 ## Preconditions
 
 - You are handed a **ticket id**.

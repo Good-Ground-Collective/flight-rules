@@ -1056,7 +1056,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.74.0";
+var appVersion = false ? "0.0.0-dev" : "1.75.0";
 
 // src/shared/ariadne/review-packet.schema.ts
 import { z as z11 } from "zod";
@@ -6119,6 +6119,123 @@ var VerifiedImplementationLoop = class {
     };
   }
 };
+
+// src/orchestration/dispatch-queue.ts
+import { z as z33 } from "zod";
+var DispatchQueuePropsSchema = z33.strictObject({
+  agents: z33.array(AgentDefinitionSchema).min(1),
+  requests: z33.array(DispatchRequestSchema).refine(
+    (requests) => new Set(requests.map((request) => request.id)).size === requests.length,
+    "dispatch IDs must be unique"
+  ),
+  maxConcurrent: z33.int().positive()
+});
+var ObservedDispatchIdsSchema = z33.array(z33.string().min(1)).refine((ids) => new Set(ids).size === ids.length, "observed dispatch IDs must be unique");
+var InvalidDispatchQueueStateError = class extends Error {
+  name = "InvalidDispatchQueueStateError";
+};
+var BoundedDispatchQueue = class {
+  policy;
+  reports = new ValidatedReportHandoff();
+  requests;
+  maxConcurrent;
+  active = /* @__PURE__ */ new Map();
+  outcomes = /* @__PURE__ */ new Map();
+  cursor = 0;
+  batchSealed = false;
+  constructor(props) {
+    const input = DispatchQueuePropsSchema.parse(props);
+    this.policy = new RegistryOrchestrationPolicy({ agents: input.agents });
+    this.requests = input.requests;
+    this.maxConcurrent = input.maxConcurrent;
+  }
+  pending() {
+    const request = this.requests[this.cursor];
+    return request === void 0 ? void 0 : DispatchRequestSchema.parse(request);
+  }
+  admit(runtime, observedDispatchIds) {
+    const complete = this.results();
+    if (complete !== void 0) return { status: "complete", outcomes: complete };
+    if (this.active.size > 0 && (this.batchSealed || this.active.size >= this.maxConcurrent || this.cursor === this.requests.length)) {
+      this.batchSealed = true;
+      return { status: "waiting", dispatchIds: [...this.active.keys()] };
+    }
+    const request = this.pending();
+    if (request === void 0)
+      throw new InvalidDispatchQueueStateError("Unsettled queue has no pending or active requests");
+    const snapshot = RuntimeSnapshotSchema.parse(runtime);
+    const observed = ObservedDispatchIdsSchema.parse(observedDispatchIds);
+    if (observed.some((id) => !this.active.has(id)) || observed.length > snapshot.limits.activeWorkers) {
+      throw new InvalidDispatchQueueStateError(
+        "Observed local dispatches must be active reservations included in the host worker count"
+      );
+    }
+    const unobservedReservations = this.active.size - observed.length;
+    const decision = this.policy.prepare(request, {
+      ...snapshot,
+      limits: {
+        ...snapshot.limits,
+        activeWorkers: snapshot.limits.activeWorkers + unobservedReservations
+      }
+    });
+    if (decision.status === "unavailable" && decision.failure.code === "CAPACITY_EXHAUSTED" && this.active.size > 0) {
+      this.batchSealed = true;
+      return { status: "waiting", dispatchIds: [...this.active.keys()] };
+    }
+    this.cursor++;
+    if (decision.status === "unavailable") {
+      const outcome = {
+        status: "unavailable",
+        dispatchId: request.id,
+        agent: request.agent,
+        context: request.context,
+        failure: decision.failure
+      };
+      this.outcomes.set(request.id, structuredClone(outcome));
+      return { status: "unavailable", outcome };
+    }
+    this.active.set(request.id, DispatchRequestSchema.parse(request));
+    if (this.active.size === this.maxConcurrent) this.batchSealed = true;
+    return decision;
+  }
+  settle(dispatchId, outcome, schema) {
+    const request = this.active.get(dispatchId);
+    if (request === void 0)
+      throw new InvalidDispatchQueueStateError(`No active reservation for ${dispatchId}`);
+    const result = this.reports.accept(request, outcome, schema);
+    if (result.status === "rejected") return result;
+    this.outcomes.set(dispatchId, structuredClone(result.outcome));
+    this.active.delete(dispatchId);
+    this.batchSealed = this.active.size > 0;
+    return result;
+  }
+  cancel() {
+    for (const request of this.requests.slice(this.cursor)) {
+      this.outcomes.set(request.id, {
+        status: "failed",
+        dispatchId: request.id,
+        agent: request.agent,
+        context: request.context,
+        failure: {
+          code: "CANCELLED",
+          message: "The caller cancelled queued work before dispatch.",
+          remedy: "Start a new invocation only when the caller chooses to resume."
+        }
+      });
+    }
+    this.cursor = this.requests.length;
+    this.batchSealed = this.active.size > 0;
+  }
+  results() {
+    if (this.outcomes.size !== this.requests.length) return void 0;
+    return this.requests.map((request) => {
+      const outcome = this.outcomes.get(request.id);
+      if (outcome === void 0)
+        throw new InvalidDispatchQueueStateError(`Missing terminal outcome for ${request.id}`);
+      return structuredClone(outcome);
+    });
+  }
+};
 export {
   AdapterLimitsSchema,
   AgentCapabilitySchema,
@@ -6128,6 +6245,7 @@ export {
   BlobSectionSource,
   BodyMetadataService,
   BodySectionSelector,
+  BoundedDispatchQueue,
   CallerContextSchema,
   CapabilityEvidenceSchema,
   ClaudeSettingsSource,
@@ -6161,6 +6279,7 @@ export {
   ImplementationRunSchema,
   InitiativeSchema,
   InvalidAgentDefinitionError,
+  InvalidDispatchQueueStateError,
   InvalidPluginSourceError,
   JiraTaskTracker,
   LayeredBodyAdfConverter,

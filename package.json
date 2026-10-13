@@ -1,6 +1,6 @@
 {
   "name": "@good-ground-collective/flight-rules",
-  "version": "1.74.0",
+  "version": "1.75.0",
   "description": "Harness-agnostic software workflow skills and review library",
   "repository": {
     "type": "git",

@@ -24,6 +24,12 @@ building on unreviewed work.
 reason it parked, the working tree is clean, HEAD is back on the base branch, and
 the user is holding a report they can act on.
 
+## Orchestration context
+
+Read `flight-rules doc orchestration-interface` and `flight-rules doc native-orchestration`. This is a caller-level driver: invoke `execute-work` and other sibling skills in the current session, never in a wrapper subagent. Before each ticket, initialize its distinct run ID/task ID and attempt 1 in the caller while retaining the active checkout and chosen base. Pass that exact context to `execute-work`; its retries preserve it and its worker depth starts at this caller's actual depth. Ticket runs remain sequential regardless of available concurrency.
+
+Human questions require invocation-level `allowHumanQuestions: true` and available `ask`, inherited by sibling skills. Otherwise return `QUESTIONS_DISABLED` or `QUESTIONS_UNAVAILABLE` with the unresolved question at a decision boundary; do not prompt or infer approval. When opted in, wait for an actual answer, reusing existing answers that already authorize the selected work. Missing worker dispatch, depth or permission evidence is a named stop before the first mutation.
+
 ## Preconditions
 
 - You are handed an **epic id** or an **initiative id**.
@@ -188,7 +194,7 @@ Never start draining without an explicit go-ahead.
 
 For each selected ticket, in `waves[0]` order:
 
-1. **Invoke `execute-work`** with the ticket id **and the base branch from step 2**. Passing the base is not optional: `execute-work` cuts its branch with `git checkout -b <branch> <from>`, and without `--from` it branches off current HEAD — which, after ticket one, is ticket one's branch. Omitting it silently stacks every ticket in the wave on its predecessor and puts the previous ticket's commits in the next ticket's PR diff.
+1. **Invoke `execute-work` as a sibling skill** with the ticket id, its caller-created run context **and the base branch from step 2**. Preserve that context without another worker level. Passing the base is not optional: `execute-work` cuts its branch with `git checkout -b <branch> <from>`, and without `--from` it branches off current HEAD — which, after ticket one, is ticket one's branch. Omitting it silently stacks every ticket in the wave on its predecessor and puts the previous ticket's commits in the next ticket's PR diff.
 2. **Record the outcome** as a short structured entry: ticket id, iterations used, PR URL, review verdict, and any unresolved `charterConcerns` or `openQuestions`.
 3. **Move on.** Do not carry the full transcript of a finished ticket forward. The entry from (2) is the whole record you need, and context is the binding constraint on how wide a wave can go.
 
