@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { FileInstructionCatalog } from "../sdk/instruction-catalog.js";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const dist = new URL("../../dist/", import.meta.url);
@@ -16,6 +17,7 @@ describe("built library smoke test", () => {
         "-e",
         `
       import { appVersion, createFlightRules } from '@good-ground-collective/flight-rules'
+      import { instructionCatalog, WorkerReportCodec } from '@good-ground-collective/flight-rules/sdk'
       import pkg from '@good-ground-collective/flight-rules/package.json' with { type: 'json' }
       const core = createFlightRules({ cwd: '/nonexistent', env: {} })
       console.log(JSON.stringify({
@@ -23,6 +25,9 @@ describe("built library smoke test", () => {
         packageVersion: pkg.version,
         doc: core.docs().resolve('coding-charter').id,
         git: typeof core.git().checkout,
+        skills: instructionCatalog.listSkills().includes('execute-work'),
+        agents: instructionCatalog.listAgents().length,
+        codec: typeof WorkerReportCodec,
       }))
     `,
       ],
@@ -34,6 +39,9 @@ describe("built library smoke test", () => {
       packageVersion: pkg.version,
       doc: "coding-charter",
       git: "function",
+      skills: true,
+      agents: 7,
+      codec: "function",
     });
   });
 
@@ -45,7 +53,12 @@ describe("built library smoke test", () => {
   });
 
   it("runs the orchestration contract through the public package without host credentials", () => {
-    const output = execFileSync(process.execPath, ["--input-type=module", "-e", `
+    const output = execFileSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `
       import { createFlightRules, FileAgentRegistry, RegistryOrchestrationPolicy, VerifiedImplementationLoop } from '@good-ground-collective/flight-rules'
       const loop = new VerifiedImplementationLoop()
       const run = {
@@ -69,9 +82,13 @@ describe("built library smoke test", () => {
         doc: createFlightRules({ cwd: process.cwd(), env: {} }).docs().resolve('orchestration-interface').id,
         agent: verification.request.agent, input: verification.request.input,
       }))
-    `], { cwd: root, encoding: "utf8" });
+    `,
+      ],
+      { cwd: root, encoding: "utf8" },
+    );
     expect(JSON.parse(output)).toEqual({
-      doc: "orchestration-interface", agent: "code-verifier",
+      doc: "orchestration-interface",
+      agent: "code-verifier",
       input: { criteria: ["Keeps the input"], filesChanged: [{ path: "input.ts" }] },
     });
   });
@@ -98,10 +115,24 @@ describe("built library smoke test", () => {
     expect(JSON.parse(output)).toEqual({ policy: true, full: true, transport: true });
   });
 
+  it("loads canonical resources from relocated Claude and Codex installations", async () => {
+    for (const host of ["claude", "codex"]) {
+      const fileInstructionCatalog = new FileInstructionCatalog({
+        moduleUrl: new URL(`../../dist/${host}/bin/flight-rules.mjs`, import.meta.url).href,
+        env: {},
+      });
+      expect(fileInstructionCatalog.listSkills()).toContain("execute-work");
+      expect(fileInstructionCatalog.listAgents()).toHaveLength(7);
+    }
+  });
+
   it("ships declarations without test declarations", () => {
     expect(readFileSync(new URL("index.d.ts", dist), "utf8")).toContain("createFlightRules");
+    expect(readFileSync(new URL("sdk/index.d.ts", dist), "utf8")).toContain("WorkerReportCodec");
     expect(
-      readdirSync(dist, { recursive: true }).some((path) => String(path).includes("__tests__") || String(path).endsWith('.test.d.ts')),
+      readdirSync(dist, { recursive: true }).some(
+        (path) => String(path).includes("__tests__") || String(path).endsWith(".test.d.ts"),
+      ),
     ).toBe(false);
   });
 
@@ -112,6 +143,7 @@ describe("built library smoke test", () => {
       ".": { types: "./dist/index.d.ts", import: "./dist/index.js" },
       "./package.json": "./package.json",
       "./review": { types: "./dist/code-review/index.d.ts", import: "./dist/review.js" },
+      "./sdk": { types: "./dist/sdk/index.d.ts", import: "./dist/sdk.js" },
       "./review/schema": "./contracts/code-review/review.v1.schema.json",
       "./review/transport-schema": "./contracts/code-review/review.v1.transport.schema.json",
     });
