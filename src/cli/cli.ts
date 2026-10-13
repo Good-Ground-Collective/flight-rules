@@ -27,6 +27,7 @@ import {
 import type { PullRequestHost } from "../pr/pull-request-host/pull-request-host.js";
 import { createPrCommand } from "../pr/commands/pr/command.js";
 import { appVersion } from "../version.js";
+import { createAgentsCommand } from "../plugins/commands/agents/command.js";
 
 export function buildProgram(
   getTracker: (overrideTracker?: string) => TaskTracker,
@@ -40,6 +41,7 @@ export function buildProgram(
     | "readiness"
     | "docs"
     | "configStore"
+    | "installation"
     | "evidence"
     | "board"
     | "packets"
@@ -74,6 +76,7 @@ export function buildProgram(
   program.addCommand(createUsersCommand(tracker));
   program.addCommand(createRfcCommand(config));
   program.addCommand(createConfigCommand(() => services.configStore()));
+  program.addCommand(createAgentsCommand(() => services.installation()));
   const boardHooks = (): BoardHookKit =>
     new BoardHookKit({
       sessions: services.boardSessions(),

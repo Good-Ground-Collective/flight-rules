@@ -43,6 +43,7 @@
     "fmt:check": "sort-package-json --check && oxfmt -c .config/.oxfmtrc.json --check",
     "release": "semantic-release",
     "test": "vitest run",
+    "test:installation:native": "npm run build && node scripts/test-native-installation.mjs",
     "test:agents:live": "npm run build && node scripts/test-agents-live.mjs",
     "test:agents:codex-config": "npm run build && node scripts/test-codex-agent-config.mjs",
     "typecheck": "tsc --noEmit",
