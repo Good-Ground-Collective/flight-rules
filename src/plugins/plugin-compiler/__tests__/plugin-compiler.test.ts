@@ -7,6 +7,7 @@ import { parse as parseToml } from "smol-toml";
 import { afterEach, describe, expect, it } from "vitest";
 import { FileAgentRegistry } from "../../../agents/agent-registry/agent-registry.js";
 import { InvalidPluginSourceError, NativePluginCompiler } from "../plugin-compiler.js";
+import { nativeParityFailures } from "./native-parity.js";
 
 const root = join(import.meta.dirname, "../../../..");
 const directories: string[] = [];
@@ -31,6 +32,26 @@ afterEach(() => {
 });
 
 describe("NativePluginCompiler", () => {
+  it("checks both native trees in-process and diagnoses missing future registrations and changed prompts/skills", () => {
+    const sourceDir = fixture();
+    const compiler = new NativePluginCompiler({ sourceDir });
+    for (const host of ["claude", "codex"] as const) compiler.compile(host);
+    for (const host of ["claude", "codex"] as const) expect(nativeParityFailures(sourceDir, host)).toEqual([]);
+
+    writeFileSync(join(sourceDir, "agents/future-specialist.md"), "---\nname: future-specialist\ndescription: Future registry entry\ncapabilities: [read]\nmodel: standard\n---\nFuture canonical prompt.\n");
+    for (const host of ["claude", "codex"] as const) {
+      expect(nativeParityFailures(sourceDir, host)).toContainEqual(expect.stringContaining(`missing future-specialist; emit every registry entry for ${host}`));
+      compiler.compile(host);
+      expect(nativeParityFailures(sourceDir, host)).toEqual([]);
+      const path = join(sourceDir, "dist", host, host === "claude" ? "agents/future-specialist.md" : ".codex/agents/future-specialist.toml");
+      writeFileSync(path, readFileSync(path, "utf8").replace("Future canonical prompt.", "Changed native prompt."));
+      expect(nativeParityFailures(sourceDir, host)).toContainEqual(expect.stringContaining("native name/prompt drift; preserve"));
+      const skill = join(sourceDir, "dist", host, "skills/execute-work/SKILL.md");
+      writeFileSync(skill, "Changed skill prompt.");
+      expect(nativeParityFailures(sourceDir, host)).toContainEqual(expect.stringContaining(`dist/${host}/skills/execute-work/SKILL.md: skill drift; copy canonical`));
+    }
+  });
+
   it("assembles every canonical resource byte and native registration without using a prior target", () => {
     const sourceDir = fixture();
     const result = new NativePluginCompiler({ sourceDir }).compile();
