@@ -17,7 +17,12 @@ the release job requests packages: write. This PR does not publish a package
 or grant cross-repo access until merged/released through that workflow.
 
 The package exports `./review`, `./review/schema` and `./review/transport-schema`.
-It also ships the canonical contract, charter and method in docs/.
+It also ships the canonical contract, charters and method in docs/.
+
+`load({ paths })` selects the core coding charter plus every language charter
+whose `applies-to` globs match one of `paths` — pass the PR's changed files.
+Without `paths` it returns the core and every language charter, each scoped by
+its own globs. If no language charter matches the selected paths, only the core is returned.
 
 ```js
 import {
@@ -28,10 +33,11 @@ import {
   JsonReviewCodec,
 } from "@good-ground-collective/flight-rules/review";
 
-const policy = new FileReviewPolicy().load();
+const policy = new FileReviewPolicy().load({ paths: changedFiles });
 const schemas = reviewContract.schemas();
-// Feed policy.method, policy.charter, trusted repo rules and schemas.transport
-// into one reviewer run. The consumer owns its rubric and model choice.
+// Feed policy.method, policy.charter (or policy.charters, one per document),
+// trusted repo rules and schemas.transport into one reviewer run. The consumer
+// owns its rubric and model choice.
 const result = reviewContract.parse(modelOutput);
 const planner = new EvidenceReviewPlanner({
   verifier: new GitHubReviewVerifier({

@@ -31653,7 +31653,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.78.0";
+var appVersion = false ? "0.0.0-dev" : "1.79.0";
 
 // src/shared/ariadne/review-packet.schema.ts
 var packetLimits = {
@@ -49181,7 +49181,10 @@ var DocCharterCatalog = class {
   all() {
     const core = this.docs.resolve(coreCharterId);
     const languages = this.docs.list().filter((id) => id.startsWith(languageCharterPrefix)).map((id) => this.languageCharter(this.docs.resolve(id)));
-    return [{ id: core.id, language: null, appliesTo: [], path: core.path, contents: core.contents }, ...languages];
+    return [
+      { id: core.id, language: null, appliesTo: [], tierA: this.tierA(core.contents), path: core.path, contents: core.contents },
+      ...languages
+    ];
   }
   select(paths) {
     const normalized = paths.map((path3) => path3.trim().replace(/^\.\//, "")).filter((path3) => path3.length > 0);
@@ -49198,7 +49201,12 @@ var DocCharterCatalog = class {
     if (doc.id !== expectedId) {
       throw new CharterFormatError(`Charter "${doc.id}" declares language "${parsed.data.language}"; its file must be ${expectedId}.md`);
     }
-    return { id: doc.id, ...parsed.data, path: doc.path, contents: doc.contents };
+    return { id: doc.id, ...parsed.data, tierA: this.tierA(doc.contents), path: doc.path, contents: doc.contents };
+  }
+  tierA(contents) {
+    const tiers = contents.split(/^## Review tiers\r?$/m)[1]?.split(/^## /m)[0] ?? "";
+    const table = tiers.split(/^\*\*Tier B/m)[0] ?? "";
+    return [...new Set([...table.matchAll(/^\|\s*([A-Z]+-\d+)\b/gm)].flatMap((match) => match[1] ?? []))];
   }
 };
 var CharterFormatError = class extends Error {
@@ -49561,6 +49569,7 @@ import { readFileSync as readFileSync10, realpathSync as realpathSync3 } from "n
 import { dirname as dirname10, join as join11, relative as relative2 } from "node:path";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
 var ReviewPolicyPropsSchema = external_exports.strictObject({ home: external_exports.string().min(1).optional() });
+var LoadPolicyPropsSchema = external_exports.strictObject({ paths: external_exports.array(external_exports.string()).optional() });
 var RepositoryContextPropsSchema = external_exports.strictObject({
   cwd: external_exports.string().min(1),
   trustedRef: HeadShaSchema2,
@@ -49572,7 +49581,8 @@ var FileReviewPolicy = class {
     const parsed = ReviewPolicyPropsSchema.parse(props);
     this.home = parsed.home ?? join11(dirname10(fileURLToPath3(import.meta.url)), "..");
   }
-  load() {
+  load(input2 = {}) {
+    const { paths } = LoadPolicyPropsSchema.parse(input2);
     const docs = realpathSync3(join11(this.home, "docs"));
     const read = (id) => {
       const path3 = realpathSync3(join11(docs, `${id}.md`));
@@ -49580,9 +49590,16 @@ var FileReviewPolicy = class {
         throw new ReviewPolicyError("review policy path leaves the installed docs directory");
       return readFileSync10(path3, "utf8");
     };
+    const catalog = new DocCharterCatalog({ docs: new FileDocResolver({ docsDir: docs }) });
+    const charters = (paths === void 0 ? catalog.all() : catalog.select(paths)).map(
+      ({ id, language, appliesTo, tierA, contents }) => ({ id, language, appliesTo, tierA, contents })
+    );
     return {
       method: read("autonomous-review-method"),
-      charter: read("coding-charter"),
+      charter: charters.map(({ contents }) => contents.endsWith("\n") ? contents : `${contents}
+`).join("\n"),
+      charters,
+      tierA: [...new Set(charters.flatMap(({ tierA }) => tierA))],
       contract: read("code-review-findings-contract")
     };
   }

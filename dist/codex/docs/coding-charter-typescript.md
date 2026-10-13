@@ -48,3 +48,20 @@ Multi-step procedural decoders (split → decode → check → decode → check 
 ## M-7 — TypeScript object keys are camelCase
 
 Even when the wire format uses snake_case, TS objects use camelCase. Map at the boundary in the Zod schema's `.transform()`, not in consuming code.
+
+## Review tiers
+
+**Tier A — objective**
+
+| Mandate                                    | Enforceable by                                                |
+| ------------------------------------------ | ------------------------------------------------------------- |
+| M-3 interface → class → optional singleton | eslint: `preflight/service-shape`, `preflight/no-loose-functions` |
+| M-5 single Zod-validated props object      | eslint: `preflight/constructor-single-props`                  |
+| M-7 camelCase TS object keys               | _(no rule exists — always reviewed by reading)_               |
+
+**Tier B — judgment**
+
+| Mandate                                 | The judgment it needs                             |
+| --------------------------------------- | ------------------------------------------------- |
+| M-4 don't over-engineer DI seams        | does anyone but the test suite want to swap this? |
+| M-6 declarative over procedural parsing | could Zod express this flow?                      |

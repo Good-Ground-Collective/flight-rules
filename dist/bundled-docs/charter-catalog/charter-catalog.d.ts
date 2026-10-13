@@ -4,6 +4,8 @@ export interface Charter {
     id: string;
     language: string | null;
     appliesTo: string[];
+    /** Tier A mandate IDs from the charter's Review tiers section, in table order. */
+    tierA: string[];
     path: string;
     contents: string;
 }
@@ -24,6 +26,7 @@ export declare class DocCharterCatalog implements CharterCatalog {
     all(): Charter[];
     select(paths: readonly string[]): Charter[];
     private languageCharter;
+    private tierA;
 }
 export declare class CharterFormatError extends Error {
     name: string;

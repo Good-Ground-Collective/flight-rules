@@ -545,13 +545,136 @@ ${this.finding(validated)}`;
 
 // src/code-review/review-policy.ts
 import { execFileSync } from "node:child_process";
-import { readFileSync, realpathSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
-import { fileURLToPath } from "node:url";
+import { readFileSync as readFileSync2, realpathSync as realpathSync2 } from "node:fs";
+import { dirname as dirname2, join as join2, relative } from "node:path";
+import { fileURLToPath as fileURLToPath2 } from "node:url";
+import { z as z7 } from "zod";
+
+// src/bundled-docs/charter-catalog/charter-catalog.ts
+import { matchesGlob } from "node:path";
+import { parse as parseYaml } from "yaml";
 import { z as z5 } from "zod";
-var ReviewPolicyPropsSchema = z5.strictObject({ home: z5.string().min(1).optional() });
-var RepositoryContextPropsSchema = z5.strictObject({
-  cwd: z5.string().min(1),
+var coreCharterId = "coding-charter";
+var languageCharterPrefix = `${coreCharterId}-`;
+var LanguageFrontmatterSchema = z5.strictObject({
+  language: z5.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+  "applies-to": z5.array(z5.string().min(1)).min(1)
+}).transform(({ language, "applies-to": appliesTo }) => ({ language, appliesTo }));
+var FrontmatterSchema = z5.string().transform((contents, ctx) => {
+  const block = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/.exec(contents)?.[1];
+  if (block === void 0) {
+    ctx.addIssue({ code: "custom", message: "missing YAML frontmatter" });
+    return z5.NEVER;
+  }
+  return parseYaml(block);
+}).pipe(LanguageFrontmatterSchema);
+var DocCharterCatalog = class {
+  docs;
+  constructor(props) {
+    this.docs = props.docs;
+  }
+  all() {
+    const core = this.docs.resolve(coreCharterId);
+    const languages = this.docs.list().filter((id) => id.startsWith(languageCharterPrefix)).map((id) => this.languageCharter(this.docs.resolve(id)));
+    return [
+      { id: core.id, language: null, appliesTo: [], tierA: this.tierA(core.contents), path: core.path, contents: core.contents },
+      ...languages
+    ];
+  }
+  select(paths) {
+    const normalized = paths.map((path) => path.trim().replace(/^\.\//, "")).filter((path) => path.length > 0);
+    return this.all().filter(
+      (charter) => charter.language === null || normalized.some((path) => charter.appliesTo.some((glob) => matchesGlob(path, glob)))
+    );
+  }
+  languageCharter(doc) {
+    const parsed = FrontmatterSchema.safeParse(doc.contents);
+    if (!parsed.success) {
+      throw new CharterFormatError(`Charter "${doc.id}" has invalid frontmatter: ${z5.prettifyError(parsed.error)}`);
+    }
+    const expectedId = `${languageCharterPrefix}${parsed.data.language}`;
+    if (doc.id !== expectedId) {
+      throw new CharterFormatError(`Charter "${doc.id}" declares language "${parsed.data.language}"; its file must be ${expectedId}.md`);
+    }
+    return { id: doc.id, ...parsed.data, tierA: this.tierA(doc.contents), path: doc.path, contents: doc.contents };
+  }
+  tierA(contents) {
+    const tiers = contents.split(/^## Review tiers\r?$/m)[1]?.split(/^## /m)[0] ?? "";
+    const table = tiers.split(/^\*\*Tier B/m)[0] ?? "";
+    return [...new Set([...table.matchAll(/^\|\s*([A-Z]+-\d+)\b/gm)].flatMap((match) => match[1] ?? []))];
+  }
+};
+var CharterFormatError = class extends Error {
+  name = "CharterFormatError";
+};
+
+// src/bundled-docs/doc-resolver/doc-resolver.ts
+import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { dirname, join, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
+import { z as z6 } from "zod";
+var DocIdSchema = z6.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
+var FileDocResolverPropsSchema = z6.object({ docsDir: z6.string().min(1) });
+var InstallDocsPropsSchema = z6.object({
+  moduleUrl: z6.url().refine((value) => value.startsWith("file:")),
+  env: z6.record(z6.string(), z6.string().optional())
+});
+var DocNotFoundPropsSchema = z6.object({ id: z6.string(), available: z6.array(z6.string()) });
+var InvalidDocIdError = class extends Error {
+  name = "InvalidDocIdError";
+};
+var DocsUnavailableError = class extends Error {
+  name = "DocsUnavailableError";
+};
+var DocNotFoundError = class extends Error {
+  name = "DocNotFoundError";
+  available;
+  constructor(props) {
+    const parsed = DocNotFoundPropsSchema.parse(props);
+    super(`Unknown doc "${parsed.id}" \u2014 available: ${parsed.available.join(", ")}`);
+    this.available = parsed.available;
+  }
+};
+var FileDocResolver = class _FileDocResolver {
+  docsDir;
+  constructor(props) {
+    this.docsDir = resolve(FileDocResolverPropsSchema.parse(props).docsDir);
+  }
+  list() {
+    return readdirSync(this.docsDir, { withFileTypes: true }).filter((entry) => entry.isFile() && entry.name.endsWith(".md")).map((entry) => entry.name.slice(0, -3)).sort();
+  }
+  resolve(id) {
+    if (!DocIdSchema.safeParse(id).success) {
+      throw new InvalidDocIdError("Invalid doc id \u2014 use lowercase letters, digits, and single hyphens");
+    }
+    const path = join(this.docsDir, `${id}.md`);
+    if (!existsSync(path) || !statSync(path).isFile()) {
+      throw new DocNotFoundError({ id, available: this.list() });
+    }
+    const realPath = realpathSync(path);
+    if (!realPath.startsWith(`${realpathSync(this.docsDir)}${sep}`)) {
+      throw new DocNotFoundError({ id, available: this.list() });
+    }
+    return { id, path: realPath, contents: readFileSync(realPath, "utf8") };
+  }
+  static fromInstall(props) {
+    const { moduleUrl, env } = InstallDocsPropsSchema.parse({ ...props, env: { ...props.env } });
+    const override = env["FLIGHT_RULES_HOME"]?.trim();
+    const home = override || join(dirname(fileURLToPath(moduleUrl)), "..");
+    const docsDir = resolve(home, "docs");
+    if (!existsSync(docsDir) || !statSync(docsDir).isDirectory()) {
+      const source = override ? `FLIGHT_RULES_HOME is set to ${override} but` : "Bundled docs directory";
+      throw new DocsUnavailableError(`${source} ${docsDir} does not exist or is not a directory \u2014 point FLIGHT_RULES_HOME at the flight-rules install root`);
+    }
+    return new _FileDocResolver({ docsDir });
+  }
+};
+
+// src/code-review/review-policy.ts
+var ReviewPolicyPropsSchema = z7.strictObject({ home: z7.string().min(1).optional() });
+var LoadPolicyPropsSchema = z7.strictObject({ paths: z7.array(z7.string()).optional() });
+var RepositoryContextPropsSchema = z7.strictObject({
+  cwd: z7.string().min(1),
   trustedRef: HeadShaSchema,
   contextPath: ReviewPathSchema.min(1).default("CODE-REVIEW.md")
 });
@@ -559,19 +682,27 @@ var FileReviewPolicy = class {
   home;
   constructor(props = {}) {
     const parsed = ReviewPolicyPropsSchema.parse(props);
-    this.home = parsed.home ?? join(dirname(fileURLToPath(import.meta.url)), "..");
+    this.home = parsed.home ?? join2(dirname2(fileURLToPath2(import.meta.url)), "..");
   }
-  load() {
-    const docs = realpathSync(join(this.home, "docs"));
+  load(input = {}) {
+    const { paths } = LoadPolicyPropsSchema.parse(input);
+    const docs = realpathSync2(join2(this.home, "docs"));
     const read = (id) => {
-      const path = realpathSync(join(docs, `${id}.md`));
+      const path = realpathSync2(join2(docs, `${id}.md`));
       if (relative(docs, path).startsWith(".."))
         throw new ReviewPolicyError("review policy path leaves the installed docs directory");
-      return readFileSync(path, "utf8");
+      return readFileSync2(path, "utf8");
     };
+    const catalog = new DocCharterCatalog({ docs: new FileDocResolver({ docsDir: docs }) });
+    const charters = (paths === void 0 ? catalog.all() : catalog.select(paths)).map(
+      ({ id, language, appliesTo, tierA, contents }) => ({ id, language, appliesTo, tierA, contents })
+    );
     return {
       method: read("autonomous-review-method"),
-      charter: read("coding-charter"),
+      charter: charters.map(({ contents }) => contents.endsWith("\n") ? contents : `${contents}
+`).join("\n"),
+      charters,
+      tierA: [...new Set(charters.flatMap(({ tierA }) => tierA))],
       contract: read("code-review-findings-contract")
     };
   }
@@ -619,7 +750,7 @@ var ReviewPolicyError = class extends Error {
 // src/code-review/github-review-verifier.ts
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { z as z6 } from "zod";
+import { z as z8 } from "zod";
 var GhReviewGitHubApi = class {
   async get(path) {
     return this.run(["api", path]);
@@ -641,20 +772,20 @@ var GhReviewGitHubApi = class {
     return JSON.parse(stdout);
   }
 };
-var GitHubReviewVerifierPropsSchema = z6.strictObject({
-  repo: z6.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
-  prNumber: z6.number().int().positive(),
-  prAuthorId: z6.number().int().positive(),
-  owners: z6.record(z6.string(), z6.array(z6.string().min(1))).default({}),
-  requireMapping: z6.boolean().default(false)
+var GitHubReviewVerifierPropsSchema = z8.strictObject({
+  repo: z8.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
+  prNumber: z8.number().int().positive(),
+  prAuthorId: z8.number().int().positive(),
+  owners: z8.record(z8.string(), z8.array(z8.string().min(1))).default({}),
+  requireMapping: z8.boolean().default(false)
 });
-var UserSchema = z6.looseObject({ id: z6.number(), login: z6.string(), type: z6.string() });
-var CommentSchema = z6.looseObject({
-  id: z6.number(),
+var UserSchema = z8.looseObject({ id: z8.number(), login: z8.string(), type: z8.string() });
+var CommentSchema = z8.looseObject({
+  id: z8.number(),
   user: UserSchema,
-  issue_url: z6.string().optional(),
-  pull_request_url: z6.string().optional(),
-  body: z6.string()
+  issue_url: z8.string().optional(),
+  pull_request_url: z8.string().optional(),
+  body: z8.string()
 });
 var GitHubReviewVerifier = class {
   props;
@@ -675,10 +806,10 @@ var GitHubReviewVerifier = class {
     if (evidence.kind === "commit") return this.reaches(evidence.sha, headSha);
     if (evidence.kind === "check_run") {
       if (evidence.commit_sha !== headSha) return false;
-      const check = z6.looseObject({
-        head_sha: z6.string(),
-        status: z6.string(),
-        conclusion: z6.string().nullable()
+      const check = z8.looseObject({
+        head_sha: z8.string(),
+        status: z8.string(),
+        conclusion: z8.string().nullable()
       }).parse(await this.api.get(`/repos/${this.props.repo}/check-runs/${evidence.check_run_id}`));
       return check.head_sha === headSha && check.status === "completed" && check.conclusion === "success";
     }
@@ -695,7 +826,7 @@ var GitHubReviewVerifier = class {
     if (owners !== void 0)
       return owners.some((login) => login.toLowerCase() === comment.user.login.toLowerCase());
     if (this.props.requireMapping || comment.user.id === this.props.prAuthorId) return false;
-    const permission = z6.looseObject({ permission: z6.string() }).parse(
+    const permission = z8.looseObject({ permission: z8.string() }).parse(
       await this.api.get(
         `/repos/${this.props.repo}/collaborators/${encodeURIComponent(comment.user.login)}/permission`
       )
@@ -705,14 +836,14 @@ var GitHubReviewVerifier = class {
   async dismissal(evidence) {
     if (evidence.kind !== "thread_resolution" || evidence.author_id === this.props.prAuthorId)
       return false;
-    const result = z6.looseObject({
-      data: z6.looseObject({
-        node: z6.looseObject({
-          isResolved: z6.boolean(),
-          resolvedBy: z6.looseObject({ databaseId: z6.number(), actorType: z6.string() }).nullable(),
-          pullRequest: z6.looseObject({
-            number: z6.number(),
-            repository: z6.looseObject({ nameWithOwner: z6.string() })
+    const result = z8.looseObject({
+      data: z8.looseObject({
+        node: z8.looseObject({
+          isResolved: z8.boolean(),
+          resolvedBy: z8.looseObject({ databaseId: z8.number(), actorType: z8.string() }).nullable(),
+          pullRequest: z8.looseObject({
+            number: z8.number(),
+            repository: z8.looseObject({ nameWithOwner: z8.string() })
           })
         }).nullable()
       })
@@ -728,12 +859,12 @@ var GitHubReviewVerifier = class {
   /** True when `sha` is the head or an ancestor of it, so the head contains that commit. */
   async reaches(sha, headSha) {
     if (sha === headSha) return true;
-    const comparison = z6.looseObject({ status: z6.string() }).parse(await this.api.get(`/repos/${this.props.repo}/compare/${sha}...${headSha}`));
+    const comparison = z8.looseObject({ status: z8.string() }).parse(await this.api.get(`/repos/${this.props.repo}/compare/${sha}...${headSha}`));
     return ["ahead", "identical"].includes(comparison.status);
   }
   /** True when `ref` has `path` as a file with at least `line` lines. */
   async hasLine(path, line, ref) {
-    const file = z6.looseObject({ type: z6.string(), encoding: z6.string(), content: z6.string() }).parse(
+    const file = z8.looseObject({ type: z8.string(), encoding: z8.string(), content: z8.string() }).parse(
       await this.api.get(
         `/repos/${this.props.repo}/contents/${path.split("/").map(encodeURIComponent).join("/")}?ref=${ref}`
       )

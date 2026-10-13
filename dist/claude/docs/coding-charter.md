@@ -187,3 +187,28 @@ export class UploadFailureError extends FileProviderError {
 }
 
 ```
+
+## Review tiers
+
+Autonomous review checks Tier A mandates on every instance and raises each Tier B mandate at most once, with representative examples. A rule named here _can_ enforce a mandate; whether it does for a given file is what the review method's coverage step measures. Core mandates apply to every changed file, so a file whose linter has no rule for a mandate is always reviewed by reading.
+
+**Tier A — objective**
+
+| Mandate                                     | Enforceable by                                                      |
+| ------------------------------------------- | ------------------------------------------------------------------- |
+| M-1 no planning-system identifiers          | eslint: `preflight/no-planning-identifiers`                         |
+| M-2 structural: no paragraph block comments | eslint: `preflight/no-paragraph-comments`                           |
+| M-10 flat if-else over nested switch+if     | eslint: `preflight/no-switch-with-nested-if`                        |
+| M-11 typed errors thrown at the call site   | eslint: `preflight/no-throw-helpers`, `preflight/error-class-sets-name` |
+
+**Tier B — judgment**
+
+| Mandate                               | The judgment it needs                         |
+| ------------------------------------- | --------------------------------------------- |
+| M-2 quality: the no-dumb-comments bar | is this comment derivable from the code?      |
+| M-8 ordinary English method names     | would a new hire understand the name cold?    |
+| M-9 visual grouping with newlines     | does this read with any rhythm?               |
+| M-12 READMEs document concepts        | is this restating a linter rule?              |
+| M-13 the code models reality          | is this framed in domain terms or tool terms? |
+
+M-2 straddles both tiers on purpose. The structural ban — paragraph blocks above non-declarations — is mechanical and belongs in Tier A. "No dumb comments" is a judgment call about a specific comment's value.
