@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createFlightRules, DefaultFlightRules, NodeGitExecutor, nodeToolProbe } from '../index.js'
+import { createFlightRules, DefaultFlightRules, NodeGitExecutor, NodeToolProbe } from '../index.js'
 
 describe('public library surface', () => {
   it('exports exactly the supported values', async () => {
@@ -24,6 +24,11 @@ describe('public library surface', () => {
       'VerifiedImplementationLoop',
       'BoundedDispatchQueue',
       'InvalidDispatchQueueStateError',
+      'WorkflowSchema',
+      'WorkflowEvidenceSchema',
+      'ReadinessOptionsSchema',
+      'NodeRepositoryReadiness',
+      'NodeWorkflowPreflight',
       'AgentCapabilitySchema',
       'AgentFrontmatterSchema',
       'AttachmentSchema',
@@ -107,6 +112,6 @@ describe('public library surface', () => {
     const core = createFlightRules({ cwd: '/nonexistent', env: {} })
     expect(core).toBeInstanceOf(DefaultFlightRules)
     expect(core.git()).toBeInstanceOf(NodeGitExecutor)
-    expect(core.probe()).toBe(nodeToolProbe)
+    expect(core.probe()).toBeInstanceOf(NodeToolProbe)
   })
 })

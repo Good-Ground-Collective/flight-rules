@@ -9,6 +9,34 @@ const failed = (stderr: string): Promise<never> => Promise.reject({ code: 1, std
 const ok = (stdout: string): Promise<ExecResult> => Promise.resolve({ stdout, stderr: '' })
 
 describe('NodeToolProbe', () => {
+  it('keeps redaction scoped to concurrent probes when the live environment changes', async () => {
+    const env = { GITHUB_TOKEN: 'unique-secret-A' }
+    const pending: (() => void)[] = []
+    const probe = new NodeToolProbe({ env, execFileFn: () => new Promise((_, reject) => {
+      const captured = env.GITHUB_TOKEN
+      pending.push(() => reject(new Error(captured)))
+    }) })
+    const first = probe.probe({ repo: 'acme/proj', qaInstructionsFound: false })
+    env.GITHUB_TOKEN = 'unique-secret-B'
+    const second = probe.probe({ repo: 'acme/proj', qaInstructionsFound: false })
+    for (const finish of pending) finish()
+    const results = await Promise.all([first, second])
+    expect(JSON.stringify(results)).not.toMatch(/unique-secret-A|unique-secret-B/)
+  })
+  it('redacts a credential changed after construction and does not call a connection refusal a sandbox denial', async () => {
+    const env = { GITHUB_TOKEN: 'original' }
+    const probe = new NodeToolProbe({ env, execFileFn: () => Promise.reject({ code: 'ECONNREFUSED', stderr: 'Connection refused with replacement-secret' }) })
+    env.GITHUB_TOKEN = 'replacement-secret'
+    const checks = await probe.probe({ repo: 'acme/proj', qaInstructionsFound: false })
+    expect(checks.every((check) => check.code === 'NETWORK')).toBe(true)
+    expect(JSON.stringify(checks)).not.toContain('replacement-secret')
+  })
+
+  it('keeps unreported push entitlement unknown', async () => {
+    const probe = new NodeToolProbe({ execFileFn: () => Promise.resolve({ stdout: 'null', stderr: '' }) })
+    const checks = await probe.probe({ repo: 'acme/proj', qaInstructionsFound: false })
+    expect(checks.find((check) => check.name === 'tools:gh-push')).toMatchObject({ ok: false, code: 'UNKNOWN', remedy: expect.any(String) })
+  })
   const allInstalled: ExecCall = (file, args) => {
     if (file === 'gh' && args[0] === '--version') return ok('gh version 2.99.0 (2026-09-01)\n')
     if (file === 'gh' && args[0] === 'auth') return ok('Logged in to github.com\n')

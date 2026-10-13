@@ -29,6 +29,13 @@ describe('JiraTaskTracker.ping', () => {
     expect(request).toHaveBeenCalledWith('GET', '/myself')
   })
 
+  it('passes a readiness timeout signal to the read-only identity request', async () => {
+    request.mockResolvedValueOnce({ accountId: '1' })
+    const signal = new AbortController().signal
+    await makeTracker().ping({ signal })
+    expect(request).toHaveBeenCalledWith('GET', '/myself', undefined, undefined, signal)
+  })
+
   it('propagates a failed probe so check reports unreachable', async () => {
     request.mockRejectedValueOnce(new Error('Unauthorized'))
     await expect(makeTracker().ping()).rejects.toThrow('Unauthorized')

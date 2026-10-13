@@ -19,15 +19,13 @@ This invocation is unattended: `allowHumanQuestions` is always false. Return mis
 
 ## Preconditions
 
+- Read `flight-rules doc workflow-preflight` and require `flight-rules check --workflow reproduce-bug --runtime-file <host-runtime-json>` to report `"ok": true` before setting any label or creating evidence. Use current caller/worker observations. Missing or unknown capability is a named failure/`needs:` result; never prompt or widen permissions. A general environment check alone is insufficient.
+
 - You are handed a **ticket id**.
 - Run everything from the **repo root** of the app under test; the CLI resolves config relative to CWD, and the agent drives that app.
 - **Config comes from the CLI.** It merges the user's and project's Claude Code settings with the flight-rules config file; `flight-rules config show` prints the result and where each value came from. Never hand-edit a config file; write with `flight-rules config set`.
 - The tracker is **Jira**. The label lifecycle and the reporter mention are Jira shapes.
-- `flight-rules check` reports `"ok": true`, including the `tools:*` probes for `playwright-cli`, `ffmpeg`, and `gh` that the agent's capture depends on.
-
-  ```bash
-  flight-rules check
-  ```
+- The workflow check includes the capture tool probes and required QA instructions. Fix failed required checks before labelling the ticket; optional tool results do not become new requirements.
 
 - QA instructions exist. Read them once, passing `--from` the directory of the code the bug lives in when the ticket names it:
 

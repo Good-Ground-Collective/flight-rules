@@ -542,8 +542,8 @@ export class GitHubTaskTracker implements TaskTracker {
     return data.map((member) => ({ accountId: member.login, displayName: member.login }))
   }
 
-  async ping(): Promise<void> {
-    await this.octokit.rest.repos.get({ owner: this.owner, repo: this.repo })
+  async ping(options?: { signal?: AbortSignal }): Promise<void> {
+    await this.octokit.rest.repos.get({ owner: this.owner, repo: this.repo, ...(options?.signal === undefined ? {} : { request: { signal: options.signal } }) })
   }
 
   private async replaceIssueBody(

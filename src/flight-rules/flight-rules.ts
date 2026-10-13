@@ -16,7 +16,8 @@ import { BoardSessionStore } from '../shared/ariadne/board-session-store.js'
 import { GitHubTaskTracker } from '../tasks/github-task-tracker/github-task-tracker.js'
 import { JiraTaskTracker } from '../tasks/jira-task-tracker/jira-task-tracker.js'
 import type { TaskTracker } from '../tasks/task-tracker/task-tracker.js'
-import { nodeToolProbe, type ToolProbe } from '../tasks/tool-probe/tool-probe.js'
+import { NodeToolProbe, type ToolProbe } from '../tasks/tool-probe/tool-probe.js'
+import { NodeRepositoryReadiness, type RepositoryReadiness } from '../tasks/readiness/repository-readiness.js'
 import { FlightRulesPropsSchema, type FlightRulesProps } from './flight-rules.schema.js'
 
 export interface FlightRules {
@@ -30,6 +31,7 @@ export interface FlightRules {
   prHost(overrideTracker?: string): PullRequestHost
   git(): GitExecutor
   probe(): ToolProbe
+  readiness(): RepositoryReadiness
   docs(): DocResolver
   /** Ariadne's Agents page reporter; reads only the `ariadne.*` keys from user and local scope, so it works without a valid tracker config. */
   board(): AriadneBoard
@@ -145,7 +147,11 @@ export class DefaultFlightRules implements FlightRules {
   }
 
   probe(): ToolProbe {
-    return nodeToolProbe
+    return new NodeToolProbe({ cwd: this.cwd, env: this.env })
+  }
+
+  readiness(): RepositoryReadiness {
+    return new NodeRepositoryReadiness({ cwd: this.cwd, env: this.env })
   }
 
   docs(): DocResolver {

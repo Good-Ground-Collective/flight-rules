@@ -184,5 +184,5 @@ export interface TaskTracker {
   addComment(entityId: string, body: string): Promise<Comment>
   addAttachment(ticketId: string, filePath: string): Promise<Attachment>
   getUsers(): Promise<TrackerUser[]>
-  ping(): Promise<void>
+  ping(options?: { signal?: AbortSignal }): Promise<void>
 }
