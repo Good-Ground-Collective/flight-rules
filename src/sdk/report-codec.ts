@@ -7,6 +7,7 @@ import {
 import { OrchestrationTextSchema } from "../orchestration/orchestration.schema.js";
 
 const reportText = OrchestrationTextSchema;
+const JsonReportValueSchema = z.json();
 const InternalResearchSchema = z.strictObject({
   files: z.array(z.strictObject({ path: reportText, why: reportText })),
   patterns: z.array(reportText),
@@ -100,14 +101,17 @@ const WriterChangeSchema = z.strictObject({
 const WriterRewriteSchema = z.strictObject({
   summary: reportText,
   verdict: z.enum(["CLEAN", "MINOR", "HEAVY"]),
-  changes: z.array(WriterChangeSchema),
+  changes: z.array(WriterChangeSchema).optional(),
   rewritten: reportText.optional(),
   preserved: z.array(reportText),
   openQuestions: z.array(reportText).optional(),
-});
+}).refine(
+  (report) => (report.changes === undefined) !== (report.rewritten === undefined),
+  "rewrite reports must contain either file changes or inline rewritten text",
+);
 const WriterAuthorSchema = z.strictObject({
   summary: reportText,
-  whatWasChanged: z.array(reportText).min(1).max(5),
+  whatWasChanged: z.array(reportText.max(256)).min(1).max(5),
   whyWasItChanged: reportText,
   otsMaterials: reportText,
   openQuestions: z.array(reportText).optional(),
@@ -141,17 +145,6 @@ export type ValidatedWorkerReport =
   | z.infer<typeof WriterFeedbackSchema>
   | z.infer<typeof WriterRewriteSchema>
   | z.infer<typeof WriterAuthorSchema>;
-const ValidatedWorkerReportSchema = z.union([
-  ImplementationReportSchema,
-  VerificationReportSchema,
-  ResearchReportSchema,
-  QaReproduceSchema,
-  QaVerifySchema,
-  WriterFeedbackSchema,
-  WriterRewriteSchema,
-  WriterAuthorSchema,
-]);
-
 export class InvalidWorkerReportError extends Error {
   override name = "InvalidWorkerReportError";
 }
@@ -160,45 +153,62 @@ export interface WorkerReportParser {
   parse(input: string, requested: ReportMode): ValidatedWorkerReport;
 }
 
-/** Parses the worker's sole final YAML block against the registration's requested report shape. */
+/** Validates the worker's final YAML report against the registration's requested report shape. */
 export class WorkerReportCodec implements WorkerReportParser {
   parse(input: string, requested: ReportMode): ValidatedWorkerReport {
-    const mode = ReportModeSchema.parse(requested);
-    const blocks = [...input.matchAll(/```yaml\s*\r?\n([\s\S]*?)\r?\n```/gi)];
-    const block = blocks.at(0);
-    if (blocks.length !== 1 || block === undefined || input.replace(block[0], "").trim() !== "") {
-      throw new InvalidWorkerReportError(
-        "Return exactly one final fenced YAML report with no surrounding content",
-      );
-    }
-    const yaml = block[1];
-    if (yaml === undefined) {
-      throw new InvalidWorkerReportError("The final YAML report block is empty");
-    }
-    let parsed: unknown;
+    let mode: ReportMode;
     try {
-      parsed = parseYaml(yaml);
+      mode = ReportModeSchema.parse(requested);
     } catch (cause) {
-      throw new InvalidWorkerReportError(
-        `Malformed YAML report: ${cause instanceof Error ? cause.message : String(cause)}`,
-      );
+      throw new InvalidWorkerReportError(cause instanceof Error ? cause.message : String(cause));
     }
-    const jsonValue = z.json().safeParse(parsed);
-    if (
-      !jsonValue.success ||
-      parsed === null ||
-      typeof parsed !== "object" ||
-      Array.isArray(parsed)
-    ) {
-      throw new InvalidWorkerReportError("Report must be a JSON-compatible object");
-    }
-    const schema = this.schemaFor(mode);
-    const report = schema.safeParse(jsonValue.data);
+
+    const report = this.pipelineFor(mode).safeParse(input);
     if (!report.success) throw new InvalidWorkerReportError(report.error.message);
-    return ValidatedWorkerReportSchema.parse(report.data);
+    return report.data;
   }
 
-  private schemaFor(mode: ReportMode): z.ZodType {
+  private pipelineFor(mode: ReportMode): z.ZodType<ValidatedWorkerReport, string> {
+    return z
+      .string()
+      .transform((input, context) => {
+        const blocks = [...input.matchAll(/```yaml\s*\r?\n([\s\S]*?)\r?\n```/gi)];
+        const block = blocks.at(0);
+        const before = block === undefined ? "" : input.slice(0, block.index);
+        const after = block === undefined ? input : input.slice(block.index + block[0].length);
+
+        if (
+          blocks.length !== 1 ||
+          block === undefined ||
+          after.trim() !== "" ||
+          (before.trim() !== "" && mode.agent !== "research-agent") ||
+          before.includes("```")
+        ) {
+          context.addIssue({
+            code: "custom",
+            message: "Return one final fenced YAML report; only research reports may have prose before it",
+          });
+          return z.NEVER;
+        }
+
+        return block[1] ?? "";
+      })
+      .transform((yaml, context) => {
+        try {
+          return parseYaml(yaml);
+        } catch (cause) {
+          context.addIssue({
+            code: "custom",
+            message: `Malformed YAML report: ${cause instanceof Error ? cause.message : String(cause)}`,
+          });
+          return z.NEVER;
+        }
+      })
+      .pipe(JsonReportValueSchema)
+      .pipe(z.preprocess((report) => report, this.schemaFor(mode)));
+  }
+
+  private schemaFor(mode: ReportMode): z.ZodType<ValidatedWorkerReport> {
     if (mode.agent === "code-implementation" || mode.agent === "code-implementation-escalated")
       return ImplementationReportSchema;
     if (mode.agent === "code-verifier") return VerificationReportSchema;

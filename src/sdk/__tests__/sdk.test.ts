@@ -130,6 +130,55 @@ describe("worker report codec", () => {
     ).toThrow(InvalidWorkerReportError);
   });
 
+  it("accepts canonical inline rewrite reports and a research prose preamble", () => {
+    const rewritten = {
+      summary: "Rewritten inline text",
+      verdict: "MINOR",
+      rewritten: "The revised paragraph.",
+      preserved: ["The direct opening."],
+    };
+    expect(
+      codec.parse(
+        `\`\`\`yaml\n${JSON.stringify(rewritten)}\n\`\`\``,
+        { agent: "tech-writer", mode: "rewrite" },
+      ),
+    ).toEqual(rewritten);
+
+    const research = {
+      summary: "The feature is supported.",
+      confidence: "high",
+      external: { answer: "Yes", sources: [], exampleUsage: null, caveats: [] },
+    };
+    expect(
+      codec.parse(
+        `Here is the research result.\n\n\`\`\`yaml\n${JSON.stringify(research)}\n\`\`\``,
+        { agent: "research-agent", mode: "external" },
+      ),
+    ).toEqual(research);
+
+    expect(() =>
+      codec.parse(
+        `Research complete.\n\n\`\`\`yaml\n${JSON.stringify(research)}\n\`\`\`\nMore prose`,
+        { agent: "research-agent", mode: "external" },
+      ),
+    ).toThrow(InvalidWorkerReportError);
+  });
+
+  it("requires exactly one canonical rewrite payload", () => {
+    const base = { summary: "Updated", verdict: "MINOR", preserved: [] };
+    for (const payload of [
+      { ...base },
+      { ...base, changes: [], rewritten: "Inline text" },
+    ]) {
+      expect(() =>
+        codec.parse(
+          `\`\`\`yaml\n${JSON.stringify(payload)}\n\`\`\``,
+          { agent: "tech-writer", mode: "rewrite" },
+        ),
+      ).toThrow(InvalidWorkerReportError);
+    }
+  });
+
   it.each([
     [
       "code-verifier",
@@ -229,9 +278,47 @@ describe("worker report codec", () => {
     ).toThrow(InvalidWorkerReportError);
     expect(() =>
       codec.parse(
-        "```yaml\nsummary: Done\nfilesChanged: []\ntestsRun: []\napproach: Direct\ncreated: 2025-01-01\n```",
+        "```yaml\nsummary: .inf\nfilesChanged: []\ntestsRun: []\napproach: Direct\n```",
         { agent: "code-implementation", mode: "implement" },
       ),
     ).toThrow(InvalidWorkerReportError);
+    expect(() =>
+      codec.parse(
+        "```yaml\nsummary: Done\nfilesChanged: []\ntestsRun: []\napproach: Direct\n```\nextra text",
+        { agent: "code-implementation", mode: "implement" },
+      ),
+    ).toThrow(InvalidWorkerReportError);
+    expect(() =>
+      codec.parse(
+        "```yaml\nsummary: Done\nconfidence: high\nexternal: { answer: Yes, sources: [], exampleUsage: null, caveats: [] }\n```\n```yaml\nsummary: duplicate\n```",
+        { agent: "research-agent", mode: "external" },
+      ),
+    ).toThrow(InvalidWorkerReportError);
+    expect(() =>
+      codec.parse(
+        `\`\`\`yaml\n${JSON.stringify({
+          summary: "Drafted",
+          whatWasChanged: ["x".repeat(257)],
+          whyWasItChanged: "Reason",
+          otsMaterials: "No visual evidence: not needed",
+        })}\n\`\`\``,
+        { agent: "tech-writer", mode: "author" },
+      ),
+    ).toThrow(InvalidWorkerReportError);
+  });
+
+  it("accepts the 256-character author bullet limit", () => {
+    const report = {
+      summary: "Drafted",
+      whatWasChanged: ["x".repeat(256)],
+      whyWasItChanged: "Reason",
+      otsMaterials: "No visual evidence: not needed",
+    };
+    expect(
+      codec.parse(
+        `\`\`\`yaml\n${JSON.stringify(report)}\n\`\`\``,
+        { agent: "tech-writer", mode: "author" },
+      ),
+    ).toEqual(report);
   });
 });
