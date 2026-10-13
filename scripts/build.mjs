@@ -3,7 +3,7 @@
 // Used by `npm run build`; semantic-release's prepareCmd runs set-version.mjs
 // (which writes the released version into package.json) and then this build,
 // so the binary always reports the version it was released as.
-import { chmodSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import * as esbuild from "esbuild";
 
@@ -60,21 +60,9 @@ writeFileSync(
   `${JSON.stringify(schemas.transport, null, 2)}\n`,
 );
 
-const { FileAgentRegistry, MarkdownClaudeAgentEmitter } = await import(new URL("../dist/index.js", import.meta.url));
-const agents = new FileAgentRegistry().load(fileURLToPath(new URL("../agents", import.meta.url)));
-const models = JSON.parse(readFileSync(new URL("../adapters/claude/model-tiers.json", import.meta.url), "utf8"));
-const emitter = new MarkdownClaudeAgentEmitter({ models });
-const emitted = agents.map((agent) => ({ name: agent.frontmatter.name, markdown: emitter.emit(agent) }));
-const agentsDir = fileURLToPath(new URL("../dist/claude/agents", import.meta.url));
-mkdirSync(agentsDir, { recursive: true });
-const agentNames = new Set(emitted.map((agent) => `${agent.name}.md`));
-for (const entry of readdirSync(agentsDir, { withFileTypes: true })) {
-  if (entry.isFile() && entry.name.endsWith(".md") && !agentNames.has(entry.name)) {
-    unlinkSync(`${agentsDir}/${entry.name}`);
-  }
-}
-for (const agent of emitted) writeFileSync(`${agentsDir}/${agent.name}.md`, agent.markdown);
+const { NativePluginCompiler } = await import(new URL("../dist/index.js", import.meta.url));
+const compiled = new NativePluginCompiler({ sourceDir: fileURLToPath(new URL("../", import.meta.url)) }).compile();
 const pluginUrl = new URL("../.claude-plugin/plugin.json", import.meta.url);
 const plugin = JSON.parse(readFileSync(pluginUrl, "utf8"));
-plugin.agents = emitted.map((agent) => `./dist/claude/agents/${agent.name}.md`);
+plugin.agents = compiled.agents.map((name) => `./dist/claude/agents/${name}.md`);
 writeFileSync(pluginUrl, `${JSON.stringify(plugin, null, 2)}\n`);

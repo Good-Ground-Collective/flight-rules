@@ -58,3 +58,5 @@ export { MarkdownClaudeAgentEmitter } from './agents/agent-emitter/claude-agent-
 export { TomlCodexAgentEmitter } from './agents/agent-emitter/codex-agent-emitter.js'
 export { UnsupportedAgentSettingError } from './agents/agent-emitter/agent-emitter.js'
 export type { AgentEmitter } from './agents/agent-emitter/agent-emitter.js'
+export { NativePluginCompiler, InvalidPluginSourceError } from './plugins/plugin-compiler/plugin-compiler.js'
+export type { PluginCompiler, CompiledPlugin } from './plugins/plugin-compiler/plugin-compiler.js'
