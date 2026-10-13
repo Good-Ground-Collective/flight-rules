@@ -1,25 +1,24 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync, unlinkSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
-import { FileAgentRegistry, TomlCodexAgentEmitter } from "../dist/index.js";
-import models from "../adapters/codex/model-tiers.json" with { type: "json" };
-import reasoning from "../adapters/codex/reasoning-tiers.json" with { type: "json" };
+import { FileAgentRegistry } from "../dist/index.js";
 
 const home = join(dirname(fileURLToPath(import.meta.url)), "..");
+const plugin = realpathSync(resolve(process.argv[2] ?? join(home, "dist/codex")));
 const scratch = realpathSync(mkdtempSync(join(tmpdir(), "flight-rules-codex-config-")));
 const directory = join(scratch, ".codex", "agents");
-mkdirSync(directory, { recursive: true });
-writeFileSync(join(scratch, ".codex", "config.toml"), "[agents]\nenabled = true\n");
+cpSync(join(plugin, ".codex"), join(scratch, ".codex"), { recursive: true });
+mkdirSync(join(scratch, ".agents/plugins"), { recursive: true });
+cpSync(join(home, ".agents/plugins/marketplace.json"), join(scratch, ".agents/plugins/marketplace.json"));
+cpSync(plugin, join(scratch, "dist/codex"), { recursive: true });
 assert.equal(spawnSync("git", ["init", "-q", scratch]).status, 0);
 const agents = new FileAgentRegistry().load(join(home, "agents"));
-const emitter = new TomlCodexAgentEmitter({ models, reasoning });
-for (const agent of agents) writeFileSync(join(directory, `${agent.frontmatter.name}.toml`), emitter.emit(agent));
-const report = { hostVersion: spawnSync("codex", ["--version"], { encoding: "utf8" }).stdout.trim(), registrations: agents.map((agent) => agent.frontmatter.name), cases: [], modelTurns: 0 };
+const report = { hostVersion: spawnSync("codex", ["--version"], { encoding: "utf8" }).stdout.trim(), plugin, registrations: agents.map((agent) => agent.frontmatter.name), cases: [], modelTurns: 0 };
 
 try {
   for (const negativeControl of [true, false]) {
@@ -58,6 +57,25 @@ try {
         assert.ok(warnings[0].includes("bad-control") && warnings[0].includes("cannot be blank"));
       } else assert.deepEqual(warnings, [], "native parser rejected generated roles or fixture configuration");
       report.cases.push({ negativeControl, threadStarted: true, warnings });
+      if (!negativeControl) {
+        const listed = await send(2, "plugin/list", { cwds: [scratch], marketplaceKinds: ["local"], forceRefetch: false });
+        assert.ok(listed.result, JSON.stringify(listed.error));
+        assert.deepEqual(listed.result.marketplaceLoadErrors ?? [], []);
+        const marketplace = listed.result.marketplaces.find((entry) => entry.name === "flight-rules");
+        assert.ok(marketplace, "native client must discover the repository marketplace");
+        writeFileSync(join(scratch, "plugins.json"), JSON.stringify(marketplace, null, 2));
+        const available = marketplace.plugins.find((entry) => entry.name === "flight-rules");
+        assert.ok(available, "native client must list the assembled plugin");
+        assert.equal(available.installed, false);
+        const inspected = await send(3, "plugin/read", { marketplacePath: join(scratch, ".agents/plugins/marketplace.json"), pluginName: "flight-rules" });
+        assert.ok(inspected.result, JSON.stringify(inspected.error));
+        writeFileSync(join(scratch, "plugin.json"), JSON.stringify(inspected.result, null, 2));
+        const version = JSON.parse(readFileSync(join(plugin, "plugin.json"), "utf8")).version;
+        assert.equal(inspected.result.plugin.summary.localVersion, version);
+        const skills = readdirSync(join(plugin, "skills")).filter((name) => existsSync(join(plugin, "skills", name, "SKILL.md"))).map((name) => `flight-rules:${name}`).sort();
+        assert.deepEqual(inspected.result.plugin.skills.map((skill) => skill.name).sort(), skills);
+        report.marketplace = { discovered: true, pluginRead: true, skills: skills.length, installed: false, version };
+      }
     } finally {
       proc.kill();
       input.close();
