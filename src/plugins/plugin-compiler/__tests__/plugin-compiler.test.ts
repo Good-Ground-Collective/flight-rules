@@ -39,7 +39,9 @@ describe("NativePluginCompiler", () => {
       const source = join(sourceDir, resource);
       const destination = join(result.directory, resource);
       expect(files(destination)).toEqual(files(source));
-      for (const path of files(source)) expect(readFileSync(join(destination, path))).toEqual(readFileSync(join(source, path)));
+      for (const path of files(source)) {
+        expect(readFileSync(join(destination, path)).equals(readFileSync(join(source, path))), `${resource}/${path}`).toBe(true);
+      }
     }
     const definitions = new FileAgentRegistry().load(join(sourceDir, "agents"));
     const manifest = JSON.parse(readFileSync(join(result.directory, ".claude-plugin/plugin.json"), "utf8"));
