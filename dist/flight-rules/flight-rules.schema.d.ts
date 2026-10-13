@@ -4,6 +4,10 @@ export declare const FlightRulesPropsSchema: z.ZodObject<{
     cwd: z.ZodOptional<z.ZodString>;
     env: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodOptional<z.ZodString>>>;
     configPath: z.ZodOptional<z.ZodString>;
+    host: z.ZodOptional<z.ZodEnum<{
+        claude: "claude";
+        codex: "codex";
+    }>>;
 }, z.core.$strip>;
 export type FlightRulesProps = z.input<typeof FlightRulesPropsSchema> & {
     /** The host's settings layers (a host adapter's seam); defaults to Claude Code's. */

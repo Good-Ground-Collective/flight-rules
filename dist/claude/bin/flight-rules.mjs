@@ -15772,7 +15772,7 @@ var recursive = /* @__PURE__ */ new WeakMap();
 var NONE = 0;
 var ASSUMED = 1;
 var PROVEN = 2;
-function isRecursive(inst, stack, resolve6) {
+function isRecursive(inst, stack, resolve7) {
   const cached2 = recursive.get(inst);
   if (cached2 !== void 0)
     return cached2 ? PROVEN : NONE;
@@ -15782,7 +15782,7 @@ function isRecursive(inst, stack, resolve6) {
   let result = NONE;
   const check2 = (child) => {
     if (result !== PROVEN && child?._zod) {
-      const answer = isRecursive(child, stack, resolve6);
+      const answer = isRecursive(child, stack, resolve7);
       if (answer > result)
         result = answer;
     }
@@ -15793,7 +15793,7 @@ function isRecursive(inst, stack, resolve6) {
       const desc = Object.getOwnPropertyDescriptor(sh, key);
       if (spread && !desc.enumerable)
         continue;
-      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve6) : NONE;
+      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve7) : NONE;
       if (child > answer)
         answer = child;
     }
@@ -15860,7 +15860,7 @@ function isRecursive(inst, stack, resolve6) {
       break;
     // `$ZodLazy` caches its inner on the def, so a resolved edge is followed exactly
     case "lazy": {
-      const inner = def._cachedInner ?? (resolve6 ? inst._zod.innerType : void 0);
+      const inner = def._cachedInner ?? (resolve7 ? inst._zod.innerType : void 0);
       merge3(inner ? isRecursive(inner, stack, false) : ASSUMED);
       break;
     }
@@ -30854,8 +30854,8 @@ var GhPullRequestHost = class {
 };
 
 // src/shared/config-store.ts
-import { existsSync as existsSync4, mkdirSync as mkdirSync2, readFileSync as readFileSync4, writeFileSync as writeFileSync2 } from "node:fs";
-import { dirname as dirname4 } from "node:path";
+import { existsSync as existsSync6, mkdirSync as mkdirSync4, readFileSync as readFileSync6, writeFileSync as writeFileSync4 } from "node:fs";
+import { dirname as dirname6 } from "node:path";
 
 // src/shared/config.ts
 import { existsSync as existsSync2, readFileSync as readFileSync2, statSync as statSync2 } from "node:fs";
@@ -31121,7 +31121,7 @@ var NodePathProbe = class {
   }
 };
 var nodePathProbe = new NodePathProbe();
-function resolveConfigPath(cwd, override, probe = nodePathProbe) {
+function resolveConfigPath(cwd, override, probe = nodePathProbe, host = "claude") {
   if (override !== void 0) {
     return isAbsolute(override) ? override : resolve2(cwd, override);
   }
@@ -31130,6 +31130,7 @@ function resolveConfigPath(cwd, override, probe = nodePathProbe) {
   const candidates = [claudePath, agentsPath];
   const existing = candidates.find((path3) => probe.isFile(path3));
   if (existing !== void 0) return existing;
+  if (host === "codex") return agentsPath;
   return candidates.find((path3) => probe.isDirectory(dirname2(path3))) ?? claudePath;
 }
 function getQaRecipePath(config2, configPath) {
@@ -31211,6 +31212,200 @@ var ClaudeSettingsSource = class {
   }
 };
 
+// src/shared/host-settings/neutral-settings-source.ts
+import { existsSync as existsSync4, mkdirSync as mkdirSync2, readFileSync as readFileSync4, writeFileSync as writeFileSync2 } from "node:fs";
+import { homedir as homedir2 } from "node:os";
+import { dirname as dirname4, join as join5 } from "node:path";
+var PropsSchema = external_exports.object({
+  cwd: external_exports.string().min(1),
+  home: external_exports.string().min(1).default(homedir2),
+  untrackedCwd: external_exports.string().min(1).optional()
+});
+var SettingsSchema2 = external_exports.record(external_exports.string(), external_exports.unknown());
+var InvalidSettingsError = class extends Error {
+  name = "InvalidSettingsError";
+};
+var NeutralSettingsSource = class {
+  host = "codex";
+  props;
+  constructor(props) {
+    this.props = PropsSchema.parse(props);
+  }
+  pathFor(scope) {
+    if (scope === "user") return join5(this.props.home, ".agents", "flight-rules.settings.json");
+    if (scope === "project") return join5(this.props.cwd, ".agents", "flight-rules.settings.json");
+    const path3 = join5(this.props.cwd, ".agents", "flight-rules.settings.local.json");
+    return this.props.untrackedCwd === void 0 || existsSync4(path3) ? path3 : join5(this.props.untrackedCwd, ".agents", "flight-rules.settings.local.json");
+  }
+  read(scope) {
+    const path3 = this.pathFor(scope);
+    if (!existsSync4(path3)) return void 0;
+    try {
+      return SettingsSchema2.parse(JSON.parse(readFileSync4(path3, "utf8")));
+    } catch (cause) {
+      throw new InvalidSettingsError(`Invalid flight-rules settings object at ${path3}`, { cause });
+    }
+  }
+  write(scope, update) {
+    const values = SettingsSchema2.parse(update(this.read(scope) ?? {}));
+    const path3 = this.pathFor(scope);
+    mkdirSync2(dirname4(path3), { recursive: true });
+    writeFileSync2(path3, `${JSON.stringify(values, null, 2)}
+`);
+  }
+  hint() {
+    return `use FLIGHT_RULES_HOST=codex flight-rules config set with --scope user, project or local; inspect paths with config show`;
+  }
+};
+
+// src/plugins/native-installation/native-installation.ts
+import { createHash } from "node:crypto";
+import { existsSync as existsSync5, lstatSync, mkdirSync as mkdirSync3, readFileSync as readFileSync5, realpathSync as realpathSync2, writeFileSync as writeFileSync3 } from "node:fs";
+import { homedir as homedir3 } from "node:os";
+import { dirname as dirname5, join as join6, resolve as resolve3 } from "node:path";
+import { fileURLToPath as fileURLToPath2 } from "node:url";
+
+// src/agents/agent-frontmatter/agent-frontmatter.schema.ts
+var agentCapabilities = ["read", "edit", "shell", "web", "spawn", "ask"];
+var modelTiers = ["standard", "escalated", "expert"];
+var reasoningLevels = ["low", "medium", "high"];
+var claudeAgentColors = ["red", "blue", "green", "yellow", "purple", "orange", "pink", "cyan"];
+var AgentCapabilitySchema = external_exports.enum(agentCapabilities);
+var ModelTierSchema = external_exports.enum(modelTiers);
+var AgentFrontmatterSchema = external_exports.strictObject({
+  name: external_exports.string().regex(/^[a-z][a-z0-9-]*$/),
+  description: external_exports.string().min(1),
+  capabilities: external_exports.array(AgentCapabilitySchema).min(1).refine(
+    (capabilities) => new Set(capabilities).size === capabilities.length,
+    { message: "duplicate capability" }
+  ),
+  model: ModelTierSchema,
+  modelReason: external_exports.string().trim().min(1).optional(),
+  reasoning: external_exports.enum(reasoningLevels).optional(),
+  sandbox: external_exports.strictObject({
+    fs: external_exports.enum(["read-only", "workspace-write"]),
+    network: external_exports.enum(["none", "enabled"])
+  }).optional(),
+  dispatch: external_exports.strictObject({
+    maxConcurrent: external_exports.int().positive(),
+    maxDepth: external_exports.int().positive()
+  }).optional(),
+  "x-claude": external_exports.strictObject({ color: external_exports.enum(claudeAgentColors).optional() }).optional()
+});
+var AgentRegistrationSchema = AgentFrontmatterSchema.refine(
+  (agent) => agent.model !== "expert" || agent.modelReason !== void 0,
+  { message: "expert tier requires modelReason", path: ["modelReason"] }
+);
+
+// src/plugins/native-installation/native-installation.ts
+var NativeHostSchema = external_exports.enum(["claude", "codex"]);
+var AgentInstallScopeSchema = external_exports.enum(["project", "user"]);
+var InstallationManifestSchema = external_exports.strictObject({
+  host: NativeHostSchema,
+  agents: external_exports.array(external_exports.strictObject({
+    name: external_exports.string().regex(/^[a-z][a-z0-9-]*$/),
+    sha256: external_exports.string().regex(/^[a-f0-9]{64}$/),
+    registration: AgentRegistrationSchema
+  })).min(1)
+}).refine((value) => new Set(value.agents.map((agent) => agent.name)).size === value.agents.length, "Duplicate agent names").refine((value) => value.agents.every((agent) => agent.name === agent.registration.name), "Registration name mismatch");
+var PropsSchema2 = external_exports.object({
+  root: external_exports.string().min(1),
+  cwd: external_exports.string().min(1),
+  home: external_exports.string().min(1).default(homedir3),
+  env: external_exports.record(external_exports.string(), external_exports.string().optional()).default({})
+});
+var NativeInstallationError = class extends Error {
+  name = "NativeInstallationError";
+};
+var FileNativeInstallation = class _FileNativeInstallation {
+  props;
+  constructor(props) {
+    this.props = PropsSchema2.parse({ ...props, env: props.env === void 0 ? void 0 : { ...props.env } });
+  }
+  host() {
+    const path3 = join6(this.props.root, "flight-rules-install.json");
+    return existsSync5(path3) ? this.manifest(this.props.root).host : void 0;
+  }
+  status(scope) {
+    const selected = AgentInstallScopeSchema.parse(scope);
+    const root = this.codexRoot();
+    const manifest = this.manifest(root);
+    const directory = selected === "project" ? resolve3(this.props.cwd, ".codex", "agents") : resolve3(this.props.env["CODEX_HOME"] || join6(this.props.home, ".codex"), "agents");
+    this.assertRegularPath(directory);
+    const agents = manifest.agents.map((agent) => {
+      const source = join6(root, ".codex", "agents", `${agent.name}.toml`);
+      this.assertRegularPath(source);
+      if (!existsSync5(source) || !lstatSync(source).isFile() || this.hash(readFileSync5(source)) !== agent.sha256) {
+        throw new NativeInstallationError(`Bundled registration is missing or changed: ${source}. Rebuild or reinstall the Codex plugin.`);
+      }
+      const path3 = join6(directory, `${agent.name}.toml`);
+      this.assertRegularPath(path3);
+      const status = !existsSync5(path3) ? "missing" : lstatSync(path3).isFile() && this.hash(readFileSync5(path3)) === agent.sha256 ? "present" : "conflict";
+      return { name: agent.name, path: path3, status };
+    });
+    return {
+      host: "codex",
+      scope: selected,
+      directory,
+      agents,
+      ok: agents.every((agent) => agent.status === "present"),
+      evidence: "files-only",
+      remedy: "Install missing registrations with agents install. For conflicts, compare and back up the existing file before explicitly removing it and reinstalling. Start a new trusted Codex session and confirm native discovery; file presence does not prove dispatch access."
+    };
+  }
+  install(scope) {
+    const report = this.status(scope);
+    const conflicts = report.agents.filter((agent) => agent.status === "conflict");
+    if (conflicts.length > 0) {
+      throw new NativeInstallationError(`Existing agent definitions differ: ${conflicts.map((agent) => agent.path).join(", ")}. ${report.remedy}`);
+    }
+    const root = this.codexRoot();
+    for (const agent of report.agents.filter((agent2) => agent2.status === "missing")) {
+      this.assertRegularPath(report.directory);
+      mkdirSync3(report.directory, { recursive: true });
+      writeFileSync3(agent.path, readFileSync5(join6(root, ".codex", "agents", `${agent.name}.toml`)), { flag: "wx" });
+    }
+    return this.status(scope);
+  }
+  codexRoot() {
+    const root = resolve3(this.props.root);
+    if (this.host() === "codex") return root;
+    const target = join6(root, "dist", "codex");
+    if (existsSync5(join6(target, "flight-rules-install.json")) && this.manifest(target).host === "codex") return target;
+    throw new NativeInstallationError("Codex registrations are unavailable in this installation. Run agents install from the Codex plugin or the complete npm package. Claude discovers agents through its native plugin installation.");
+  }
+  manifest(root) {
+    try {
+      return InstallationManifestSchema.parse(JSON.parse(readFileSync5(join6(root, "flight-rules-install.json"), "utf8")));
+    } catch (cause) {
+      throw new NativeInstallationError(`Invalid installation manifest at ${root}; rebuild or reinstall flight-rules`, { cause });
+    }
+  }
+  hash(contents) {
+    return createHash("sha256").update(contents).digest("hex");
+  }
+  assertRegularPath(path3) {
+    let current = resolve3(path3);
+    const anchors = [this.props.cwd, this.props.home, this.props.env["CODEX_HOME"], this.props.root].filter((anchor2) => anchor2 !== void 0).map((anchor2) => resolve3(anchor2));
+    while (!anchors.includes(current) && dirname5(current) !== current) {
+      try {
+        if (lstatSync(current).isSymbolicLink()) throw new NativeInstallationError(`Refusing symlinked installation path: ${current}`);
+      } catch (cause) {
+        if (!(cause instanceof Error && "code" in cause && cause.code === "ENOENT")) throw cause;
+      }
+      current = dirname5(current);
+    }
+    if (existsSync5(current)) realpathSync2(current);
+  }
+  static fromInstall(props) {
+    return new _FileNativeInstallation({
+      root: props.env["FLIGHT_RULES_HOME"]?.trim() || join6(dirname5(fileURLToPath2(props.moduleUrl)), ".."),
+      cwd: props.cwd,
+      env: props.env
+    });
+  }
+};
+
 // src/shared/config-store.ts
 var configScopes = ["user", "project", "local", "file"];
 var userScopedKeys = /* @__PURE__ */ new Set(["ariadne.url", "ariadne.enabled"]);
@@ -31225,20 +31420,23 @@ var ConfigStore = class {
     this.env = props.env ?? process.env;
     this.pathProbe = props.pathProbe;
     this.untrackedRoot = props.untrackedRoot;
-    this.hostSettings = props.hostSettings ?? new ClaudeSettingsSource({
+    const host = NativeHostSchema.parse(props.host ?? this.env["FLIGHT_RULES_HOST"] ?? "claude");
+    const settingsProps = {
       cwd: props.cwd,
       env: this.env,
       ...props.home !== void 0 ? { home: props.home } : {},
       ...props.untrackedRoot !== void 0 ? { untrackedCwd: props.untrackedRoot } : {}
-    });
+    };
+    this.hostSettings = props.hostSettings ?? (host === "codex" ? new NeutralSettingsSource(settingsProps) : new ClaudeSettingsSource(settingsProps));
   }
   /** The flight-rules config file path, as `flight-rules config path` reports it. */
   filePath() {
     const override = this.env["FLIGHT_RULES_CONFIG"];
-    const here = resolveConfigPath(this.cwd, override, this.pathProbe);
+    const host = this.hostSettings.host === "codex" ? "codex" : "claude";
+    const here = resolveConfigPath(this.cwd, override, this.pathProbe, host);
     if (override !== void 0 || this.untrackedRoot === void 0) return here;
-    const isFile = this.pathProbe?.isFile.bind(this.pathProbe) ?? existsSync4;
-    return isFile(here) ? here : resolveConfigPath(this.untrackedRoot, void 0, this.pathProbe);
+    const isFile = this.pathProbe?.isFile.bind(this.pathProbe) ?? existsSync6;
+    return isFile(here) ? here : resolveConfigPath(this.untrackedRoot, void 0, this.pathProbe, host);
   }
   pathFor(scope) {
     return scope === "file" ? this.filePath() : this.hostSettings.pathFor(scope);
@@ -31261,9 +31459,9 @@ var ConfigStore = class {
   inspect() {
     const merged = this.merge();
     const result = ConfigSchema.safeParse(merged.values);
-    if (result.success) return { valid: true, ...merged, values: result.data };
+    if (result.success) return { host: this.hostSettings.host, valid: true, ...merged, values: result.data };
     const error62 = Object.keys(merged.values).length === 0 ? "no flight-rules config found" : result.error.issues.map((i) => `${i.path.join(".") || "config"}: ${i.message}`).join("; ");
-    return { valid: false, error: error62, ...merged };
+    return { host: this.hostSettings.host, valid: false, error: error62, ...merged };
   }
   /**
    * The scope a write lands in when the caller names none: wherever the key
@@ -31325,8 +31523,8 @@ var ConfigStore = class {
   readLayer(scope) {
     const path3 = this.pathFor(scope);
     if (scope === "file") {
-      if (!existsSync4(path3)) return { scope, path: path3, present: false, values: {} };
-      return { scope, path: path3, present: true, values: parseFrontmatter(readFileSync4(path3, "utf-8")) };
+      if (!existsSync6(path3)) return { scope, path: path3, present: false, values: {} };
+      return { scope, path: path3, present: true, values: parseFrontmatter(readFileSync6(path3, "utf-8")) };
     }
     const values = this.hostSettings.read(scope);
     return { scope, path: path3, present: values !== void 0, values: values ?? {} };
@@ -31337,11 +31535,11 @@ var ConfigStore = class {
       return;
     }
     const path3 = this.filePath();
-    const contents = existsSync4(path3) ? readFileSync4(path3, "utf-8") : void 0;
-    mkdirSync2(dirname4(path3), { recursive: true });
+    const contents = existsSync6(path3) ? readFileSync6(path3, "utf-8") : void 0;
+    mkdirSync4(dirname6(path3), { recursive: true });
     const values = update(contents === void 0 ? {} : parseFrontmatter(contents));
     const body = contents?.replace(/^---\n[\s\S]*?\n---\n?/, "") ?? "";
-    writeFileSync2(path3, `${this.toFrontmatter(values)}${body}`);
+    writeFileSync4(path3, `${this.toFrontmatter(values)}${body}`);
   }
   toFrontmatter(values) {
     const lines = Object.entries(values).flatMap(
@@ -31377,7 +31575,7 @@ ${lines.join("\n")}
 
 // src/git/worktree-locator/worktree-locator.ts
 import { execFileSync } from "node:child_process";
-import { basename, dirname as dirname5 } from "node:path";
+import { basename, dirname as dirname7 } from "node:path";
 var WorktreeLocator = class {
   execFileSync;
   constructor(props = {}) {
@@ -31394,13 +31592,13 @@ var WorktreeLocator = class {
     const [gitDir, commonDir] = output2.trim().split("\n");
     if (gitDir === void 0 || commonDir === void 0 || gitDir === commonDir) return void 0;
     if (basename(commonDir) !== ".git") return void 0;
-    return dirname5(commonDir);
+    return dirname7(commonDir);
   }
 };
 
 // src/tasks/evidence/evidence-location.ts
 import { execFileSync as execFileSync2 } from "node:child_process";
-import { dirname as dirname6, join as join5 } from "node:path";
+import { dirname as dirname8, join as join7 } from "node:path";
 var EvidenceLocation = class {
   root;
   execFileSync;
@@ -31412,7 +31610,7 @@ var EvidenceLocation = class {
     if (ticket.trim() === "" || /[/\\]|\.\./.test(ticket)) {
       throw new Error(`invalid ticket id "${ticket}" for an evidence directory`);
     }
-    const path3 = join5(dirname6(resolveConfigPath(this.root, void 0)), "evidence", ticket);
+    const path3 = join7(dirname8(resolveConfigPath(this.root, void 0)), "evidence", ticket);
     return { path: path3, gitignored: this.isIgnored(path3) };
   }
   isIgnored(path3) {
@@ -31455,7 +31653,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.76.1";
+var appVersion = false ? "0.0.0-dev" : "1.77.0";
 
 // src/shared/ariadne/review-packet.schema.ts
 var packetLimits = {
@@ -31700,9 +31898,9 @@ var AriadneClient = class {
 };
 
 // src/shared/ariadne/board-state-files.ts
-import { existsSync as existsSync5, mkdirSync as mkdirSync3, readFileSync as readFileSync5, readdirSync as readdirSync2, rmSync, statSync as statSync3, writeFileSync as writeFileSync3 } from "node:fs";
-import { homedir as homedir2 } from "node:os";
-import { join as join6 } from "node:path";
+import { existsSync as existsSync7, mkdirSync as mkdirSync5, readFileSync as readFileSync7, readdirSync as readdirSync2, rmSync, statSync as statSync3, writeFileSync as writeFileSync5 } from "node:fs";
+import { homedir as homedir4 } from "node:os";
+import { join as join8 } from "node:path";
 var stateIdPattern = /^[A-Za-z0-9_-]{1,80}$/;
 var BoardStateFiles = class {
   now;
@@ -31710,19 +31908,19 @@ var BoardStateFiles = class {
   home;
   constructor(props = {}) {
     this.env = props.env ?? process.env;
-    this.home = props.home ?? homedir2();
+    this.home = props.home ?? homedir4();
     this.now = props.now ?? Date.now;
   }
   root() {
     const stateHome = this.env["XDG_STATE_HOME"];
-    const base = stateHome !== void 0 && stateHome !== "" ? stateHome : join6(this.home, ".local", "state");
-    return join6(base, "flight-rules", "board");
+    const base = stateHome !== void 0 && stateHome !== "" ? stateHome : join8(this.home, ".local", "state");
+    return join8(base, "flight-rules", "board");
   }
   read(folder, id, schema) {
     const path3 = this.pathFor(folder, id);
-    if (path3 === void 0 || !existsSync5(path3)) return void 0;
+    if (path3 === void 0 || !existsSync7(path3)) return void 0;
     try {
-      const parsed = schema.safeParse(JSON.parse(readFileSync5(path3, "utf-8")));
+      const parsed = schema.safeParse(JSON.parse(readFileSync7(path3, "utf-8")));
       return parsed.success ? parsed.data : void 0;
     } catch {
       return void 0;
@@ -31731,16 +31929,16 @@ var BoardStateFiles = class {
   write(folder, id, value) {
     const path3 = this.pathFor(folder, id);
     if (path3 === void 0) return;
-    mkdirSync3(this.folder(folder), { recursive: true, mode: 448 });
-    writeFileSync3(path3, JSON.stringify(value), { mode: 384 });
+    mkdirSync5(this.folder(folder), { recursive: true, mode: 448 });
+    writeFileSync5(path3, JSON.stringify(value), { mode: 384 });
   }
   /** Writes a file only if none exists, atomically; returns whether it wrote. */
   create(folder, id, value) {
     const path3 = this.pathFor(folder, id);
     if (path3 === void 0) return false;
-    mkdirSync3(this.folder(folder), { recursive: true, mode: 448 });
+    mkdirSync5(this.folder(folder), { recursive: true, mode: 448 });
     try {
-      writeFileSync3(path3, JSON.stringify(value), { mode: 384, flag: "wx" });
+      writeFileSync5(path3, JSON.stringify(value), { mode: 384, flag: "wx" });
       return true;
     } catch {
       return false;
@@ -31753,10 +31951,10 @@ var BoardStateFiles = class {
   /** Deletes a folder's files last written more than `maxAgeMs` ago. */
   prune(folder, maxAgeMs) {
     const dir = this.folder(folder);
-    if (!existsSync5(dir)) return;
+    if (!existsSync7(dir)) return;
     const cutoff = this.now() - maxAgeMs;
     for (const name of readdirSync2(dir)) {
-      const path3 = join6(dir, name);
+      const path3 = join8(dir, name);
       try {
         if (statSync3(path3).mtimeMs < cutoff) rmSync(path3, { force: true });
       } catch {
@@ -31765,10 +31963,10 @@ var BoardStateFiles = class {
     }
   }
   folder(folder) {
-    return folder === void 0 ? this.root() : join6(this.root(), folder);
+    return folder === void 0 ? this.root() : join8(this.root(), folder);
   }
   pathFor(folder, id) {
-    return stateIdPattern.test(id) ? join6(this.folder(folder), `${id}.json`) : void 0;
+    return stateIdPattern.test(id) ? join8(this.folder(folder), `${id}.json`) : void 0;
   }
 };
 
@@ -32410,9 +32608,9 @@ var AriadnePackets = class {
 };
 
 // src/shared/ariadne/ariadne-token-store.ts
-import { chmodSync, existsSync as existsSync6, mkdirSync as mkdirSync4, readFileSync as readFileSync6, rmSync as rmSync2, writeFileSync as writeFileSync4 } from "node:fs";
-import { homedir as homedir3 } from "node:os";
-import { dirname as dirname7, join as join7 } from "node:path";
+import { chmodSync, existsSync as existsSync8, mkdirSync as mkdirSync6, readFileSync as readFileSync8, rmSync as rmSync2, writeFileSync as writeFileSync6 } from "node:fs";
+import { homedir as homedir5 } from "node:os";
+import { dirname as dirname9, join as join9 } from "node:path";
 var agentTokenPattern = /^ariadne_agent_[0-9a-f]{16}_[A-Za-z0-9_-]{43}$/;
 var ariadneTokenEnvNames = ["ARIADNE_AGENT_TOKEN", "ARIADNE_TOKEN"];
 var AriadneTokenStore = class {
@@ -32420,7 +32618,7 @@ var AriadneTokenStore = class {
   home;
   constructor(props = {}) {
     this.env = props.env ?? process.env;
-    this.home = props.home ?? homedir3();
+    this.home = props.home ?? homedir5();
   }
   isAgentToken(value) {
     return agentTokenPattern.test(value);
@@ -32428,8 +32626,8 @@ var AriadneTokenStore = class {
   /** `$XDG_CONFIG_HOME/flight-rules/ariadne-token`, else `~/.config/flight-rules/ariadne-token`. */
   path() {
     const configHome = this.env["XDG_CONFIG_HOME"];
-    const base = configHome !== void 0 && configHome !== "" ? configHome : join7(this.home, ".config");
-    return join7(base, "flight-rules", "ariadne-token");
+    const base = configHome !== void 0 && configHome !== "" ? configHome : join9(this.home, ".config");
+    return join9(base, "flight-rules", "ariadne-token");
   }
   resolve() {
     for (const name of ariadneTokenEnvNames) {
@@ -32437,8 +32635,8 @@ var AriadneTokenStore = class {
       if (value2 !== void 0 && value2 !== "") return { token: value2, source: name };
     }
     const path3 = this.path();
-    if (!existsSync6(path3)) return void 0;
-    const value = readFileSync6(path3, "utf-8").trim();
+    if (!existsSync8(path3)) return void 0;
+    const value = readFileSync8(path3, "utf-8").trim();
     return value === "" ? void 0 : { token: value, source: "file" };
   }
   /** The environment variable that would win over a saved file, if one is set. */
@@ -32454,8 +32652,8 @@ var AriadneTokenStore = class {
       );
     }
     const path3 = this.path();
-    mkdirSync4(dirname7(path3), { recursive: true, mode: 448 });
-    writeFileSync4(path3, `${value}
+    mkdirSync6(dirname9(path3), { recursive: true, mode: 448 });
+    writeFileSync6(path3, `${value}
 `, { mode: 384 });
     chmodSync(path3, 384);
     return path3;
@@ -32463,15 +32661,15 @@ var AriadneTokenStore = class {
   /** Deletes the saved token; returns whether one existed. */
   remove() {
     const path3 = this.path();
-    if (!existsSync6(path3)) return false;
+    if (!existsSync8(path3)) return false;
     rmSync2(path3);
     return true;
   }
 };
 
 // src/shared/ariadne/board-agent-store.ts
-import { existsSync as existsSync7, readdirSync as readdirSync3 } from "node:fs";
-import { join as join8 } from "node:path";
+import { existsSync as existsSync9, readdirSync as readdirSync3 } from "node:fs";
+import { join as join10 } from "node:path";
 var DispatchRecordSchema = external_exports.object({
   /** The Jira key the dispatch named, or null when it named none. */
   ticket: external_exports.string().nullable(),
@@ -32512,8 +32710,8 @@ var BoardAgentStore = class {
   }
   /** The dispatch in `session` whose prompt has this digest; reads every dispatch file, so only a fallback uses it. */
   findDispatchByPrompt(session, promptDigest) {
-    const dir = join8(this.files.root(), dispatchFolder);
-    if (!existsSync7(dir)) return void 0;
+    const dir = join10(this.files.root(), dispatchFolder);
+    if (!existsSync9(dir)) return void 0;
     for (const name of readdirSync3(dir)) {
       if (!name.endsWith(".json")) continue;
       const record2 = this.readDispatch(name.slice(0, -".json".length));
@@ -37309,7 +37507,7 @@ var GitHubTaskTracker = class {
 };
 
 // src/tasks/jira-task-tracker/jira-task-tracker.ts
-import { readFileSync as readFileSync7 } from "node:fs";
+import { readFileSync as readFileSync9 } from "node:fs";
 import { basename as basename2 } from "node:path";
 
 // src/tasks/jira-task-tracker/jira-api-error.ts
@@ -37409,7 +37607,7 @@ var JiraClient = class {
       const retryAfterSeconds = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : defaultRetryAfterSeconds;
       const jitter = 0.7 + Math.random() * 0.6;
       const delayMs = Math.min(retryAfterSeconds * 1e3 * jitter, maxBackoffMs);
-      await new Promise((resolve6) => setTimeout(resolve6, delayMs));
+      await new Promise((resolve7) => setTimeout(resolve7, delayMs));
       return this.fetchWithRetry(url2, init, attempt + 1);
     }
     return res;
@@ -37461,7 +37659,7 @@ var ConfluenceClient = class {
       const retryAfterSeconds = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : defaultRetryAfterSeconds2;
       const jitter = 0.7 + Math.random() * 0.6;
       const delayMs = Math.min(retryAfterSeconds * 1e3 * jitter, maxBackoffMs2);
-      await new Promise((resolve6) => setTimeout(resolve6, delayMs));
+      await new Promise((resolve7) => setTimeout(resolve7, delayMs));
       return this.fetchWithRetry(url2, init, attempt + 1);
     }
     return res;
@@ -40069,10 +40267,10 @@ function resolveAll(constructs2, events, context) {
   const called = [];
   let index2 = -1;
   while (++index2 < constructs2.length) {
-    const resolve6 = constructs2[index2].resolveAll;
-    if (resolve6 && !called.includes(resolve6)) {
-      events = resolve6(events, context);
-      called.push(resolve6);
+    const resolve7 = constructs2[index2].resolveAll;
+    if (resolve7 && !called.includes(resolve7)) {
+      events = resolve7(events, context);
+      called.push(resolve7);
     }
   }
   return events;
@@ -47654,7 +47852,7 @@ var JiraTaskTracker = class {
    */
   async addAttachment(ticketId, filePath) {
     const filename = basename2(filePath);
-    const file2 = new File([readFileSync7(filePath)], filename, { type: this.mimeTypes.forFilename(filename) });
+    const file2 = new File([readFileSync9(filePath)], filename, { type: this.mimeTypes.forFilename(filename) });
     const uploaded = JiraUploadedAttachmentsSchema.parse(
       await this.client.upload(`/issue/${ticketId}/attachments`, [file2])
     );
@@ -48084,43 +48282,11 @@ var nodeToolProbe = new NodeToolProbe();
 import { execFile as execFile4 } from "node:child_process";
 import { access, realpath } from "node:fs/promises";
 import { constants } from "node:fs";
-import { resolve as resolve3 } from "node:path";
+import { resolve as resolve4 } from "node:path";
 import { promisify as promisify4 } from "node:util";
 
 // src/orchestration/orchestration-policy.ts
 import { isDeepStrictEqual } from "node:util";
-
-// src/agents/agent-frontmatter/agent-frontmatter.schema.ts
-var agentCapabilities = ["read", "edit", "shell", "web", "spawn", "ask"];
-var modelTiers = ["standard", "escalated", "expert"];
-var reasoningLevels = ["low", "medium", "high"];
-var claudeAgentColors = ["red", "blue", "green", "yellow", "purple", "orange", "pink", "cyan"];
-var AgentCapabilitySchema = external_exports.enum(agentCapabilities);
-var ModelTierSchema = external_exports.enum(modelTiers);
-var AgentFrontmatterSchema = external_exports.strictObject({
-  name: external_exports.string().regex(/^[a-z][a-z0-9-]*$/),
-  description: external_exports.string().min(1),
-  capabilities: external_exports.array(AgentCapabilitySchema).min(1).refine(
-    (capabilities) => new Set(capabilities).size === capabilities.length,
-    { message: "duplicate capability" }
-  ),
-  model: ModelTierSchema,
-  modelReason: external_exports.string().trim().min(1).optional(),
-  reasoning: external_exports.enum(reasoningLevels).optional(),
-  sandbox: external_exports.strictObject({
-    fs: external_exports.enum(["read-only", "workspace-write"]),
-    network: external_exports.enum(["none", "enabled"])
-  }).optional(),
-  dispatch: external_exports.strictObject({
-    maxConcurrent: external_exports.int().positive(),
-    maxDepth: external_exports.int().positive()
-  }).optional(),
-  "x-claude": external_exports.strictObject({ color: external_exports.enum(claudeAgentColors).optional() }).optional()
-});
-var AgentRegistrationSchema = AgentFrontmatterSchema.refine(
-  (agent) => agent.model !== "expert" || agent.modelReason !== void 0,
-  { message: "expert tier requires modelReason", path: ["modelReason"] }
-);
 
 // src/agents/agent-emitter/agent-emitter.schema.ts
 var ModelBindingsSchema = external_exports.strictObject({
@@ -48445,7 +48611,7 @@ var NodeWorkflowPreflight = class {
     const codeWorkflow = selected === "execute-work" || selected === "execute-wave";
     const requiredAgents = codeWorkflow ? ["code-implementation", "code-implementation-escalated", "code-verifier", "tech-writer"] : selected === "break-down-work" ? ["research-agent"] : [selected === "reproduce-bug" ? "qa-engineer" : "qa-engineer-verify"];
     const checks = [];
-    const contextMatches = parsed !== void 0 && resolve3(parsed.context.cwd) === resolve3(this.cwd);
+    const contextMatches = parsed !== void 0 && resolve4(parsed.context.cwd) === resolve4(this.cwd);
     checks.push({
       name: "host:context",
       ok: contextMatches,
@@ -48605,7 +48771,7 @@ var NodeWorkflowPreflight = class {
   async gitWrite(diagnostics) {
     try {
       const paths = await this.command(["rev-parse", "--git-dir", "--git-common-dir"]);
-      const directories = paths.split("\n").map((path3) => resolve3(this.cwd, path3));
+      const directories = paths.split("\n").map((path3) => resolve4(this.cwd, path3));
       if (directories.length !== 2) {
         return {
           name: "local:git-write",
@@ -48818,7 +48984,8 @@ var NodeRepositoryReadiness = class {
 var FlightRulesPropsSchema = external_exports.object({
   cwd: external_exports.string().optional().describe("Directory used for config discovery; defaults to process.cwd()"),
   env: external_exports.record(external_exports.string(), external_exports.string().optional()).optional().describe("Live environment record; defaults to process.env"),
-  configPath: external_exports.string().optional().describe("Explicit config file, taking precedence over FLIGHT_RULES_CONFIG and discovery")
+  configPath: external_exports.string().optional().describe("Explicit config file, taking precedence over FLIGHT_RULES_CONFIG and discovery"),
+  host: NativeHostSchema.optional().describe("Explicit configuration host; otherwise FLIGHT_RULES_HOST, the native package host, or Claude for compatibility")
 });
 
 // src/flight-rules/flight-rules.ts
@@ -48827,6 +48994,7 @@ var DefaultFlightRules = class {
   env;
   explicitConfigPath;
   hostSettings;
+  host;
   untrackedRoot;
   constructor(props = {}) {
     const parsed = FlightRulesPropsSchema.parse({ ...props, env: props.env === void 0 ? void 0 : { ...props.env } });
@@ -48834,6 +49002,7 @@ var DefaultFlightRules = class {
     this.env = props.env ?? process.env;
     this.explicitConfigPath = parsed.configPath;
     this.hostSettings = props.hostSettings;
+    this.host = parsed.host;
   }
   configPath() {
     return this.configStore().filePath();
@@ -48844,9 +49013,13 @@ var DefaultFlightRules = class {
     return new ConfigStore({
       cwd: this.cwd,
       env,
+      host: NativeHostSchema.parse(this.host ?? env["FLIGHT_RULES_HOST"] ?? this.installation().host() ?? "claude"),
       ...this.hostSettings !== void 0 ? { hostSettings: this.hostSettings } : {},
       ...untrackedRoot !== void 0 ? { untrackedRoot } : {}
     });
+  }
+  installation() {
+    return FileNativeInstallation.fromInstall({ moduleUrl: import.meta.url, cwd: this.cwd, env: this.env });
   }
   /** Looked up once per instance. */
   mainCheckout() {
@@ -48956,7 +49129,7 @@ function createDocCommand(getResolver) {
 }
 
 // src/code-review/commands/command.ts
-import { readFileSync as readFileSync9 } from "node:fs";
+import { readFileSync as readFileSync11 } from "node:fs";
 
 // src/code-review/review.schema.ts
 var reviewContractVersion = 1;
@@ -49262,9 +49435,9 @@ var reviewContract = new ZodReviewContract();
 
 // src/code-review/review-policy.ts
 import { execFileSync as execFileSync3 } from "node:child_process";
-import { readFileSync as readFileSync8, realpathSync as realpathSync2 } from "node:fs";
-import { dirname as dirname8, join as join9, relative as relative2 } from "node:path";
-import { fileURLToPath as fileURLToPath2 } from "node:url";
+import { readFileSync as readFileSync10, realpathSync as realpathSync3 } from "node:fs";
+import { dirname as dirname10, join as join11, relative as relative2 } from "node:path";
+import { fileURLToPath as fileURLToPath3 } from "node:url";
 var ReviewPolicyPropsSchema = external_exports.strictObject({ home: external_exports.string().min(1).optional() });
 var RepositoryContextPropsSchema = external_exports.strictObject({
   cwd: external_exports.string().min(1),
@@ -49275,15 +49448,15 @@ var FileReviewPolicy = class {
   home;
   constructor(props = {}) {
     const parsed = ReviewPolicyPropsSchema.parse(props);
-    this.home = parsed.home ?? join9(dirname8(fileURLToPath2(import.meta.url)), "..");
+    this.home = parsed.home ?? join11(dirname10(fileURLToPath3(import.meta.url)), "..");
   }
   load() {
-    const docs = realpathSync2(join9(this.home, "docs"));
+    const docs = realpathSync3(join11(this.home, "docs"));
     const read = (id) => {
-      const path3 = realpathSync2(join9(docs, `${id}.md`));
+      const path3 = realpathSync3(join11(docs, `${id}.md`));
       if (relative2(docs, path3).startsWith(".."))
         throw new ReviewPolicyError("review policy path leaves the installed docs directory");
-      return readFileSync8(path3, "utf8");
+      return readFileSync10(path3, "utf8");
     };
     return {
       method: read("autonomous-review-method"),
@@ -49627,7 +49800,7 @@ var GitHubReviewVerifier = class {
 };
 
 // src/code-review/review-codec.ts
-import { createHash } from "node:crypto";
+import { createHash as createHash2 } from "node:crypto";
 var MarkerInputSchema = external_exports.strictObject({
   body: external_exports.string(),
   authorId: external_exports.number().int().positive(),
@@ -49680,7 +49853,7 @@ ${finding.details}${owner}
 ${this.finding(validated)}`;
   }
   fingerprint(finding) {
-    return createHash("sha256").update(`${finding.path}|${finding.label}|${finding.subject.trim().toLowerCase()}`).digest("hex");
+    return createHash2("sha256").update(`${finding.path}|${finding.label}|${finding.subject.trim().toLowerCase()}`).digest("hex");
   }
   marker(kind, value) {
     return `<!-- code-review:${kind} ${JSON.stringify(value).replaceAll(">", "\\u003e")} -->`;
@@ -49715,7 +49888,7 @@ function createReviewCommand() {
   });
   review.command("validate").argument("<file>", "structured reviewer result").action((file2) => {
     process.stdout.write(
-      JSON.stringify(reviewContract.parse(JSON.parse(readFileSync9(file2, "utf8")))) + "\n"
+      JSON.stringify(reviewContract.parse(JSON.parse(readFileSync11(file2, "utf8")))) + "\n"
     );
   });
   review.command("render").argument("<plan>", "evidence-checked plan JSON").action((file2) => {
@@ -49724,7 +49897,7 @@ function createReviewCommand() {
       records: external_exports.array(FindingRecordSchema),
       outcome: external_exports.string(),
       problems: external_exports.array(external_exports.string())
-    }).parse(JSON.parse(readFileSync9(file2, "utf8")));
+    }).parse(JSON.parse(readFileSync11(file2, "utf8")));
     const result = reviewContract.parse(plan.review);
     const codec2 = new JsonReviewCodec();
     process.stdout.write(
@@ -49745,7 +49918,7 @@ function createReviewCommand() {
   review.command("state").argument("<file>", "index with actual persisted artifact IDs").action((file2) => {
     process.stdout.write(
       new JsonReviewCodec().state(
-        ReviewStateSchema.parse(JSON.parse(readFileSync9(file2, "utf8")))
+        ReviewStateSchema.parse(JSON.parse(readFileSync11(file2, "utf8")))
       ) + "\n"
     );
   });
@@ -49771,7 +49944,7 @@ function createReviewCommand() {
         head: external_exports.looseObject({ sha: external_exports.string() }),
         user: external_exports.looseObject({ id: external_exports.number() })
       }).parse(await api.get(`/repos/${opts.repo}/pulls/${prNumber}`));
-      const owners = opts.ownersFile === void 0 ? {} : external_exports.record(external_exports.string(), external_exports.array(external_exports.string())).parse(JSON.parse(readFileSync9(opts.ownersFile, "utf8")));
+      const owners = opts.ownersFile === void 0 ? {} : external_exports.record(external_exports.string(), external_exports.array(external_exports.string())).parse(JSON.parse(readFileSync11(opts.ownersFile, "utf8")));
       const planner = new EvidenceReviewPlanner({
         verifier: new GitHubReviewVerifier({
           api,
@@ -49782,9 +49955,9 @@ function createReviewCommand() {
           requireMapping: opts.requireMapping ?? false
         })
       });
-      const records = external_exports.array(external_exports.unknown()).parse(JSON.parse(readFileSync9(opts.recordsFile, "utf8")));
+      const records = external_exports.array(external_exports.unknown()).parse(JSON.parse(readFileSync11(opts.recordsFile, "utf8")));
       const result = await planner.plan({
-        review: JSON.parse(readFileSync9(opts.file, "utf8")),
+        review: JSON.parse(readFileSync11(opts.file, "utf8")),
         records,
         headSha: pr.head.sha
       });
@@ -49795,7 +49968,7 @@ function createReviewCommand() {
 }
 
 // src/shared/commands/config/command.ts
-var scopeHelp = "where to write: user (~/.claude/settings.json), project (.claude/settings.json), local (.claude/settings.local.json), or file (the flight-rules config file)";
+var scopeHelp = "where to write: user, project, local, or file; config show reports the selected host and exact paths (override with FLIGHT_RULES_HOST=claude|codex)";
 function createConfigCommand(getStore) {
   const config2 = new Command("config");
   config2.exitOverride();
@@ -49851,7 +50024,7 @@ var HiddenPrompt = class {
     const muted = new Writable({ write: (_chunk, _encoding, done) => done() });
     const prompt = createInterface({ input: process.stdin, output: muted, terminal: true });
     try {
-      return await new Promise((resolve6) => prompt.once("line", resolve6));
+      return await new Promise((resolve7) => prompt.once("line", resolve7));
     } finally {
       prompt.close();
       process.stderr.write("\n");
@@ -49989,7 +50162,7 @@ function createBoardCommand(getBoard, getTokens = () => new AriadneTokenStore(),
 }
 
 // src/shared/commands/packet/command.ts
-import { readFileSync as readFileSync10, writeFileSync as writeFileSync5 } from "node:fs";
+import { readFileSync as readFileSync12, writeFileSync as writeFileSync7 } from "node:fs";
 
 // src/shared/decimal-integer.ts
 var DecimalIntegerParser = class {
@@ -50036,7 +50209,7 @@ var PacketFile = class {
   read() {
     let text6;
     try {
-      text6 = readFileSync10(this.path, "utf8");
+      text6 = readFileSync12(this.path, "utf8");
     } catch (err) {
       throw new Error(`cannot read ${this.path}: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
     }
@@ -50049,7 +50222,7 @@ var PacketFile = class {
   /** Runs after the packet is stored, so a failure says so and names the id the file still needs. */
   writeId(file2, id) {
     try {
-      writeFileSync5(this.path, JSON.stringify({ ...file2, id }, null, 2) + "\n");
+      writeFileSync7(this.path, JSON.stringify({ ...file2, id }, null, 2) + "\n");
     } catch (err) {
       throw new PacketIdWriteError(
         `packet ${id} was published, but its id could not be written to ${this.path}: ${err instanceof Error ? err.message : String(err)}; add "id": "${id}" to the file before re-running, or a re-run publishes a second packet`,
@@ -50124,9 +50297,9 @@ var PacketCommandFactory = class {
 var createPacketCommand = (getPackets) => new PacketCommandFactory().create(getPackets);
 
 // src/tasks/commands/resolve-body.ts
-import { readFileSync as readFileSync11 } from "node:fs";
+import { readFileSync as readFileSync13 } from "node:fs";
 function resolveBody(opts) {
-  if (opts.bodyFile !== void 0) return readFileSync11(opts.bodyFile, "utf8");
+  if (opts.bodyFile !== void 0) return readFileSync13(opts.bodyFile, "utf8");
   if (opts.body !== void 0) return opts.body;
   throw new Error("one of --body or --body-file is required");
 }
@@ -51071,15 +51244,15 @@ function createRfcCommand(getConfig, getCwd = () => process.cwd()) {
 }
 
 // src/tasks/qa-instructions/qa-instructions.ts
-import { existsSync as existsSync8, readFileSync as readFileSync12, statSync as statSync4 } from "node:fs";
-import { dirname as dirname9, join as join10, resolve as resolve4 } from "node:path";
+import { existsSync as existsSync10, readFileSync as readFileSync14, statSync as statSync4 } from "node:fs";
+import { dirname as dirname11, join as join12, resolve as resolve5 } from "node:path";
 var atxHeading = /^ {0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$/;
 var fenceRun2 = /^ {0,3}(`{3,}|~{3,})/;
 var legacyHint = 'Legacy QA recipe in use. Move its content into a QA.md at the repo root (or a "QA" section of AGENTS.md); see docs/qa-instructions.md.';
 var nodeFileSystem = {
-  isFile: (path3) => existsSync8(path3) && statSync4(path3).isFile(),
-  exists: (path3) => existsSync8(path3),
-  readFile: (path3) => readFileSync12(path3, "utf8")
+  isFile: (path3) => existsSync10(path3) && statSync4(path3).isFile(),
+  exists: (path3) => existsSync10(path3),
+  readFile: (path3) => readFileSync14(path3, "utf8")
 };
 var QaInstructionsFinder = class {
   fs;
@@ -51128,26 +51301,26 @@ var QaInstructionsFinder = class {
   }
   /** The start directory and each parent up to the repository root; only the start when no root is found. */
   levels(from) {
-    const absolute = resolve4(from);
-    const start = this.fs.isFile(absolute) ? dirname9(absolute) : absolute;
+    const absolute = resolve5(from);
+    const start = this.fs.isFile(absolute) ? dirname11(absolute) : absolute;
     const levels = [];
     let current = start;
     for (; ; ) {
       levels.push(current);
-      if (this.fs.exists(join10(current, ".git"))) return levels;
-      const parent = dirname9(current);
+      if (this.fs.exists(join12(current, ".git"))) return levels;
+      const parent = dirname11(current);
       if (parent === current) return [start];
       current = parent;
     }
   }
   sourceAt(dir) {
-    const agentsMd = join10(dir, "AGENTS.md");
+    const agentsMd = join12(dir, "AGENTS.md");
     if (this.fs.isFile(agentsMd)) {
       const section = this.extractQaSection(this.fs.readFile(agentsMd));
       if (section !== void 0)
         return { path: agentsMd, kind: "agents-md-section", dir, content: section };
     }
-    return this.fileSource(join10(dir, "QA.md"), "qa-md", dir) ?? this.fileSource(join10(dir, ".agents", "QA.md"), "agents-dir-qa-md", dir);
+    return this.fileSource(join12(dir, "QA.md"), "qa-md", dir) ?? this.fileSource(join12(dir, ".agents", "QA.md"), "agents-dir-qa-md", dir);
   }
   fileSource(path3, kind, dir) {
     if (!this.fs.isFile(path3)) return void 0;
@@ -51156,7 +51329,7 @@ var QaInstructionsFinder = class {
   }
   legacySource(path3) {
     if (path3 === void 0) return void 0;
-    const source = this.fileSource(path3, "legacy-recipe", dirname9(path3));
+    const source = this.fileSource(path3, "legacy-recipe", dirname11(path3));
     return source === void 0 ? void 0 : { ...source, legacy: true, hint: legacyHint };
   }
 };
@@ -51218,7 +51391,7 @@ function createCompetenciesCommand(getConfig) {
 }
 
 // src/tasks/commands/check/command.ts
-import { readFileSync as readFileSync13 } from "node:fs";
+import { readFileSync as readFileSync15 } from "node:fs";
 var ReadinessFailedError = class extends Error {
   name = "ReadinessFailedError";
 };
@@ -51227,7 +51400,7 @@ function createCheckCommand(getConfig, getTracker, getConfigPath, getProbe, getF
   check2.addOption(new Option("--workflow <name>", "check readiness for this workflow before its first mutation").choices(WorkflowSchema.options)).option("--runtime-file <path>", "JSON containing current caller/worker capability observations; requires --workflow").exitOverride().action(async (options) => {
     let evidence;
     try {
-      evidence = options.runtimeFile === void 0 ? void 0 : JSON.parse(readFileSync13(options.runtimeFile, "utf8"));
+      evidence = options.runtimeFile === void 0 ? void 0 : JSON.parse(readFileSync15(options.runtimeFile, "utf8"));
     } catch {
       process.stdout.write(JSON.stringify({ tracker: null, repo: null, checks: [{ name: "runtime", ok: false, required: true, code: "INVALID_CONTEXT", detail: "Cannot read a JSON runtime evidence file", remedy: "Supply a readable evidence file; see flight-rules doc workflow-preflight." }], ok: false, scope: "workflow" }) + "\n");
       throw new ReadinessFailedError("flight-rules check failed \u2014 see report above");
@@ -51562,9 +51735,9 @@ var DetachedHeartbeatSender = class {
 import { execFileSync as execFileSync4 } from "node:child_process";
 
 // src/hooks/board-heartbeat/agent-ticket-resolver.ts
-import { createHash as createHash2 } from "node:crypto";
-import { closeSync, existsSync as existsSync9, openSync, readFileSync as readFileSync14, readSync } from "node:fs";
-import { basename as basename5, dirname as dirname10, join as join11 } from "node:path";
+import { createHash as createHash3 } from "node:crypto";
+import { closeSync, existsSync as existsSync11, openSync, readFileSync as readFileSync16, readSync } from "node:fs";
+import { basename as basename5, dirname as dirname12, join as join13 } from "node:path";
 var SubagentMetaSchema = external_exports.looseObject({
   agentType: external_exports.string().optional(),
   description: external_exports.string().optional(),
@@ -51592,8 +51765,8 @@ var AgentTicketResolver = class {
     if (cached2 !== void 0) return cached2;
     const dir = this.subagentsDir(location);
     if (dir === void 0) return void 0;
-    const meta3 = this.readMeta(join11(dir, `agent-${location.agentId}.meta.json`));
-    const resolved = meta3 !== void 0 ? this.fromMeta(location, meta3) : this.fromTranscript(location, join11(dir, `agent-${location.agentId}.jsonl`));
+    const meta3 = this.readMeta(join13(dir, `agent-${location.agentId}.meta.json`));
+    const resolved = meta3 !== void 0 ? this.fromMeta(location, meta3) : this.fromTranscript(location, join13(dir, `agent-${location.agentId}.jsonl`));
     if (resolved !== void 0) this.agents.recordAgent(location.agentId, resolved);
     return resolved;
   }
@@ -51616,7 +51789,7 @@ var AgentTicketResolver = class {
   }
   /** A stable digest of a prompt, recorded at dispatch and matched against a transcript's first message. */
   digest(prompt) {
-    return createHash2("sha256").update(prompt.trim()).digest("hex").slice(0, 32);
+    return createHash3("sha256").update(prompt.trim()).digest("hex").slice(0, 32);
   }
   fromMeta(location, meta3) {
     const dispatch = meta3.toolUseId !== void 0 ? this.agents.readDispatch(meta3.toolUseId) : void 0;
@@ -51647,23 +51820,23 @@ var AgentTicketResolver = class {
   }
   subagentsDir(location) {
     if (location.agentTranscriptPath !== void 0 && location.agentTranscriptPath !== "") {
-      return dirname10(location.agentTranscriptPath);
+      return dirname12(location.agentTranscriptPath);
     }
     const transcript = location.transcriptPath;
     if (transcript === void 0 || !transcript.endsWith(".jsonl")) return void 0;
-    return join11(dirname10(transcript), basename5(transcript, ".jsonl"), "subagents");
+    return join13(dirname12(transcript), basename5(transcript, ".jsonl"), "subagents");
   }
   readMeta(path3) {
-    if (!existsSync9(path3)) return void 0;
+    if (!existsSync11(path3)) return void 0;
     try {
-      const parsed = SubagentMetaSchema.safeParse(JSON.parse(readFileSync14(path3, "utf-8")));
+      const parsed = SubagentMetaSchema.safeParse(JSON.parse(readFileSync16(path3, "utf-8")));
       return parsed.success ? parsed.data : void 0;
     } catch {
       return void 0;
     }
   }
   firstUserMessage(path3) {
-    if (!existsSync9(path3)) return void 0;
+    if (!existsSync11(path3)) return void 0;
     let head;
     try {
       const fd = openSync(path3, "r");
@@ -51768,8 +51941,8 @@ ${line.trim()}`) === "";
 };
 
 // src/hooks/commit-guard/commit-guard.ts
-import { readFileSync as readFileSync15 } from "node:fs";
-import { isAbsolute as isAbsolute3, resolve as resolve5 } from "node:path";
+import { readFileSync as readFileSync17 } from "node:fs";
+import { isAbsolute as isAbsolute3, resolve as resolve6 } from "node:path";
 var PreToolUseInputSchema = external_exports.looseObject({
   tool_name: external_exports.string().optional(),
   tool_input: external_exports.looseObject({ command: external_exports.string().optional() }).optional(),
@@ -51861,7 +52034,7 @@ var CommitGuard = class {
     const unquoted = file2.replace(/^["']|["']$/g, "");
     if (unquoted === "-" || !isAbsolute3(unquoted) && cwd === void 0) return false;
     try {
-      const contents = readFileSync15(isAbsolute3(unquoted) ? unquoted : resolve5(cwd ?? "", unquoted), "utf8");
+      const contents = readFileSync17(isAbsolute3(unquoted) ? unquoted : resolve6(cwd ?? "", unquoted), "utf8");
       return /^Flight-Rules-Version: /m.test(contents);
     } catch {
       return false;
@@ -51982,11 +52155,11 @@ function createHookCommand(getHandler = () => new PreBashHook(), readStdin = () 
 }
 
 // src/git/commands/commit/command.ts
-import { readFileSync as readFileSync17 } from "node:fs";
+import { readFileSync as readFileSync19 } from "node:fs";
 
 // src/git/commit-message-builder/commit-message-builder.ts
-import { readFileSync as readFileSync16 } from "node:fs";
-import { dirname as dirname11, join as join12 } from "node:path";
+import { readFileSync as readFileSync18 } from "node:fs";
+import { dirname as dirname13, join as join14 } from "node:path";
 
 // src/git/commit-message-builder/commit-message.schema.ts
 var CommitMessageInputSchema = external_exports.object({
@@ -52044,8 +52217,8 @@ var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
   }
   static readPluginVersion(binPath) {
     try {
-      const pkgPath = join12(dirname11(binPath), "..", "package.json");
-      const parsed = JSON.parse(readFileSync16(pkgPath, "utf-8"));
+      const pkgPath = join14(dirname13(binPath), "..", "package.json");
+      const parsed = JSON.parse(readFileSync18(pkgPath, "utf-8"));
       if (typeof parsed === "object" && parsed !== null && "version" in parsed && typeof parsed.version === "string") {
         return parsed.version;
       }
@@ -52082,7 +52255,7 @@ function createGitCommand(getExecutor) {
       type: opts.type,
       scope: opts.scope,
       description: opts.description,
-      body: opts.bodyFile !== void 0 ? readFileSync17(opts.bodyFile, "utf8") : opts.body,
+      body: opts.bodyFile !== void 0 ? readFileSync19(opts.bodyFile, "utf8") : opts.body,
       footers: opts.footer,
       model: opts.model ?? void 0
     });
@@ -52120,16 +52293,16 @@ function createGitCommand(getExecutor) {
 }
 
 // src/git/commands/message/command.ts
-import { mkdtempSync, readFileSync as readFileSync18, writeFileSync as writeFileSync6 } from "node:fs";
+import { mkdtempSync, readFileSync as readFileSync20, writeFileSync as writeFileSync8 } from "node:fs";
 import { tmpdir as tmpdir2 } from "node:os";
-import { join as join13 } from "node:path";
+import { join as join15 } from "node:path";
 function createCommitMessageCommand() {
   return new Command("commit-message").description("write the conventional commit message `flight-rules git commit` would use to a file, without committing").exitOverride().requiredOption("--type <type>", "conventional commit type").requiredOption("--scope <scope>", "conventional commit scope").requiredOption("--description <description>", "commit description").option("--body <body>", "commit body (or use --body-file)").option("--body-file <path>", "read the commit body from a file; wins over --body").option("--footer <footer>", "commit footer (repeatable)", (value, previous3) => [...previous3, value], []).option("--model <model>", "model identifier").option("--out <path>", "where to write the message; defaults to a new file in the temp directory").action((opts) => {
     const input2 = CommitMessageInputSchema.parse({
       type: opts.type,
       scope: opts.scope,
       description: opts.description,
-      body: opts.bodyFile !== void 0 ? readFileSync18(opts.bodyFile, "utf8") : opts.body,
+      body: opts.bodyFile !== void 0 ? readFileSync20(opts.bodyFile, "utf8") : opts.body,
       footers: opts.footer,
       model: opts.model
     });
@@ -52137,8 +52310,8 @@ function createCommitMessageCommand() {
       binPath: process.argv[1] ?? "",
       agentEnv: process.env["AI_AGENT"]
     }).build(input2);
-    const path3 = opts.out ?? join13(mkdtempSync(join13(tmpdir2(), "flight-rules-commit-")), "message.txt");
-    writeFileSync6(path3, `${message}
+    const path3 = opts.out ?? join15(mkdtempSync(join15(tmpdir2(), "flight-rules-commit-")), "message.txt");
+    writeFileSync8(path3, `${message}
 `);
     process.stdout.write(JSON.stringify({ path: path3, message }) + "\n");
   });
@@ -52196,6 +52369,21 @@ function createPrCommand(getHost) {
   return pr;
 }
 
+// src/plugins/commands/agents/command.ts
+function createAgentsCommand(getInstallation) {
+  const command = new Command("agents").description("Inspect or install Codex's separate native agent registrations").exitOverride();
+  for (const action of ["status", "install"]) {
+    command.command(action).description(action === "status" ? "check registration files; native discovery still requires a fresh session" : "copy missing registrations, preserving all differing existing files").addOption(new Option("--scope <scope>", "project or user registration directory").choices(AgentInstallScopeSchema.options).default("project")).exitOverride().action((opts) => {
+      const installation = getInstallation();
+      const report = action === "install" ? installation.install(opts.scope) : installation.status(opts.scope);
+      process.stdout.write(`${JSON.stringify(report)}
+`);
+      if (!report.ok) throw new NativeInstallationError("Required native registration files are missing or differ; see the report's remedy");
+    });
+  }
+  return command;
+}
+
 // src/cli/cli.ts
 function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = () => createFlightRules().configPath(), services = createFlightRules()) {
   const program2 = new Command("flight-rules");
@@ -52221,6 +52409,7 @@ function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = () => cr
   program2.addCommand(createUsersCommand(tracker));
   program2.addCommand(createRfcCommand(config2));
   program2.addCommand(createConfigCommand(() => services.configStore()));
+  program2.addCommand(createAgentsCommand(() => services.installation()));
   const boardHooks = () => new BoardHookKit({
     sessions: services.boardSessions(),
     agents: services.boardAgents(),

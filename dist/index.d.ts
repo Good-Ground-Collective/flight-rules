@@ -78,3 +78,6 @@ export { NodeRepositoryReadiness } from './tasks/readiness/repository-readiness.
 export type { RepositoryReadiness, ReadinessInputs } from './tasks/readiness/repository-readiness.js';
 export { NodeWorkflowPreflight } from './tasks/readiness/workflow-preflight.js';
 export type { WorkflowPreflight } from './tasks/readiness/workflow-preflight.js';
+export { FileNativeInstallation, NativeInstallationError, NativeHostSchema, AgentInstallScopeSchema, InstallationManifestSchema } from './plugins/native-installation/native-installation.js';
+export type { NativeInstallation, AgentInstallationReport, NativeHost, AgentInstallScope } from './plugins/native-installation/native-installation.js';
+export { NeutralSettingsSource, InvalidSettingsError } from './shared/host-settings/neutral-settings-source.js';

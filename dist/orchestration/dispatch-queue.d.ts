@@ -32,8 +32,8 @@ declare const DispatchQueuePropsSchema: z.ZodObject<{
                     "workspace-write": "workspace-write";
                 }>;
                 network: z.ZodEnum<{
-                    enabled: "enabled";
                     none: "none";
+                    enabled: "enabled";
                 }>;
             }, z.core.$strict>>;
             dispatch: z.ZodOptional<z.ZodObject<{
@@ -42,13 +42,13 @@ declare const DispatchQueuePropsSchema: z.ZodObject<{
             }, z.core.$strict>>;
             "x-claude": z.ZodOptional<z.ZodObject<{
                 color: z.ZodOptional<z.ZodEnum<{
+                    red: "red";
                     blue: "blue";
                     green: "green";
                     yellow: "yellow";
-                    orange: "orange";
-                    red: "red";
-                    pink: "pink";
                     purple: "purple";
+                    orange: "orange";
+                    pink: "pink";
                     cyan: "cyan";
                 }>>;
             }, z.core.$strict>>;
