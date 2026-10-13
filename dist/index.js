@@ -2977,7 +2977,7 @@ var JiraClient = class {
       const retryAfterSeconds = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : defaultRetryAfterSeconds;
       const jitter = 0.7 + Math.random() * 0.6;
       const delayMs = Math.min(retryAfterSeconds * 1e3 * jitter, maxBackoffMs);
-      await new Promise((resolve3) => setTimeout(resolve3, delayMs));
+      await new Promise((resolve4) => setTimeout(resolve4, delayMs));
       return this.fetchWithRetry(url, init, attempt + 1);
     }
     return res;
@@ -3030,7 +3030,7 @@ var ConfluenceClient = class {
       const retryAfterSeconds = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : defaultRetryAfterSeconds2;
       const jitter = 0.7 + Math.random() * 0.6;
       const delayMs = Math.min(retryAfterSeconds * 1e3 * jitter, maxBackoffMs2);
-      await new Promise((resolve3) => setTimeout(resolve3, delayMs));
+      await new Promise((resolve4) => setTimeout(resolve4, delayMs));
       return this.fetchWithRetry(url, init, attempt + 1);
     }
     return res;
@@ -5491,6 +5491,83 @@ var TomlCodexAgentEmitter = class {
     return diagnostics;
   }
 };
+
+// src/plugins/plugin-compiler/plugin-compiler.ts
+import { chmodSync as chmodSync2, copyFileSync, existsSync as existsSync8, lstatSync, mkdirSync as mkdirSync5, readFileSync as readFileSync10, readdirSync as readdirSync5, realpathSync as realpathSync2, rmSync as rmSync3, writeFileSync as writeFileSync5 } from "node:fs";
+import { join as join11, resolve as resolve3 } from "node:path";
+import { z as z29 } from "zod";
+var NativePluginCompilerPropsSchema = z29.strictObject({ sourceDir: z29.string().min(1) });
+var PackageVersionSchema = z29.object({ version: z29.string().min(1) });
+var PluginIdentitySchema = z29.strictObject({
+  name: z29.string().regex(/^[a-z][a-z0-9-]*$/),
+  description: z29.string().min(1),
+  repository: z29.url(),
+  author: z29.strictObject({ name: z29.string().min(1) }),
+  license: z29.string().min(1)
+});
+var InvalidPluginSourceError = class extends Error {
+  name = "InvalidPluginSourceError";
+};
+var NativePluginCompiler = class {
+  sourceDir;
+  constructor(props) {
+    this.sourceDir = realpathSync2(resolve3(NativePluginCompilerPropsSchema.parse(props).sourceDir));
+  }
+  compile() {
+    for (const resource of ["package.json", "adapters", "agents", "skills", "docs", "hooks", "bin"]) {
+      this.validateSource(join11(this.sourceDir, resource));
+    }
+    const identity = PluginIdentitySchema.parse(JSON.parse(readFileSync10(join11(this.sourceDir, "adapters/plugin.json"), "utf8")));
+    const { version } = PackageVersionSchema.parse(JSON.parse(readFileSync10(join11(this.sourceDir, "package.json"), "utf8")));
+    const definitions = new FileAgentRegistry().load(join11(this.sourceDir, "agents"));
+    const models = JSON.parse(readFileSync10(join11(this.sourceDir, "adapters/claude/model-tiers.json"), "utf8"));
+    const emitter = new MarkdownClaudeAgentEmitter({ models });
+    const agents = definitions.map((agent) => ({ name: agent.frontmatter.name, markdown: emitter.emit(agent) }));
+    for (const executable of ["flight-rules", "flight-rules.mjs"]) {
+      if (!existsSync8(join11(this.sourceDir, "bin", executable))) {
+        throw new InvalidPluginSourceError(`Build the CLI before native assembly: missing bin/${executable}`);
+      }
+    }
+    const directory = join11(this.sourceDir, "dist", "claude");
+    if (existsSync8(join11(this.sourceDir, "dist")) && lstatSync(join11(this.sourceDir, "dist")).isSymbolicLink()) {
+      throw new InvalidPluginSourceError("Native output cannot use a symlinked dist directory");
+    }
+    rmSync3(directory, { recursive: true, force: true });
+    mkdirSync5(directory, { recursive: true });
+    for (const resource of ["skills", "docs", "hooks", "bin"]) this.copyDirectory(join11(this.sourceDir, resource), join11(directory, resource));
+    mkdirSync5(join11(directory, "agents"));
+    for (const agent of agents) writeFileSync5(join11(directory, "agents", `${agent.name}.md`), agent.markdown);
+    mkdirSync5(join11(directory, "adapters", "claude"), { recursive: true });
+    copyFileSync(join11(this.sourceDir, "adapters/claude/model-tiers.json"), join11(directory, "adapters/claude/model-tiers.json"));
+    for (const executable of ["flight-rules", "flight-rules.mjs"]) chmodSync2(join11(directory, "bin", executable), 493);
+    mkdirSync5(join11(directory, ".claude-plugin"));
+    writeFileSync5(join11(directory, ".claude-plugin", "plugin.json"), JSON.stringify({
+      ...identity,
+      version,
+      skills: "./skills/",
+      agents: agents.map((agent) => `./agents/${agent.name}.md`)
+    }, null, 2) + "\n");
+    return { directory, agents: agents.map((agent) => agent.name), diagnostics: [] };
+  }
+  validateSource(path) {
+    const stat = lstatSync(path);
+    if (stat.isSymbolicLink() || !stat.isFile() && !stat.isDirectory()) {
+      throw new InvalidPluginSourceError(`Native resources must be regular files/directories: ${path}`);
+    }
+    if (stat.isDirectory()) {
+      for (const entry of readdirSync5(path)) this.validateSource(join11(path, entry));
+    }
+  }
+  copyDirectory(source, destination) {
+    mkdirSync5(destination, { recursive: true });
+    for (const entry of readdirSync5(source, { withFileTypes: true })) {
+      const from = join11(source, entry.name);
+      const to = join11(destination, entry.name);
+      if (entry.isDirectory()) this.copyDirectory(from, to);
+      else copyFileSync(from, to);
+    }
+  }
+};
 export {
   AgentCapabilitySchema,
   AgentFrontmatterSchema,
@@ -5524,12 +5601,14 @@ export {
   GitHubTaskTracker,
   InitiativeSchema,
   InvalidAgentDefinitionError,
+  InvalidPluginSourceError,
   JiraTaskTracker,
   LayeredBodyAdfConverter,
   MarkdownClaudeAgentEmitter,
   MediaLookupSchema,
   MediaRefSchema,
   ModelTierSchema,
+  NativePluginCompiler,
   NodeGitExecutor,
   NodeToolProbe,
   PrecedenceBodyFormatDetector,

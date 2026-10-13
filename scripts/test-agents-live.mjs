@@ -2,14 +2,14 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 
 const plugin = resolve(process.argv[2] ?? join(dirname(fileURLToPath(import.meta.url)), ".."));
-const scratch = mkdtempSync(join(tmpdir(), "flight-rules-live-"));
+const scratch = realpathSync(mkdtempSync(join(tmpdir(), "flight-rules-live-")));
 const manifest = JSON.parse(readFileSync(join(plugin, ".claude-plugin/plugin.json"), "utf8"));
 const models = JSON.parse(readFileSync(join(plugin, "adapters/claude/model-tiers.json"), "utf8"));
 const expectedAgents = manifest.agents.map((path) => `flight-rules:${parseYaml(/^---\n([\s\S]*?)^---\n/m.exec(readFileSync(join(plugin, path), "utf8"))[1]).name}`);
@@ -21,7 +21,7 @@ const settings = {
   permissions: {
     allow: [
       `Edit(/${scratch}/answer.mjs)`, `Write(/${scratch}/answer.mjs)`, `Write(/${scratch}/evidence/**)`,
-      "Bash(node *)", "Bash(flight-rules doc *)", "Bash(ls *)", "Bash(cat *)", "Bash(echo *)", "Bash(pwd)",
+      "Bash(node *)", "Bash(flight-rules doc *)", "Bash(ls *)", "Bash(cat *)", "Bash(echo *)", "Bash(pwd)", "Bash(tee evidence/*)",
     ],
     deny: ["Agent", "WebSearch", "WebFetch", "Bash(git *)"],
   },
@@ -35,7 +35,7 @@ const initialTest = spawnSync(process.execPath, ["--test", "answer.test.mjs"], {
 assert.equal(initialTest.status, 1, "fixture must start failing");
 writeFileSync(join(scratch, "before-test.txt"), initialTest.stdout);
 
-const constraints = " This is an isolated smoke test: do not run git, access a tracker, use the web or spawn agents. Run each charter command by itself and read its complete output without head or other truncation. Run tests separately. Shell permissions allow node, flight-rules doc, ls, cat, echo and pwd. A denied compound command does not mean all shell commands are denied. If a required command is denied, report that and stop before editing. Follow your registered instructions and finish with their required YAML.";
+const constraints = " This is an isolated smoke test: do not run git, access a tracker, use the web or spawn agents. Run each charter command by itself and read its complete output without head or other truncation. Run tests separately. Shell permissions allow node, flight-rules doc, ls, cat, echo, pwd and tee evidence/*. A denied compound command does not mean all shell commands are denied. If a required command is denied, report that and stop before editing. Follow your registered instructions and finish with their required YAML.";
 const cases = [
   {
     agent: "code-verifier", tier: "standard", docs: ["M-13"], readonly: true,
