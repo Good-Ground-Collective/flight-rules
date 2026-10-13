@@ -95,6 +95,9 @@ try {
     assert.deepEqual(run(process.execPath, [join(location, "bin/flight-rules.mjs"), "charter", "src/example.ts", "--path"], scratch).trim().split("\n"), [
       join(location, "docs/coding-charter.md"), join(location, "docs/coding-charter-typescript.md"),
     ]);
+    assert.deepEqual(run(process.execPath, [join(location, "bin/flight-rules.mjs"), "charter", "classes/Example.cls", "triggers/Example.trigger", "--path"], scratch).trim().split("\n"), [
+      join(location, "docs/coding-charter.md"), join(location, "docs/coding-charter-apex.md"),
+    ]);
     for (const binary of ["flight-rules", "flight-rules.mjs"]) assert.equal(statSync(join(location, "bin", binary)).mode & 0o111, 0o111);
   }
   symlinkSync(join(home, "node_modules"), join(packageRoot, "node_modules"));
@@ -107,6 +110,10 @@ try {
     assert.deepEqual(full, reviewContract.schemas().full);
     assert.deepEqual(transport, reviewContract.schemas().transport);
     assert.ok(new FileReviewPolicy().load().method.includes('fix, clarify and decide'));
+    const policy = new FileReviewPolicy();
+    assert.deepEqual(policy.load({paths:['classes/Example.cls']}).charters.map(({id})=>id), ['coding-charter','coding-charter-apex']);
+    assert.deepEqual(policy.load({paths:['src/example.ts']}).charters.map(({id})=>id), ['coding-charter','coding-charter-typescript']);
+    assert.deepEqual(policy.load({paths:['src/example.ts','classes/Example.cls']}).charters.map(({id})=>id), ['coding-charter','coding-charter-apex','coding-charter-typescript']);
     assert.equal(createFlightRules({cwd:'/nonexistent',env:{}}).docs().resolve('coding-charter').id,'coding-charter');
     console.log(JSON.stringify({version:appVersion,root:true,review:true,schemas:true}));
   `], packageRoot));
