@@ -28,6 +28,10 @@ export declare class GitHubReviewVerifier implements ReviewVerifier {
     verify(evidence: ReviewEvidence, headSha: string): Promise<boolean>;
     authorize(answer: DecisionAnswer, finding: ActionableFinding): Promise<boolean>;
     dismissal(evidence: ReviewEvidence): Promise<boolean>;
+    /** True when `sha` is the head or an ancestor of it, so the head contains that commit. */
+    private reaches;
+    /** True when `ref` has `path` as a file with at least `line` lines. */
+    private hasLine;
     private comment;
 }
 export {};

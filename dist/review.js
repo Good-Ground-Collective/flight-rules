@@ -672,14 +672,9 @@ var GitHubReviewVerifier = class {
       return comment !== void 0;
     }
     if (evidence.kind === "thread_resolution") return this.dismissal(evidence);
-    if (evidence.kind === "commit") {
-      const comparison = z6.looseObject({ status: z6.string() }).parse(
-        await this.api.get(`/repos/${this.props.repo}/compare/${evidence.sha}...${headSha}`)
-      );
-      return ["ahead", "identical"].includes(comparison.status);
-    }
-    if (evidence.commit_sha !== headSha) return false;
+    if (evidence.kind === "commit") return this.reaches(evidence.sha, headSha);
     if (evidence.kind === "check_run") {
+      if (evidence.commit_sha !== headSha) return false;
       const check = z6.looseObject({
         head_sha: z6.string(),
         status: z6.string(),
@@ -687,12 +682,8 @@ var GitHubReviewVerifier = class {
       }).parse(await this.api.get(`/repos/${this.props.repo}/check-runs/${evidence.check_run_id}`));
       return check.head_sha === headSha && check.status === "completed" && check.conclusion === "success";
     }
-    const file = z6.looseObject({ type: z6.string(), encoding: z6.string(), content: z6.string() }).parse(
-      await this.api.get(
-        `/repos/${this.props.repo}/contents/${evidence.path.split("/").map(encodeURIComponent).join("/")}?ref=${headSha}`
-      )
-    );
-    return file.type === "file" && file.encoding === "base64" && evidence.line <= Buffer.from(file.content, "base64").toString("utf8").split("\n").length;
+    if (!await this.reaches(evidence.commit_sha, headSha)) return false;
+    return (evidence.commit_sha === headSha || await this.hasLine(evidence.path, evidence.line, evidence.commit_sha)) && await this.hasLine(evidence.path, evidence.line, headSha);
   }
   async authorize(answer, finding) {
     if (finding.type !== "decide" || !finding.decision_options.some((option) => option.id === answer.option_id))
@@ -733,6 +724,24 @@ var GitHubReviewVerifier = class {
     );
     const thread = result.data.node;
     return thread !== null && thread.isResolved && thread.resolvedBy?.actorType === "User" && thread.resolvedBy.databaseId === evidence.author_id && thread.pullRequest.number === this.props.prNumber && thread.pullRequest.repository.nameWithOwner.toLowerCase() === this.props.repo.toLowerCase();
+  }
+  /** True when `sha` is the head or an ancestor of it, so the head contains that commit. */
+  async reaches(sha, headSha) {
+    if (sha === headSha) return true;
+    const comparison = z6.looseObject({ status: z6.string() }).parse(await this.api.get(`/repos/${this.props.repo}/compare/${sha}...${headSha}`));
+    return ["ahead", "identical"].includes(comparison.status);
+  }
+  /** True when `ref` has `path` as a file with at least `line` lines. */
+  async hasLine(path, line, ref) {
+    const file = z6.looseObject({ type: z6.string(), encoding: z6.string(), content: z6.string() }).parse(
+      await this.api.get(
+        `/repos/${this.props.repo}/contents/${path.split("/").map(encodeURIComponent).join("/")}?ref=${ref}`
+      )
+    );
+    if (file.type !== "file" || file.encoding !== "base64") return false;
+    const text = Buffer.from(file.content, "base64").toString("utf8");
+    const lines = text === "" ? 0 : text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
+    return line <= lines;
   }
   async comment(id, url) {
     if (url !== void 0 && !url.toLowerCase().startsWith(
