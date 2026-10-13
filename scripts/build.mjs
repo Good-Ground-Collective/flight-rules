@@ -62,6 +62,8 @@ writeFileSync(
 
 const { NativePluginCompiler } = await import(new URL("../dist/index.js", import.meta.url));
 const compiled = new NativePluginCompiler({ sourceDir: fileURLToPath(new URL("../", import.meta.url)) }).compile();
+const codex = new NativePluginCompiler({ sourceDir: fileURLToPath(new URL("../", import.meta.url)) }).compile("codex");
+for (const diagnostic of codex.diagnostics) process.stderr.write(`Codex: ${diagnostic}\n`);
 const pluginUrl = new URL("../.claude-plugin/plugin.json", import.meta.url);
 const plugin = JSON.parse(readFileSync(pluginUrl, "utf8"));
 plugin.agents = compiled.agents.map((name) => `./dist/claude/agents/${name}.md`);

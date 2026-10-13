@@ -3,6 +3,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, 
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { parse as parseToml } from "smol-toml";
 import { afterEach, describe, expect, it } from "vitest";
 import { FileAgentRegistry } from "../../../agents/agent-registry/agent-registry.js";
 import { InvalidPluginSourceError, NativePluginCompiler } from "../plugin-compiler.js";
@@ -23,7 +24,7 @@ const fixture = (): string => {
   return directory;
 };
 const files = (directory: string): string[] => readdirSync(directory, { recursive: true, withFileTypes: true })
-  .filter((entry) => entry.isFile()).map((entry) => join(entry.parentPath, entry.name).slice(directory.length + 1));
+  .filter((entry) => entry.isFile()).map((entry) => join(entry.parentPath, entry.name).slice(directory.length + 1)).sort();
 
 afterEach(() => {
   for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
@@ -56,8 +57,8 @@ describe("NativePluginCompiler", () => {
     }
   });
 
-  it("ships an executable CLI whose document paths stay local after relocation", () => {
-    const result = new NativePluginCompiler({ sourceDir: fixture() }).compile();
+  it.each(["claude", "codex"] as const)("ships an executable %s CLI whose document paths stay local after relocation", (host) => {
+    const result = new NativePluginCompiler({ sourceDir: fixture() }).compile(host);
     const parent = temporary();
     const relocated = join(parent, "relocated-plugin");
     renameSync(result.directory, relocated);
@@ -68,10 +69,47 @@ describe("NativePluginCompiler", () => {
     for (const executable of ["flight-rules", "flight-rules.mjs"]) {
       expect(statSync(join(relocated, "bin", executable)).mode & 0o111).toBe(0o111);
     }
-    const hooks = readFileSync(join(relocated, "hooks/hooks.json"), "utf8");
-    const paths = [...hooks.matchAll(/\$\{CLAUDE_PLUGIN_ROOT\}(\/[^"\s]+)/g)].map((match) => match[1] ?? "");
-    expect(paths.length).toBeGreaterThan(0);
-    for (const path of paths) expect(existsSync(join(relocated, path))).toBe(true);
+    if (host === "claude") {
+      const hooks = readFileSync(join(relocated, "hooks/hooks.json"), "utf8");
+      const paths = [...hooks.matchAll(/\$\{CLAUDE_PLUGIN_ROOT\}(\/[^"\s]+)/g)].map((match) => match[1] ?? "");
+      expect(paths.length).toBeGreaterThan(0);
+      for (const path of paths) expect(existsSync(join(relocated, path))).toBe(true);
+    }
+  });
+
+  it("assembles a native Codex plugin plus standalone agents without advertising unsupported hooks or agent discovery", () => {
+    const sourceDir = fixture();
+    const result = new NativePluginCompiler({ sourceDir }).compile("codex");
+    expect(result.directory).toBe(resolve(sourceDir, "dist/codex"));
+    for (const resource of ["skills", "docs", "bin"]) {
+      const source = join(sourceDir, resource);
+      const destination = join(result.directory, resource);
+      expect(files(destination)).toEqual(files(source));
+      for (const path of files(source)) {
+        expect(readFileSync(join(destination, path)).equals(readFileSync(join(source, path))), `${resource}/${path}`).toBe(true);
+      }
+    }
+    const identity = JSON.parse(readFileSync(join(sourceDir, "adapters/plugin.json"), "utf8"));
+    const { version } = JSON.parse(readFileSync(join(sourceDir, "package.json"), "utf8"));
+    const portable = JSON.parse(readFileSync(join(result.directory, "plugin.json"), "utf8"));
+    expect(portable).toEqual({ $schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json", ...identity, version });
+    const native = JSON.parse(readFileSync(join(result.directory, ".codex-plugin/plugin.json"), "utf8"));
+    expect(native).toEqual({ ...identity, version, skills: "./skills/" });
+    expect(existsSync(join(result.directory, "hooks"))).toBe(false);
+    const definitions = new FileAgentRegistry().load(join(sourceDir, "agents"));
+    expect(result.agents).toEqual(definitions.map((agent) => agent.frontmatter.name));
+    expect(files(join(result.directory, ".codex/agents"))).toEqual(definitions.map((agent) => `${agent.frontmatter.name}.toml`).sort());
+    for (const agent of definitions) {
+      const registration = parseToml(readFileSync(join(result.directory, ".codex/agents", `${agent.frontmatter.name}.toml`), "utf8"));
+      expect(registration.name).toBe(agent.frontmatter.name);
+      expect(registration.developer_instructions).toBe(agent.body);
+      expect(registration.web_search).toBe(agent.frontmatter.capabilities.includes("web") ? "live" : "disabled");
+    }
+    expect(parseToml(readFileSync(join(result.directory, ".codex/config.toml"), "utf8"))).toEqual({ agents: { enabled: true } });
+    expect(JSON.parse(readFileSync(join(result.directory, "diagnostics.json"), "utf8"))).toEqual(result.diagnostics);
+    expect(result.diagnostics).toContain("Claude commit and Ariadne hooks are omitted; this target emits no Codex hooks.");
+    const reasoning = "adapters/codex/reasoning-tiers.json";
+    expect(readFileSync(join(result.directory, reasoning), "utf8")).toBe(readFileSync(join(sourceDir, reasoning), "utf8"));
   });
 
   it("removes stale output without changing canonical sources", () => {

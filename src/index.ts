@@ -59,4 +59,4 @@ export { TomlCodexAgentEmitter } from './agents/agent-emitter/codex-agent-emitte
 export { UnsupportedAgentSettingError } from './agents/agent-emitter/agent-emitter.js'
 export type { AgentEmitter } from './agents/agent-emitter/agent-emitter.js'
 export { NativePluginCompiler, InvalidPluginSourceError } from './plugins/plugin-compiler/plugin-compiler.js'
-export type { PluginCompiler, CompiledPlugin } from './plugins/plugin-compiler/plugin-compiler.js'
+export type { PluginCompiler, CompiledPlugin, PluginHost } from './plugins/plugin-compiler/plugin-compiler.js'
