@@ -234,6 +234,12 @@ flight-rules check
 
 ---
 
+## Workflow readiness after configuration
+
+A successful ordinary `flight-rules check` establishes environment checks, not permission to run every workflow. Before reporting a selected workflow ready, read `flight-rules doc workflow-preflight` and `flight-rules doc native-orchestration`. Identify the actual installed host/version, effective caller and worker access, named registrations, current worker usage and depth. Record observations without credentials in the documented runtime evidence format, then run `flight-rules check --workflow <workflow-name> --runtime-file <host-runtime-json>` from the active checkout.
+
+Show every failed required check with its code and remedy. Distinguish authentication, connectivity, known permission denial and unknown access; connection refusal alone does not identify a sandbox. A remote read and GitHub push entitlement do not prove a future push will succeed. Do not change sandbox settings, grant access, raise worker caps or disable approvals automatically. Apply only a requested scoped setup correction through the installed host's supported options, refresh observations and rerun the check. When the current workflow is unattended, return the missing capability rather than starting a permission prompt. Native project placement remains separate from this readiness check.
+
 ## Step 7: Scaffold the QA instructions
 
 This step is shared by both branches and does not depend on the tracker. If the user declined the QA lane in Step 4, skip this step.

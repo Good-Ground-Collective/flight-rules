@@ -37,6 +37,7 @@ export function buildProgram(
     FlightRules,
     | "git"
     | "probe"
+    | "readiness"
     | "docs"
     | "configStore"
     | "evidence"
@@ -92,7 +93,7 @@ export function buildProgram(
   program.addCommand(createCompetenciesCommand(config));
   program.addCommand(createDocCommand(() => services.docs()));
   program.addCommand(createReviewCommand());
-  program.addCommand(createCheckCommand(config, tracker, getConfigPath, () => services.probe()));
+  program.addCommand(createCheckCommand(config, tracker, getConfigPath, () => services.probe(), undefined, () => services.readiness()));
   program.addCommand(
     createBoardCommand(
       () => services.board(),

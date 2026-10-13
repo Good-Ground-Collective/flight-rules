@@ -35,7 +35,7 @@ Human questions require invocation-level `allowHumanQuestions: true` and availab
 - You are handed an **epic id** or an **initiative id**.
 - Run everything from the **repo root**.
 - The **working tree is clean**. Checked once, here, before any mutation.
-- `flight-rules check` reports `"ok": true`.
+- Read `flight-rules doc workflow-preflight`, gather current host observations, and require `flight-rules check --workflow execute-wave --runtime-file <host-runtime-json>` to report `"ok": true` before the first repository or tracker mutation. Missing/unknown access stops with the named remedy. Each ticket's sibling invocation refreshes its own scoped preflight and dispatch evidence; an earlier wave check does not authorize changed context.
 - Config carries a **`repo`** field (`owner/repo`). `execute-work` needs it to open each PR, and discovering it missing on ticket four means three PRs and a broken run. Settle it now.
 - **Ariadne reporting is optional.** The `flight-rules board` lines below report the wave to Ariadne's Agents page and read answers people gave there. When Ariadne is not configured, or the node is not a Jira key, they print nothing and exit 0. Treat empty output as "no answer". Never let a post change the run. Answers come only from people in Ariadne; this skill reads them and never answers an item itself.
 

@@ -22,7 +22,7 @@ This invocation is unattended: `allowHumanQuestions` is always false. Return `ne
 - You are handed a **ticket id**.
 - Run everything from the **repo root of the app under test** — the `flight-rules` CLI resolves config relative to CWD, and the tester drives that app.
 - **Config comes from the CLI.** It merges the user's and project's Claude Code settings with the flight-rules config file; `flight-rules config show` prints the result and where each value came from. Never hand-edit a config file; write with `flight-rules config set`.
-- `flight-rules check` reports `"ok": true`, including the tool probes the QA lane depends on. A half-configured CLI fails partway through, after it has already labelled the ticket in progress.
+- Read `flight-rules doc workflow-preflight` and require `flight-rules check --workflow verify-ticket --runtime-file <host-runtime-json>` to report `"ok": true` with current caller/worker observations before any label or evidence write. Missing or unknown access is a named failure/`needs:` result, never a prompt or permission change. A general environment check alone is insufficient.
 - The **tracker is Jira**. The failure mention and the native attachments are Jira shapes.
 - **QA instructions exist.** Read them, passing `--from` the directory of the code the ticket changed when the ticket names it:
 

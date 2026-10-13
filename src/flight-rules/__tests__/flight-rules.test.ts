@@ -7,7 +7,7 @@ import { GitHubTaskTracker } from '../../tasks/github-task-tracker/github-task-t
 import { JiraTaskTracker } from '../../tasks/jira-task-tracker/jira-task-tracker.js'
 import { GhPullRequestHost } from '../../pr/pull-request-host/gh-pull-request-host.js'
 import { NodeGitExecutor } from '../../git/git-executor/git-executor.js'
-import { nodeToolProbe } from '../../tasks/tool-probe/tool-probe.js'
+import { NodeToolProbe } from '../../tasks/tool-probe/tool-probe.js'
 
 vi.mock('@octokit/rest', () => ({ Octokit: vi.fn().mockImplementation(function () { return {} }) }))
 vi.mock('@octokit/graphql', () => ({
@@ -121,7 +121,7 @@ describe('createFlightRules', () => {
     mkdirSync(join(cwd, 'docs'))
     writeFileSync(join(cwd, 'docs', 'example.md'), 'Example')
     expect(core.git()).toBeInstanceOf(NodeGitExecutor)
-    expect(core.probe()).toBe(nodeToolProbe)
+    expect(core.probe()).toBeInstanceOf(NodeToolProbe)
     expect(core.docs().resolve('example').contents).toBe('Example')
     env.FLIGHT_RULES_HOME = join(cwd, 'missing')
     expect(() => core.docs()).toThrow('does not exist or is not a directory')

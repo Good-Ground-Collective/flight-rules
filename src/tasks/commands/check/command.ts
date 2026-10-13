@@ -1,23 +1,14 @@
-import { Command } from "commander";
-import { getQaRecipePath } from "../../../shared/config.js";
-import type { Config } from "../../../shared/config.js";
-import { EnvLoader, type Env } from "../../../shared/env.js";
-import type { TaskTracker } from "../../task-tracker/task-tracker.js";
-import type { ToolProbe } from "../../tool-probe/tool-probe.js";
-import { QaInstructionsFinder } from "../../qa-instructions/qa-instructions.js";
+import { readFileSync } from 'node:fs'
+import { Command, Option } from 'commander'
+import type { Config } from '../../../shared/config.js'
+import type { TaskTracker } from '../../task-tracker/task-tracker.js'
+import type { ToolProbe } from '../../tool-probe/tool-probe.js'
+import { QaInstructionsFinder } from '../../qa-instructions/qa-instructions.js'
+import { NodeRepositoryReadiness, type RepositoryReadiness } from '../../readiness/repository-readiness.js'
+import { ReadinessOptionsSchema, WorkflowSchema } from '../../readiness/readiness.schema.js'
 
-type Check = { name: string; ok: boolean; detail: string; required?: boolean };
-
-// eslint-disable-next-line preflight/no-loose-functions -- missingCredentials is module-level behaviour awaiting a home on a service; tracked in KAN-39
-function missingCredentials(config: Config, env: Env): string[] {
-  if (config.tracker === "github")
-    return env.githubToken === undefined ? ["GITHUB_TOKEN"] : [];
-  const missing: string[] = [];
-  if (env.jiraToken === undefined)
-    missing.push("JIRA_TOKEN (or JIRA_API_TOKEN / JIRA_API_KEY)");
-  if ((env.jiraEmail ?? config.jiraEmail) === undefined)
-    missing.push("JIRA_EMAIL (or jiraEmail in the config)");
-  return missing;
+export class ReadinessFailedError extends Error {
+  override name = 'ReadinessFailedError'
 }
 
 export function createCheckCommand(
@@ -26,95 +17,28 @@ export function createCheckCommand(
   getConfigPath: () => string,
   getProbe: () => ToolProbe,
   getFinder: () => QaInstructionsFinder = () => new QaInstructionsFinder(),
+  getReadiness: () => RepositoryReadiness = () => new NodeRepositoryReadiness(),
 ): Command {
-  const check = new Command("check");
-
-  check.exitOverride().action(async () => {
-    const checks: Check[] = [];
-
-    let config: Config;
-    try {
-      config = getConfig();
-    } catch (err) {
-      const detail = err instanceof Error ? err.message : String(err);
-      checks.push({ name: "config", ok: false, detail });
-      process.stdout.write(
-        JSON.stringify({ tracker: null, repo: null, checks, ok: false }) + "\n",
-      );
-      throw new Error(
-        "flight-rules check failed — config could not be resolved",
-        { cause: err },
-      );
-    }
-    checks.push({
-      name: "config",
-      ok: true,
-      detail: `tracker=${config.tracker} repo=${config.repo}`,
-    });
-
-    // A loader per run: the cache is per-instance, and `check` reports on the
-    // environment as it stands at invocation time.
-    const missing = missingCredentials(config, new EnvLoader().load());
-    const credOk = missing.length === 0;
-    checks.push({
-      name: "credentials",
-      ok: credOk,
-      detail: credOk ? "present" : `not set: ${missing.join(", ")}`,
-    });
-
-    if (credOk) {
+  const check = new Command('check')
+  check.addOption(new Option('--workflow <name>', 'check readiness for this workflow before its first mutation').choices(WorkflowSchema.options))
+    .option('--runtime-file <path>', 'JSON containing current caller/worker capability observations; requires --workflow')
+    .exitOverride().action(async (options: { workflow?: string; runtimeFile?: string }) => {
+      let evidence: unknown
       try {
-        await getTracker().ping();
-        checks.push({
-          name: "reachable",
-          ok: true,
-          detail: `${config.repo} responded`,
-        });
-      } catch (err) {
-        const detail = err instanceof Error ? err.message : String(err);
-        checks.push({ name: "reachable", ok: false, detail });
+        evidence = options.runtimeFile === undefined ? undefined : JSON.parse(readFileSync(options.runtimeFile, 'utf8'))
+      } catch {
+        process.stdout.write(JSON.stringify({ tracker: null, repo: null, checks: [{ name: 'runtime', ok: false, required: true, code: 'INVALID_CONTEXT', detail: 'Cannot read a JSON runtime evidence file', remedy: 'Supply a readable evidence file; see flight-rules doc workflow-preflight.' }], ok: false, scope: 'workflow' }) + '\n')
+        throw new ReadinessFailedError('flight-rules check failed — see report above')
       }
-    } else {
-      checks.push({
-        name: "reachable",
-        ok: false,
-        detail: "skipped — credentials missing",
-      });
-    }
-
-    const qa = getFinder().discover({
-      from: process.cwd(),
-      legacyRecipePath: getQaRecipePath(config, getConfigPath()),
-    });
-    const [nearest] = qa.sources;
-    checks.push({
-      name: "qa-instructions",
-      ok: qa.found,
-      detail:
-        nearest === undefined
-          ? "none found — add a QA.md or a QA section in AGENTS.md to enable the QA lane"
-          : [nearest.path, ...qa.sources.slice(1).map((s) => s.path)].join(", ") +
-            (nearest.legacy === true ? " (legacy recipe — migrate to QA.md)" : ""),
-      required: false,
-    });
-
-    const tools = await getProbe().probe({
-      repo: config.repo,
-      qaInstructionsFound: qa.found,
-    });
-    checks.push(...tools);
-
-    const ok = checks.every((c) => c.ok || c.required === false);
-    process.stdout.write(
-      JSON.stringify({
-        tracker: config.tracker,
-        repo: config.repo,
-        checks,
-        ok,
-      }) + "\n",
-    );
-    if (!ok) throw new Error("flight-rules check failed — see report above");
-  });
-
-  return check;
+      const parsed = ReadinessOptionsSchema.safeParse({ workflow: options.workflow, evidence })
+      if (!parsed.success) {
+        process.stdout.write(JSON.stringify({ tracker: null, repo: null, checks: [{ name: 'runtime', ok: false, required: true, code: 'INVALID_CONTEXT', detail: 'Invalid workflow runtime evidence', remedy: 'Supply evidence matching WorkflowEvidenceSchema with a --workflow selection.' }], ok: false, scope: 'workflow' }) + '\n')
+        throw new ReadinessFailedError('flight-rules check failed — see report above')
+      }
+      const report = await getReadiness().inspect({ config: getConfig, tracker: getTracker, configPath: getConfigPath, probe: getProbe(), finder: getFinder(),
+        options: parsed.data })
+      process.stdout.write(JSON.stringify(report) + '\n')
+      if (!report.ok) throw new ReadinessFailedError('flight-rules check failed — see report above')
+    })
+  return check
 }

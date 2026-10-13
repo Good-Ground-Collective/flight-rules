@@ -87,7 +87,7 @@ When you ask, be specific: state what's unclear, show what you found, and offer 
 ## Preconditions
 
 - Run everything from the **repo root** so `flight-rules` resolves the project's configured tracker.
-- Confirm the tracker is wired up before starting: `flight-rules check` (verifies config, credentials, and reachability; exits non-zero with an actionable report if not). This skill is **tracker-agnostic** — it never talks to GitHub/Jira directly, only through `flight-rules`, which resolves the configured system.
+- Read `flight-rules doc workflow-preflight` and require `flight-rules check --workflow break-down-work --runtime-file <host-runtime-json>` to report `"ok": true` with current caller/research-worker evidence before dispatch or tracker mutation. A general environment check is insufficient; missing or unknown access returns the named remedy. This skill is **tracker-agnostic** — it never talks to GitHub/Jira directly, only through `flight-rules`, which resolves the configured system.
 
 ## Process
 
