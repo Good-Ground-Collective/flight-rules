@@ -1056,7 +1056,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.73.0";
+var appVersion = false ? "0.0.0-dev" : "1.74.0";
 
 // src/shared/ariadne/review-packet.schema.ts
 import { z as z11 } from "zod";
@@ -5591,7 +5591,536 @@ var NativePluginCompiler = class {
     }
   }
 };
+
+// src/orchestration/orchestration.schema.ts
+import { isAbsolute as isAbsolute2, relative, sep as sep2 } from "node:path";
+import { z as z30 } from "zod";
+var OrchestrationTextSchema = z30.string().refine((value) => value.trim().length > 0, "must not be blank");
+var AbsolutePathSchema = OrchestrationTextSchema.refine(
+  isAbsolute2,
+  "must be an absolute path on this host"
+);
+var CapabilityNameSchema = z30.string().regex(/^[a-z][a-zA-Z0-9:.-]*$/);
+var RunContextObjectSchema = z30.strictObject({
+  runId: OrchestrationTextSchema,
+  taskId: OrchestrationTextSchema,
+  cwd: AbsolutePathSchema,
+  repositoryRoot: AbsolutePathSchema,
+  baseRef: OrchestrationTextSchema,
+  skill: OrchestrationTextSchema
+});
+var RunContextSchema = RunContextObjectSchema.refine((value) => {
+  const path = relative(value.repositoryRoot, value.cwd);
+  return path !== ".." && !path.startsWith(`..${sep2}`) && !isAbsolute2(path);
+}, "working directory must be inside the active repository root");
+var CallerContextSchema = RunContextSchema.safeExtend({ attempt: z30.int().positive() });
+var CapabilityEvidenceSchema = z30.discriminatedUnion("state", [
+  z30.strictObject({ state: z30.literal("available"), evidence: OrchestrationTextSchema }),
+  z30.strictObject({
+    state: z30.enum(["denied", "unknown"]),
+    evidence: OrchestrationTextSchema,
+    remedy: OrchestrationTextSchema
+  })
+]);
+var AdapterLimitsSchema = z30.strictObject({
+  maxConcurrent: z30.int().nonnegative().nullable(),
+  activeWorkers: z30.int().nonnegative(),
+  currentDepth: z30.int().nonnegative(),
+  maxDepth: z30.int().nonnegative().nullable(),
+  source: OrchestrationTextSchema
+});
+var RuntimeSnapshotSchema = z30.strictObject({
+  context: CallerContextSchema,
+  host: z30.strictObject({ name: OrchestrationTextSchema, version: OrchestrationTextSchema }),
+  observedAt: z30.iso.datetime(),
+  agent: AgentFrontmatterSchema.shape.name.nullable(),
+  spawn: CapabilityEvidenceSchema,
+  ask: CapabilityEvidenceSchema,
+  permissions: z30.record(CapabilityNameSchema, CapabilityEvidenceSchema),
+  limits: AdapterLimitsSchema
+});
+var DispatchRequestSchema = z30.strictObject({
+  id: OrchestrationTextSchema,
+  agent: AgentFrontmatterSchema.shape.name,
+  context: CallerContextSchema,
+  input: z30.record(z30.string(), z30.json()),
+  requiredCapabilities: z30.array(CapabilityNameSchema).optional()
+});
+var OrchestrationFailureSchema = z30.strictObject({
+  code: z30.enum([
+    "UNKNOWN_AGENT",
+    "UNSUPPORTED_AGENT_SETTINGS",
+    "CONTEXT_MISMATCH",
+    "CAPABILITY_DENIED",
+    "CAPABILITY_UNKNOWN",
+    "DISPATCH_UNAVAILABLE",
+    "LIMITS_UNKNOWN",
+    "CAPACITY_EXHAUSTED",
+    "DEPTH_EXCEEDED",
+    "QUESTIONS_DISABLED",
+    "QUESTIONS_UNAVAILABLE",
+    "INVALID_HANDOFF",
+    "INVALID_REPORT",
+    "INVALID_HISTORY",
+    "OPEN_QUESTIONS",
+    "UNVERIFIABLE",
+    "ATTEMPTS_EXHAUSTED",
+    "EXECUTION_FAILED",
+    "CANCELLED"
+  ]),
+  message: OrchestrationTextSchema,
+  remedy: OrchestrationTextSchema,
+  capability: CapabilityNameSchema.optional()
+});
+var OutcomeIdentitySchema = z30.strictObject({
+  dispatchId: OrchestrationTextSchema,
+  agent: AgentFrontmatterSchema.shape.name,
+  context: CallerContextSchema
+});
+var DispatchOutcomeSchema = z30.discriminatedUnion("status", [
+  OutcomeIdentitySchema.extend({
+    status: z30.literal("completed"),
+    report: z30.record(z30.string(), z30.json())
+  }),
+  OutcomeIdentitySchema.extend({
+    status: z30.enum(["failed", "unavailable"]),
+    failure: OrchestrationFailureSchema
+  })
+]);
+var QuestionRequestSchema = z30.strictObject({
+  context: CallerContextSchema,
+  question: OrchestrationTextSchema,
+  allowHumanQuestions: z30.boolean()
+});
+var SiblingSkillRequestSchema = z30.strictObject({
+  context: CallerContextSchema,
+  skill: OrchestrationTextSchema,
+  input: z30.record(z30.string(), z30.json())
+});
+
+// src/orchestration/orchestration-policy.ts
+import { isDeepStrictEqual } from "node:util";
+import { z as z31 } from "zod";
+var RegistryOrchestrationPolicyPropsSchema = z31.strictObject({
+  agents: z31.array(AgentDefinitionSchema).min(1).refine(
+    (agents) => new Set(agents.map((agent) => agent.frontmatter.name)).size === agents.length,
+    "duplicate agent name"
+  )
+});
+var RegistryOrchestrationPolicy = class {
+  agents;
+  constructor(props) {
+    this.agents = new Map(
+      RegistryOrchestrationPolicyPropsSchema.parse(props).agents.map((agent) => [
+        agent.frontmatter.name,
+        agent
+      ])
+    );
+  }
+  prepare(request, runtime) {
+    const input = DispatchRequestSchema.parse(request);
+    const snapshot = RuntimeSnapshotSchema.parse(runtime);
+    const definition = this.agents.get(input.agent);
+    if (definition === void 0) {
+      return {
+        status: "unavailable",
+        failure: {
+          code: "UNKNOWN_AGENT",
+          message: `No registered agent named ${input.agent}.`,
+          remedy: "Install or load the named registration before dispatch."
+        }
+      };
+    }
+    if (!isDeepStrictEqual(input.context, snapshot.context) || snapshot.agent !== input.agent) {
+      return {
+        status: "unavailable",
+        failure: {
+          code: "CONTEXT_MISMATCH",
+          message: "Runtime evidence belongs to another context or worker.",
+          remedy: "Observe effective access for this named worker in this task, checkout and attempt."
+        }
+      };
+    }
+    if (definition.frontmatter.sandbox !== void 0 || definition.frontmatter.dispatch !== void 0) {
+      return {
+        status: "unavailable",
+        failure: {
+          code: "UNSUPPORTED_AGENT_SETTINGS",
+          message: "Explicit worker sandbox or dispatch restrictions need an enforcing runtime binding.",
+          remedy: "Provide an adapter that can enforce the declared restrictions before dispatch; do not drop them."
+        }
+      };
+    }
+    if (snapshot.spawn.state !== "available") {
+      return {
+        status: "unavailable",
+        failure: {
+          code: "DISPATCH_UNAVAILABLE",
+          capability: "spawn",
+          message: snapshot.spawn.evidence,
+          remedy: snapshot.spawn.remedy
+        }
+      };
+    }
+    const { maxConcurrent, activeWorkers, currentDepth, maxDepth } = snapshot.limits;
+    if (maxConcurrent === null || maxDepth === null) {
+      return {
+        status: "unavailable",
+        failure: {
+          code: "LIMITS_UNKNOWN",
+          message: "Concurrency or nesting capacity has not been established.",
+          remedy: "Read the host limits or provide a documented conservative adapter bound with its provenance."
+        }
+      };
+    }
+    if (currentDepth >= maxDepth) {
+      return {
+        status: "unavailable",
+        failure: {
+          code: "DEPTH_EXCEEDED",
+          message: `A child at depth ${currentDepth + 1} exceeds the bound ${maxDepth}.`,
+          remedy: "Invoke orchestration in a supported caller context with remaining worker depth."
+        }
+      };
+    }
+    if (activeWorkers >= maxConcurrent) {
+      return {
+        status: "unavailable",
+        failure: {
+          code: "CAPACITY_EXHAUSTED",
+          message: `All ${maxConcurrent} worker slots are occupied or disabled.`,
+          remedy: "Wait for a worker to finish, refresh current usage, then plan the remaining work."
+        }
+      };
+    }
+    const required = /* @__PURE__ */ new Set([
+      ...definition.frontmatter.capabilities,
+      ...input.requiredCapabilities ?? []
+    ]);
+    for (const capability of required) {
+      const permission = snapshot.permissions[capability];
+      if (permission === void 0 || permission.state !== "available") {
+        return {
+          status: "unavailable",
+          failure: {
+            code: permission?.state === "denied" ? "CAPABILITY_DENIED" : "CAPABILITY_UNKNOWN",
+            capability,
+            message: permission?.evidence ?? `No effective worker access evidence for ${capability}.`,
+            remedy: permission?.remedy ?? `Establish ${capability} access for this worker and working directory before dispatch.`
+          }
+        };
+      }
+    }
+    return { status: "ready", request: input, definition: AgentDefinitionSchema.parse(definition) };
+  }
+  ask(request, runtime) {
+    const input = QuestionRequestSchema.parse(request);
+    const snapshot = RuntimeSnapshotSchema.parse(runtime);
+    if (!isDeepStrictEqual(input.context, snapshot.context)) {
+      return {
+        status: "unavailable",
+        failure: {
+          code: "CONTEXT_MISMATCH",
+          message: "Question capability evidence belongs to another caller context.",
+          remedy: "Refresh capability evidence for this caller before asking."
+        }
+      };
+    }
+    if (!input.allowHumanQuestions) {
+      return {
+        status: "unavailable",
+        failure: {
+          code: "QUESTIONS_DISABLED",
+          capability: "ask",
+          message: "This invocation is unattended or has not opted into human questions.",
+          remedy: "Return the unresolved question to the caller as a named failure; do not prompt."
+        }
+      };
+    }
+    if (snapshot.ask.state !== "available") {
+      return {
+        status: "unavailable",
+        failure: {
+          code: "QUESTIONS_UNAVAILABLE",
+          capability: "ask",
+          message: snapshot.ask.evidence,
+          remedy: snapshot.ask.remedy
+        }
+      };
+    }
+    return { status: "awaiting-answer", request: input };
+  }
+  sibling(request) {
+    return SiblingSkillRequestSchema.parse(request);
+  }
+};
+
+// src/orchestration/report-handoff.ts
+import { isDeepStrictEqual as isDeepStrictEqual2 } from "node:util";
+var ValidatedReportHandoff = class {
+  accept(request, outcome, reportSchema) {
+    const expected = DispatchRequestSchema.parse(request);
+    const parsed = DispatchOutcomeSchema.safeParse(outcome);
+    if (!parsed.success) {
+      return {
+        status: "rejected",
+        failure: {
+          code: "INVALID_HANDOFF",
+          message: parsed.error.message,
+          remedy: "Return a complete structured outcome with the original dispatch identity and caller context."
+        }
+      };
+    }
+    const value = parsed.data;
+    if (value.dispatchId !== expected.id || value.agent !== expected.agent || !isDeepStrictEqual2(value.context, expected.context)) {
+      return {
+        status: "rejected",
+        failure: {
+          code: "INVALID_HANDOFF",
+          message: "The result does not belong to this dispatch, agent and caller context.",
+          remedy: "Reconcile the original invocation; do not route another task or attempt's report into this run."
+        }
+      };
+    }
+    if (value.status !== "completed") return { status: "accepted", outcome: value };
+    const report = reportSchema.safeParse(value.report);
+    if (!report.success) {
+      return {
+        status: "rejected",
+        failure: {
+          code: "INVALID_REPORT",
+          message: report.error.message,
+          remedy: "Obtain a report matching the requested role's schema; do not fabricate or infer a successful result."
+        }
+      };
+    }
+    return { status: "accepted", outcome: { ...value, status: "completed", report: report.data } };
+  }
+};
+
+// src/orchestration/implementation-loop.schema.ts
+import { z as z32 } from "zod";
+var ImplementationReportSchema = z32.strictObject({
+  summary: OrchestrationTextSchema,
+  filesChanged: z32.array(
+    z32.strictObject({ path: OrchestrationTextSchema, why: OrchestrationTextSchema })
+  ),
+  testsRun: z32.array(
+    z32.strictObject({ command: OrchestrationTextSchema, result: OrchestrationTextSchema })
+  ),
+  approach: OrchestrationTextSchema,
+  openQuestions: z32.array(OrchestrationTextSchema).optional()
+});
+var CriterionResultSchema = z32.strictObject({
+  criterion: OrchestrationTextSchema,
+  verdict: z32.enum(["PASS", "FAIL", "UNVERIFIABLE"]),
+  evidence: OrchestrationTextSchema
+});
+var VerificationReportSchema = z32.strictObject({
+  summary: OrchestrationTextSchema,
+  criteria: z32.array(CriterionResultSchema).min(1),
+  charterConcerns: z32.array(OrchestrationTextSchema).optional(),
+  openQuestions: z32.array(OrchestrationTextSchema).optional(),
+  verified: z32.boolean()
+}).refine(
+  (report) => report.verified === report.criteria.every((criterion) => criterion.verdict === "PASS"),
+  "verified must agree with every itemized verdict"
+);
+var HandoffRecordSchema = z32.strictObject({
+  request: DispatchRequestSchema,
+  outcome: z32.unknown()
+});
+var ImplementationRunSchema = z32.strictObject({
+  context: RunContextSchema,
+  criteria: z32.array(OrchestrationTextSchema).min(1).refine((criteria) => new Set(criteria).size === criteria.length, "criteria must be distinct"),
+  implementationInput: z32.record(z32.string(), z32.json()).refine(
+    (input) => !Object.hasOwn(input, "verifierFailures"),
+    "verifierFailures is reserved for validated retry evidence"
+  ),
+  history: z32.array(
+    z32.strictObject({ implementation: HandoffRecordSchema, verification: HandoffRecordSchema })
+  ).max(3)
+});
+
+// src/orchestration/implementation-loop.ts
+import { isDeepStrictEqual as isDeepStrictEqual3 } from "node:util";
+var VerifiedImplementationLoop = class {
+  reports = new ValidatedReportHandoff();
+  next(run) {
+    const parsed = ImplementationRunSchema.safeParse(run);
+    if (!parsed.success) {
+      return {
+        status: "stopped",
+        failure: {
+          code: "INVALID_HISTORY",
+          message: parsed.error.message,
+          remedy: "Supply the original run context and at most three ordered implementation/verification receipts."
+        }
+      };
+    }
+    const input = parsed.data;
+    const filesChanged = /* @__PURE__ */ new Set();
+    let failures = [];
+    for (const [index, round] of input.history.entries()) {
+      const expected = this.implementationRequest(input, index + 1, failures);
+      const implementation = this.readReport(
+        expected,
+        round.implementation,
+        ImplementationReportSchema
+      );
+      if (implementation.status === "stopped") return implementation;
+      if (implementation.report.openQuestions?.length)
+        return this.openQuestions(implementation.report.openQuestions);
+      for (const file of implementation.report.filesChanged) filesChanged.add(file.path);
+      const verification = this.readReport(
+        this.verificationRequest(input, index + 1, [...filesChanged]),
+        round.verification,
+        VerificationReportSchema
+      );
+      if (verification.status === "stopped") return verification;
+      const report = verification.report;
+      if (!isDeepStrictEqual3(
+        report.criteria.map((criterion) => criterion.criterion),
+        input.criteria
+      )) {
+        return {
+          status: "stopped",
+          failure: {
+            code: "INVALID_REPORT",
+            message: "Verifier criteria do not match the original criteria in order and text.",
+            remedy: "Have the verifier quote each original criterion exactly once, in its original order."
+          }
+        };
+      }
+      const terminal = report.verified || report.criteria.some((criterion) => criterion.verdict === "UNVERIFIABLE") || Boolean(report.openQuestions?.length);
+      if (terminal && index < input.history.length - 1) {
+        return {
+          status: "stopped",
+          failure: {
+            code: "INVALID_HISTORY",
+            message: "History continues after a terminal verification result.",
+            remedy: "Reconcile the stopped run before starting further work; do not reinterpret it as a retry."
+          }
+        };
+      }
+      if (report.openQuestions?.length) return this.openQuestions(report.openQuestions);
+      if (report.criteria.some((criterion) => criterion.verdict === "UNVERIFIABLE")) {
+        return {
+          status: "stopped",
+          failure: {
+            code: "UNVERIFIABLE",
+            message: "At least one acceptance criterion could not be verified.",
+            remedy: "Resolve the missing evidence or access described in the verifier report before starting a new run."
+          }
+        };
+      }
+      if (report.verified) return { status: "verified", report, filesChanged: [...filesChanged] };
+      failures = report.criteria.filter((criterion) => criterion.verdict === "FAIL");
+    }
+    if (input.history.length === 3) {
+      return {
+        status: "stopped",
+        failure: {
+          code: "ATTEMPTS_EXHAUSTED",
+          message: "Three implementation attempts received verifier FAIL results.",
+          remedy: "Return all remaining failed criteria to the caller for a decision; do not dispatch a fourth attempt."
+        }
+      };
+    }
+    return {
+      status: "implement",
+      request: this.implementationRequest(input, input.history.length + 1, failures),
+      filesChanged: [...filesChanged]
+    };
+  }
+  verify(run, implementation) {
+    const decision = this.next(run);
+    if (decision.status === "stopped") return decision;
+    if (decision.status === "verified") {
+      return {
+        status: "stopped",
+        failure: {
+          code: "INVALID_HISTORY",
+          message: "This run already passed verification.",
+          remedy: "Use the verified result; start a separate run if the task or checkout changes."
+        }
+      };
+    }
+    const receipt = HandoffRecordSchema.safeParse(implementation);
+    if (!receipt.success) {
+      return {
+        status: "stopped",
+        failure: {
+          code: "INVALID_HANDOFF",
+          message: receipt.error.message,
+          remedy: "Supply the original implementation request and its structured outcome."
+        }
+      };
+    }
+    const result = this.readReport(decision.request, receipt.data, ImplementationReportSchema);
+    if (result.status === "stopped") return result;
+    if (result.report.openQuestions?.length) return this.openQuestions(result.report.openQuestions);
+    const filesChanged = [
+      .../* @__PURE__ */ new Set([
+        ...decision.filesChanged,
+        ...result.report.filesChanged.map((file) => file.path)
+      ])
+    ];
+    return {
+      status: "verify",
+      request: this.verificationRequest(run, decision.request.context.attempt, filesChanged)
+    };
+  }
+  implementationRequest(run, attempt, failures) {
+    return {
+      id: `${run.context.runId}:implementation:${attempt}`,
+      agent: attempt === 3 ? "code-implementation-escalated" : "code-implementation",
+      context: { ...run.context, attempt },
+      input: {
+        ...run.implementationInput,
+        criteria: [...run.criteria],
+        ...failures.length ? { verifierFailures: failures } : {}
+      }
+    };
+  }
+  verificationRequest(run, attempt, filesChanged) {
+    return {
+      id: `${run.context.runId}:verification:${attempt}`,
+      agent: "code-verifier",
+      context: { ...run.context, attempt },
+      input: { criteria: [...run.criteria], filesChanged: filesChanged.map((path) => ({ path })) }
+    };
+  }
+  readReport(expected, record, schema) {
+    if (!isDeepStrictEqual3(expected, record.request)) {
+      return {
+        status: "stopped",
+        failure: {
+          code: "INVALID_HISTORY",
+          message: "Recorded dispatch differs from the request derived from this run.",
+          remedy: "Preserve the original task, attempt, agent and input; do not substitute or enrich verifier requests."
+        }
+      };
+    }
+    const handoff = this.reports.accept(expected, record.outcome, schema);
+    if (handoff.status === "rejected") return { status: "stopped", failure: handoff.failure };
+    if (handoff.outcome.status !== "completed")
+      return { status: "stopped", failure: handoff.outcome.failure };
+    return { status: "completed", report: handoff.outcome.report };
+  }
+  openQuestions(questions) {
+    return {
+      status: "stopped",
+      failure: {
+        code: "OPEN_QUESTIONS",
+        message: questions.join("\n"),
+        remedy: "Return these questions to the caller. Use the question policy only when this invocation explicitly permits human questions."
+      }
+    };
+  }
+};
 export {
+  AdapterLimitsSchema,
   AgentCapabilitySchema,
   AgentFrontmatterSchema,
   AttachmentSchema,
@@ -5599,6 +6128,8 @@ export {
   BlobSectionSource,
   BodyMetadataService,
   BodySectionSelector,
+  CallerContextSchema,
+  CapabilityEvidenceSchema,
   ClaudeSettingsSource,
   CommentSchema,
   CommitMessageInputSchema,
@@ -5608,10 +6139,13 @@ export {
   CreateInitiativeInputSchema,
   CreateTechnicalDesignInputSchema,
   CreateTicketInputSchema,
+  CriterionResultSchema,
   DefaultCommitMessageBuilder,
   DefaultFlightRules,
   DefaultPullRequestBuilder,
   DependencyPlannerService,
+  DispatchOutcomeSchema,
+  DispatchRequestSchema,
   DocIdSchema,
   DuplicateEvidenceNameError,
   EntityMetadataSchema,
@@ -5622,6 +6156,9 @@ export {
   GhOutputParseError,
   GhPullRequestHost,
   GitHubTaskTracker,
+  HandoffRecordSchema,
+  ImplementationReportSchema,
+  ImplementationRunSchema,
   InitiativeSchema,
   InvalidAgentDefinitionError,
   InvalidPluginSourceError,
@@ -5634,10 +6171,16 @@ export {
   NativePluginCompiler,
   NodeGitExecutor,
   NodeToolProbe,
+  OrchestrationFailureSchema,
   PrecedenceBodyFormatDetector,
   PullRequestTemplateSchema,
   PushSpecSchema,
+  QuestionRequestSchema,
+  RegistryOrchestrationPolicy,
+  RunContextSchema,
+  RuntimeSnapshotSchema,
   SemanticTypeSchema,
+  SiblingSkillRequestSchema,
   TechnicalDesignSchema,
   TicketSchema,
   TomlCodexAgentEmitter,
@@ -5648,6 +6191,9 @@ export {
   UpdateEpicInputSchema,
   UpdateInitiativeInputSchema,
   UpdateTicketInputSchema,
+  ValidatedReportHandoff,
+  VerificationReportSchema,
+  VerifiedImplementationLoop,
   YamlAgentFrontmatterParser,
   agentCapabilities,
   agentFrontmatterParser,
