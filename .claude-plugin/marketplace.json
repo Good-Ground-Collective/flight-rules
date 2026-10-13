@@ -7,7 +7,7 @@
   "plugins": [
     {
       "name": "flight-rules",
-      "source": "./",
+      "source": "./dist/claude",
       "description": "PM-to-engineering pipeline for Good Ground Collective"
     }
   ]

@@ -44,6 +44,38 @@ describe("built library smoke test", () => {
     expect(bundle).not.toContain("class ZodError");
   });
 
+  it("runs the orchestration contract through the public package without host credentials", () => {
+    const output = execFileSync(process.execPath, ["--input-type=module", "-e", `
+      import { createFlightRules, FileAgentRegistry, RegistryOrchestrationPolicy, VerifiedImplementationLoop } from '@good-ground-collective/flight-rules'
+      const loop = new VerifiedImplementationLoop()
+      const run = {
+        context: { runId: 'package-smoke', taskId: 'ticket', cwd: process.cwd(), repositoryRoot: process.cwd(), baseRef: 'main', skill: 'execute-work' },
+        criteria: ['Keeps the input'], implementationInput: { ticket: 'Keep the input' }, history: [],
+      }
+      const next = loop.next(run)
+      if (next.status !== 'implement') throw new Error(JSON.stringify(next))
+      const available = { state: 'available', evidence: 'Fixture observation' }
+      const policy = new RegistryOrchestrationPolicy({ agents: new FileAgentRegistry().load('./agents') })
+      const decision = policy.prepare(next.request, {
+        context: next.request.context, agent: next.request.agent, host: { name: 'fixture', version: '1' }, observedAt: '2026-10-13T00:00:00Z',
+        spawn: available, ask: available, permissions: { read: available, edit: available, shell: available },
+        limits: { maxConcurrent: 1, activeWorkers: 0, currentDepth: 0, maxDepth: 1, source: 'Fixture bound' },
+      })
+      if (decision.status !== 'ready') throw new Error(JSON.stringify(decision))
+      const report = { summary: 'Done', filesChanged: [{ path: 'input.ts', why: 'Kept input' }], testsRun: [], approach: 'Pass through' }
+      const verification = loop.verify(run, { request: next.request, outcome: { status: 'completed', dispatchId: next.request.id, agent: next.request.agent, context: next.request.context, report } })
+      if (verification.status !== 'verify') throw new Error(JSON.stringify(verification))
+      console.log(JSON.stringify({
+        doc: createFlightRules({ cwd: process.cwd(), env: {} }).docs().resolve('orchestration-interface').id,
+        agent: verification.request.agent, input: verification.request.input,
+      }))
+    `], { cwd: root, encoding: "utf8" });
+    expect(JSON.parse(output)).toEqual({
+      doc: "orchestration-interface", agent: "code-verifier",
+      input: { criteria: ["Keeps the input"], filesChanged: [{ path: "input.ts" }] },
+    });
+  });
+
   it("imports the review entry and schemas by package name", () => {
     const output = execFileSync(
       process.execPath,
@@ -69,7 +101,7 @@ describe("built library smoke test", () => {
   it("ships declarations without test declarations", () => {
     expect(readFileSync(new URL("index.d.ts", dist), "utf8")).toContain("createFlightRules");
     expect(
-      readdirSync(dist, { recursive: true }).some((path) => String(path).includes("__tests__")),
+      readdirSync(dist, { recursive: true }).some((path) => String(path).includes("__tests__") || String(path).endsWith('.test.d.ts')),
     ).toBe(false);
   });
 

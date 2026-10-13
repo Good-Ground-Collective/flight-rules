@@ -4,6 +4,7 @@ import { GhPullRequestHost } from '../pr/pull-request-host/gh-pull-request-host.
 import type { PullRequestHost } from '../pr/pull-request-host/pull-request-host.js'
 import type { Config } from '../shared/config.js'
 import { ConfigStore } from '../shared/config-store.js'
+import { FileNativeInstallation, NativeHostSchema, type NativeHost, type NativeInstallation } from '../plugins/native-installation/native-installation.js'
 import type { HostSettingsSource } from '../shared/host-settings/host-settings-source.js'
 import { WorktreeLocator } from '../git/worktree-locator/worktree-locator.js'
 import { EvidenceLocation } from '../tasks/evidence/evidence-location.js'
@@ -16,10 +17,12 @@ import { BoardSessionStore } from '../shared/ariadne/board-session-store.js'
 import { GitHubTaskTracker } from '../tasks/github-task-tracker/github-task-tracker.js'
 import { JiraTaskTracker } from '../tasks/jira-task-tracker/jira-task-tracker.js'
 import type { TaskTracker } from '../tasks/task-tracker/task-tracker.js'
-import { nodeToolProbe, type ToolProbe } from '../tasks/tool-probe/tool-probe.js'
+import { NodeToolProbe, type ToolProbe } from '../tasks/tool-probe/tool-probe.js'
+import { NodeRepositoryReadiness, type RepositoryReadiness } from '../tasks/readiness/repository-readiness.js'
 import { FlightRulesPropsSchema, type FlightRulesProps } from './flight-rules.schema.js'
 
 export interface FlightRules {
+  installation(): NativeInstallation
   configPath(): string
   configStore(): ConfigStore
   /** The main checkout when the working directory is a linked git worktree. */
@@ -30,6 +33,7 @@ export interface FlightRules {
   prHost(overrideTracker?: string): PullRequestHost
   git(): GitExecutor
   probe(): ToolProbe
+  readiness(): RepositoryReadiness
   docs(): DocResolver
   /** Ariadne's Agents page reporter; reads only the `ariadne.*` keys from user and local scope, so it works without a valid tracker config. */
   board(): AriadneBoard
@@ -47,6 +51,7 @@ export class DefaultFlightRules implements FlightRules {
   private readonly env: Record<string, string | undefined>
   private readonly explicitConfigPath: string | undefined
   private readonly hostSettings: HostSettingsSource | undefined
+  private readonly host: NativeHost | undefined
   private untrackedRoot: { value: string | undefined } | undefined
 
   constructor(props: FlightRulesProps = {}) {
@@ -56,6 +61,7 @@ export class DefaultFlightRules implements FlightRules {
     this.env = props.env ?? process.env
     this.explicitConfigPath = parsed.configPath
     this.hostSettings = props.hostSettings
+    this.host = parsed.host
   }
 
   configPath(): string {
@@ -69,9 +75,14 @@ export class DefaultFlightRules implements FlightRules {
     return new ConfigStore({
       cwd: this.cwd,
       env,
+      host: NativeHostSchema.parse(this.host ?? env['FLIGHT_RULES_HOST'] ?? this.installation().host() ?? 'claude'),
       ...(this.hostSettings !== undefined ? { hostSettings: this.hostSettings } : {}),
       ...(untrackedRoot !== undefined ? { untrackedRoot } : {}),
     })
+  }
+
+  installation(): NativeInstallation {
+    return FileNativeInstallation.fromInstall({ moduleUrl: import.meta.url, cwd: this.cwd, env: this.env })
   }
 
   /** Looked up once per instance. */
@@ -145,7 +156,11 @@ export class DefaultFlightRules implements FlightRules {
   }
 
   probe(): ToolProbe {
-    return nodeToolProbe
+    return new NodeToolProbe({ cwd: this.cwd, env: this.env })
+  }
+
+  readiness(): RepositoryReadiness {
+    return new NodeRepositoryReadiness({ cwd: this.cwd, env: this.env })
   }
 
   docs(): DocResolver {

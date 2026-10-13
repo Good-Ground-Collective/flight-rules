@@ -1,0 +1,6 @@
+[
+  "Codex has no equivalent per-agent tool allowlist; capabilities remain instruction constraints and host permissions govern tools.",
+  "The parent session can override agent sandbox defaults; evidence directories need writable access from the runtime adapter.",
+  "Claude display color has no Codex mapping and is omitted.",
+  "Claude commit and Ariadne hooks are omitted; this target emits no Codex hooks."
+]

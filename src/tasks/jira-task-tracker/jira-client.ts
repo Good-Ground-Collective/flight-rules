@@ -35,6 +35,7 @@ export class JiraClient {
     path: string,
     body?: unknown,
     params?: Record<string, string | number>,
+    signal?: AbortSignal,
   ): Promise<T> {
     const url = new URL(`${this.baseUrl}${path}`)
     if (params) Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, String(v)))
@@ -43,6 +44,7 @@ export class JiraClient {
       method,
       headers: { Authorization: this.authHeader, 'Content-Type': 'application/json', Accept: 'application/json' },
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      ...(signal === undefined ? {} : { signal }),
     })
 
     if (!res.ok) await this.throwApiError(res)
@@ -105,7 +107,7 @@ export class JiraClient {
 
   private async fetchWithRetry(url: string, init: RequestInit, attempt = 0): Promise<Response> {
     const res = await fetch(url, init)
-    if (res.status === 429 && attempt < maxRetries) {
+    if (res.status === 429 && attempt < maxRetries && init.signal === undefined) {
       const retryAfterHeader = res.headers.get('Retry-After')
       const parsedRetryAfter = retryAfterHeader !== null ? Number(retryAfterHeader) : NaN
       const retryAfterSeconds = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : defaultRetryAfterSeconds

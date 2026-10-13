@@ -22,7 +22,7 @@ It also ships the canonical contract, charters and method in docs/.
 `load({ paths })` selects the core coding charter plus every language charter
 whose `applies-to` globs match one of `paths` — pass the PR's changed files.
 Without `paths` it returns the core and every language charter, each scoped by
-its own globs. The core is never returned alone.
+its own globs. If no language charter matches the selected paths, only the core is returned.
 
 ```js
 import {
@@ -71,9 +71,11 @@ The consuming model's transport compatibility remains a consuming-adapter
 check. Parse/reconcile before any write even if a model reports a valid result.
 
 `GitHubReviewVerifier` uses gh by default, or the action's GitHub client adapter.
-It checks artifact provenance, current-head code/CI evidence and eligible
-humans. It does not decide whether a reply answers a question; the reviewer
-does that and must give a reason. The default adapter rejects local command
+It checks artifact provenance, code evidence and eligible humans. Code
+evidence may cite the head or an ancestor of it, such as the fix commit; the
+cited line must exist at that commit and at the head. CI evidence must be on
+the head itself. It does not decide whether a reply answers a question; the
+reviewer does that and must give a reason. The default adapter rejects local command
 verification because it has no trusted executor. A consumer with a trusted
 executor can implement the ReviewVerifier interface. ValidatedReviewVerifier
 is for already verified adapter attestations; never populate it from model

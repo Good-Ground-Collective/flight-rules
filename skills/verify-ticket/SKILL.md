@@ -11,12 +11,18 @@ This is the skill that confirms the thing. You are handed a **ticket id**; you h
 
 **Terminal state:** the ticket carries a verdict comment with a per-item verdict and after evidence, plus exactly one of `Agentic-Verification-Success` or `Agentic-Verification-Failure` — or, when an item was UNVERIFIABLE, no outcome label and a comment stating what blocked verification.
 
+## Orchestration context
+
+Read `flight-rules doc orchestration-interface` and `flight-rules doc native-orchestration`. Preserve or initialize the ticket's caller context (run/task IDs, active checkout, working directory, fixed base and attempt 1). Use `dispatch` with `qa-engineer-verify`; validate its role report against the original request identity and context. Missing dispatch/capability evidence or insufficient depth is a named stop before the first ticket mutation. Invoke sibling skills in the same caller context, without an extra worker level.
+
+This invocation is unattended: `allowHumanQuestions` is always false. Return `needs`/`openQuestions` with the named failure, without invoking `ask`, publishing a question or inferring an answer. A failed or malformed worker outcome is not a product FAIL verdict. Preserve the existing per-item QA verdict and label rules below.
+
 ## Preconditions
 
 - You are handed a **ticket id**.
 - Run everything from the **repo root of the app under test** — the `flight-rules` CLI resolves config relative to CWD, and the tester drives that app.
 - **Config comes from the CLI.** It merges the user's and project's Claude Code settings with the flight-rules config file; `flight-rules config show` prints the result and where each value came from. Never hand-edit a config file; write with `flight-rules config set`.
-- `flight-rules check` reports `"ok": true`, including the tool probes the QA lane depends on. A half-configured CLI fails partway through, after it has already labelled the ticket in progress.
+- Read `flight-rules doc workflow-preflight` and require `flight-rules check --workflow verify-ticket --runtime-file <host-runtime-json>` to report `"ok": true` with current caller/worker observations before any label or evidence write. Missing or unknown access is a named failure/`needs:` result, never a prompt or permission change. A general environment check alone is insufficient.
 - The **tracker is Jira**. The failure mention and the native attachments are Jira shapes.
 - **QA instructions exist.** Read them, passing `--from` the directory of the code the ticket changed when the ticket names it:
 
@@ -71,10 +77,11 @@ flight-rules ticket label <id> --add Agentic-Verification-In-Progress
 
 This is the lock. From here on, a CLI error must clear it before you stop (see Error handling).
 
-The change is deployed and about to be checked, so report it as testable:
+The change is deployed and about to be checked, so put the run on its QA step and report it as testable:
 
 ```bash
-flight-rules board post item --kind testable --ticket <id> --title "<id> is deployed to <environment> and ready to test"
+flight-rules board post heartbeat --ticket <id> --step qa --state nominal --skill flight-rules:verify-ticket --detail "Verifying on <environment>"
+flight-rules board post item --kind testable --ticket <id> --skill flight-rules:verify-ticket --title "<id> is deployed to <environment> and ready to test"
 ```
 
 ### 4. Fetch the contract fresh
@@ -103,7 +110,7 @@ Hand the tester the `items[].text` numbered.
 
 ### 5. Dispatch the tester
 
-Dispatch the **`qa-engineer`** agent in **`verify` mode**, **with `model: sonnet`** passed explicitly. Verify follows a recorded script rather than locating a symptom's layer from scratch, so it runs the cheap tier — the agent declares `opus` for reproduction, and this dispatch overrides it. Hand the agent:
+Dispatch the **`qa-engineer-verify`** agent in **`verify` mode**. Verify follows a recorded script rather than locating a symptom's layer from scratch, so this named registration uses the standard tier and shares the QA prompt with the escalated reproduction registration. Do not override its model at dispatch. Hand the agent:
 
 - the **numbered contract items** — Fixed When for a bug, Acceptance Criteria for a story;
 - for a bug, the recorded **Steps To Reproduce** and **Root Cause**, verbatim;
@@ -126,7 +133,8 @@ Read the single trailing `yaml` block it returns: `items[].{item, verdict, evide
    ```
 
    ```bash
-   flight-rules board post activity --ticket <id> --level success --text "Verified on <environment>: <m> of <m> passed; labelled Agentic-Verification-Success"
+   flight-rules board post heartbeat --ticket <id> --step qa --state nominal --skill flight-rules:verify-ticket --detail "Verified on <environment>: <m> of <m> passed"
+   flight-rules board post activity --ticket <id> --level success --skill flight-rules:verify-ticket --text "Verified on <environment>: <m> of <m> passed; labelled Agentic-Verification-Success"
    ```
 
    Repeat `--attach` once per manifest item, referencing each in the body as `![<caption>](./<basename>)` with the same basename.
@@ -138,7 +146,8 @@ Read the single trailing `yaml` block it returns: `items[].{item, verdict, evide
    ```
 
    ```bash
-   flight-rules board post activity --ticket <id> --level abort --text "Verification failed on <environment>: <n> of <m> failed; labelled Agentic-Verification-Failure"
+   flight-rules board post heartbeat --ticket <id> --step qa --state abort --skill flight-rules:verify-ticket --detail "Verification failed on <environment>: <n> of <m> failed"
+   flight-rules board post activity --ticket <id> --level abort --skill flight-rules:verify-ticket --text "Verification failed on <environment>: <n> of <m> failed; labelled Agentic-Verification-Failure"
    ```
 
 3. **Any UNVERIFIABLE and no FAIL** — the item could not be tested as handed over, which is a contract or environment problem, not a demonstrated defect. Write a comment: `Verification could not complete.` then one line per UNVERIFIABLE item with its evidence and the matching `openQuestions` entry. Post it with `ticket comment`, then remove the lock and add **no** outcome label:
@@ -148,7 +157,8 @@ Read the single trailing `yaml` block it returns: `items[].{item, verdict, evide
    ```
 
    ```bash
-   flight-rules board post activity --ticket <id> --level caution --text "Verification could not complete on <environment>; no outcome label"
+   flight-rules board post heartbeat --ticket <id> --step qa --state caution --skill flight-rules:verify-ticket --detail "Verification could not complete on <environment>"
+   flight-rules board post activity --ticket <id> --level caution --skill flight-rules:verify-ticket --text "Verification could not complete on <environment>; no outcome label"
    ```
 
    Surface every `openQuestions` entry to the user in the report.
@@ -165,8 +175,8 @@ Give the user, in order: the detected format, the gate result, the per-item verd
 - **Never fix code or data.** A reversible flip the tester captures, observes, and restores is not a fix; anything you would edit to make an item pass is out of bounds.
 - **Never re-discover a bug's steps.** The tester replays the recorded reproduction (Q-6). If the steps no longer match the UI, that is a FAIL item with that evidence — you post it, you do not go hunting for a different symptom.
 - **Every tracker write goes through `flight-rules`** — `ticket label` and `ticket comment`, never the Jira REST API or `gh`. Read-only inspection with plain `flight-rules ticket get` is fine.
-- **The tester never writes; you do.** The `qa-engineer` agent hands back a verdict and files under the evidence directory and nothing else. Comments and labels are yours.
-- **No `AskUserQuestion` in the happy path.** Missing QA instructions or a missing credential is a stop with a named reason, not a question.
+- **The tester never writes; you do.** The `qa-engineer-verify` agent hands back a verdict and files under the evidence directory and nothing else. Comments and labels are yours.
+- **No human questions in the happy path.** Missing QA instructions or a missing credential is a stop with a named reason, not a question.
 - **Success and failure are each exactly one `ticket label` call** that removes the lock and adds the outcome in the same invocation.
 
 ## Error handling

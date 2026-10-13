@@ -140,6 +140,66 @@ describe("GitHub provenance and decision authority", () => {
       ),
     ).toBe(false);
   });
+  it("accepts code evidence cited at the head or an ancestor when the line exists at both", async () => {
+    const fix = "c".repeat(40);
+    const file = (text: string) => ({
+      type: "file",
+      encoding: "base64",
+      content: Buffer.from(text).toString("base64"),
+    });
+    const contents = (ref: string) => `/repos/org/repo/contents/src/auth.ts?ref=${ref}`;
+    const code = (sha: string, line = 3) =>
+      ({ kind: "code", commit_sha: sha, path: "src/auth.ts", line }) as const;
+    const client = (status: string, atFix = file("a\nb\nc")) =>
+      api({
+        [`/repos/org/repo/compare/${fix}...${head}`]: { status },
+        [contents(fix)]: atFix,
+        [contents(head)]: file("a\nb\nc"),
+      });
+
+    const ancestor = client("ahead");
+    expect(await verifier(ancestor).verify(code(fix), head)).toBe(true);
+    expect(ancestor.get).toHaveBeenCalledWith(contents(fix));
+    expect(ancestor.get).toHaveBeenCalledWith(contents(head));
+    expect(await verifier(client("ahead")).verify(code(fix, 4), head)).toBe(false);
+    expect(await verifier(client("ahead", file("a\nb"))).verify(code(fix), head)).toBe(false);
+    expect(await verifier(client("ahead", file("a\nb\n"))).verify(code(fix), head)).toBe(false);
+    expect(await verifier(client("ahead", file(""))).verify(code(fix, 1), head)).toBe(false);
+    expect(await verifier(client("ahead", file("a\n\n\n"))).verify(code(fix), head)).toBe(true);
+    for (const status of ["diverged", "behind"]) {
+      const unrelated = client(status);
+      expect(await verifier(unrelated).verify(code(fix), head)).toBe(false);
+      expect(unrelated.get).not.toHaveBeenCalledWith(expect.stringContaining("/contents/"));
+      expect(await verifier(unrelated).verify({ kind: "commit", sha: fix }, head)).toBe(false);
+    }
+    expect(await verifier(client("ahead")).verify({ kind: "commit", sha: fix }, head)).toBe(true);
+
+    const atHead = client("identical");
+    expect(await verifier(atHead).verify(code(head), head)).toBe(true);
+    expect(await verifier(atHead).verify(code(head, 4), head)).toBe(false);
+    expect(atHead.get).not.toHaveBeenCalledWith(expect.stringContaining("/compare/"));
+    expect(atHead.get).not.toHaveBeenCalledWith(contents(fix));
+    const terminated = api({ [contents(head)]: file("a\nb\n") });
+    expect(await verifier(terminated).verify(code(head, 2), head)).toBe(true);
+    expect(await verifier(terminated).verify(code(head), head)).toBe(false);
+  });
+  it("rejects check runs on an ancestor of the head", async () => {
+    const ancestor = "c".repeat(40);
+    const client = api({
+      [`/repos/org/repo/compare/${ancestor}...${head}`]: { status: "ahead" },
+      "/repos/org/repo/check-runs/11": {
+        head_sha: ancestor,
+        status: "completed",
+        conclusion: "success",
+      },
+    });
+    expect(
+      await verifier(client).verify(
+        { kind: "check_run", check_run_id: 11, commit_sha: ancestor },
+        head,
+      ),
+    ).toBe(false);
+  });
   it("checks resolver identity and PR provenance; local executor evidence is rejected by this adapter", async () => {
     expect(
       await verifier().dismissal({ kind: "thread_resolution", thread_id: "thread", author_id: 20 }),

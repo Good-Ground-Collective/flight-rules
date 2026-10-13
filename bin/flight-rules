@@ -1,5 +1,3 @@
 #!/bin/sh
-# Extensionless PATH shim. Node cannot load an extensionless file as ESM under
-# "type": "module" (ERR_UNKNOWN_FILE_EXTENSION), so `flight-rules` lands here
-# and execs the real bundle, which carries a proper .mjs extension.
+# Generated PATH shim; canonical source is scripts/build.mjs.
 exec node "$(dirname "$0")/flight-rules.mjs" "$@"

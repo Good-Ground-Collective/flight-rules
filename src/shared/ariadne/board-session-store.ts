@@ -35,6 +35,9 @@ const ThreadRecordSchema = z.object({
   branchCheckedAt: z.number().optional(),
 });
 
+/** The skill a Claude Code session's main thread last loaded through the Skill tool. */
+const ThreadSkillRecordSchema = z.object({ skill: z.string() });
+
 export type BoardSessionRecord = z.infer<typeof SessionRecordSchema>;
 export type InferredSessionRecord = z.infer<typeof InferredRecordSchema>;
 type ThreadRecord = z.infer<typeof ThreadRecordSchema>;
@@ -47,6 +50,7 @@ export interface BoardSessionStoreProps {
 
 const inferredFolder = "inferred";
 const threadsFolder = "threads";
+const threadSkillsFolder = "thread-skills";
 
 /** Letters, digits, underscores and hyphens only; every other character becomes an underscore. */
 const unsafeSessionCharacters = /[^A-Za-z0-9_-]/g;
@@ -81,6 +85,9 @@ export const ticketSessionKey = new TicketSessionKey();
  * - `threads/<claude session>.json`: the board session a skill last posted
  *   to by default from that Claude Code session, and the main thread's
  *   branch-lookup throttle.
+ * - `thread-skills/<claude session>.json`: the skill the main thread last
+ *   loaded. It is a separate file so a Skill call and a skill's post, which
+ *   can land at the same moment from different processes, never undo each other.
  */
 export class BoardSessionStore {
   private readonly files: BoardStateFiles;
@@ -103,6 +110,30 @@ export class BoardSessionStore {
   record(heartbeat: HeartbeatInput): void {
     const now = this.now();
     this.files.write(undefined, heartbeat.session, { heartbeat: this.compact(heartbeat), recordedAt: now, sentAt: now });
+  }
+
+  /**
+   * The skill heartbeat a skill recorded for the session within `maxAgeMs`,
+   * whatever its state; an older record counts as none.
+   */
+  recent(session: string, maxAgeMs: number): HeartbeatInput | undefined {
+    const record = this.read(session);
+    return record !== undefined && this.now() - record.recordedAt <= maxAgeMs ? record.heartbeat : undefined;
+  }
+
+  /**
+   * Remembers a placeholder heartbeat only where no skill has recorded a
+   * recent one: a fresh record is never replaced, and a missing file is
+   * created atomically, so a skill's own heartbeat landing at the same
+   * moment from another process wins. Returns whether it was remembered.
+   */
+  recordIfAbsent(heartbeat: HeartbeatInput, maxAgeMs: number): boolean {
+    if (this.recent(heartbeat.session, maxAgeMs) !== undefined) return false;
+    const now = this.now();
+    const record = { heartbeat: this.compact(heartbeat), recordedAt: now, sentAt: now };
+    if (this.read(heartbeat.session) === undefined) return this.files.create(undefined, heartbeat.session, record);
+    this.files.write(undefined, heartbeat.session, record);
+    return true;
   }
 
   /**
@@ -170,10 +201,22 @@ export class BoardSessionStore {
     return true;
   }
 
+  /** Remembers the skill this Claude Code session's main thread just loaded. */
+  recordThreadSkill(claudeSession: string, skill: string): void {
+    if (this.threadSkill(claudeSession) === skill) return;
+    this.files.write(threadSkillsFolder, claudeSession, { skill });
+  }
+
+  /** The skill this Claude Code session's main thread last loaded, if any. */
+  threadSkill(claudeSession: string): string | undefined {
+    return this.files.read(threadSkillsFolder, claudeSession, ThreadSkillRecordSchema)?.skill;
+  }
+
   /** Deletes inferred heartbeats and thread records untouched for `maxAgeMs`. */
   prune(maxAgeMs: number): void {
     this.files.prune(inferredFolder, maxAgeMs);
     this.files.prune(threadsFolder, maxAgeMs);
+    this.files.prune(threadSkillsFolder, maxAgeMs);
   }
 
   private thread(claudeSession: string): ThreadRecord | undefined {

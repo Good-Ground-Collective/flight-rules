@@ -1,9 +1,34 @@
 import { describe, expect, it } from 'vitest'
-import { createFlightRules, DefaultFlightRules, NodeGitExecutor, nodeToolProbe } from '../index.js'
+import { createFlightRules, DefaultFlightRules, NodeGitExecutor, NodeToolProbe } from '../index.js'
 
 describe('public library surface', () => {
   it('exports exactly the supported values', async () => {
     expect(Object.keys(await import('../index.js')).sort()).toEqual([
+      'RunContextSchema',
+      'CallerContextSchema',
+      'CapabilityEvidenceSchema',
+      'AdapterLimitsSchema',
+      'RuntimeSnapshotSchema',
+      'DispatchRequestSchema',
+      'OrchestrationFailureSchema',
+      'DispatchOutcomeSchema',
+      'QuestionRequestSchema',
+      'SiblingSkillRequestSchema',
+      'RegistryOrchestrationPolicy',
+      'ValidatedReportHandoff',
+      'ImplementationReportSchema',
+      'VerificationReportSchema',
+      'CriterionResultSchema',
+      'HandoffRecordSchema',
+      'ImplementationRunSchema',
+      'VerifiedImplementationLoop',
+      'BoundedDispatchQueue',
+      'InvalidDispatchQueueStateError',
+      'WorkflowSchema',
+      'WorkflowEvidenceSchema',
+      'ReadinessOptionsSchema',
+      'NodeRepositoryReadiness',
+      'NodeWorkflowPreflight',
       'AgentCapabilitySchema',
       'AgentFrontmatterSchema',
       'AttachmentSchema',
@@ -21,6 +46,13 @@ describe('public library surface', () => {
       'CreateTicketInputSchema',
       'DefaultCommitMessageBuilder',
       'DefaultFlightRules',
+      'FileNativeInstallation',
+      'NativeInstallationError',
+      'NativeHostSchema',
+      'AgentInstallScopeSchema',
+      'InstallationManifestSchema',
+      'NeutralSettingsSource',
+      'InvalidSettingsError',
       'DefaultPullRequestBuilder',
       'DependencyPlannerService',
       'DocCharterCatalog',
@@ -30,16 +62,22 @@ describe('public library surface', () => {
       'EnvLoader',
       'EpicSchema',
       'FileDocResolver',
+      'FileAgentRegistry',
       'GhOutputParseError',
       'GhPullRequestHost',
       'GitHubTaskTracker',
       'InitiativeSchema',
+      'InvalidAgentDefinitionError',
+      'InvalidPluginSourceError',
       'JiraTaskTracker',
       'LayeredBodyAdfConverter',
       'MediaLookupSchema',
       'MediaRefSchema',
       'ModelTierSchema',
+      'MarkdownClaudeAgentEmitter',
+      'TomlCodexAgentEmitter',
       'NodeGitExecutor',
+      'NativePluginCompiler',
       'NodeToolProbe',
       'PrecedenceBodyFormatDetector',
       'PullRequestTemplateSchema',
@@ -50,6 +88,7 @@ describe('public library surface', () => {
       'TrackerEvidenceService',
       'TrackerUserSchema',
       'UnsupportedTrackerOperationError',
+      'UnsupportedAgentSettingError',
       'UpdateEpicInputSchema',
       'UpdateInitiativeInputSchema',
       'UpdateTicketInputSchema',
@@ -82,6 +121,6 @@ describe('public library surface', () => {
     const core = createFlightRules({ cwd: '/nonexistent', env: {} })
     expect(core).toBeInstanceOf(DefaultFlightRules)
     expect(core.git()).toBeInstanceOf(NodeGitExecutor)
-    expect(core.probe()).toBe(nodeToolProbe)
+    expect(core.probe()).toBeInstanceOf(NodeToolProbe)
   })
 })

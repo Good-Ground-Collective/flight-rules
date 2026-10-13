@@ -790,6 +790,16 @@ describe('GitHubTracker.getInitiative', () => {
 describe('GitHubTracker.ping', () => {
   beforeEach(() => vi.clearAllMocks())
 
+  it('passes bounded probe cancellation through to Octokit', async () => {
+    const tracker = makeTracker()
+    // @ts-expect-error — accessing private field for test setup
+    const mockGet = vi.mocked(tracker.octokit.rest.repos.get)
+    mockGet.mockResolvedValueOnce({ data: {} } as never)
+    const signal = new AbortController().signal
+    await tracker.ping({ signal })
+    expect(mockGet).toHaveBeenCalledWith({ owner: 'acme', repo: 'proj', request: { signal } })
+  })
+
   it('reads the configured repo to verify reachability', async () => {
     const tracker = makeTracker()
     // @ts-expect-error — accessing private field for test setup

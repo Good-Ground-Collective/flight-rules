@@ -31,6 +31,15 @@ describe('JiraClient.request', () => {
     vi.unstubAllGlobals()
   })
 
+  it('passes a probe abort signal and does not schedule rate-limit retries for bounded probes', async () => {
+    const signal = new AbortController().signal
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({ message: 'Limited' }, { status: 429, headers: { 'Retry-After': '60' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(makeClient().request('GET', '/myself', undefined, undefined, signal)).rejects.toMatchObject({ status: 429 })
+    expect(fetchMock).toHaveBeenCalledExactlyOnceWith('https://acme.atlassian.net/rest/api/3/myself', expect.objectContaining({ signal }))
+    vi.unstubAllGlobals()
+  })
+
   it('sends method/body/params and parses a successful JSON response', async () => {
     const client = makeClient()
     const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({ key: 'FOO-1', fields: { summary: 'hi' } }))

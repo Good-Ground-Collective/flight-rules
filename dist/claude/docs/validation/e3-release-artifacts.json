@@ -1,0 +1,25 @@
+{
+  "networkPush": false,
+  "registryPublish": false,
+  "modelTurns": 0,
+  "generatedFiles": 208,
+  "nativeManifests": 3,
+  "staleDeletions": 4,
+  "sourceChanges": [
+    "package-lock.json",
+    "package.json"
+  ],
+  "ignoredDotfilesCommitted": true,
+  "atomicMarketplaceSwitch": true,
+  "localRemoteHeadMatched": true,
+  "npmArtifactCoverage": true,
+  "relocatedClis": 3,
+  "imports": {
+    "version": "99.0.0-release-proof",
+    "root": true,
+    "review": true,
+    "schemas": true
+  },
+  "validatedAt": "2026-10-13T01:27:50.580892+00:00",
+  "fixtureVersion": "99.0.0-release-proof"
+}

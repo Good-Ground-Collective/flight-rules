@@ -67,6 +67,9 @@ export declare const ticketSessionKey: TicketSessionKey;
  * - `threads/<claude session>.json`: the board session a skill last posted
  *   to by default from that Claude Code session, and the main thread's
  *   branch-lookup throttle.
+ * - `thread-skills/<claude session>.json`: the skill the main thread last
+ *   loaded. It is a separate file so a Skill call and a skill's post, which
+ *   can land at the same moment from different processes, never undo each other.
  */
 export declare class BoardSessionStore {
     private readonly files;
@@ -76,6 +79,18 @@ export declare class BoardSessionStore {
     read(session: string): BoardSessionRecord | undefined;
     /** Remembers a heartbeat a skill just sent. */
     record(heartbeat: HeartbeatInput): void;
+    /**
+     * The skill heartbeat a skill recorded for the session within `maxAgeMs`,
+     * whatever its state; an older record counts as none.
+     */
+    recent(session: string, maxAgeMs: number): HeartbeatInput | undefined;
+    /**
+     * Remembers a placeholder heartbeat only where no skill has recorded a
+     * recent one: a fresh record is never replaced, and a missing file is
+     * created atomically, so a skill's own heartbeat landing at the same
+     * moment from another process wins. Returns whether it was remembered.
+     */
+    recordIfAbsent(heartbeat: HeartbeatInput, maxAgeMs: number): boolean;
     /**
      * Claims the next liveness heartbeat for a session: returns its record and
      * marks it sent, or returns undefined when there is nothing to keep alive.
@@ -99,6 +114,10 @@ export declare class BoardSessionStore {
     threadSession(claudeSession: string): string | undefined;
     /** At most one main-thread branch lookup per `intervalMs` per Claude Code session. */
     claimBranchCheck(claudeSession: string, intervalMs: number): boolean;
+    /** Remembers the skill this Claude Code session's main thread just loaded. */
+    recordThreadSkill(claudeSession: string, skill: string): void;
+    /** The skill this Claude Code session's main thread last loaded, if any. */
+    threadSkill(claudeSession: string): string | undefined;
     /** Deletes inferred heartbeats and thread records untouched for `maxAgeMs`. */
     prune(maxAgeMs: number): void;
     private thread;

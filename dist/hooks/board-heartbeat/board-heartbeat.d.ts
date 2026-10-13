@@ -89,8 +89,11 @@ export declare class BoardHeartbeatHook {
      * the one a skill last posted to by default from it.
      */
     private skillThread;
+    /** The skill a Skill tool call just loaded, when it is a name Ariadne accepts. */
+    private invokedSkill;
     private bridgeBackgroundLaunch;
     private subagentHeartbeat;
+    /** A main thread's heartbeat names the skill it last loaded, when it loaded one. */
     private checkoutHeartbeat;
     private send;
 }

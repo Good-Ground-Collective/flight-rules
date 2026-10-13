@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AgentFrontmatterSchema, agentCapabilities, modelTiers, reasoningLevels, claudeAgentColors } from "../agent-frontmatter.schema.js";
+import { AgentFrontmatterSchema, AgentRegistrationSchema, agentCapabilities, modelTiers, reasoningLevels, claudeAgentColors } from "../agent-frontmatter.schema.js";
 
 const minimal = {
   name: "example-agent",
@@ -25,6 +25,12 @@ describe("AgentFrontmatterSchema", () => {
 
   it.each(modelTiers)("accepts model tier %s", (model) => {
     expect(AgentFrontmatterSchema.parse({ ...minimal, model }).model).toBe(model);
+  });
+
+  it("requires a nonempty recorded reason to use the reserved expert tier", () => {
+    expect(() => AgentRegistrationSchema.parse({ ...minimal, model: "expert" })).toThrow(/modelReason/);
+    expect(() => AgentRegistrationSchema.parse({ ...minimal, model: "expert", modelReason: "  " })).toThrow();
+    expect(AgentRegistrationSchema.parse({ ...minimal, model: "expert", modelReason: "Owner requires a deeper investigation." }).model).toBe("expert");
   });
 
   it.each(reasoningLevels)("accepts reasoning %s", (reasoning) => {

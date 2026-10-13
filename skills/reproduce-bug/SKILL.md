@@ -11,17 +11,21 @@ This is the skill that turns a landed bug into a document a human can act on. Yo
 
 **Terminal state:** the ticket carries a Bug Report body per the output of `flight-rules doc bug-report-format`, a comment with the before/after evidence inline, and exactly one of `Agentic-Reproduction-Success` or `Agentic-Reproduction-Failure`; the user holds a run summary with the outcome, the label, the evidence paths, and any open questions.
 
+## Orchestration context
+
+Read `flight-rules doc orchestration-interface` and `flight-rules doc native-orchestration`. Preserve or initialize the ticket's caller context (run/task IDs, active checkout, working directory, fixed base and attempt 1). Use `dispatch` with the named `qa-engineer` registration and retain the original request beside its role report. Missing capability, unavailable dispatch or exhausted depth is a named stop before any ticket label/write. If a later report has a mismatched identity or invalid shape, follow Error handling to clear the in-progress label and stop. Invoke sibling skills in the same caller context, without an extra worker level.
+
+This invocation is unattended: `allowHumanQuestions` is always false. Return missing inputs as `needs`/`openQuestions` and a named failure; never invoke `ask`, publish a question or infer an answer. A failed execution or malformed report cannot stand in for reproduction evidence.
+
 ## Preconditions
+
+- Read `flight-rules doc workflow-preflight` and require `flight-rules check --workflow reproduce-bug --runtime-file <host-runtime-json>` to report `"ok": true` before setting any label or creating evidence. Use current caller/worker observations. Missing or unknown capability is a named failure/`needs:` result; never prompt or widen permissions. A general environment check alone is insufficient.
 
 - You are handed a **ticket id**.
 - Run everything from the **repo root** of the app under test; the CLI resolves config relative to CWD, and the agent drives that app.
 - **Config comes from the CLI.** It merges the user's and project's Claude Code settings with the flight-rules config file; `flight-rules config show` prints the result and where each value came from. Never hand-edit a config file; write with `flight-rules config set`.
 - The tracker is **Jira**. The label lifecycle and the reporter mention are Jira shapes.
-- `flight-rules check` reports `"ok": true`, including the `tools:*` probes for `playwright-cli`, `ffmpeg`, and `gh` that the agent's capture depends on.
-
-  ```bash
-  flight-rules check
-  ```
+- The workflow check includes the capture tool probes and required QA instructions. Fix failed required checks before labelling the ticket; optional tool results do not become new requirements.
 
 - QA instructions exist. Read them once, passing `--from` the directory of the code the bug lives in when the ticket names it:
 
@@ -150,7 +154,7 @@ Give the user, in this order: the outcome, the final label, the evidence paths, 
 - **Every tracker write goes through `flight-rules`.** Read-only `git status` and `gh` inspection is fine; native tracker APIs are not.
 - **One `ticket label` call per outcome**, removing `In-Progress` and adding the outcome together, so the label is never orphaned.
 - **The label lifecycle is exactly** `Agentic-Reproduction-In-Progress`, `Agentic-Reproduction-Success`, and `Agentic-Reproduction-Failure`. No other reproduction label exists.
-- **No `AskUserQuestion` in the happy path.** A missing input is a failure with a reason, not a question.
+- **No human questions in the happy path.** A missing input is a failure with a reason, not a question.
 
 ## Error handling
 

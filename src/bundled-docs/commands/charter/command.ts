@@ -12,7 +12,7 @@ interface CharterOptions {
 
 /**
  * Prints the core coding charter plus every language charter governing the selected files.
- * The core is never printed alone, so callers cannot drop the language charters by accident.
+ * Applicable language charters accompany the core automatically.
  */
 export function createCharterCommand(
   getCatalog: () => CharterCatalog,

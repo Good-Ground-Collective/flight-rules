@@ -1,0 +1,69 @@
+{
+  "description": "Route commits through the flight-rules CLI in repos that use flight-rules, strip Claude Code's attribution trailers from commits and PR bodies, and, when Ariadne is configured, report Jira work to its Agents page: keep skill sessions alive, and show any sub-agent dispatched for a Jira ticket (or a main thread whose directory or branch names one) as running on that ticket",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Bash(git *)",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/bin/flight-rules.mjs", "hook", "pre-bash"],
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "if": "Bash(gh pr *)",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/bin/flight-rules.mjs", "hook", "pre-bash"],
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "if": "Bash(flight-rules *)",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/bin/flight-rules.mjs", "hook", "pre-bash"],
+            "timeout": 15
+          }
+        ]
+      },
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/bin/flight-rules.mjs", "hook", "agent-dispatch"],
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/bin/flight-rules.mjs", "hook", "board-heartbeat"],
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/bin/flight-rules.mjs", "hook", "agent-stop"],
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -7,7 +7,7 @@ const filesIn = (directory: string): string[] =>
   readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const path = join(directory, entry.name);
     if (entry.isDirectory()) return filesIn(path);
-    return entry.isFile() ? [path] : [];
+    return entry.isFile() && entry.name.endsWith(".md") ? [path] : [];
   });
 const files = ["skills", "agents", "docs"].flatMap((directory) => filesIn(join(root, directory)));
 

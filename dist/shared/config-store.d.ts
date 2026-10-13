@@ -1,4 +1,5 @@
 import type { Config, PathProbe } from "./config.js";
+import { type NativeHost } from "../plugins/native-installation/native-installation.js";
 import type { HostSettingsSource } from "./host-settings/host-settings-source.js";
 /**
  * Where a config layer lives, lowest precedence first. `user`, `project`, and
@@ -31,6 +32,7 @@ export interface ConfigReport {
  * form a valid config, so a half-finished setup can still be inspected.
  */
 export interface ConfigInspection {
+    host: string;
     valid: boolean;
     error?: string;
     values: Record<string, unknown>;
@@ -42,6 +44,8 @@ export interface ConfigStoreProps {
     env?: Record<string, string | undefined>;
     /** The host's settings layers; defaults to Claude Code's. */
     hostSettings?: HostSettingsSource;
+    /** Explicit host, otherwise FLIGHT_RULES_HOST, otherwise the compatible Claude default. */
+    host?: NativeHost;
     /** Used for the user settings path when no host source is given. */
     home?: string;
     pathProbe?: PathProbe;

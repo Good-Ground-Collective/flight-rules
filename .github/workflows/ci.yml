@@ -4,7 +4,6 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
 
 jobs:
   ci:
@@ -14,6 +13,15 @@ jobs:
       packages: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reject generated artifacts in source PRs
+        if: github.event_name == 'pull_request'
+        run: node scripts/check-source-artifacts.mjs "$PR_BASE_SHA" "$PR_HEAD_SHA"
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
 
       - uses: actions/setup-node@v4
         with:
@@ -37,6 +45,9 @@ jobs:
 
       - name: Test
         run: npm test
+
+      - name: Verify release artifacts against a local remote
+        run: npm run test:release:artifacts
 
   release:
     needs: ci
@@ -62,7 +73,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # semantic-release's @semantic-release/git plugin commits the version bump
-      # and rebuilt binary back to main, so it needs a git identity.
+      # and all rebuilt artifacts back to main, so it needs a git identity.
       - name: Configure git identity
         run: |
           git config user.name "github-actions[bot]"

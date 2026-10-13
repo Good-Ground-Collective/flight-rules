@@ -11,12 +11,18 @@ This is the skill that builds the thing. You are handed a **ticket id**; you han
 
 **Terminal state:** the PR is open and carries an autonomous charter review, the ticket sits in the tracker's in-review status, and the user is holding a run summary they can grade.
 
+## Orchestration context
+
+Read `flight-rules doc orchestration-interface` and `flight-rules doc native-orchestration` before dispatch. Initialize one run context with the ticket ID, unique run ID, active checkout root, working directory, fixed base and attempt 1, or preserve the context supplied by `execute-wave`. Select agents by registry name through `dispatch`, validate each role report with its original request identity, and retain the paired receipts across retries. An unavailable dispatch is a named stop, never inline replacement work.
+
+Human questions require invocation-level `allowHumanQuestions: true` and supported `ask`; otherwise every instruction below to ask means return `QUESTIONS_DISABLED` or `QUESTIONS_UNAVAILABLE` with the unresolved question. When opted in, wait for an actual answer before dependent work. Existing user answers and authorizations remain valid; do not ask again for an already settled decision. Invoke sibling skills in this caller context, without adding a worker nesting level.
+
 ## Preconditions
 
 - You are handed a **ticket id**, and optionally a **base branch**. `execute-wave` supplies the base when it drives you as one ticket of a wave; a human invoking you directly normally doesn't.
 - Run everything from the **repo root** (the `flight-rules` CLI resolves config relative to CWD).
 - **Read and write config only through the CLI.** Config can live in several places that the CLI merges key by key: the user's `~/.claude/settings.json`, the project's `.claude/settings.json` and `.claude/settings.local.json` (each under `pluginConfigs["flight-rules@flight-rules"].options`), and the config file that `flight-rules config path` prints. `flight-rules config show` prints the merged values and where each came from; `flight-rules config set` writes one. Never hand-edit any of these files — a value written to the wrong layer is shadowed by another and silently ignored.
-- `flight-rules check` reports `"ok": true`. If it doesn't, fix the environment first — the run mutates tracker state, and a half-configured CLI fails partway through.
+- Before the first repository or tracker mutation, read `flight-rules doc workflow-preflight`, gather current host observations, and require `flight-rules check --workflow execute-work --runtime-file <host-runtime-json>` to report `"ok": true`. A general environment check is insufficient. Resolve required configuration through setup first; missing/unknown access returns the named failure before a status change or branch creation. Refresh worker evidence again before each dispatch.
 - Config carries a **`repo`** field (`owner/repo`). `flight-rules pr create` needs it regardless of tracker — the PR always lands on GitHub — and it throws before parsing a single option when it is missing. On a Jira-tracked repo `repo` is often absent, because the tracker doesn't need it and `skills/setup/SKILL.md` doesn't ask for it. **Step 2 discovers and stores it**, and it must be settled _before_ the loop runs: reaching step 7 without it means a pushed branch and no PR.
 - The **working tree is clean**. A dirty tree stops the run _before any mutation_: the commit step commits by explicit path, so pre-existing edits to a file the implementer also touched would be swept into the commit silently.
 - **Ariadne reporting is optional.** The `flight-rules board post` lines below report the run to Ariadne's Agents page. When Ariadne is not configured, or the ticket is not a Jira key, they print nothing and exit 0. A failed post prints one line and still exits 0. Never retry one, wait on one, or let its output change the run.
@@ -121,7 +127,7 @@ It prints something like `{"id":"…","transitions":["In Progress","Done"]}` and
 gh repo view --json nameWithOwner --jq .nameWithOwner
 ```
 
-**Ask** with `AskUserQuestion`, once per missing field:
+**Ask the human and wait for an answer**, once per missing field:
 
 - **Always offer a free-text answer**, whatever the discovered list contains. The correct status name may not be in it — see above — and a discovered name that merely _looks_ plausible is how a wrong `inReviewStatus` gets stored and a run dies at the final transition. Offer the discovered names as convenience options, never as the closed set.
 - When the list is **empty**, that is a valid state, not an error (a fresh GitHub repo has no `status:` labels yet). Free text is then the only answer; explain that the tracker will create the status on first use.
@@ -132,7 +138,7 @@ Questions to ask: "Which status means work has started?", "Which status means a 
 The repo question is closed, so also post it to Ariadne when you ask it in chat:
 
 ```bash
-flight-rules board post item --kind question --ticket <id> --title "Open PRs against <owner/repo>?" --option Yes --option No
+flight-rules board post item --skill flight-rules:execute-work --kind question --ticket <id> --title "Open PRs against <owner/repo>?" --option Yes --option No
 ```
 
 The first answer wins. If the person says they answered in Ariadne, read the answer from `chosenOption` in `flight-rules board items --ticket <id> --json`. A `No` still needs the right `owner/repo` from chat.
@@ -215,9 +221,9 @@ Do not include your own opinion on how to build it. The walkthrough and the char
 
 ### 6. The implement / verify loop — hard maximum 3 iterations
 
-Dispatch the two agents in strict alternation. Count iterations out loud; you will report the count.
+Dispatch the two agents in strict alternation. Count iterations out loud; you will report the count. Follow `VerifiedImplementationLoop` from the shared contract: `next` derives the implementation request from paired receipts and `verify` derives the independent verifier request. Native parents apply the same transitions through their available dispatch tools. Check current capability evidence before each dispatch; three attempts never imply three concurrent workers or three levels of nesting.
 
-**a. Dispatch `code-implementation`** with the brief from step 5. Report the step first, with `--state caution` on iterations 2 and 3:
+**a. Dispatch the implementer selected in the table below** with the brief from step 5. Report the step first, with `--state caution` on iterations 2 and 3:
 
 ```bash
 flight-rules board post heartbeat --ticket <id> --step implement --state nominal --branch <branch> --skill flight-rules:execute-work
@@ -225,19 +231,19 @@ flight-rules board post heartbeat --ticket <id> --step implement --state nominal
 
 Then dispatch. On **iterations 2 and 3**, add the previous verifier's itemized FAIL entries **verbatim** — the criterion, the verdict, and the evidence exactly as the verifier wrote them. That evidence _is_ the definition of what still needs fixing; rewriting it in your own words is how a retry loses the thread.
 
-**Set the model by iteration.** `Agent`'s `model` parameter overrides the agent's frontmatter, so pass it explicitly on the dispatch:
+**Select the agent by iteration.** The agent's declared tier is mapped by the host adapter; dispatch by name without overriding its model.
 
-| Iteration | `model`                                     |
-| --------- | ------------------------------------------- |
-| 1         | _omit_ — inherits `sonnet` from frontmatter |
-| 2         | _omit_ — inherits `sonnet` from frontmatter |
-| 3 (final) | `opus`                                      |
+| Iteration | Agent | Tier |
+| --------- | ----- | ---- |
+| 1 | `code-implementation` | standard |
+| 2 | `code-implementation` | standard |
+| 3 (final) | `code-implementation-escalated` | escalated |
 
-Sonnet is the tier this pipeline is built around: `break-down-work` writes each ticket's Guided Walkthrough so a Sonnet-tier agent can build from it, and a first attempt against a good walkthrough is exactly the case that choice was made for. But by iteration 3 the verifier has rejected the work twice with itemized reasons, and re-running the same tier against the same criteria is close to a coin flip. Escalate rather than spend the last of a hard-capped three on a repeat.
+The standard tier is what this pipeline is built around: `break-down-work` writes each ticket's Guided Walkthrough so a standard-tier agent can build from it. By iteration 3 the verifier has rejected the work twice with itemized reasons. Use the escalated registration for that final attempt rather than repeat the same tier against the same unresolved criteria.
 
-This is bounded by construction — it can only fire on a ticket that has already failed verification twice, so the happy path never leaves sonnet. Do **not** escalate early on a hunch that the ticket looks hard; the retry count is the only signal.
+This is bounded by construction: escalation requires two recorded verifier rejections. Do **not** escalate early on a hunch that the ticket looks hard; the retry count is the only signal.
 
-**The verifier stays on sonnet at every iteration**, including against an escalated implementer. That asymmetry is deliberate: the verifier checks explicit acceptance criteria and reports per-criterion verdicts with evidence — it checks a stated contract rather than synthesizing one — and a cheap gate is a feature, not a compromise. Never pass `model` on a `code-verifier` dispatch.
+**Always dispatch `code-verifier` itself at every iteration**, including against an escalated implementer. It stays at its declared standard tier: checking explicit acceptance criteria with evidence is a different task from synthesizing an implementation. The verifier does not escalate.
 
 It returns a trailing YAML block:
 
@@ -274,7 +280,7 @@ for a layered body, or
 flight-rules ticket get <id> --section fixed-when
 ```
 
-for a bug report. Either returns `{id, section, markdown, items:[{text,done}]}`. Hand the verifier the items as its criteria and nothing that could bias it — **not** the implementer's `summary`, `approach`, or `testsRun`. Its contract permits `filesChanged` as a map of _where to look_; never pass it as a claim that the work is done. A verifier that has read the implementer's victory lap is not an independent check.
+for a bug report. Either returns `{id, section, markdown, items:[{text,done}]}`. Compare the items to the original ordered contract from step 1; a changed contract stops this run for a caller decision, rather than silently changing what a retry must satisfy. Hand the verifier the original criteria and the union of changed paths across attempts as `filesChanged: [{ path }]` — **not** the implementer's `summary`, `approach`, `testsRun` or change descriptions. Require the verifier to quote every criterion exactly once, in its original order, so each verdict binds to its criterion without interpreting a paraphrase. A verifier that has read the implementer's victory lap is not an independent check.
 
 It returns:
 
@@ -289,7 +295,7 @@ charterConcerns:
 verified: true | false
 ```
 
-**c. Read `verified`, then branch in this order:**
+**c. Validate the report and handoff before reading `verified`:** reject mismatched context/attempt, missing or altered criteria, and a `verified` flag that disagrees with the itemized verdicts. Malformed or failed execution is a named stop, not a verifier FAIL. Surface any `openQuestions` and stop before shipping or retrying. Then branch in this order:
 
 1. **`verified: true`** → exit the loop and ship (step 7).
 2. **Any `UNVERIFIABLE` verdict** → **stop and ask the user**, before spending another iteration. UNVERIFIABLE takes precedence over FAIL. The verifier also reports `verified: false` in this case, so do not let that pull you into a retry: an UNVERIFIABLE criterion is untestable _as written_, which is a ticket bug the implementer cannot fix with code. Re-dispatching burns an iteration of a hard-capped three and changes nothing.
@@ -339,21 +345,21 @@ The `--file` set is the **union of `filesChanged[].path` across every iteration*
 
 Never use a Claude Code auto-generated commit. The CLI owns the message format.
 
-**If the change touches `src/`, rebuild the bundle before committing** and add it to the `--file` set:
+**If the change touches `src/`, rebuild before committing** to validate the CLI and native packages:
 
 ```bash
 npm run build
 ```
 
-`bin/flight-rules.mjs` is a tracked build artifact this repo commits deliberately. CI builds but never diffs the result, so a PR that changes `src/` without rebuilding ships a bundle contradicting its own diff — and the stale binary is what anyone running the CLI from this branch actually executes.
+In flight-rules, release preparation owns `bin/`, `dist/`, the generated review JSON schemas and root plugin catalogs/manifests. Catalog templates live under `adapters/`. Commit canonical sources only: omit generated paths from the `--file` set. CI builds them and rejects added or modified artifacts in source PRs. Release commits may track those ignored files, so a local rebuild can still show generated changes in git status; leave those changes out of source commits.
 
 Then confirm you committed everything:
 
 ```bash
-git status --porcelain
+npm run check:source-status
 ```
 
-It must be **empty**. Any remaining output — unstaged _or_ staged — means the verified tree is wider than what you committed, so stop and reconcile before pushing rather than opening a PR that doesn't match what was verified. This check has teeth because the CLI commits with `git commit --only -- <paths>`: a path the implementer left behind, or staged without reporting, is excluded from the commit and therefore still visible here. It cannot be swept in silently.
+For flight-rules, this must pass: it ignores release-owned output and rejects remaining canonical source changes, staged or unstaged, including untracked source files. In repositories without that script, use `git status --porcelain` and reconcile remaining changes according to their artifact policy. The CLI commits with `git commit --only -- <paths>`: a path the implementer left behind, or staged without reporting, is excluded from the commit and still needs reconciliation.
 
 **Push.** The command resolves the branch from HEAD and sets upstream by default:
 
@@ -424,7 +430,7 @@ flight-rules pr create --type <type> --scope <id> --description "<description>" 
 Report the open PR, with `<number>` from the URL `pr create` printed:
 
 ```bash
-flight-rules board post activity --ticket <id> --text "Opened PR #<number>" --level success
+flight-rules board post activity --skill flight-rules:execute-work --ticket <id> --text "Opened PR #<number>" --level success
 ```
 
 **Move the ticket:**
@@ -480,12 +486,12 @@ Give the user, in this order:
 ## Guardrails
 
 - **Maximum 3 loop iterations, hard.** No restarting the count, no fourth attempt under another name.
-- **The implementer escalates to opus only on iteration 3, and the verifier never escalates.** Iterations 1 and 2 run the frontmatter default. A ticket that "looks hard" is not a reason to escalate early — two recorded FAILs is the only one.
+- **Dispatch `code-implementation-escalated` only on iteration 3, and the verifier never escalates.** Iterations 1 and 2 dispatch `code-implementation`. A ticket that "looks hard" is not a reason to escalate early — two recorded FAILs is the only one.
 - **Never merge.** This skill opens a PR and stops. Merging is a human decision.
 - **Never let an unverified change reach a PR.** `verified: true` is the only key that unlocks step 7.
 - **Review remediation is a separate, verified pass.** The review outcome does not restart this hard-capped implementation loop or authorize approval. Acting on a review finding here would put an unverified edit on the branch after the verifier signed off.
 - **Never tick contract checkboxes.** The `items[].done` flags are read-only to this skill; the verifier's itemized verdict is the record of what passed. A ticked box in a tracker is a claim nobody checked.
-- **All git and tracker mutations go through `flight-rules`.** Never hand-rolled `git commit`/`checkout`/`push`, never Claude Code auto-generated commits, never native tracker APIs (`gh issue edit`, the Jira REST API) for state changes. Read-only inspection with plain `git` or `gh` is fine. The plugin's commit guard hook blocks a raw `git commit` in any repo with flight-rules config. When it fires, switch to `flight-rules git commit`; do not reach for the `FLIGHT_RULES_RAW_GIT=1` bypass during a run. The one exception to running git through `flight-rules` is plain-git mode, above, which still takes its message and branch name from the CLI.
+- **All git and tracker mutations go through `flight-rules`.** Never hand-rolled `git commit`/`checkout`/`push`, never host-generated commits, never native tracker APIs (`gh issue edit`, the Jira REST API) for state changes. Read-only inspection with plain `git` or `gh` is fine. The plugin's commit guard hook blocks a raw `git commit` in any repo with flight-rules config. When it fires, switch to `flight-rules git commit`; do not reach for the `FLIGHT_RULES_RAW_GIT=1` bypass during a run. The one exception to running git through `flight-rules` is plain-git mode, above, which still takes its message and branch name from the CLI.
 - **`openQuestions` and `UNVERIFIABLE` always reach the user, unanswered.** The agents ask when they are genuinely unsure. Answering on their behalf converts a flagged unknown into a silent guess — which is the exact failure the loop exists to prevent.
 - **Never overrule the verifier.** A FAIL you disagree with is still a FAIL. Feed it back to the implementer or stop.
 
@@ -524,6 +530,6 @@ A reviewer can grade a run against this list:
 - The ticket's status trail reads to-do → in-progress → in-review, with the in-review transition happening _after_ the PR exists.
 - No contract item — acceptance criterion or Fixed When item — shipped without a PASS verdict backed by evidence, and no checkbox was ticked.
 - The run summary states the iteration count, and every `charterConcerns` and `openQuestions` entry reached the user.
-- Iterations 1 and 2 ran the implementer at its default tier; opus appears only if a third iteration was reached, and never on the verifier.
+- Iterations 1 and 2 dispatched `code-implementation`; `code-implementation-escalated` appeared only if a third iteration was reached, and the verifier remained `code-verifier`.
 - The PR carries a submitted `COMMENT` review from `autonomous-code-review`, posted after the in-review transition, and the run summary states its outcome.
 - The PR is open and unmerged, waiting on a human.
