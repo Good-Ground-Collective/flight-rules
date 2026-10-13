@@ -339,21 +339,21 @@ The `--file` set is the **union of `filesChanged[].path` across every iteration*
 
 Never use a Claude Code auto-generated commit. The CLI owns the message format.
 
-**If the change touches `src/`, rebuild the bundle before committing** and add it to the `--file` set:
+**If the change touches `src/`, rebuild before committing** to validate the CLI and native packages:
 
 ```bash
 npm run build
 ```
 
-`bin/flight-rules.mjs` is a tracked build artifact this repo commits deliberately. CI builds but never diffs the result, so a PR that changes `src/` without rebuilding ships a bundle contradicting its own diff — and the stale binary is what anyone running the CLI from this branch actually executes.
+In flight-rules, release preparation owns `bin/`, `dist/`, the generated review JSON schemas and root plugin catalogs/manifests. Catalog templates live under `adapters/`. Commit canonical sources only: omit generated paths from the `--file` set. CI builds them and rejects added or modified artifacts in source PRs. Release commits may track those ignored files, so a local rebuild can still show generated changes in git status; leave those changes out of source commits.
 
 Then confirm you committed everything:
 
 ```bash
-git status --porcelain
+npm run check:source-status
 ```
 
-It must be **empty**. Any remaining output — unstaged _or_ staged — means the verified tree is wider than what you committed, so stop and reconcile before pushing rather than opening a PR that doesn't match what was verified. This check has teeth because the CLI commits with `git commit --only -- <paths>`: a path the implementer left behind, or staged without reporting, is excluded from the commit and therefore still visible here. It cannot be swept in silently.
+For flight-rules, this must pass: it ignores release-owned output and rejects remaining canonical source changes, staged or unstaged, including untracked source files. In repositories without that script, use `git status --porcelain` and reconcile remaining changes according to their artifact policy. The CLI commits with `git commit --only -- <paths>`: a path the implementer left behind, or staged without reporting, is excluded from the commit and still needs reconciliation.
 
 **Push.** The command resolves the branch from HEAD and sets upstream by default:
 
