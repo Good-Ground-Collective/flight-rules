@@ -69,6 +69,20 @@ describe("NativePluginCompiler", () => {
     for (const executable of ["flight-rules", "flight-rules.mjs"]) {
       expect(statSync(join(relocated, "bin", executable)).mode & 0o111).toBe(0o111);
     }
+    const caller = temporary();
+    const configPath = execFileSync(process.execPath, [join(relocated, "bin/flight-rules.mjs"), "config", "path"], {
+      cwd: caller, env: { PATH: process.env["PATH"] }, encoding: "utf8",
+    }).trim();
+    expect(configPath).toBe(join(caller, host === "codex" ? ".agents" : ".claude", "flight-rules.local.md"));
+    const overridden = execFileSync(process.execPath, [join(relocated, "bin/flight-rules.mjs"), "config", "path"], {
+      cwd: caller, env: { PATH: process.env["PATH"], FLIGHT_RULES_HOST: host === "codex" ? "claude" : "codex" }, encoding: "utf8",
+    }).trim();
+    expect(overridden).toBe(join(caller, host === "codex" ? ".claude" : ".agents", "flight-rules.local.md"));
+    const installation = JSON.parse(readFileSync(join(relocated, "flight-rules-install.json"), "utf8"));
+    expect(installation.host).toBe(host);
+    expect(installation.agents.map((agent: { registration: unknown }) => agent.registration)).toEqual(
+      new FileAgentRegistry().load(join(root, "agents")).map((agent) => agent.frontmatter),
+    );
     if (host === "claude") {
       const hooks = readFileSync(join(relocated, "hooks/hooks.json"), "utf8");
       const paths = [...hooks.matchAll(/\$\{CLAUDE_PLUGIN_ROOT\}(\/[^"\s]+)/g)].map((match) => match[1] ?? "");

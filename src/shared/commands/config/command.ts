@@ -3,7 +3,7 @@ import { configScopes } from "../../config-store.js";
 import type { ConfigScope, ConfigStore } from "../../config-store.js";
 
 const scopeHelp =
-  "where to write: user (~/.claude/settings.json), project (.claude/settings.json), local (.claude/settings.local.json), or file (the flight-rules config file)";
+  "where to write: user, project, local, or file; config show reports the selected host and exact paths (override with FLIGHT_RULES_HOST=claude|codex)";
 
 export function createConfigCommand(getStore: () => ConfigStore): Command {
   const config = new Command("config");

@@ -1,5 +1,6 @@
 import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import { MarkdownClaudeAgentEmitter } from "../../agents/agent-emitter/claude-agent-emitter.js";
 import { TomlCodexAgentEmitter } from "../../agents/agent-emitter/codex-agent-emitter.js";
@@ -52,7 +53,7 @@ export class NativePluginCompiler implements PluginCompiler {
       models, reasoning: JSON.parse(readFileSync(join(this.sourceDir, "adapters/codex/reasoning-tiers.json"), "utf8")),
     }) : undefined;
     const emitter = codexEmitter ?? new MarkdownClaudeAgentEmitter({ models });
-    const agents = definitions.map((agent) => ({ name: agent.frontmatter.name, contents: emitter.emit(agent) }));
+    const agents = definitions.map((agent) => ({ name: agent.frontmatter.name, contents: emitter.emit(agent), registration: agent.frontmatter }));
     const diagnostics = codexEmitter === undefined ? [] : [...new Set(definitions.flatMap((agent) => codexEmitter.diagnostics(agent)))];
     if (target === "codex") diagnostics.push("Claude commit and Ariadne hooks are omitted; this target emits no Codex hooks.");
     for (const executable of ["flight-rules", "flight-rules.mjs"]) {
@@ -73,6 +74,10 @@ export class NativePluginCompiler implements PluginCompiler {
     mkdirSync(agentDirectory, { recursive: true });
     const extension = target === "claude" ? "md" : "toml";
     for (const agent of agents) writeFileSync(join(agentDirectory, `${agent.name}.${extension}`), agent.contents);
+    writeFileSync(join(directory, "flight-rules-install.json"), JSON.stringify({
+      host: target,
+      agents: agents.map((agent) => ({ name: agent.name, sha256: createHash("sha256").update(agent.contents).digest("hex"), registration: agent.registration })),
+    }, null, 2) + "\n");
     mkdirSync(join(directory, "adapters", target), { recursive: true });
     copyFileSync(join(this.sourceDir, "adapters", target, "model-tiers.json"), join(directory, "adapters", target, "model-tiers.json"));
     if (target === "codex") copyFileSync(join(this.sourceDir, "adapters/codex/reasoning-tiers.json"), join(directory, "adapters/codex/reasoning-tiers.json"));

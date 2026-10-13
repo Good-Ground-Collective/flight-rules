@@ -3,6 +3,8 @@ import { dirname } from "node:path";
 import { ConfigSchema, parseFrontmatter, resolveConfigPath } from "./config.js";
 import type { Config, PathProbe } from "./config.js";
 import { ClaudeSettingsSource } from "./host-settings/claude-settings-source.js";
+import { NeutralSettingsSource } from "./host-settings/neutral-settings-source.js";
+import { NativeHostSchema, type NativeHost } from "../plugins/native-installation/native-installation.js";
 import type { HostSettingsSource } from "./host-settings/host-settings-source.js";
 
 /**
@@ -35,6 +37,7 @@ export interface ConfigReport {
  * form a valid config, so a half-finished setup can still be inspected.
  */
 export interface ConfigInspection {
+  host: string;
   valid: boolean;
   error?: string;
   values: Record<string, unknown>;
@@ -47,6 +50,8 @@ export interface ConfigStoreProps {
   env?: Record<string, string | undefined>;
   /** The host's settings layers; defaults to Claude Code's. */
   hostSettings?: HostSettingsSource;
+  /** Explicit host, otherwise FLIGHT_RULES_HOST, otherwise the compatible Claude default. */
+  host?: NativeHost;
   /** Used for the user settings path when no host source is given. */
   home?: string;
   pathProbe?: PathProbe;
@@ -76,23 +81,26 @@ export class ConfigStore {
     this.env = props.env ?? process.env;
     this.pathProbe = props.pathProbe;
     this.untrackedRoot = props.untrackedRoot;
-    this.hostSettings =
-      props.hostSettings ??
-      new ClaudeSettingsSource({
+    const host = NativeHostSchema.parse(props.host ?? this.env["FLIGHT_RULES_HOST"] ?? "claude");
+    const settingsProps = {
         cwd: props.cwd,
         env: this.env,
         ...(props.home !== undefined ? { home: props.home } : {}),
         ...(props.untrackedRoot !== undefined ? { untrackedCwd: props.untrackedRoot } : {}),
-      });
+    };
+    this.hostSettings = props.hostSettings ?? (host === "codex"
+      ? new NeutralSettingsSource(settingsProps)
+      : new ClaudeSettingsSource(settingsProps));
   }
 
   /** The flight-rules config file path, as `flight-rules config path` reports it. */
   filePath(): string {
     const override = this.env["FLIGHT_RULES_CONFIG"];
-    const here = resolveConfigPath(this.cwd, override, this.pathProbe);
+    const host = this.hostSettings.host === "codex" ? "codex" : "claude";
+    const here = resolveConfigPath(this.cwd, override, this.pathProbe, host);
     if (override !== undefined || this.untrackedRoot === undefined) return here;
     const isFile = this.pathProbe?.isFile.bind(this.pathProbe) ?? existsSync;
-    return isFile(here) ? here : resolveConfigPath(this.untrackedRoot, undefined, this.pathProbe);
+    return isFile(here) ? here : resolveConfigPath(this.untrackedRoot, undefined, this.pathProbe, host);
   }
 
   pathFor(scope: ConfigScope): string {
@@ -120,12 +128,12 @@ export class ConfigStore {
   inspect(): ConfigInspection {
     const merged = this.merge();
     const result = ConfigSchema.safeParse(merged.values);
-    if (result.success) return { valid: true, ...merged, values: result.data };
+    if (result.success) return { host: this.hostSettings.host, valid: true, ...merged, values: result.data };
     const error =
       Object.keys(merged.values).length === 0
         ? "no flight-rules config found"
         : result.error.issues.map((i) => `${i.path.join(".") || "config"}: ${i.message}`).join("; ");
-    return { valid: false, error, ...merged };
+    return { host: this.hostSettings.host, valid: false, error, ...merged };
   }
 
   /**
@@ -167,7 +175,7 @@ export class ConfigStore {
       .find((layer) => configScopes.indexOf(layer.scope) > rank && key in layer.values)?.scope;
   }
 
-  private merge(): Omit<ConfigInspection, "valid" | "error"> {
+  private merge(): Omit<ConfigInspection, "valid" | "error" | "host"> {
     const layers = this.layers();
     if (this.env["FLIGHT_RULES_CONFIG"] !== undefined && !this.layer(layers, "file").present) {
       throw new Error(`FLIGHT_RULES_CONFIG points at ${this.filePath()}, which does not exist`);

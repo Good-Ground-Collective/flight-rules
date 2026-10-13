@@ -31,24 +31,8 @@ describe("document references are host neutral", () => {
     expect(locationsContaining(/CLAUDE_PLUGIN_ROOT}\/docs/)).toEqual([]);
   });
 
-  it("allows only the two setup binary PATH references", () => {
-    const failures = files.flatMap((file) =>
-      readFileSync(file, "utf8")
-        .split("\n")
-        .flatMap((line, index) => {
-          const references = [...line.matchAll(/CLAUDE_PLUGIN_ROOT/g)];
-          if (references.length === 0) return [];
-          const allowed =
-            relative(root, file) === "skills/setup/SKILL.md" &&
-            line.includes("The flight-rules binary isn't reachable") &&
-            references.length === 2 &&
-            [...line.matchAll(/CLAUDE_PLUGIN_ROOT}\/bin/g)].length === 2;
-          return allowed ? [] : [`${relative(root, file)}:${index + 1}`];
-        }),
-    );
-    expect(failures).toEqual([]);
-    const setup = readFileSync(join(root, "skills/setup/SKILL.md"), "utf8");
-    expect([...setup.matchAll(/CLAUDE_PLUGIN_ROOT/g)]).toHaveLength(2);
+  it("does not retain the old setup exception for Claude plugin paths", () => {
+    expect(locationsContaining(/CLAUDE_PLUGIN_ROOT/)).toEqual([]);
   });
 });
 
