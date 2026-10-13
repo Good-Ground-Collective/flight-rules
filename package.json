@@ -19,6 +19,10 @@
       "types": "./dist/code-review/index.d.ts",
       "import": "./dist/review.js"
     },
+    "./sdk": {
+      "types": "./dist/sdk/index.d.ts",
+      "import": "./dist/sdk.js"
+    },
     "./review/schema": "./contracts/code-review/review.v1.schema.json",
     "./review/transport-schema": "./contracts/code-review/review.v1.transport.schema.json"
   },
@@ -39,16 +43,16 @@
   ],
   "scripts": {
     "build": "node scripts/build.mjs && tsc -p tsconfig.build.json",
+    "check:source-status": "node scripts/check-source-artifacts.mjs --working-tree",
     "fmt": "sort-package-json && oxfmt -c .config/.oxfmtrc.json",
     "fmt:check": "sort-package-json --check && oxfmt -c .config/.oxfmtrc.json --check",
     "release": "semantic-release",
     "test": "vitest run",
-    "test:installation:native": "npm run build && node scripts/test-native-installation.mjs",
-    "test:agents:live": "npm run build && node scripts/test-agents-live.mjs",
     "test:agents:codex-config": "npm run build && node scripts/test-codex-agent-config.mjs",
-    "typecheck": "tsc --noEmit",
-    "check:source-status": "node scripts/check-source-artifacts.mjs --working-tree",
-    "test:release:artifacts": "node scripts/test-release-artifacts.mjs"
+    "test:agents:live": "npm run build && node scripts/test-agents-live.mjs",
+    "test:installation:native": "npm run build && node scripts/test-native-installation.mjs",
+    "test:release:artifacts": "node scripts/test-release-artifacts.mjs",
+    "typecheck": "tsc --noEmit"
   },
   "release": {
     "branches": [
