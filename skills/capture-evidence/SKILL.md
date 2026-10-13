@@ -62,7 +62,7 @@ For each credential the instructions name, decide where it comes from and confir
 
 When the instructions need no credentials, record `credentials: none`. Otherwise record where they came from (`environment`, or the manager's name) in the plan.
 
-Never run a secret-reading command, such as `op read`, in a Bash call whose output you see. A resolved secret exists only inside the take subprocess.
+Never run a secret-reading command, such as `op read`, in a shell call whose output you see. A resolved secret exists only inside the take subprocess.
 
 ### 3. Write the take
 
@@ -83,7 +83,7 @@ Make the script executable.
 
 ### 4. Run the take, once
 
-Run the whole script in one Bash call, per the one-take rule. Splitting it across calls records the gaps as dead air, and another job may reuse the session between calls.
+Run the whole script in one shell call, per the one-take rule. Splitting it across calls records the gaps as dead air, and another job may reuse the session between calls.
 
 - **Environment or no credentials:** `bash <evidence-dir>/take.sh <ticket> <appUrl>`.
 - **Secrets manager:** wrap the same command as the instructions say, for example `op run --env-file=<evidence-dir>/qa.env -- bash <evidence-dir>/take.sh <ticket> <appUrl>`. The manager exposes the values only to the subprocess. When it fails because nobody is signed in, stop with `No visual evidence: needs: <sign in to the manager, as its error says>`.
@@ -96,7 +96,7 @@ Check the recorded take against the three gates, not the exit code:
 - Confirm `frame-2s.png` exists and is not empty.
 - Read `black.txt`. It must be `0`.
 
-Then open `before.png` (when captured) and `after.png` with the Read tool and confirm each shows the surface the directions describe, not a login form or a blank page.
+Then open `before.png` (when captured) and `after.png` with image-reading capability and confirm each shows the surface the directions describe, not a login form or a blank page.
 
 When any check fails, re-plan once. A selector that did not match is the usual cause: run `playwright-cli -s=fr-<ticket> snapshot` in a separate probe to find the real selector. Add a `find` gate when the page had not painted. Return to step 3 one time. A second failure stops the run with `No visual evidence: <the failing check and what it showed>`.
 
@@ -121,7 +121,7 @@ On failure, return exactly one line beginning `No visual evidence:` followed by 
 
 ## Guardrails
 
-- Never `AskUserQuestion`. A missing input is a failure with a reason.
+- Never ask the human during this workflow. A missing input is a failure with a reason.
 - Never write outside `<evidence-dir>/`.
 - Never call `flight-rules ticket …`, `flight-rules pr …`, or `gh`, and never call `git` for anything but `git check-ignore`.
 - Never echo a credential, and never run a secret-reading command where its output is visible.
@@ -143,7 +143,7 @@ On failure, return exactly one line beginning `No visual evidence:` followed by 
 
 A reviewer can grade a run against this list:
 
-- One Bash call recorded the take; the take was never split across calls.
+- One shell call recorded the take; the take was never split across calls.
 - The manifest lists only files that exist and passed verification, with absolute paths, `kind` from the extension, a `phase` per item, and one-sentence captions.
 - No secret appears in any command output or in any file on disk; `qa.env`, when present, holds references, not resolved values.
 - The caller never had to answer a question.

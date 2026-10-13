@@ -121,7 +121,7 @@ It prints something like `{"id":"…","transitions":["In Progress","Done"]}` and
 gh repo view --json nameWithOwner --jq .nameWithOwner
 ```
 
-**Ask** with `AskUserQuestion`, once per missing field:
+**Ask the human and wait for an answer**, once per missing field:
 
 - **Always offer a free-text answer**, whatever the discovered list contains. The correct status name may not be in it — see above — and a discovered name that merely _looks_ plausible is how a wrong `inReviewStatus` gets stored and a run dies at the final transition. Offer the discovered names as convenience options, never as the closed set.
 - When the list is **empty**, that is a valid state, not an error (a fresh GitHub repo has no `status:` labels yet). Free text is then the only answer; explain that the tracker will create the status on first use.
@@ -217,7 +217,7 @@ Do not include your own opinion on how to build it. The walkthrough and the char
 
 Dispatch the two agents in strict alternation. Count iterations out loud; you will report the count.
 
-**a. Dispatch `code-implementation`** with the brief from step 5. Report the step first, with `--state caution` on iterations 2 and 3:
+**a. Dispatch the implementer selected in the table below** with the brief from step 5. Report the step first, with `--state caution` on iterations 2 and 3:
 
 ```bash
 flight-rules board post heartbeat --ticket <id> --step implement --state nominal --branch <branch> --skill flight-rules:execute-work
@@ -225,19 +225,19 @@ flight-rules board post heartbeat --ticket <id> --step implement --state nominal
 
 Then dispatch. On **iterations 2 and 3**, add the previous verifier's itemized FAIL entries **verbatim** — the criterion, the verdict, and the evidence exactly as the verifier wrote them. That evidence _is_ the definition of what still needs fixing; rewriting it in your own words is how a retry loses the thread.
 
-**Set the model by iteration.** `Agent`'s `model` parameter overrides the agent's frontmatter, so pass it explicitly on the dispatch:
+**Select the agent by iteration.** The agent's declared tier is mapped by the host adapter; dispatch by name without overriding its model.
 
-| Iteration | `model`                                     |
-| --------- | ------------------------------------------- |
-| 1         | _omit_ — inherits `sonnet` from frontmatter |
-| 2         | _omit_ — inherits `sonnet` from frontmatter |
-| 3 (final) | `opus`                                      |
+| Iteration | Agent | Tier |
+| --------- | ----- | ---- |
+| 1 | `code-implementation` | standard |
+| 2 | `code-implementation` | standard |
+| 3 (final) | `code-implementation-escalated` | escalated |
 
-Sonnet is the tier this pipeline is built around: `break-down-work` writes each ticket's Guided Walkthrough so a Sonnet-tier agent can build from it, and a first attempt against a good walkthrough is exactly the case that choice was made for. But by iteration 3 the verifier has rejected the work twice with itemized reasons, and re-running the same tier against the same criteria is close to a coin flip. Escalate rather than spend the last of a hard-capped three on a repeat.
+The standard tier is what this pipeline is built around: `break-down-work` writes each ticket's Guided Walkthrough so a standard-tier agent can build from it. By iteration 3 the verifier has rejected the work twice with itemized reasons. Use the escalated registration for that final attempt rather than repeat the same tier against the same unresolved criteria.
 
-This is bounded by construction — it can only fire on a ticket that has already failed verification twice, so the happy path never leaves sonnet. Do **not** escalate early on a hunch that the ticket looks hard; the retry count is the only signal.
+This is bounded by construction: escalation requires two recorded verifier rejections. Do **not** escalate early on a hunch that the ticket looks hard; the retry count is the only signal.
 
-**The verifier stays on sonnet at every iteration**, including against an escalated implementer. That asymmetry is deliberate: the verifier checks explicit acceptance criteria and reports per-criterion verdicts with evidence — it checks a stated contract rather than synthesizing one — and a cheap gate is a feature, not a compromise. Never pass `model` on a `code-verifier` dispatch.
+**Always dispatch `code-verifier` itself at every iteration**, including against an escalated implementer. It stays at its declared standard tier: checking explicit acceptance criteria with evidence is a different task from synthesizing an implementation. The verifier does not escalate.
 
 It returns a trailing YAML block:
 
@@ -480,12 +480,12 @@ Give the user, in this order:
 ## Guardrails
 
 - **Maximum 3 loop iterations, hard.** No restarting the count, no fourth attempt under another name.
-- **The implementer escalates to opus only on iteration 3, and the verifier never escalates.** Iterations 1 and 2 run the frontmatter default. A ticket that "looks hard" is not a reason to escalate early — two recorded FAILs is the only one.
+- **Dispatch `code-implementation-escalated` only on iteration 3, and the verifier never escalates.** Iterations 1 and 2 dispatch `code-implementation`. A ticket that "looks hard" is not a reason to escalate early — two recorded FAILs is the only one.
 - **Never merge.** This skill opens a PR and stops. Merging is a human decision.
 - **Never let an unverified change reach a PR.** `verified: true` is the only key that unlocks step 7.
 - **Review remediation is a separate, verified pass.** The review outcome does not restart this hard-capped implementation loop or authorize approval. Acting on a review finding here would put an unverified edit on the branch after the verifier signed off.
 - **Never tick contract checkboxes.** The `items[].done` flags are read-only to this skill; the verifier's itemized verdict is the record of what passed. A ticked box in a tracker is a claim nobody checked.
-- **All git and tracker mutations go through `flight-rules`.** Never hand-rolled `git commit`/`checkout`/`push`, never Claude Code auto-generated commits, never native tracker APIs (`gh issue edit`, the Jira REST API) for state changes. Read-only inspection with plain `git` or `gh` is fine. The plugin's commit guard hook blocks a raw `git commit` in any repo with flight-rules config. When it fires, switch to `flight-rules git commit`; do not reach for the `FLIGHT_RULES_RAW_GIT=1` bypass during a run. The one exception to running git through `flight-rules` is plain-git mode, above, which still takes its message and branch name from the CLI.
+- **All git and tracker mutations go through `flight-rules`.** Never hand-rolled `git commit`/`checkout`/`push`, never host-generated commits, never native tracker APIs (`gh issue edit`, the Jira REST API) for state changes. Read-only inspection with plain `git` or `gh` is fine. The plugin's commit guard hook blocks a raw `git commit` in any repo with flight-rules config. When it fires, switch to `flight-rules git commit`; do not reach for the `FLIGHT_RULES_RAW_GIT=1` bypass during a run. The one exception to running git through `flight-rules` is plain-git mode, above, which still takes its message and branch name from the CLI.
 - **`openQuestions` and `UNVERIFIABLE` always reach the user, unanswered.** The agents ask when they are genuinely unsure. Answering on their behalf converts a flagged unknown into a silent guess — which is the exact failure the loop exists to prevent.
 - **Never overrule the verifier.** A FAIL you disagree with is still a FAIL. Feed it back to the implementer or stop.
 
@@ -524,6 +524,6 @@ A reviewer can grade a run against this list:
 - The ticket's status trail reads to-do → in-progress → in-review, with the in-review transition happening _after_ the PR exists.
 - No contract item — acceptance criterion or Fixed When item — shipped without a PASS verdict backed by evidence, and no checkbox was ticked.
 - The run summary states the iteration count, and every `charterConcerns` and `openQuestions` entry reached the user.
-- Iterations 1 and 2 ran the implementer at its default tier; opus appears only if a third iteration was reached, and never on the verifier.
+- Iterations 1 and 2 dispatched `code-implementation`; `code-implementation-escalated` appeared only if a third iteration was reached, and the verifier remained `code-verifier`.
 - The PR carries a submitted `COMMENT` review from `autonomous-code-review`, posted after the in-review transition, and the run summary states its outcome.
 - The PR is open and unmerged, waiting on a human.

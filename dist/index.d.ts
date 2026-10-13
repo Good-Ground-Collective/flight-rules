@@ -52,3 +52,8 @@ export { AgentFrontmatterSchema, AgentCapabilitySchema, ModelTierSchema, agentCa
 export type { AgentFrontmatter } from './agents/agent-frontmatter/agent-frontmatter.schema.js';
 export { YamlAgentFrontmatterParser, agentFrontmatterParser } from './agents/agent-frontmatter/agent-frontmatter.js';
 export type { AgentFrontmatterParser } from './agents/agent-frontmatter/agent-frontmatter.js';
+export { FileAgentRegistry, InvalidAgentDefinitionError } from './agents/agent-registry/agent-registry.js';
+export type { AgentDefinition, AgentRegistry } from './agents/agent-registry/agent-registry.js';
+export { MarkdownClaudeAgentEmitter } from './agents/agent-emitter/claude-agent-emitter.js';
+export { UnsupportedAgentSettingError } from './agents/agent-emitter/agent-emitter.js';
+export type { AgentEmitter } from './agents/agent-emitter/agent-emitter.js';

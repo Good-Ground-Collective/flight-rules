@@ -33,6 +33,57 @@ export declare const AgentFrontmatterSchema: z.ZodObject<{
         escalated: "escalated";
         expert: "expert";
     }>;
+    modelReason: z.ZodOptional<z.ZodString>;
+    reasoning: z.ZodOptional<z.ZodEnum<{
+        low: "low";
+        medium: "medium";
+        high: "high";
+    }>>;
+    sandbox: z.ZodOptional<z.ZodObject<{
+        fs: z.ZodEnum<{
+            "read-only": "read-only";
+            "workspace-write": "workspace-write";
+        }>;
+        network: z.ZodEnum<{
+            enabled: "enabled";
+            none: "none";
+        }>;
+    }, z.core.$strict>>;
+    dispatch: z.ZodOptional<z.ZodObject<{
+        maxConcurrent: z.ZodInt;
+        maxDepth: z.ZodInt;
+    }, z.core.$strict>>;
+    "x-claude": z.ZodOptional<z.ZodObject<{
+        color: z.ZodOptional<z.ZodEnum<{
+            blue: "blue";
+            green: "green";
+            yellow: "yellow";
+            orange: "orange";
+            red: "red";
+            pink: "pink";
+            purple: "purple";
+            cyan: "cyan";
+        }>>;
+    }, z.core.$strict>>;
+}, z.core.$strict>;
+/** Authored registrations must explain use of the reserved tier; wire parsing remains backwards compatible. */
+export declare const AgentRegistrationSchema: z.ZodObject<{
+    name: z.ZodString;
+    description: z.ZodString;
+    capabilities: z.ZodArray<z.ZodEnum<{
+        edit: "edit";
+        read: "read";
+        shell: "shell";
+        web: "web";
+        spawn: "spawn";
+        ask: "ask";
+    }>>;
+    model: z.ZodEnum<{
+        standard: "standard";
+        escalated: "escalated";
+        expert: "expert";
+    }>;
+    modelReason: z.ZodOptional<z.ZodString>;
     reasoning: z.ZodOptional<z.ZodEnum<{
         low: "low";
         medium: "medium";

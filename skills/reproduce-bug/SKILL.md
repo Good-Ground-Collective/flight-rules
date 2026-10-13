@@ -150,7 +150,7 @@ Give the user, in this order: the outcome, the final label, the evidence paths, 
 - **Every tracker write goes through `flight-rules`.** Read-only `git status` and `gh` inspection is fine; native tracker APIs are not.
 - **One `ticket label` call per outcome**, removing `In-Progress` and adding the outcome together, so the label is never orphaned.
 - **The label lifecycle is exactly** `Agentic-Reproduction-In-Progress`, `Agentic-Reproduction-Success`, and `Agentic-Reproduction-Failure`. No other reproduction label exists.
-- **No `AskUserQuestion` in the happy path.** A missing input is a failure with a reason, not a question.
+- **No human questions in the happy path.** A missing input is a failure with a reason, not a question.
 
 ## Error handling
 
