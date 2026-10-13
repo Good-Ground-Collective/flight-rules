@@ -1,15 +1,15 @@
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { FileAgentRegistry } from "../agents/agent-registry/agent-registry.js";
-import { RegistryOrchestrationPolicy } from "./orchestration-policy.js";
+import { FileAgentRegistry } from "../../agents/agent-registry/agent-registry.js";
+import { RegistryOrchestrationPolicy } from "../orchestration-policy.js";
 import {
   CallerContextSchema,
   DispatchRequestSchema,
   type DispatchRequest,
   type RuntimeSnapshot,
-} from "./orchestration.schema.js";
-import { ValidatedReportHandoff } from "./report-handoff.js";
+} from "../orchestration.schema.js";
+import { ValidatedReportHandoff } from "../report-handoff.js";
 
 const context = {
   runId: "run-1",
@@ -27,7 +27,7 @@ const request: DispatchRequest = {
   input: { ticket: "A bounded change" },
 };
 const agents = new FileAgentRegistry().load(
-  fileURLToPath(new URL("../../agents", import.meta.url)),
+  fileURLToPath(new URL("../../../agents", import.meta.url)),
 );
 const policy = new RegistryOrchestrationPolicy({ agents });
 const available = {

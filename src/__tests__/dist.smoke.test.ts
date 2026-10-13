@@ -101,7 +101,7 @@ describe("built library smoke test", () => {
   it("ships declarations without test declarations", () => {
     expect(readFileSync(new URL("index.d.ts", dist), "utf8")).toContain("createFlightRules");
     expect(
-      readdirSync(dist, { recursive: true }).some((path) => String(path).includes("__tests__")),
+      readdirSync(dist, { recursive: true }).some((path) => String(path).includes("__tests__") || String(path).endsWith('.test.d.ts')),
     ).toBe(false);
   });
 
