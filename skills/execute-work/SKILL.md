@@ -282,6 +282,8 @@ flight-rules ticket get <id> --section fixed-when
 
 for a bug report. Either returns `{id, section, markdown, items:[{text,done}]}`. Compare the items to the original ordered contract from step 1; a changed contract stops this run for a caller decision, rather than silently changing what a retry must satisfy. Hand the verifier the original criteria and the union of changed paths across attempts as `filesChanged: [{ path }]` — **not** the implementer's `summary`, `approach`, `testsRun` or change descriptions. Require the verifier to quote every criterion exactly once, in its original order, so each verdict binds to its criterion without interpreting a paraphrase. A verifier that has read the implementer's victory lap is not an independent check.
 
+Use a fresh worker context for every verification. Do not fork the parent's conversation or resume an implementation worker as the verifier: inherited history would leak the implementation rationale even when the explicit brief is clean. If the host cannot isolate the verifier's context, stop with `DISPATCH_UNAVAILABLE` and the isolation requirement.
+
 It returns:
 
 ```yaml
