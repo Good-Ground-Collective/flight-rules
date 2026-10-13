@@ -48,6 +48,8 @@ export type { Env } from './shared/env.js';
 export { appVersion } from './version.js';
 export { FileDocResolver, DocIdSchema } from './bundled-docs/doc-resolver/doc-resolver.js';
 export type { DocResolver, ResolvedDoc } from './bundled-docs/doc-resolver/doc-resolver.js';
+export { DocCharterCatalog, CharterFormatError } from './bundled-docs/charter-catalog/charter-catalog.js';
+export type { Charter, CharterCatalog, DocCharterCatalogProps } from './bundled-docs/charter-catalog/charter-catalog.js';
 export { AgentFrontmatterSchema, AgentCapabilitySchema, ModelTierSchema, agentCapabilities, modelTiers } from './agents/agent-frontmatter/agent-frontmatter.schema.js';
 export type { AgentFrontmatter } from './agents/agent-frontmatter/agent-frontmatter.schema.js';
 export { YamlAgentFrontmatterParser, agentFrontmatterParser } from './agents/agent-frontmatter/agent-frontmatter.js';

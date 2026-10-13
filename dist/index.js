@@ -1257,7 +1257,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.77.0";
+var appVersion = false ? "0.0.0-dev" : "1.78.0";
 
 // src/shared/ariadne/review-packet.schema.ts
 import { z as z14 } from "zod";
@@ -6281,8 +6281,58 @@ var TrackerEvidenceService = class {
 // src/shared/host-settings/host-settings-source.ts
 var settingsScopes = ["user", "project", "local"];
 
-// src/agents/agent-frontmatter/agent-frontmatter.ts
+// src/bundled-docs/charter-catalog/charter-catalog.ts
+import { matchesGlob } from "node:path";
 import { parse as parseYaml3 } from "yaml";
+import { z as z35 } from "zod";
+var coreCharterId = "coding-charter";
+var languageCharterPrefix = `${coreCharterId}-`;
+var LanguageFrontmatterSchema = z35.strictObject({
+  language: z35.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+  "applies-to": z35.array(z35.string().min(1)).min(1)
+}).transform(({ language, "applies-to": appliesTo }) => ({ language, appliesTo }));
+var FrontmatterSchema = z35.string().transform((contents, ctx) => {
+  const block = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/.exec(contents)?.[1];
+  if (block === void 0) {
+    ctx.addIssue({ code: "custom", message: "missing YAML frontmatter" });
+    return z35.NEVER;
+  }
+  return parseYaml3(block);
+}).pipe(LanguageFrontmatterSchema);
+var DocCharterCatalog = class {
+  docs;
+  constructor(props) {
+    this.docs = props.docs;
+  }
+  all() {
+    const core = this.docs.resolve(coreCharterId);
+    const languages = this.docs.list().filter((id) => id.startsWith(languageCharterPrefix)).map((id) => this.languageCharter(this.docs.resolve(id)));
+    return [{ id: core.id, language: null, appliesTo: [], path: core.path, contents: core.contents }, ...languages];
+  }
+  select(paths) {
+    const normalized = paths.map((path) => path.trim().replace(/^\.\//, "")).filter((path) => path.length > 0);
+    return this.all().filter(
+      (charter) => charter.language === null || normalized.some((path) => charter.appliesTo.some((glob) => matchesGlob(path, glob)))
+    );
+  }
+  languageCharter(doc) {
+    const parsed = FrontmatterSchema.safeParse(doc.contents);
+    if (!parsed.success) {
+      throw new CharterFormatError(`Charter "${doc.id}" has invalid frontmatter: ${z35.prettifyError(parsed.error)}`);
+    }
+    const expectedId = `${languageCharterPrefix}${parsed.data.language}`;
+    if (doc.id !== expectedId) {
+      throw new CharterFormatError(`Charter "${doc.id}" declares language "${parsed.data.language}"; its file must be ${expectedId}.md`);
+    }
+    return { id: doc.id, ...parsed.data, path: doc.path, contents: doc.contents };
+  }
+};
+var CharterFormatError = class extends Error {
+  name = "CharterFormatError";
+};
+
+// src/agents/agent-frontmatter/agent-frontmatter.ts
+import { parse as parseYaml4 } from "yaml";
 var MissingFrontmatterError = class extends Error {
   name = "MissingFrontmatterError";
 };
@@ -6292,7 +6342,7 @@ var YamlAgentFrontmatterParser = class {
     if (match === null || match.index !== 0 || match[1] === void 0) {
       throw new MissingFrontmatterError("agent file has no leading --- frontmatter block");
     }
-    const raw = parseYaml3(match[1]);
+    const raw = parseYaml4(match[1]);
     if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
       throw new MissingFrontmatterError("frontmatter is not a YAML mapping");
     }
@@ -6304,16 +6354,16 @@ var agentFrontmatterParser = new YamlAgentFrontmatterParser();
 // src/agents/agent-registry/agent-registry.ts
 import { readFileSync as readFileSync11, readdirSync as readdirSync4 } from "node:fs";
 import { basename as basename4, join as join12 } from "node:path";
-import { z as z35 } from "zod";
+import { z as z36 } from "zod";
 var AgentNameSchema = AgentFrontmatterSchema.shape.name;
-var AgentVariantSchema = z35.strictObject({
+var AgentVariantSchema = z36.strictObject({
   name: AgentNameSchema,
   extends: AgentNameSchema,
   description: AgentFrontmatterSchema.shape.description,
   model: ModelTierSchema,
-  modelReason: z35.string().trim().min(1).optional()
+  modelReason: z36.string().trim().min(1).optional()
 });
-var AgentVariantsSchema = z35.array(AgentVariantSchema);
+var AgentVariantsSchema = z36.array(AgentVariantSchema);
 var InvalidAgentDefinitionError = class extends Error {
   name = "InvalidAgentDefinitionError";
 };
@@ -6353,7 +6403,7 @@ var FileAgentRegistry = class {
 
 // src/agents/agent-emitter/claude-agent-emitter.ts
 import { stringify as stringifyYaml3 } from "yaml";
-import { z as z36 } from "zod";
+import { z as z37 } from "zod";
 
 // src/agents/agent-emitter/agent-emitter.ts
 var UnsupportedAgentSettingError = class extends Error {
@@ -6361,7 +6411,7 @@ var UnsupportedAgentSettingError = class extends Error {
 };
 
 // src/agents/agent-emitter/claude-agent-emitter.ts
-var ClaudeAgentEmitterPropsSchema = z36.strictObject({ models: ModelBindingsSchema });
+var ClaudeAgentEmitterPropsSchema = z37.strictObject({ models: ModelBindingsSchema });
 var MarkdownClaudeAgentEmitter = class {
   models;
   constructor(props) {
@@ -6394,13 +6444,13 @@ ${body}`;
 };
 
 // src/agents/agent-emitter/codex-agent-emitter.ts
-import { z as z37 } from "zod";
-var ReasoningBindingsSchema = z37.strictObject({
-  standard: z37.enum(reasoningLevels),
-  escalated: z37.enum(reasoningLevels),
-  expert: z37.enum(reasoningLevels)
+import { z as z38 } from "zod";
+var ReasoningBindingsSchema = z38.strictObject({
+  standard: z38.enum(reasoningLevels),
+  escalated: z38.enum(reasoningLevels),
+  expert: z38.enum(reasoningLevels)
 });
-var CodexAgentEmitterPropsSchema = z37.strictObject({
+var CodexAgentEmitterPropsSchema = z38.strictObject({
   models: ModelBindingsSchema,
   reasoning: ReasoningBindingsSchema
 });
@@ -6443,16 +6493,16 @@ var TomlCodexAgentEmitter = class {
 import { chmodSync as chmodSync2, copyFileSync, existsSync as existsSync10, lstatSync as lstatSync2, mkdirSync as mkdirSync7, readFileSync as readFileSync12, readdirSync as readdirSync5, realpathSync as realpathSync3, rmSync as rmSync3, writeFileSync as writeFileSync7 } from "node:fs";
 import { join as join13, resolve as resolve5 } from "node:path";
 import { createHash as createHash2 } from "node:crypto";
-import { z as z38 } from "zod";
-var NativePluginCompilerPropsSchema = z38.strictObject({ sourceDir: z38.string().min(1) });
-var PluginHostSchema = z38.enum(["claude", "codex"]);
-var PackageVersionSchema = z38.object({ version: z38.string().min(1) });
-var PluginIdentitySchema = z38.strictObject({
-  name: z38.string().regex(/^[a-z][a-z0-9-]*$/),
-  description: z38.string().min(1),
-  repository: z38.url(),
-  author: z38.strictObject({ name: z38.string().min(1) }),
-  license: z38.string().min(1)
+import { z as z39 } from "zod";
+var NativePluginCompilerPropsSchema = z39.strictObject({ sourceDir: z39.string().min(1) });
+var PluginHostSchema = z39.enum(["claude", "codex"]);
+var PackageVersionSchema = z39.object({ version: z39.string().min(1) });
+var PluginIdentitySchema = z39.strictObject({
+  name: z39.string().regex(/^[a-z][a-z0-9-]*$/),
+  description: z39.string().min(1),
+  repository: z39.url(),
+  author: z39.strictObject({ name: z39.string().min(1) }),
+  license: z39.string().min(1)
 });
 var InvalidPluginSourceError = class extends Error {
   name = "InvalidPluginSourceError";
@@ -6588,46 +6638,46 @@ var ValidatedReportHandoff = class {
 };
 
 // src/orchestration/implementation-loop.schema.ts
-import { z as z39 } from "zod";
-var ImplementationReportSchema = z39.strictObject({
+import { z as z40 } from "zod";
+var ImplementationReportSchema = z40.strictObject({
   summary: OrchestrationTextSchema,
-  filesChanged: z39.array(
-    z39.strictObject({ path: OrchestrationTextSchema, why: OrchestrationTextSchema })
+  filesChanged: z40.array(
+    z40.strictObject({ path: OrchestrationTextSchema, why: OrchestrationTextSchema })
   ),
-  testsRun: z39.array(
-    z39.strictObject({ command: OrchestrationTextSchema, result: OrchestrationTextSchema })
+  testsRun: z40.array(
+    z40.strictObject({ command: OrchestrationTextSchema, result: OrchestrationTextSchema })
   ),
   approach: OrchestrationTextSchema,
-  openQuestions: z39.array(OrchestrationTextSchema).optional()
+  openQuestions: z40.array(OrchestrationTextSchema).optional()
 });
-var CriterionResultSchema = z39.strictObject({
+var CriterionResultSchema = z40.strictObject({
   criterion: OrchestrationTextSchema,
-  verdict: z39.enum(["PASS", "FAIL", "UNVERIFIABLE"]),
+  verdict: z40.enum(["PASS", "FAIL", "UNVERIFIABLE"]),
   evidence: OrchestrationTextSchema
 });
-var VerificationReportSchema = z39.strictObject({
+var VerificationReportSchema = z40.strictObject({
   summary: OrchestrationTextSchema,
-  criteria: z39.array(CriterionResultSchema).min(1),
-  charterConcerns: z39.array(OrchestrationTextSchema).optional(),
-  openQuestions: z39.array(OrchestrationTextSchema).optional(),
-  verified: z39.boolean()
+  criteria: z40.array(CriterionResultSchema).min(1),
+  charterConcerns: z40.array(OrchestrationTextSchema).optional(),
+  openQuestions: z40.array(OrchestrationTextSchema).optional(),
+  verified: z40.boolean()
 }).refine(
   (report) => report.verified === report.criteria.every((criterion) => criterion.verdict === "PASS"),
   "verified must agree with every itemized verdict"
 );
-var HandoffRecordSchema = z39.strictObject({
+var HandoffRecordSchema = z40.strictObject({
   request: DispatchRequestSchema,
-  outcome: z39.unknown()
+  outcome: z40.unknown()
 });
-var ImplementationRunSchema = z39.strictObject({
+var ImplementationRunSchema = z40.strictObject({
   context: RunContextSchema,
-  criteria: z39.array(OrchestrationTextSchema).min(1).refine((criteria) => new Set(criteria).size === criteria.length, "criteria must be distinct"),
-  implementationInput: z39.record(z39.string(), z39.json()).refine(
+  criteria: z40.array(OrchestrationTextSchema).min(1).refine((criteria) => new Set(criteria).size === criteria.length, "criteria must be distinct"),
+  implementationInput: z40.record(z40.string(), z40.json()).refine(
     (input) => !Object.hasOwn(input, "verifierFailures"),
     "verifierFailures is reserved for validated retry evidence"
   ),
-  history: z39.array(
-    z39.strictObject({ implementation: HandoffRecordSchema, verification: HandoffRecordSchema })
+  history: z40.array(
+    z40.strictObject({ implementation: HandoffRecordSchema, verification: HandoffRecordSchema })
   ).max(3)
 });
 
@@ -6810,16 +6860,16 @@ var VerifiedImplementationLoop = class {
 };
 
 // src/orchestration/dispatch-queue.ts
-import { z as z40 } from "zod";
-var DispatchQueuePropsSchema = z40.strictObject({
-  agents: z40.array(AgentDefinitionSchema).min(1),
-  requests: z40.array(DispatchRequestSchema).refine(
+import { z as z41 } from "zod";
+var DispatchQueuePropsSchema = z41.strictObject({
+  agents: z41.array(AgentDefinitionSchema).min(1),
+  requests: z41.array(DispatchRequestSchema).refine(
     (requests) => new Set(requests.map((request) => request.id)).size === requests.length,
     "dispatch IDs must be unique"
   ),
-  maxConcurrent: z40.int().positive()
+  maxConcurrent: z41.int().positive()
 });
-var ObservedDispatchIdsSchema = z40.array(z40.string().min(1)).refine((ids) => new Set(ids).size === ids.length, "observed dispatch IDs must be unique");
+var ObservedDispatchIdsSchema = z41.array(z41.string().min(1)).refine((ids) => new Set(ids).size === ids.length, "observed dispatch IDs must be unique");
 var InvalidDispatchQueueStateError = class extends Error {
   name = "InvalidDispatchQueueStateError";
 };
@@ -6938,6 +6988,7 @@ export {
   BoundedDispatchQueue,
   CallerContextSchema,
   CapabilityEvidenceSchema,
+  CharterFormatError,
   ClaudeSettingsSource,
   CommentSchema,
   CommitMessageInputSchema,
@@ -6954,6 +7005,7 @@ export {
   DependencyPlannerService,
   DispatchOutcomeSchema,
   DispatchRequestSchema,
+  DocCharterCatalog,
   DocIdSchema,
   DuplicateEvidenceNameError,
   EntityMetadataSchema,

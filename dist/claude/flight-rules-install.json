@@ -3,7 +3,7 @@
   "agents": [
     {
       "name": "code-implementation",
-      "sha256": "d00ca2def2e227f63e32fc5bcb53d3eda07563459a3d9cbe5ed98d4f0767ff65",
+      "sha256": "ed11ecf00fa64f488e5dc74d41338a6894be60b7b3044d9d78f6e006f4a9866f",
       "registration": {
         "name": "code-implementation",
         "description": "Implements a single ticket's acceptance criteria against the coding charter. Dispatched by the execute-work skill with the ticket's layered body, any RFC/TDD context, and — on a retry — the verifier's itemized failures. Writes and edits code and tests; it never commits, branches, or opens PRs (the orchestrating skill owns git). Use when a ticket needs to be built.",
@@ -20,7 +20,7 @@
     },
     {
       "name": "code-implementation-escalated",
-      "sha256": "db542f72c90225b2ccd8af45a20ade7ee4d9a60aa2f8730e455706f66eff7236",
+      "sha256": "4cae526b0dce9c9f1d40d0853f9049cb15ca98a051281b06a64312d5953bb5a9",
       "registration": {
         "name": "code-implementation-escalated",
         "description": "Implements the final attempt for a ticket after two recorded verifier rejections. Shares the code-implementation instructions, acceptance criteria and structured report; use only on attempt three of execute-work.",
@@ -37,7 +37,7 @@
     },
     {
       "name": "code-verifier",
-      "sha256": "aa73f5f9ce85ddfc0190f3c06b0113065cf85e0954ed99606938f82142f79f34",
+      "sha256": "19f0f206e45a2692211e16d017c7ab603047b21a2575e2db898185c8bd938e08",
       "registration": {
         "name": "code-verifier",
         "description": "Verifies a completed implementation against a ticket's acceptance criteria, itemized, one verdict per criterion with evidence. Dispatched by the execute-work skill after code-implementation runs. Read-only — it inspects code and runs tests but never edits anything. Use to independently confirm a ticket is actually done.",

@@ -48,10 +48,16 @@ Differences from the normal flow:
    PR to review. (See reference §1.)
 2. **Load PR metadata** — title, body, author, base branch, head branch, line
    and file counts. (Reference §1.)
-3. **Load the charter**: run `flight-rules doc coding-charter`. Read
-   the full output — you vet against every mandate. This is a discrete step so a
-   repo-supplied additional charter can be layered in later; for now there is
-   only the bundled one.
+3. **Load the charters** for the files this PR changes:
+
+   ```bash
+   gh pr diff [PR] --name-only | flight-rules charter --stdin
+   ```
+
+   Read the full output — the core charter plus each language charter whose
+   `applies-to` globs match a changed file. You vet against every mandate, and a
+   language charter's mandates only against the files it governs. Never carry one
+   language's idioms onto another's files.
 4. **Load the diff.** (Reference §3.)
 5. **Detect the mode.** Self-review starts when explicitly requested (by the
    packet-authoring skill, or the user says "review my PR"), or when the login
@@ -84,8 +90,8 @@ Multi-repo PRs are out of scope — review a single repo's PR only.
 Read the diff and build an internal **findings list**. Do not write anything to
 GitHub or show the list yet. Evaluate against two lenses (three in self-review):
 
-- **Charter compliance** — the 13 mandates (M-1…M-13), applying the weighting
-  rules below.
+- **Charter compliance** — every mandate in the loaded charters, each against the
+  files it governs, applying the weighting rules below.
 - **Holistic review** — security issues, logic errors, code smells, sloppy
   code. Code that is perfectly charter-compliant can still be a dumpster fire.
   This lens is not optional and is where the most important findings usually

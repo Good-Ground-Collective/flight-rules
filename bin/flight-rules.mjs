@@ -1005,14 +1005,14 @@ var require_foldFlowLines = __commonJS({
     var FOLD_FLOW = "flow";
     var FOLD_BLOCK = "block";
     var FOLD_QUOTED = "quoted";
-    function foldFlowLines(text6, indent2, mode = "flow", { indentAtStart, lineWidth = 80, minContentWidth = 20, onFold, onOverflow } = {}) {
+    function foldFlowLines(text7, indent2, mode = "flow", { indentAtStart, lineWidth = 80, minContentWidth = 20, onFold, onOverflow } = {}) {
       if (!lineWidth || lineWidth < 0)
-        return text6;
+        return text7;
       if (lineWidth < minContentWidth)
         minContentWidth = 0;
       const endStep = Math.max(1 + minContentWidth, 1 + lineWidth - indent2.length);
-      if (text6.length <= endStep)
-        return text6;
+      if (text7.length <= endStep)
+        return text7;
       const folds = [];
       const escapedFolds = {};
       let end = lineWidth - indent2.length;
@@ -1029,14 +1029,14 @@ var require_foldFlowLines = __commonJS({
       let escStart = -1;
       let escEnd = -1;
       if (mode === FOLD_BLOCK) {
-        i = consumeMoreIndentedLines(text6, i, indent2.length);
+        i = consumeMoreIndentedLines(text7, i, indent2.length);
         if (i !== -1)
           end = i + endStep;
       }
-      for (let ch; ch = text6[i += 1]; ) {
+      for (let ch; ch = text7[i += 1]; ) {
         if (mode === FOLD_QUOTED && ch === "\\") {
           escStart = i;
-          switch (text6[i + 1]) {
+          switch (text7[i + 1]) {
             case "x":
               i += 3;
               break;
@@ -1053,12 +1053,12 @@ var require_foldFlowLines = __commonJS({
         }
         if (ch === "\n") {
           if (mode === FOLD_BLOCK)
-            i = consumeMoreIndentedLines(text6, i, indent2.length);
+            i = consumeMoreIndentedLines(text7, i, indent2.length);
           end = i + indent2.length + endStep;
           split = void 0;
         } else {
           if (ch === " " && prev && prev !== " " && prev !== "\n" && prev !== "	") {
-            const next = text6[i + 1];
+            const next = text7[i + 1];
             if (next && next !== " " && next !== "\n" && next !== "	")
               split = i;
           }
@@ -1070,12 +1070,12 @@ var require_foldFlowLines = __commonJS({
             } else if (mode === FOLD_QUOTED) {
               while (prev === " " || prev === "	") {
                 prev = ch;
-                ch = text6[i += 1];
+                ch = text7[i += 1];
                 overflow = true;
               }
               const j = i > escEnd + 1 ? i - 2 : escStart - 1;
               if (escapedFolds[j])
-                return text6;
+                return text7;
               folds.push(j);
               escapedFolds[j] = true;
               end = j + endStep;
@@ -1090,39 +1090,39 @@ var require_foldFlowLines = __commonJS({
       if (overflow && onOverflow)
         onOverflow();
       if (folds.length === 0)
-        return text6;
+        return text7;
       if (onFold)
         onFold();
-      let res = text6.slice(0, folds[0]);
+      let res = text7.slice(0, folds[0]);
       for (let i2 = 0; i2 < folds.length; ++i2) {
         const fold = folds[i2];
-        const end2 = folds[i2 + 1] || text6.length;
+        const end2 = folds[i2 + 1] || text7.length;
         if (fold === 0)
           res = `
-${indent2}${text6.slice(0, end2)}`;
+${indent2}${text7.slice(0, end2)}`;
         else {
           if (mode === FOLD_QUOTED && escapedFolds[fold])
-            res += `${text6[fold]}\\`;
+            res += `${text7[fold]}\\`;
           res += `
-${indent2}${text6.slice(fold + 1, end2)}`;
+${indent2}${text7.slice(fold + 1, end2)}`;
         }
       }
       return res;
     }
-    function consumeMoreIndentedLines(text6, i, indent2) {
+    function consumeMoreIndentedLines(text7, i, indent2) {
       let end = i;
       let start = i + 1;
-      let ch = text6[start];
+      let ch = text7[start];
       while (ch === " " || ch === "	") {
         if (i < start + indent2) {
-          ch = text6[++i];
+          ch = text7[++i];
         } else {
           do {
-            ch = text6[++i];
+            ch = text7[++i];
           } while (ch && ch !== "\n");
           end = i;
           start = i + 1;
-          ch = text6[start];
+          ch = text7[start];
         }
       }
       return end;
@@ -10497,9 +10497,9 @@ Expecting one of '${allowedValues.join("', '")}'`);
       helpWidth: context.helpWidth,
       outputHasColors: context.hasColors
     });
-    const text6 = helper.formatHelp(this, helper);
-    if (context.hasColors) return text6;
-    return this._outputConfiguration.stripColor(text6);
+    const text7 = helper.formatHelp(this, helper);
+    if (context.hasColors) return text7;
+    return this._outputConfiguration.stripColor(text7);
   }
   /**
    * @typedef HelpContext
@@ -10659,7 +10659,7 @@ Expecting one of '${allowedValues.join("', '")}'`);
    * @param {(string | Function)} text - string to add, or a function returning a string
    * @return {Command} `this` command for chaining
    */
-  addHelpText(position2, text6) {
+  addHelpText(position2, text7) {
     const allowedValues = ["beforeAll", "before", "after", "afterAll"];
     if (!allowedValues.includes(position2)) {
       throw new Error(`Unexpected value for position to addHelpText.
@@ -10668,10 +10668,10 @@ Expecting one of '${allowedValues.join("', '")}'`);
     const helpEvent = `${position2}Help`;
     this.on(helpEvent, (context) => {
       let helpStr;
-      if (typeof text6 === "function") {
-        helpStr = text6({ error: context.error, command: context.command });
+      if (typeof text7 === "function") {
+        helpStr = text7({ error: context.error, command: context.command });
       } else {
-        helpStr = text6;
+        helpStr = text7;
       }
       if (helpStr) {
         context.write(`${helpStr}
@@ -20026,8 +20026,8 @@ function ko_default() {
 }
 
 // node_modules/zod/v4/locales/lt.js
-var capitalizeFirstCharacter = (text6) => {
-  return text6.charAt(0).toUpperCase() + text6.slice(1);
+var capitalizeFirstCharacter = (text7) => {
+  return text7.charAt(0).toUpperCase() + text7.slice(1);
 };
 function getUnitTypeFromNumber(number4) {
   const abs = Math.abs(number4);
@@ -30189,7 +30189,7 @@ function visit(schema, fnOrHandlers) {
     return h ? h(node3, rewritten) : node3;
   };
   const cache = /* @__PURE__ */ new Map();
-  function run2(s) {
+  function run3(s) {
     const cached2 = cache.get(s);
     if (cached2 === RESOLVING) {
       return new $ZodLazy({
@@ -30215,21 +30215,21 @@ function visit(schema, fnOrHandlers) {
         let changed = false;
         const newShape = {};
         for (const k of keys) {
-          const mapped = run2(oldShape[k]);
+          const mapped = run3(oldShape[k]);
           if (mapped !== oldShape[k])
             changed = true;
           newShape[k] = mapped;
         }
         let newCatchall = def.catchall;
         if (def.catchall) {
-          newCatchall = run2(def.catchall);
+          newCatchall = run3(def.catchall);
           if (newCatchall !== def.catchall)
             changed = true;
         }
         return changed ? clone(s, { ...def, shape: newShape, catchall: newCatchall }) : s;
       }
       case "array": {
-        const mapped = run2(def.element);
+        const mapped = run3(def.element);
         return mapped === def.element ? s : clone(s, { ...def, element: mapped });
       }
       case "tuple": {
@@ -30237,14 +30237,14 @@ function visit(schema, fnOrHandlers) {
         let changed = false;
         const newItems = [];
         for (const item of oldItems) {
-          const mapped = run2(item);
+          const mapped = run3(item);
           if (mapped !== item)
             changed = true;
           newItems.push(mapped);
         }
         let newRest = def.rest;
         if (def.rest) {
-          newRest = run2(def.rest);
+          newRest = run3(def.rest);
           if (newRest !== def.rest)
             changed = true;
         }
@@ -30252,12 +30252,12 @@ function visit(schema, fnOrHandlers) {
       }
       case "record":
       case "map": {
-        const newKey = run2(def.keyType);
-        const newVal = run2(def.valueType);
+        const newKey = run3(def.keyType);
+        const newVal = run3(def.valueType);
         return newKey === def.keyType && newVal === def.valueType ? s : clone(s, { ...def, keyType: newKey, valueType: newVal });
       }
       case "set": {
-        const newVal = run2(def.valueType);
+        const newVal = run3(def.valueType);
         return newVal === def.valueType ? s : clone(s, { ...def, valueType: newVal });
       }
       case "union": {
@@ -30265,7 +30265,7 @@ function visit(schema, fnOrHandlers) {
         let changed = false;
         const newOptions = [];
         for (const opt of oldOptions) {
-          const mapped = run2(opt);
+          const mapped = run3(opt);
           if (mapped !== opt)
             changed = true;
           newOptions.push(mapped);
@@ -30273,8 +30273,8 @@ function visit(schema, fnOrHandlers) {
         return changed ? clone(s, { ...def, options: newOptions }) : s;
       }
       case "intersection": {
-        const newLeft = run2(def.left);
-        const newRight = run2(def.right);
+        const newLeft = run3(def.left);
+        const newRight = run3(def.right);
         return newLeft === def.left && newRight === def.right ? s : clone(s, { ...def, left: newLeft, right: newRight });
       }
       case "optional":
@@ -30286,30 +30286,30 @@ function visit(schema, fnOrHandlers) {
       case "nonoptional":
       case "promise":
       case "success": {
-        const newInner = run2(def.innerType);
+        const newInner = run3(def.innerType);
         return newInner === def.innerType ? s : clone(s, { ...def, innerType: newInner });
       }
       case "pipe": {
-        const newIn = run2(def.in);
-        const newOut = run2(def.out);
+        const newIn = run3(def.in);
+        const newOut = run3(def.out);
         return newIn === def.in && newOut === def.out ? s : clone(s, { ...def, in: newIn, out: newOut });
       }
       case "function": {
-        const newInput = run2(def.input);
-        const newOutput = run2(def.output);
+        const newInput = run3(def.input);
+        const newOutput = run3(def.output);
         return newInput === def.input && newOutput === def.output ? s : clone(s, { ...def, input: newInput, output: newOutput });
       }
       case "lazy": {
         const original = def.getter;
         const { _cachedInner, ...rest } = def;
-        return clone(s, { ...rest, getter: () => run2(original()) });
+        return clone(s, { ...rest, getter: () => run3(original()) });
       }
       case "properties": {
         const oldShape = def.shape;
         let changed = false;
         const newShape = {};
         for (const k of Reflect.ownKeys(oldShape)) {
-          const mapped = run2(oldShape[k]);
+          const mapped = run3(oldShape[k]);
           if (mapped !== oldShape[k])
             changed = true;
           newShape[k] = mapped;
@@ -30345,7 +30345,7 @@ function visit(schema, fnOrHandlers) {
       }
     }
   }
-  return run2(schema);
+  return run3(schema);
 }
 
 // node_modules/zod/v4/classic/deep-partial.js
@@ -30791,11 +30791,11 @@ var GhPullRequestHost = class {
   }
   describeFailure(err) {
     const stderr = this.readStringProperty(err, "stderr")?.trim();
-    const text6 = stderr !== void 0 && stderr.length > 0 ? stderr : err instanceof Error ? err.message : String(err);
-    return text6.split("\n")[0]?.trim() ?? text6;
+    const text7 = stderr !== void 0 && stderr.length > 0 ? stderr : err instanceof Error ? err.message : String(err);
+    return text7.split("\n")[0]?.trim() ?? text7;
   }
-  escapeRegExp(text6) {
-    return text6.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  escapeRegExp(text7) {
+    return text7.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
   async runCreate(template, title, bodyFile, attach) {
     const args = [
@@ -30835,12 +30835,12 @@ var GhPullRequestHost = class {
     if (match?.[1] === void 0) throw new GhOutputParseError(url2);
     return { number: Number(match[1]), url: url2 };
   }
-  async withBodyFile(body, run2) {
+  async withBodyFile(body, run3) {
     const dir = await mkdtemp(join2(tmpdir(), "flight-rules-"));
     const bodyFile = join2(dir, "body.md");
     try {
       await writeFile(bodyFile, body, "utf8");
-      return await run2(bodyFile);
+      return await run3(bodyFile);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -31653,7 +31653,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.77.0";
+var appVersion = false ? "0.0.0-dev" : "1.78.0";
 
 // src/shared/ariadne/review-packet.schema.ts
 var packetLimits = {
@@ -32360,14 +32360,14 @@ var AriadneBoard = class {
     }
   }
   /** Local state is best effort: a full or unreadable disk must not fail a report. */
-  bestEffort(run2) {
+  bestEffort(run3) {
     try {
-      return run2();
+      return run3();
     } catch {
       return void 0;
     }
   }
-  async call(options, requestedSession, run2, ticket) {
+  async call(options, requestedSession, run3, ticket) {
     let settings;
     try {
       settings = this.settings();
@@ -32406,7 +32406,7 @@ var AriadneBoard = class {
       ...this.timeoutMs !== void 0 ? { timeoutMs: this.timeoutMs } : {}
     });
     try {
-      return noted({ status: "posted", value: await run2(client, session) });
+      return noted({ status: "posted", value: await run3(client, session) });
     } catch (err) {
       return noted({ status: "failed", message: this.redact(this.describe(err, url2, token !== void 0), token) });
     }
@@ -32454,8 +32454,8 @@ var RandomPacketIdGenerator = class {
     const kebab = this.trim(title.toLowerCase().replace(/[^a-z0-9]+/g, "-"));
     return kebab === "" ? fallbackSlug : kebab;
   }
-  trim(text6) {
-    return text6.slice(0, maxSlugLength).replace(/^-+|-+$/g, "");
+  trim(text7) {
+    return text7.slice(0, maxSlugLength).replace(/^-+|-+$/g, "");
   }
   suffix() {
     return randomBytes(4).toString("hex");
@@ -32556,7 +32556,7 @@ var AriadnePackets = class {
       "no Ariadne token; set ARIADNE_AGENT_TOKEN, or run `flight-rules board login` with an agent token from Ariadne \u203A Settings \u203A Connections"
     );
   }
-  async call(run2) {
+  async call(run3) {
     const url2 = this.url();
     const token = this.token();
     const client = new AriadneClient({
@@ -32566,7 +32566,7 @@ var AriadnePackets = class {
       ...this.timeoutMs !== void 0 ? { timeoutMs: this.timeoutMs } : {}
     });
     try {
-      return await run2(client);
+      return await run3(client);
     } catch (err) {
       throw new AriadnePacketError(this.redact(this.describe(err, url2), token), { cause: err });
     }
@@ -33604,8 +33604,8 @@ var convertMarkedBigIntsReviver = (key, value, context, userReviver) => {
   if (!hasUserReviver) return value;
   return userReviver(key, value, context);
 };
-var JSONParseV2 = (text6, reviver) => {
-  return JSON.parse(text6, (key, value, context) => {
+var JSONParseV2 = (text7, reviver) => {
+  return JSON.parse(text7, (key, value, context) => {
     const isNumber = typeof value === "number";
     const isOutOfBounds = value > Number.MAX_SAFE_INTEGER || value < Number.MIN_SAFE_INTEGER;
     const isBigNumber = isNumber && isOutOfBounds;
@@ -33663,8 +33663,8 @@ var applyReviverIteratively = (parsed, userReviver) => {
   }
   return rootHolder[""];
 };
-var serializeBigInts = (text6) => {
-  return text6.replace(
+var serializeBigInts = (text7) => {
+  return text7.replace(
     stringsOrLargeNumbers,
     (match, digits, fractional, exponential) => {
       const isString = match[0] === '"';
@@ -33678,18 +33678,18 @@ var serializeBigInts = (text6) => {
     }
   );
 };
-var JSONParse = (text6, reviver) => {
-  if (!text6) return originalParse(text6, reviver);
+var JSONParse = (text7, reviver) => {
+  if (!text7) return originalParse(text7, reviver);
   try {
-    if (isContextSourceSupported()) return JSONParseV2(text6, reviver);
-    const serializedData = serializeBigInts(text6);
+    if (isContextSourceSupported()) return JSONParseV2(text7, reviver);
+    const serializedData = serializeBigInts(text7);
     return originalParse(
       serializedData,
       (key, value, context) => convertMarkedBigIntsReviver(key, value, context, reviver)
     );
   } catch (error62) {
     if (error62 instanceof RangeError) {
-      const serializedData = serializeBigInts(text6);
+      const serializedData = serializeBigInts(text7);
       const parsed = originalParse(serializedData);
       return applyReviverIteratively(parsed, reviver);
     }
@@ -33857,12 +33857,12 @@ async function getResponseData(response) {
   }
   const mimetype = parse4(contentType);
   if (isJSONResponse(mimetype)) {
-    let text6 = "";
+    let text7 = "";
     try {
-      text6 = await response.text();
-      return JSONParse(text6);
+      text7 = await response.text();
+      return JSONParse(text7);
     } catch (err) {
-      return text6;
+      return text7;
     }
   } else if (mimetype.type.startsWith("text/") || // `application/octet-stream` is the canonical "arbitrary binary" type
   // (RFC 2046) and must never be decoded as text, even when the response
@@ -37554,8 +37554,8 @@ var JiraClient = class {
       ...signal === void 0 ? {} : { signal }
     });
     if (!res.ok) await this.throwApiError(res);
-    const text6 = await res.text();
-    const data = text6.length > 0 ? JSON.parse(text6) : void 0;
+    const text7 = await res.text();
+    const data = text7.length > 0 ? JSON.parse(text7) : void 0;
     return data;
   }
   /**
@@ -37576,8 +37576,8 @@ var JiraClient = class {
       body: form
     });
     if (!res.ok) await this.throwApiError(res);
-    const text6 = await res.text();
-    const data = text6.length > 0 ? JSON.parse(text6) : void 0;
+    const text7 = await res.text();
+    const data = text7.length > 0 ? JSON.parse(text7) : void 0;
     return data;
   }
   /**
@@ -37647,8 +37647,8 @@ var ConfluenceClient = class {
       ...body !== void 0 ? { body: JSON.stringify(body) } : {}
     });
     if (!res.ok) await this.throwApiError(res);
-    const text6 = await res.text();
-    const data = text6.length > 0 ? JSON.parse(text6) : void 0;
+    const text7 = await res.text();
+    const data = text7.length > 0 ? JSON.parse(text7) : void 0;
     return data;
   }
   async fetchWithRetry(url2, init, attempt = 0) {
@@ -40286,7 +40286,7 @@ function resolveAllAttention(events, context) {
   let index2 = -1;
   let open2;
   let group;
-  let text6;
+  let text7;
   let openingSequence;
   let closingSequence;
   let use;
@@ -40324,7 +40324,7 @@ function resolveAllAttention(events, context) {
             },
             end
           };
-          text6 = {
+          text7 = {
             type: use > 1 ? "strongText" : "emphasisText",
             start: {
               ...events[open2][1].end
@@ -40352,9 +40352,9 @@ function resolveAllAttention(events, context) {
           if (events[open2][1].end.offset - events[open2][1].start.offset) {
             nextEvents = push(nextEvents, [["enter", events[open2][1], context], ["exit", events[open2][1], context]]);
           }
-          nextEvents = push(nextEvents, [["enter", group, context], ["enter", openingSequence, context], ["exit", openingSequence, context], ["enter", text6, context]]);
+          nextEvents = push(nextEvents, [["enter", group, context], ["enter", openingSequence, context], ["exit", openingSequence, context], ["enter", text7, context]]);
           nextEvents = push(nextEvents, resolveAll(context.parser.constructs.insideSpan.null, events.slice(open2 + 1, index2), context));
-          nextEvents = push(nextEvents, [["exit", text6, context], ["enter", closingSequence, context], ["exit", closingSequence, context], ["exit", group, context]]);
+          nextEvents = push(nextEvents, [["exit", text7, context], ["enter", closingSequence, context], ["exit", closingSequence, context], ["exit", group, context]]);
           if (events[index2][1].end.offset - events[index2][1].start.offset) {
             offset = 2;
             nextEvents = push(nextEvents, [["enter", events[index2][1], context], ["exit", events[index2][1], context]]);
@@ -41802,7 +41802,7 @@ function resolveHeadingAtx(events, context) {
   let contentEnd = events.length - 2;
   let contentStart = 3;
   let content3;
-  let text6;
+  let text7;
   if (events[contentStart][1].type === "whitespace") {
     contentStart += 2;
   }
@@ -41818,13 +41818,13 @@ function resolveHeadingAtx(events, context) {
       start: events[contentStart][1].start,
       end: events[contentEnd][1].end
     };
-    text6 = {
+    text7 = {
       type: "chunkText",
       start: events[contentStart][1].start,
       end: events[contentEnd][1].end,
       contentType: "text"
     };
-    splice(events, contentStart, contentEnd - contentStart + 1, [["enter", content3, context], ["enter", text6, context], ["exit", text6, context], ["exit", content3, context]]);
+    splice(events, contentStart, contentEnd - contentStart + 1, [["enter", content3, context], ["enter", text7, context], ["exit", text7, context], ["exit", content3, context]]);
   }
   return events;
 }
@@ -42714,7 +42714,7 @@ function resolveToLabelEnd(events, context) {
       ...events[close][1].end
     }
   };
-  const text6 = {
+  const text7 = {
     type: "labelText",
     start: {
       ...events[open2 + offset + 2][1].end
@@ -42725,9 +42725,9 @@ function resolveToLabelEnd(events, context) {
   };
   media = [["enter", group, context], ["enter", label, context]];
   media = push(media, events.slice(open2 + 1, open2 + offset + 3));
-  media = push(media, [["enter", text6, context]]);
+  media = push(media, [["enter", text7, context]]);
   media = push(media, resolveAll(context.parser.constructs.insideSpan.null, events.slice(open2 + offset + 4, close - 3), context));
-  media = push(media, [["exit", text6, context], events[close - 2], events[close - 1], ["exit", label, context]]);
+  media = push(media, [["exit", text7, context], events[close - 2], events[close - 1], ["exit", label, context]]);
   media = push(media, events.slice(close + 1));
   media = push(media, [["exit", group, context]]);
   splice(events, open2, events.length, media);
@@ -43107,7 +43107,7 @@ var setextUnderline = {
 function resolveToSetextUnderline(events, context) {
   let index2 = events.length;
   let content3;
-  let text6;
+  let text7;
   let definition2;
   while (index2--) {
     if (events[index2][0] === "enter") {
@@ -43116,7 +43116,7 @@ function resolveToSetextUnderline(events, context) {
         break;
       }
       if (events[index2][1].type === "paragraph") {
-        text6 = index2;
+        text7 = index2;
       }
     } else {
       if (events[index2][1].type === "content") {
@@ -43136,9 +43136,9 @@ function resolveToSetextUnderline(events, context) {
       ...events[events.length - 1][1].end
     }
   };
-  events[text6][1].type = "setextHeadingText";
+  events[text7][1].type = "setextHeadingText";
   if (definition2) {
-    events.splice(text6, 0, ["enter", heading, context]);
+    events.splice(text7, 0, ["enter", heading, context]);
     events.splice(definition2 + 1, 0, ["exit", events[content3][1], context]);
     events[content3][1].end = {
       ...events[definition2][1].end
@@ -43242,10 +43242,10 @@ function initializeFactory(field) {
   function initializeText(effects) {
     const self = this;
     const constructs2 = this.parser.constructs[field];
-    const text6 = effects.attempt(constructs2, start, notText);
+    const text7 = effects.attempt(constructs2, start, notText);
     return start;
     function start(code2) {
-      return atBreak(code2) ? text6(code2) : notText(code2);
+      return atBreak(code2) ? text7(code2) : notText(code2);
     }
     function notText(code2) {
       if (code2 === null) {
@@ -43259,7 +43259,7 @@ function initializeFactory(field) {
     function data(code2) {
       if (atBreak(code2)) {
         effects.exit("data");
-        return text6(code2);
+        return text7(code2);
       }
       effects.consume(code2);
       return data;
@@ -44307,7 +44307,7 @@ function compiler(options) {
     const siblings = node3.children;
     let tail = siblings[siblings.length - 1];
     if (!tail || tail.type !== "text") {
-      tail = text6();
+      tail = text7();
       tail.position = {
         start: point2(token.start),
         // @ts-expect-error: we’ll add `end` later.
@@ -44552,7 +44552,7 @@ function compiler(options) {
       children: []
     };
   }
-  function text6() {
+  function text7() {
     return {
       type: "text",
       value: ""
@@ -45943,17 +45943,17 @@ function gfmStrikethrough(options) {
               start: Object.assign({}, events[open2][1].start),
               end: Object.assign({}, events[index2][1].end)
             };
-            const text6 = {
+            const text7 = {
               type: "strikethroughText",
               start: Object.assign({}, events[open2][1].end),
               end: Object.assign({}, events[index2][1].start)
             };
-            const nextEvents = [["enter", strikethrough, context], ["enter", events[open2][1], context], ["exit", events[open2][1], context], ["enter", text6, context]];
+            const nextEvents = [["enter", strikethrough, context], ["enter", events[open2][1], context], ["exit", events[open2][1], context], ["enter", text7, context]];
             const insideSpan2 = context.parser.constructs.insideSpan.null;
             if (insideSpan2) {
               splice(nextEvents, nextEvents.length, 0, resolveAll(insideSpan2, events.slice(open2 + 1, index2), context));
             }
-            splice(nextEvents, nextEvents.length, 0, [["exit", text6, context], ["enter", events[index2][1], context], ["exit", events[index2][1], context], ["exit", strikethrough, context]]);
+            splice(nextEvents, nextEvents.length, 0, [["exit", text7, context], ["enter", events[index2][1], context], ["exit", events[index2][1], context], ["exit", strikethrough, context]]);
             splice(events, open2 - 1, index2 - open2 + 3, nextEvents);
             index2 = open2 + nextEvents.length - 2;
             break;
@@ -46812,9 +46812,9 @@ var LayeredBodyAdfConverter = class {
   alertType(node3) {
     const first = node3.children[0];
     if (first === void 0 || first.type !== "paragraph") return void 0;
-    const text6 = first.children[0];
-    if (text6 === void 0 || text6.type !== "text") return void 0;
-    return alertMarker.exec(text6.value)?.[1];
+    const text7 = first.children[0];
+    if (text7 === void 0 || text7.type !== "text") return void 0;
+    return alertMarker.exec(text7.value)?.[1];
   }
   /**
    * Returns the blockquote's children with the admonition marker (and its trailing
@@ -46825,10 +46825,10 @@ var LayeredBodyAdfConverter = class {
   stripAlertMarker(children) {
     const [first, ...rest] = children;
     if (first === void 0 || first.type !== "paragraph") return children;
-    const [text6, ...moreInline] = first.children;
-    if (text6 === void 0 || text6.type !== "text") return children;
-    const stripped = text6.value.replace(alertMarker, "");
-    const inline = stripped === "" ? moreInline : [{ ...text6, value: stripped }, ...moreInline];
+    const [text7, ...moreInline] = first.children;
+    if (text7 === void 0 || text7.type !== "text") return children;
+    const stripped = text7.value.replace(alertMarker, "");
+    const inline = stripped === "" ? moreInline : [{ ...text7, value: stripped }, ...moreInline];
     if (inline.length === 0) return rest;
     return [{ ...first, children: inline }, ...rest];
   }
@@ -47128,12 +47128,12 @@ var LayeredBodyAdfConverter = class {
    * task list would accrete a `>` on every round trip.
    */
   literalBlock(node3, source, stripEnclosingQuote = false) {
-    const text6 = this.literal(node3, source);
-    const inner = stripEnclosingQuote ? this.stripEnclosingQuote(text6) : text6;
+    const text7 = this.literal(node3, source);
+    const inner = stripEnclosingQuote ? this.stripEnclosingQuote(text7) : text7;
     return { type: "paragraph", content: this.textSegments(inner, []) };
   }
-  stripEnclosingQuote(text6) {
-    return text6.split("\n").map((line, index2) => index2 === 0 ? line : line.replace(/^> ?/, "")).join("\n");
+  stripEnclosingQuote(text7) {
+    return text7.split("\n").map((line, index2) => index2 === 0 ? line : line.replace(/^> ?/, "")).join("\n");
   }
   literal(node3, source) {
     return source.slice(node3.position?.start.offset ?? 0, node3.position?.end.offset ?? 0);
@@ -47148,9 +47148,9 @@ var LayeredBodyAdfConverter = class {
         return this.inlineToMarkdown(node3.content ?? [], names);
       case "codeBlock": {
         const language = typeof node3.attrs?.["language"] === "string" ? node3.attrs["language"] : "";
-        const text6 = (node3.content ?? []).map((child) => child.text ?? "").join("");
+        const text7 = (node3.content ?? []).map((child) => child.text ?? "").join("");
         return `\`\`\`${language}
-${text6}
+${text7}
 \`\`\``;
       }
       case "taskList":
@@ -47329,7 +47329,7 @@ ${indent2}`)}`;
       if (node3.text === void 0) {
         closeFrom(0);
         const inner = node3.content !== void 0 ? this.inlineToMarkdown(node3.content, names) : "";
-        out += [...node3.marks ?? []].reverse().reduce((text7, mark) => this.applyMark(text7, mark), inner);
+        out += [...node3.marks ?? []].reverse().reduce((text8, mark) => this.applyMark(text8, mark), inner);
         continue;
       }
       const marks = node3.marks ?? [];
@@ -47350,12 +47350,12 @@ ${indent2}`)}`;
       }
       closeFrom(common);
       const opening = marks.slice(common);
-      let text6 = node3.text;
+      let text7 = node3.text;
       if (common === 0 && opening.length > 0 && opening.every((mark) => this.isEmphasis(mark))) {
-        const lead = /^\s+/.exec(text6)?.[0];
-        if (lead !== void 0 && lead.length < text6.length) {
+        const lead = /^\s+/.exec(text7)?.[0];
+        if (lead !== void 0 && lead.length < text7.length) {
           out += lead;
-          text6 = text6.slice(lead.length);
+          text7 = text7.slice(lead.length);
         }
       }
       for (let k = common; k < marks.length; k++) {
@@ -47364,7 +47364,7 @@ ${indent2}`)}`;
         out += this.markOpen(mark);
         open2.push(mark);
       }
-      out += this.escapeText(text6, open2.some((mark) => mark.type === "code"));
+      out += this.escapeText(text7, open2.some((mark) => mark.type === "code"));
     }
     closeFrom(0);
     return out;
@@ -47380,8 +47380,8 @@ ${indent2}`)}`;
    */
   mentionToMarkdown(node3) {
     const id = typeof node3.attrs?.["id"] === "string" ? node3.attrs["id"] : "";
-    const text6 = node3.attrs?.["text"];
-    const display = typeof text6 === "string" ? text6.startsWith("@") ? text6.slice(1) : text6 : "";
+    const text7 = node3.attrs?.["text"];
+    const display = typeof text7 === "string" ? text7.startsWith("@") ? text7.slice(1) : text7 : "";
     return `@{${id}|${this.escapeMentionDisplay(display)}}`;
   }
   /**
@@ -47397,20 +47397,20 @@ ${indent2}`)}`;
    * Wraps text in the markdown for one mark, innermost-first. Only used for the
    * rare content-bearing inline node; the main text path coalesces marks instead.
    */
-  applyMark(text6, mark) {
+  applyMark(text7, mark) {
     switch (mark.type) {
       case "code":
-        return `\`${text6}\``;
+        return `\`${text7}\``;
       case "em":
-        return `*${text6}*`;
+        return `*${text7}*`;
       case "strong":
-        return `**${text6}**`;
+        return `**${text7}**`;
       case "strike":
-        return `~~${text6}~~`;
+        return `~~${text7}~~`;
       case "link":
-        return this.linkToMarkdown(text6, mark);
+        return this.linkToMarkdown(text7, mark);
       default:
-        return text6;
+        return text7;
     }
   }
   markOpen(mark) {
@@ -47462,22 +47462,22 @@ ${indent2}`)}`;
    * but only when the destination needs no escaping and there's no title — so the
    * autolink re-parses to the same href. Otherwise the caller emits `[text](dest)`.
    */
-  tryBareUrl(text6, mark) {
+  tryBareUrl(text7, mark) {
     if (mark.type !== "link") return void 0;
     const href = mark.attrs?.["href"];
     if (typeof href !== "string") return void 0;
     if (typeof mark.attrs?.["title"] === "string") return void 0;
-    if (text6 !== href || this.encodeDestination(href) !== href) return void 0;
+    if (text7 !== href || this.encodeDestination(href) !== href) return void 0;
     return href;
   }
-  linkToMarkdown(text6, mark) {
+  linkToMarkdown(text7, mark) {
     const href = mark.attrs?.["href"];
-    if (typeof href !== "string") return text6;
-    const bare = this.tryBareUrl(text6, mark);
+    if (typeof href !== "string") return text7;
+    const bare = this.tryBareUrl(text7, mark);
     if (bare !== void 0) return bare;
     const title = mark.attrs?.["title"];
     const suffix = typeof title === "string" ? ` "${this.encodeTitle(title)}"` : "";
-    return `[${text6}](${this.encodeDestination(href)}${suffix})`;
+    return `[${text7}](${this.encodeDestination(href)}${suffix})`;
   }
   /**
    * Escapes a link destination so it re-parses to the same string: literal `\`
@@ -47508,9 +47508,9 @@ ${indent2}`)}`;
    * text node that itself reads as a mention token (`@{id|name}`) is escaped to
    * `\@{…}` so it re-parses as text rather than a mention.
    */
-  escapeText(text6, insideCode) {
-    if (insideCode) return text6;
-    const escaped = text6.replace(/[\\*`]/g, (ch) => `\\${ch}`);
+  escapeText(text7, insideCode) {
+    if (insideCode) return text7;
+    const escaped = text7.replace(/[\\*`]/g, (ch) => `\\${ch}`);
     return escaped.replace(this.mentionToken(), (full) => `\\${full}`);
   }
 };
@@ -47521,18 +47521,18 @@ var import_yaml2 = __toESM(require_dist(), 1);
 
 // src/tasks/jira-task-tracker/adf.ts
 var DefaultAdfBuilder = class {
-  doc(text6) {
+  doc(text7) {
     return {
       version: 1,
       type: "doc",
-      content: [{ type: "paragraph", content: [{ type: "text", text: text6 }] }]
+      content: [{ type: "paragraph", content: [{ type: "text", text: text7 }] }]
     };
   }
-  codeBlock(text6, language = "yaml") {
+  codeBlock(text7, language = "yaml") {
     return {
       type: "codeBlock",
       attrs: { language },
-      content: [{ type: "text", text: text6 }]
+      content: [{ type: "text", text: text7 }]
     };
   }
   expand(title, child) {
@@ -47568,9 +47568,9 @@ var JiraAdfMetadataService = class {
   readMetadataYaml(doc) {
     const expand2 = doc.content.find((n) => this.isMetadataExpand(n));
     const codeBlock = expand2?.content?.find((n) => n.type === "codeBlock");
-    const text6 = codeBlock?.content?.find((n) => n.type === "text")?.text;
-    if (text6 === void 0 || text6.trim() === "") return void 0;
-    return text6;
+    const text7 = codeBlock?.content?.find((n) => n.type === "text")?.text;
+    if (text7 === void 0 || text7.trim() === "") return void 0;
+    return text7;
   }
   isMetadataExpand(node3) {
     return node3.type === "expand" && node3.attrs?.["title"] === metadataTitle;
@@ -48127,8 +48127,8 @@ var RedactedProbeDiagnostics = class {
       ([key, value]) => /token|secret|password|api[_-]?key|credential/i.test(key) && Boolean(value)
     ).flatMap(([, value]) => value === void 0 ? [] : [value, encodeURIComponent(value)]).sort((a, b) => b.length - a.length);
   }
-  redact(text6) {
-    let result = text6.replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/@]+@/gi, "$1[REDACTED]@").replace(/\b(Bearer|Basic)\s+[^\s,'";]+/gi, "$1 [REDACTED]").replace(/([?&](?:token|access_token|api_key|key|signature)=)[^&#\s]+/gi, "$1[REDACTED]").replace(/\b(?:gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+)\b/g, "[REDACTED]");
+  redact(text7) {
+    let result = text7.replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/@]+@/gi, "$1[REDACTED]@").replace(/\b(Bearer|Basic)\s+[^\s,'";]+/gi, "$1 [REDACTED]").replace(/([?&](?:token|access_token|api_key|key|signature)=)[^&#\s]+/gi, "$1[REDACTED]").replace(/\b(?:gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+)\b/g, "[REDACTED]");
     for (const secret of this.secrets) result = result.replaceAll(secret, "[REDACTED]");
     return result;
   }
@@ -48691,8 +48691,8 @@ var NodeWorkflowPreflight = class {
     return checks;
   }
   async command(args) {
-    const run2 = promisify4(execFile4);
-    const { stdout } = await run2("git", args, {
+    const run3 = promisify4(execFile4);
+    const { stdout } = await run3("git", args, {
       cwd: this.cwd,
       env: { ...this.env, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "Never" },
       timeout: this.timeoutMs,
@@ -49127,6 +49127,128 @@ function createDocCommand(getResolver) {
   });
   return doc;
 }
+
+// src/bundled-docs/commands/charter/command.ts
+import { text as text4 } from "node:stream/consumers";
+function createCharterCommand(getCatalog, getPaths, readStdin = () => text4(process.stdin)) {
+  const charter = new Command("charter");
+  charter.exitOverride().description("print the core coding charter and the language charters for a set of files").argument("[paths...]", "repository-relative files to select charters for").option("--stdin", "read newline-separated paths from stdin").option("--diff <base>", "select for files changed since the merge base with <base>, including uncommitted work").option("--repo", "select for every file in the repository (the default)").option("--path", "print absolute paths, one per line, instead of the contents").action(async (paths, opts) => {
+    const sources = [paths.length > 0, opts.stdin === true, opts.diff !== void 0, opts.repo === true];
+    if (sources.filter(Boolean).length > 1) {
+      throw new CharterSelectionError("Choose one of: paths, --stdin, --diff <base>, --repo");
+    }
+    let selection = paths;
+    if (opts.stdin) selection = (await readStdin()).split("\n");
+    else if (opts.diff !== void 0) selection = await getPaths().changedSince(opts.diff);
+    else if (paths.length === 0) selection = await getPaths().inventory();
+    const selected = getCatalog().select(selection);
+    if (selected.every((item) => item.language === null)) {
+      process.stderr.write("No language charter matched these files; printing the core charter only.\n");
+    }
+    const output2 = opts.path ? selected.map((item) => `${item.path}
+`) : selected.map((item) => item.contents.endsWith("\n") ? item.contents : `${item.contents}
+`);
+    process.stdout.write(output2.join(opts.path ? "" : "\n"));
+  });
+  return charter;
+}
+var CharterSelectionError = class extends Error {
+  name = "CharterSelectionError";
+};
+
+// src/bundled-docs/charter-catalog/charter-catalog.ts
+var import_yaml3 = __toESM(require_dist(), 1);
+import { matchesGlob } from "node:path";
+var coreCharterId = "coding-charter";
+var languageCharterPrefix = `${coreCharterId}-`;
+var LanguageFrontmatterSchema = external_exports.strictObject({
+  language: external_exports.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+  "applies-to": external_exports.array(external_exports.string().min(1)).min(1)
+}).transform(({ language, "applies-to": appliesTo }) => ({ language, appliesTo }));
+var FrontmatterSchema = external_exports.string().transform((contents, ctx) => {
+  const block = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/.exec(contents)?.[1];
+  if (block === void 0) {
+    ctx.addIssue({ code: "custom", message: "missing YAML frontmatter" });
+    return external_exports.NEVER;
+  }
+  return (0, import_yaml3.parse)(block);
+}).pipe(LanguageFrontmatterSchema);
+var DocCharterCatalog = class {
+  docs;
+  constructor(props) {
+    this.docs = props.docs;
+  }
+  all() {
+    const core = this.docs.resolve(coreCharterId);
+    const languages = this.docs.list().filter((id) => id.startsWith(languageCharterPrefix)).map((id) => this.languageCharter(this.docs.resolve(id)));
+    return [{ id: core.id, language: null, appliesTo: [], path: core.path, contents: core.contents }, ...languages];
+  }
+  select(paths) {
+    const normalized = paths.map((path3) => path3.trim().replace(/^\.\//, "")).filter((path3) => path3.length > 0);
+    return this.all().filter(
+      (charter) => charter.language === null || normalized.some((path3) => charter.appliesTo.some((glob) => matchesGlob(path3, glob)))
+    );
+  }
+  languageCharter(doc) {
+    const parsed = FrontmatterSchema.safeParse(doc.contents);
+    if (!parsed.success) {
+      throw new CharterFormatError(`Charter "${doc.id}" has invalid frontmatter: ${external_exports.prettifyError(parsed.error)}`);
+    }
+    const expectedId = `${languageCharterPrefix}${parsed.data.language}`;
+    if (doc.id !== expectedId) {
+      throw new CharterFormatError(`Charter "${doc.id}" declares language "${parsed.data.language}"; its file must be ${expectedId}.md`);
+    }
+    return { id: doc.id, ...parsed.data, path: doc.path, contents: doc.contents };
+  }
+};
+var CharterFormatError = class extends Error {
+  name = "CharterFormatError";
+};
+
+// src/bundled-docs/charter-catalog/repository-paths.ts
+import { execFile as execFile5 } from "node:child_process";
+import { promisify as promisify5 } from "node:util";
+var run = promisify5(execFile5);
+var BaseRefSchema = external_exports.string().regex(/^[^\s-]\S*$/, 'base must be a git ref or commit, and cannot start with "-"');
+var GitRepositoryPathsPropsSchema = external_exports.object({ cwd: external_exports.string().min(1) });
+var GitRepositoryPaths = class {
+  cwd;
+  constructor(props) {
+    this.cwd = GitRepositoryPathsPropsSchema.parse(props).cwd;
+  }
+  async inventory() {
+    const root = await this.root();
+    return this.paths(root, ["ls-files", "-z", "--cached", "--others", "--exclude-standard"]);
+  }
+  async changedSince(base) {
+    const ref = BaseRefSchema.parse(base);
+    const root = await this.root();
+    const mergeBase = (await this.git(root, ["merge-base", ref, "HEAD"])).trim();
+    if (mergeBase.length === 0) throw new RepositoryPathsError(`No merge base between ${ref} and HEAD`);
+    const changed = await this.paths(root, ["diff", "-z", "--name-only", mergeBase]);
+    const untracked = await this.paths(root, ["ls-files", "-z", "--others", "--exclude-standard"]);
+    return [.../* @__PURE__ */ new Set([...changed, ...untracked])];
+  }
+  // Path queries run from the top level so the result never depends on which subdirectory the caller is in.
+  async root() {
+    return (await this.git(this.cwd, ["rev-parse", "--show-toplevel"])).replace(/\r?\n$/, "");
+  }
+  // NUL-delimited output keeps paths verbatim; newline output quotes non-ASCII and special characters.
+  async paths(root, args) {
+    return (await this.git(root, args)).split("\0").filter((path3) => path3.length > 0);
+  }
+  async git(cwd, args) {
+    try {
+      const { stdout } = await run("git", args, { cwd, maxBuffer: 64 * 1024 * 1024 });
+      return stdout;
+    } catch (cause) {
+      throw new RepositoryPathsError(`git ${args[0]} failed in ${cwd}`, { cause });
+    }
+  }
+};
+var RepositoryPathsError = class extends Error {
+  name = "RepositoryPathsError";
+};
 
 // src/code-review/commands/command.ts
 import { readFileSync as readFileSync11 } from "node:fs";
@@ -49652,8 +49774,8 @@ var ValidatedEvidencePropsSchema = external_exports.strictObject({
 });
 
 // src/code-review/github-review-verifier.ts
-import { execFile as execFile5 } from "node:child_process";
-import { promisify as promisify5 } from "node:util";
+import { execFile as execFile6 } from "node:child_process";
+import { promisify as promisify6 } from "node:util";
 var GhReviewGitHubApi = class {
   async get(path3) {
     return this.run(["api", path3]);
@@ -49671,7 +49793,7 @@ var GhReviewGitHubApi = class {
     ]);
   }
   async run(args) {
-    const { stdout } = await promisify5(execFile5)("gh", args, { maxBuffer: 2e7 });
+    const { stdout } = await promisify6(execFile6)("gh", args, { maxBuffer: 2e7 });
     return JSON.parse(stdout);
   }
 };
@@ -49773,8 +49895,8 @@ var GitHubReviewVerifier = class {
       )
     );
     if (file2.type !== "file" || file2.encoding !== "base64") return false;
-    const text6 = Buffer.from(file2.content, "base64").toString("utf8");
-    const lines = text6 === "" ? 0 : text6.split("\n").length - (text6.endsWith("\n") ? 1 : 0);
+    const text7 = Buffer.from(file2.content, "base64").toString("utf8");
+    const lines = text7 === "" ? 0 : text7.split("\n").length - (text7.endsWith("\n") ? 1 : 0);
     return line <= lines;
   }
   async comment(id, url2) {
@@ -50008,7 +50130,7 @@ function createConfigCommand(getStore) {
 
 // src/shared/commands/board/command.ts
 import { createInterface } from "node:readline";
-import { text as text4 } from "node:stream/consumers";
+import { text as text5 } from "node:stream/consumers";
 import { Writable } from "node:stream";
 
 // src/shared/collect.ts
@@ -50019,7 +50141,7 @@ function collect(value, previous3) {
 // src/shared/commands/board/command.ts
 var HiddenPrompt = class {
   async read(label) {
-    if (process.stdin.isTTY !== true) return text4(process.stdin);
+    if (process.stdin.isTTY !== true) return text5(process.stdin);
     process.stderr.write(label);
     const muted = new Writable({ write: (_chunk, _encoding, done) => done() });
     const prompt = createInterface({ input: process.stdin, output: muted, terminal: true });
@@ -50207,14 +50329,14 @@ var PacketFile = class {
   path;
   /** The file's JSON exactly as written; strict validation happens before anything is sent. */
   read() {
-    let text6;
+    let text7;
     try {
-      text6 = readFileSync12(this.path, "utf8");
+      text7 = readFileSync12(this.path, "utf8");
     } catch (err) {
       throw new Error(`cannot read ${this.path}: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
     }
     try {
-      return JSON.parse(text6);
+      return JSON.parse(text7);
     } catch (err) {
       throw new Error(`${this.path} is not valid JSON: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
     }
@@ -50317,8 +50439,8 @@ var maxReported = 5;
 var RegexPortableContextGuard = class {
   find(body) {
     return body.split("\n").flatMap(
-      (text6, index2) => localReferencePatterns.flatMap(
-        (pattern) => [...text6.matchAll(pattern)].map((m) => ({ line: index2 + 1, match: m[0].replace(trailingPunctuation, "") }))
+      (text7, index2) => localReferencePatterns.flatMap(
+        (pattern) => [...text7.matchAll(pattern)].map((m) => ({ line: index2 + 1, match: m[0].replace(trailingPunctuation, "") }))
       )
     );
   }
@@ -50848,7 +50970,7 @@ var BlobSectionSource = class {
       if (current !== void 0) raw[current]?.push(line);
       i++;
     }
-    const text6 = (key) => {
+    const text7 = (key) => {
       const joined = (raw[key] ?? []).join("\n").trim();
       return joined.length > 0 ? joined : void 0;
     };
@@ -50858,7 +50980,7 @@ var BlobSectionSource = class {
       fixedWhenItems: this.checklistItems(raw.fixedWhen)
     };
     for (const key of stringSectionKeys) {
-      const value = text6(key);
+      const value = text7(key);
       if (value !== void 0) sections[key] = value;
     }
     return sections;
@@ -51048,11 +51170,11 @@ var TrackerEvidenceService = class {
   openingFence(line) {
     const match = fenceRun.exec(line);
     if (match === null) return void 0;
-    const run2 = match[1];
+    const run3 = match[1];
     const rest = match[2];
-    if (run2 === void 0 || rest === void 0) return void 0;
-    if (run2.charAt(0) === "`" && rest.includes("`")) return void 0;
-    return { char: run2.charAt(0), length: run2.length };
+    if (run3 === void 0 || rest === void 0) return void 0;
+    if (run3.charAt(0) === "`" && rest.includes("`")) return void 0;
+    return { char: run3.charAt(0), length: run3.length };
   }
   /**
    * A line closes an open fence only when it is a run of the SAME character, at
@@ -51061,10 +51183,10 @@ var TrackerEvidenceService = class {
   closesFence(line, fence) {
     const match = fenceRun.exec(line);
     if (match === null) return false;
-    const run2 = match[1];
+    const run3 = match[1];
     const rest = match[2];
-    if (run2 === void 0 || rest === void 0) return false;
-    return run2.charAt(0) === fence.char && run2.length >= fence.length && rest.trim().length === 0;
+    if (run3 === void 0 || rest === void 0) return false;
+    return run3.charAt(0) === fence.char && run3.length >= fence.length && rest.trim().length === 0;
   }
   rewriteLine(line, byName) {
     let result = "";
@@ -51425,7 +51547,7 @@ function createCheckCommand(getConfig, getTracker, getConfigPath, getProbe, getF
 }
 
 // src/hooks/commands/hook/command.ts
-import { text as text5 } from "node:stream/consumers";
+import { text as text6 } from "node:stream/consumers";
 
 // src/hooks/board-heartbeat/board-heartbeat.ts
 import { spawn } from "node:child_process";
@@ -51463,24 +51585,24 @@ var TicketKeyExtractor = class {
   /** A "ticket <KEY>" or "building <KEY>" phrase, then the first key. */
   fromPrompt(prompt) {
     if (prompt === void 0) return void 0;
-    const text6 = this.withoutUrls(prompt);
-    for (const match of text6.matchAll(phrasePattern)) {
+    const text7 = this.withoutUrls(prompt);
+    for (const match of text7.matchAll(phrasePattern)) {
       const key = this.valid(match[1]);
       if (key !== void 0) return key;
     }
-    return this.firstKey(text6);
+    return this.firstKey(text7);
   }
   /** The first key in a description, a branch name or a directory name. */
-  firstKey(text6) {
-    if (text6 === void 0) return void 0;
-    for (const match of this.withoutUrls(text6).matchAll(keyPattern)) {
+  firstKey(text7) {
+    if (text7 === void 0) return void 0;
+    for (const match of this.withoutUrls(text7).matchAll(keyPattern)) {
       const key = this.valid(match[0]);
       if (key !== void 0) return key;
     }
     return void 0;
   }
-  withoutUrls(text6) {
-    return text6.replace(urlPattern, " ");
+  withoutUrls(text7) {
+    return text7.replace(urlPattern, " ");
   }
   valid(candidate) {
     if (candidate === void 0) return void 0;
@@ -51850,8 +51972,8 @@ var AgentTicketResolver = class {
       return void 0;
     }
     for (const line of head.split("\n")) {
-      const text6 = this.userText(line);
-      if (text6 !== void 0) return text6;
+      const text7 = this.userText(line);
+      if (text7 !== void 0) return text7;
     }
     return void 0;
   }
@@ -51867,8 +51989,8 @@ var AgentTicketResolver = class {
     if (parsed.type !== "user" || parsed.message === void 0) return void 0;
     const content3 = parsed.message.content;
     if (typeof content3 === "string") return content3;
-    const text6 = content3.filter((part) => part.type === "text" && part.text !== void 0).map((part) => part.text).join("\n");
-    return text6 === "" ? void 0 : text6;
+    const text7 = content3.filter((part) => part.type === "text" && part.text !== void 0).map((part) => part.text).join("\n");
+    return text7 === "" ? void 0 : text7;
   }
 };
 
@@ -51922,9 +52044,9 @@ var closingBlock = new RegExp(
 var attributionLine = new RegExp(String.raw`(?:^|\r?\n)[ \t]*${trailerText}${lineEnd}`, "gi");
 var messageCommand = /(^|[\s;&|(])(?:git\b[^\n;&|]*\bcommit\b|gh\s+pr\s+(?:create|edit)\b|flight-rules\s+(?:git\s+commit|pr\s+create)\b)/;
 var AttributionStripper = class {
-  strip(text6) {
-    const stripped = text6.replace(closingBlock, "").replace(attributionLine, "");
-    if (stripped === text6) return text6;
+  strip(text7) {
+    const stripped = text7.replace(closingBlock, "").replace(attributionLine, "");
+    if (stripped === text7) return text7;
     return stripped.replace(/\n{3,}/g, "\n\n");
   }
   /** The command with attribution removed, or undefined when it writes no message or carries none. */
@@ -52096,7 +52218,7 @@ var DefaultBoardHookServices = class {
   }
 };
 var defaultBoardServices = new DefaultBoardHookServices();
-function createHookCommand(getHandler = () => new PreBashHook(), readStdin = () => text5(process.stdin), boardServices = defaultBoardServices) {
+function createHookCommand(getHandler = () => new PreBashHook(), readStdin = () => text6(process.stdin), boardServices = defaultBoardServices) {
   const hook2 = new Command("hook").description("handlers for the plugin's Claude Code hooks");
   hook2.command("pre-bash").alias("guard-commit").description(
     "PreToolUse(Bash): block a hand-written `git commit` in a flight-rules repo, and strip Claude's attribution trailers from commit and PR commands"
@@ -52427,6 +52549,12 @@ function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = () => cr
   program2.addCommand(createQaCommand(config2, getConfigPath, void 0, () => services.evidence()));
   program2.addCommand(createCompetenciesCommand(config2));
   program2.addCommand(createDocCommand(() => services.docs()));
+  program2.addCommand(
+    createCharterCommand(
+      () => new DocCharterCatalog({ docs: services.docs() }),
+      () => new GitRepositoryPaths({ cwd: process.cwd() })
+    )
+  );
   program2.addCommand(createReviewCommand());
   program2.addCommand(createCheckCommand(config2, tracker, getConfigPath, () => services.probe(), void 0, () => services.readiness()));
   program2.addCommand(
@@ -52438,7 +52566,7 @@ function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = () => cr
   program2.addCommand(createPacketCommand(() => services.packets()));
   return program2;
 }
-async function run(argv, flightRules = createFlightRules()) {
+async function run2(argv, flightRules = createFlightRules()) {
   await buildProgram(
     (override) => flightRules.tracker(override),
     (override) => flightRules.config(override),
@@ -52451,7 +52579,7 @@ async function run(argv, flightRules = createFlightRules()) {
 }
 
 // src/agents/agent-frontmatter/agent-frontmatter.ts
-var import_yaml3 = __toESM(require_dist(), 1);
+var import_yaml4 = __toESM(require_dist(), 1);
 var MissingFrontmatterError = class extends Error {
   name = "MissingFrontmatterError";
 };
@@ -52461,7 +52589,7 @@ var YamlAgentFrontmatterParser = class {
     if (match === null || match.index !== 0 || match[1] === void 0) {
       throw new MissingFrontmatterError("agent file has no leading --- frontmatter block");
     }
-    const raw = (0, import_yaml3.parse)(match[1]);
+    const raw = (0, import_yaml4.parse)(match[1]);
     if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
       throw new MissingFrontmatterError("frontmatter is not a YAML mapping");
     }
@@ -52471,7 +52599,7 @@ var YamlAgentFrontmatterParser = class {
 var agentFrontmatterParser = new YamlAgentFrontmatterParser();
 
 // src/main.ts
-run(process.argv.slice(2)).catch((err) => {
+run2(process.argv.slice(2)).catch((err) => {
   if (err instanceof CommanderError) {
     process.exit(err.exitCode);
   }

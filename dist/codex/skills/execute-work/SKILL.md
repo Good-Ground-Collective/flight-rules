@@ -189,10 +189,10 @@ The command prints `{"branch":"…","from":null,"renamedFrom":null}`. Keep that 
 Build the brief you will hand `code-implementation`. It gets exactly:
 
 - **The ticket's full body, in whichever format step 1 settled** — every section, including the Guided Walkthrough on a layered body or the Reproduction Notes on a bug report. Don't summarize it; the agent is a lower-tier model and paraphrase loses the contract.
-- **A pointer to the coding charter**: run this command and pass the printed path. The agent must read it in full, not your précis.
+- **Pointers to the coding charters**: run this command in the repository and pass every printed path — the core charter plus the language charter for each language in the repository. The agent must read them in full, not your précis.
 
   ```bash
-  flight-rules doc coding-charter --path
+  flight-rules charter --repo --path
   ```
 
 - **Parent RFC / TDD content, when the ticket links one.** Read the parent epic for the technical writeup, using the `metadata.epicId` you noted in step 1:
