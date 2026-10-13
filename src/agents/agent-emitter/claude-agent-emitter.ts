@@ -1,19 +1,11 @@
 import { stringify as stringifyYaml } from "yaml";
 import { z } from "zod";
-import { AgentRegistrationSchema, type AgentFrontmatter } from "../agent-frontmatter/agent-frontmatter.schema.js";
+import type { AgentFrontmatter } from "../agent-frontmatter/agent-frontmatter.schema.js";
 import type { AgentDefinition } from "../agent-registry/agent-registry.js";
 import { type AgentEmitter, UnsupportedAgentSettingError } from "./agent-emitter.js";
+import { AgentDefinitionSchema, ModelBindingsSchema } from "./agent-emitter.schema.js";
 
-const ModelBindingsSchema = z.strictObject({
-  standard: z.string().trim().min(1),
-  escalated: z.string().trim().min(1),
-  expert: z.string().trim().min(1),
-});
 const ClaudeAgentEmitterPropsSchema = z.strictObject({ models: ModelBindingsSchema });
-const AgentDefinitionSchema = z.strictObject({
-  frontmatter: AgentRegistrationSchema,
-  body: z.string().refine((body) => body.trim() !== "", "agent prompt must not be empty"),
-});
 type ClaudeAgentEmitterProps = z.infer<typeof ClaudeAgentEmitterPropsSchema>;
 
 /** Host bindings are separate from canonical prompts and do not silently weaken execution restrictions. */
