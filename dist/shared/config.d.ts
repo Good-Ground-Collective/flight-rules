@@ -43,5 +43,5 @@ export declare class NodePathProbe implements PathProbe {
  * in an existing .agents directory, then .claude/flight-rules.local.md.
  */
 export declare function resolveConfigPath(// eslint-disable-line preflight/no-loose-functions -- resolveConfigPath is module-level behaviour awaiting a home on a service; tracked in KAN-39
-cwd: string, override: string | undefined, probe?: PathProbe): string;
+cwd: string, override: string | undefined, probe?: PathProbe, host?: "claude" | "codex"): string;
 export declare function getQaRecipePath(config: Config, configPath: string): string;

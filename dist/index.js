@@ -445,8 +445,8 @@ var GhPullRequestHost = class {
 };
 
 // src/shared/config-store.ts
-import { existsSync as existsSync4, mkdirSync as mkdirSync2, readFileSync as readFileSync4, writeFileSync as writeFileSync2 } from "node:fs";
-import { dirname as dirname4 } from "node:path";
+import { existsSync as existsSync6, mkdirSync as mkdirSync4, readFileSync as readFileSync6, writeFileSync as writeFileSync4 } from "node:fs";
+import { dirname as dirname6 } from "node:path";
 
 // src/shared/config.ts
 import { existsSync as existsSync2, readFileSync as readFileSync2, statSync as statSync2 } from "node:fs";
@@ -720,7 +720,7 @@ var NodePathProbe = class {
   }
 };
 var nodePathProbe = new NodePathProbe();
-function resolveConfigPath(cwd, override, probe = nodePathProbe) {
+function resolveConfigPath(cwd, override, probe = nodePathProbe, host = "claude") {
   if (override !== void 0) {
     return isAbsolute(override) ? override : resolve2(cwd, override);
   }
@@ -729,6 +729,7 @@ function resolveConfigPath(cwd, override, probe = nodePathProbe) {
   const candidates = [claudePath, agentsPath];
   const existing = candidates.find((path) => probe.isFile(path));
   if (existing !== void 0) return existing;
+  if (host === "codex") return agentsPath;
   return candidates.find((path) => probe.isDirectory(dirname2(path))) ?? claudePath;
 }
 function getQaRecipePath(config, configPath) {
@@ -811,6 +812,203 @@ var ClaudeSettingsSource = class {
   }
 };
 
+// src/shared/host-settings/neutral-settings-source.ts
+import { existsSync as existsSync4, mkdirSync as mkdirSync2, readFileSync as readFileSync4, writeFileSync as writeFileSync2 } from "node:fs";
+import { homedir as homedir2 } from "node:os";
+import { dirname as dirname4, join as join5 } from "node:path";
+import { z as z10 } from "zod";
+var PropsSchema = z10.object({
+  cwd: z10.string().min(1),
+  home: z10.string().min(1).default(homedir2),
+  untrackedCwd: z10.string().min(1).optional()
+});
+var SettingsSchema2 = z10.record(z10.string(), z10.unknown());
+var InvalidSettingsError = class extends Error {
+  name = "InvalidSettingsError";
+};
+var NeutralSettingsSource = class {
+  host = "codex";
+  props;
+  constructor(props) {
+    this.props = PropsSchema.parse(props);
+  }
+  pathFor(scope) {
+    if (scope === "user") return join5(this.props.home, ".agents", "flight-rules.settings.json");
+    if (scope === "project") return join5(this.props.cwd, ".agents", "flight-rules.settings.json");
+    const path = join5(this.props.cwd, ".agents", "flight-rules.settings.local.json");
+    return this.props.untrackedCwd === void 0 || existsSync4(path) ? path : join5(this.props.untrackedCwd, ".agents", "flight-rules.settings.local.json");
+  }
+  read(scope) {
+    const path = this.pathFor(scope);
+    if (!existsSync4(path)) return void 0;
+    try {
+      return SettingsSchema2.parse(JSON.parse(readFileSync4(path, "utf8")));
+    } catch (cause) {
+      throw new InvalidSettingsError(`Invalid flight-rules settings object at ${path}`, { cause });
+    }
+  }
+  write(scope, update) {
+    const values = SettingsSchema2.parse(update(this.read(scope) ?? {}));
+    const path = this.pathFor(scope);
+    mkdirSync2(dirname4(path), { recursive: true });
+    writeFileSync2(path, `${JSON.stringify(values, null, 2)}
+`);
+  }
+  hint() {
+    return `use FLIGHT_RULES_HOST=codex flight-rules config set with --scope user, project or local; inspect paths with config show`;
+  }
+};
+
+// src/plugins/native-installation/native-installation.ts
+import { createHash } from "node:crypto";
+import { existsSync as existsSync5, lstatSync, mkdirSync as mkdirSync3, readFileSync as readFileSync5, realpathSync as realpathSync2, writeFileSync as writeFileSync3 } from "node:fs";
+import { homedir as homedir3 } from "node:os";
+import { dirname as dirname5, join as join6, resolve as resolve3 } from "node:path";
+import { fileURLToPath as fileURLToPath2 } from "node:url";
+import { z as z12 } from "zod";
+
+// src/agents/agent-frontmatter/agent-frontmatter.schema.ts
+import { z as z11 } from "zod";
+var agentCapabilities = ["read", "edit", "shell", "web", "spawn", "ask"];
+var modelTiers = ["standard", "escalated", "expert"];
+var reasoningLevels = ["low", "medium", "high"];
+var claudeAgentColors = ["red", "blue", "green", "yellow", "purple", "orange", "pink", "cyan"];
+var AgentCapabilitySchema = z11.enum(agentCapabilities);
+var ModelTierSchema = z11.enum(modelTiers);
+var AgentFrontmatterSchema = z11.strictObject({
+  name: z11.string().regex(/^[a-z][a-z0-9-]*$/),
+  description: z11.string().min(1),
+  capabilities: z11.array(AgentCapabilitySchema).min(1).refine(
+    (capabilities) => new Set(capabilities).size === capabilities.length,
+    { message: "duplicate capability" }
+  ),
+  model: ModelTierSchema,
+  modelReason: z11.string().trim().min(1).optional(),
+  reasoning: z11.enum(reasoningLevels).optional(),
+  sandbox: z11.strictObject({
+    fs: z11.enum(["read-only", "workspace-write"]),
+    network: z11.enum(["none", "enabled"])
+  }).optional(),
+  dispatch: z11.strictObject({
+    maxConcurrent: z11.int().positive(),
+    maxDepth: z11.int().positive()
+  }).optional(),
+  "x-claude": z11.strictObject({ color: z11.enum(claudeAgentColors).optional() }).optional()
+});
+var AgentRegistrationSchema = AgentFrontmatterSchema.refine(
+  (agent) => agent.model !== "expert" || agent.modelReason !== void 0,
+  { message: "expert tier requires modelReason", path: ["modelReason"] }
+);
+
+// src/plugins/native-installation/native-installation.ts
+var NativeHostSchema = z12.enum(["claude", "codex"]);
+var AgentInstallScopeSchema = z12.enum(["project", "user"]);
+var InstallationManifestSchema = z12.strictObject({
+  host: NativeHostSchema,
+  agents: z12.array(z12.strictObject({
+    name: z12.string().regex(/^[a-z][a-z0-9-]*$/),
+    sha256: z12.string().regex(/^[a-f0-9]{64}$/),
+    registration: AgentRegistrationSchema
+  })).min(1)
+}).refine((value) => new Set(value.agents.map((agent) => agent.name)).size === value.agents.length, "Duplicate agent names").refine((value) => value.agents.every((agent) => agent.name === agent.registration.name), "Registration name mismatch");
+var PropsSchema2 = z12.object({
+  root: z12.string().min(1),
+  cwd: z12.string().min(1),
+  home: z12.string().min(1).default(homedir3),
+  env: z12.record(z12.string(), z12.string().optional()).default({})
+});
+var NativeInstallationError = class extends Error {
+  name = "NativeInstallationError";
+};
+var FileNativeInstallation = class _FileNativeInstallation {
+  props;
+  constructor(props) {
+    this.props = PropsSchema2.parse({ ...props, env: props.env === void 0 ? void 0 : { ...props.env } });
+  }
+  host() {
+    const path = join6(this.props.root, "flight-rules-install.json");
+    return existsSync5(path) ? this.manifest(this.props.root).host : void 0;
+  }
+  status(scope) {
+    const selected = AgentInstallScopeSchema.parse(scope);
+    const root = this.codexRoot();
+    const manifest = this.manifest(root);
+    const directory = selected === "project" ? resolve3(this.props.cwd, ".codex", "agents") : resolve3(this.props.env["CODEX_HOME"] || join6(this.props.home, ".codex"), "agents");
+    this.assertRegularPath(directory);
+    const agents = manifest.agents.map((agent) => {
+      const source = join6(root, ".codex", "agents", `${agent.name}.toml`);
+      this.assertRegularPath(source);
+      if (!existsSync5(source) || !lstatSync(source).isFile() || this.hash(readFileSync5(source)) !== agent.sha256) {
+        throw new NativeInstallationError(`Bundled registration is missing or changed: ${source}. Rebuild or reinstall the Codex plugin.`);
+      }
+      const path = join6(directory, `${agent.name}.toml`);
+      this.assertRegularPath(path);
+      const status = !existsSync5(path) ? "missing" : lstatSync(path).isFile() && this.hash(readFileSync5(path)) === agent.sha256 ? "present" : "conflict";
+      return { name: agent.name, path, status };
+    });
+    return {
+      host: "codex",
+      scope: selected,
+      directory,
+      agents,
+      ok: agents.every((agent) => agent.status === "present"),
+      evidence: "files-only",
+      remedy: "Install missing registrations with agents install. For conflicts, compare and back up the existing file before explicitly removing it and reinstalling. Start a new trusted Codex session and confirm native discovery; file presence does not prove dispatch access."
+    };
+  }
+  install(scope) {
+    const report = this.status(scope);
+    const conflicts = report.agents.filter((agent) => agent.status === "conflict");
+    if (conflicts.length > 0) {
+      throw new NativeInstallationError(`Existing agent definitions differ: ${conflicts.map((agent) => agent.path).join(", ")}. ${report.remedy}`);
+    }
+    const root = this.codexRoot();
+    for (const agent of report.agents.filter((agent2) => agent2.status === "missing")) {
+      this.assertRegularPath(report.directory);
+      mkdirSync3(report.directory, { recursive: true });
+      writeFileSync3(agent.path, readFileSync5(join6(root, ".codex", "agents", `${agent.name}.toml`)), { flag: "wx" });
+    }
+    return this.status(scope);
+  }
+  codexRoot() {
+    const root = resolve3(this.props.root);
+    if (this.host() === "codex") return root;
+    const target = join6(root, "dist", "codex");
+    if (existsSync5(join6(target, "flight-rules-install.json")) && this.manifest(target).host === "codex") return target;
+    throw new NativeInstallationError("Codex registrations are unavailable in this installation. Run agents install from the Codex plugin or the complete npm package. Claude discovers agents through its native plugin installation.");
+  }
+  manifest(root) {
+    try {
+      return InstallationManifestSchema.parse(JSON.parse(readFileSync5(join6(root, "flight-rules-install.json"), "utf8")));
+    } catch (cause) {
+      throw new NativeInstallationError(`Invalid installation manifest at ${root}; rebuild or reinstall flight-rules`, { cause });
+    }
+  }
+  hash(contents) {
+    return createHash("sha256").update(contents).digest("hex");
+  }
+  assertRegularPath(path) {
+    let current = resolve3(path);
+    const anchors = [this.props.cwd, this.props.home, this.props.env["CODEX_HOME"], this.props.root].filter((anchor) => anchor !== void 0).map((anchor) => resolve3(anchor));
+    while (!anchors.includes(current) && dirname5(current) !== current) {
+      try {
+        if (lstatSync(current).isSymbolicLink()) throw new NativeInstallationError(`Refusing symlinked installation path: ${current}`);
+      } catch (cause) {
+        if (!(cause instanceof Error && "code" in cause && cause.code === "ENOENT")) throw cause;
+      }
+      current = dirname5(current);
+    }
+    if (existsSync5(current)) realpathSync2(current);
+  }
+  static fromInstall(props) {
+    return new _FileNativeInstallation({
+      root: props.env["FLIGHT_RULES_HOME"]?.trim() || join6(dirname5(fileURLToPath2(props.moduleUrl)), ".."),
+      cwd: props.cwd,
+      env: props.env
+    });
+  }
+};
+
 // src/shared/config-store.ts
 var configScopes = ["user", "project", "local", "file"];
 var userScopedKeys = /* @__PURE__ */ new Set(["ariadne.url", "ariadne.enabled"]);
@@ -825,20 +1023,23 @@ var ConfigStore = class {
     this.env = props.env ?? process.env;
     this.pathProbe = props.pathProbe;
     this.untrackedRoot = props.untrackedRoot;
-    this.hostSettings = props.hostSettings ?? new ClaudeSettingsSource({
+    const host = NativeHostSchema.parse(props.host ?? this.env["FLIGHT_RULES_HOST"] ?? "claude");
+    const settingsProps = {
       cwd: props.cwd,
       env: this.env,
       ...props.home !== void 0 ? { home: props.home } : {},
       ...props.untrackedRoot !== void 0 ? { untrackedCwd: props.untrackedRoot } : {}
-    });
+    };
+    this.hostSettings = props.hostSettings ?? (host === "codex" ? new NeutralSettingsSource(settingsProps) : new ClaudeSettingsSource(settingsProps));
   }
   /** The flight-rules config file path, as `flight-rules config path` reports it. */
   filePath() {
     const override = this.env["FLIGHT_RULES_CONFIG"];
-    const here = resolveConfigPath(this.cwd, override, this.pathProbe);
+    const host = this.hostSettings.host === "codex" ? "codex" : "claude";
+    const here = resolveConfigPath(this.cwd, override, this.pathProbe, host);
     if (override !== void 0 || this.untrackedRoot === void 0) return here;
-    const isFile = this.pathProbe?.isFile.bind(this.pathProbe) ?? existsSync4;
-    return isFile(here) ? here : resolveConfigPath(this.untrackedRoot, void 0, this.pathProbe);
+    const isFile = this.pathProbe?.isFile.bind(this.pathProbe) ?? existsSync6;
+    return isFile(here) ? here : resolveConfigPath(this.untrackedRoot, void 0, this.pathProbe, host);
   }
   pathFor(scope) {
     return scope === "file" ? this.filePath() : this.hostSettings.pathFor(scope);
@@ -861,9 +1062,9 @@ var ConfigStore = class {
   inspect() {
     const merged = this.merge();
     const result = ConfigSchema.safeParse(merged.values);
-    if (result.success) return { valid: true, ...merged, values: result.data };
+    if (result.success) return { host: this.hostSettings.host, valid: true, ...merged, values: result.data };
     const error = Object.keys(merged.values).length === 0 ? "no flight-rules config found" : result.error.issues.map((i) => `${i.path.join(".") || "config"}: ${i.message}`).join("; ");
-    return { valid: false, error, ...merged };
+    return { host: this.hostSettings.host, valid: false, error, ...merged };
   }
   /**
    * The scope a write lands in when the caller names none: wherever the key
@@ -925,8 +1126,8 @@ var ConfigStore = class {
   readLayer(scope) {
     const path = this.pathFor(scope);
     if (scope === "file") {
-      if (!existsSync4(path)) return { scope, path, present: false, values: {} };
-      return { scope, path, present: true, values: parseFrontmatter(readFileSync4(path, "utf-8")) };
+      if (!existsSync6(path)) return { scope, path, present: false, values: {} };
+      return { scope, path, present: true, values: parseFrontmatter(readFileSync6(path, "utf-8")) };
     }
     const values = this.hostSettings.read(scope);
     return { scope, path, present: values !== void 0, values: values ?? {} };
@@ -937,11 +1138,11 @@ var ConfigStore = class {
       return;
     }
     const path = this.filePath();
-    const contents = existsSync4(path) ? readFileSync4(path, "utf-8") : void 0;
-    mkdirSync2(dirname4(path), { recursive: true });
+    const contents = existsSync6(path) ? readFileSync6(path, "utf-8") : void 0;
+    mkdirSync4(dirname6(path), { recursive: true });
     const values = update(contents === void 0 ? {} : parseFrontmatter(contents));
     const body = contents?.replace(/^---\n[\s\S]*?\n---\n?/, "") ?? "";
-    writeFileSync2(path, `${this.toFrontmatter(values)}${body}`);
+    writeFileSync4(path, `${this.toFrontmatter(values)}${body}`);
   }
   toFrontmatter(values) {
     const lines = Object.entries(values).flatMap(
@@ -977,7 +1178,7 @@ ${lines.join("\n")}
 
 // src/git/worktree-locator/worktree-locator.ts
 import { execFileSync } from "node:child_process";
-import { basename, dirname as dirname5 } from "node:path";
+import { basename, dirname as dirname7 } from "node:path";
 var WorktreeLocator = class {
   execFileSync;
   constructor(props = {}) {
@@ -994,13 +1195,13 @@ var WorktreeLocator = class {
     const [gitDir, commonDir] = output.trim().split("\n");
     if (gitDir === void 0 || commonDir === void 0 || gitDir === commonDir) return void 0;
     if (basename(commonDir) !== ".git") return void 0;
-    return dirname5(commonDir);
+    return dirname7(commonDir);
   }
 };
 
 // src/tasks/evidence/evidence-location.ts
 import { execFileSync as execFileSync2 } from "node:child_process";
-import { dirname as dirname6, join as join5 } from "node:path";
+import { dirname as dirname8, join as join7 } from "node:path";
 var EvidenceLocation = class {
   root;
   execFileSync;
@@ -1012,7 +1213,7 @@ var EvidenceLocation = class {
     if (ticket.trim() === "" || /[/\\]|\.\./.test(ticket)) {
       throw new Error(`invalid ticket id "${ticket}" for an evidence directory`);
     }
-    const path = join5(dirname6(resolveConfigPath(this.root, void 0)), "evidence", ticket);
+    const path = join7(dirname8(resolveConfigPath(this.root, void 0)), "evidence", ticket);
     return { path, gitignored: this.isIgnored(path) };
   }
   isIgnored(path) {
@@ -1026,11 +1227,11 @@ var EvidenceLocation = class {
 };
 
 // src/shared/env.ts
-import { z as z10 } from "zod";
-var EnvSchema = z10.object({
-  githubToken: z10.string().optional(),
-  jiraToken: z10.string().optional(),
-  jiraEmail: z10.string().optional(),
+import { z as z13 } from "zod";
+var EnvSchema = z13.object({
+  githubToken: z13.string().optional(),
+  jiraToken: z13.string().optional(),
+  jiraEmail: z13.string().optional(),
   jiraHost: JiraHostSchema.optional()
 });
 var EnvLoader = class {
@@ -1056,10 +1257,10 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.67.0";
+var appVersion = false ? "0.0.0-dev" : "1.77.0";
 
 // src/shared/ariadne/review-packet.schema.ts
-import { z as z11 } from "zod";
+import { z as z14 } from "zod";
 var packetLimits = {
   title: 200,
   objective: 600,
@@ -1075,74 +1276,74 @@ var packetLimits = {
 };
 var focusAreaKinds = ["design-pattern", "business-logic", "data-schema", "other"];
 var anchorSides = ["LEFT", "RIGHT"];
-var textSchema = (max) => z11.string().min(1, "must not be blank").max(max, `must be at most ${max} characters`);
+var textSchema = (max) => z14.string().min(1, "must not be blank").max(max, `must be at most ${max} characters`);
 var oneLineTextSchema = (max) => textSchema(max).refine((value) => !/[\r\n]/.test(value), "must be one line");
-var PositiveIntSchema = z11.number().int().positive();
+var PositiveIntSchema = z14.number().int().positive();
 var PacketIdSchema = AgentRecordIdSchema;
-var OperationIdSchema = z11.string().regex(/^[A-Za-z0-9_-]{16,80}$/, "must be 16\u201380 letters, digits, underscores or hyphens");
-var HeadShaSchema = z11.string().regex(/^[0-9a-f]{40}$/, "must be a 40-character lowercase hex commit sha");
-var GithubLoginSchema = z11.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/, "must be a GitHub login");
-var PacketAnchorSchema = z11.strictObject({
+var OperationIdSchema = z14.string().regex(/^[A-Za-z0-9_-]{16,80}$/, "must be 16\u201380 letters, digits, underscores or hyphens");
+var HeadShaSchema = z14.string().regex(/^[0-9a-f]{40}$/, "must be a 40-character lowercase hex commit sha");
+var GithubLoginSchema = z14.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/, "must be a GitHub login");
+var PacketAnchorSchema = z14.strictObject({
   path: textSchema(packetLimits.path),
   line: PositiveIntSchema,
   startLine: optionalSchema(PositiveIntSchema),
-  side: z11.enum(anchorSides)
+  side: z14.enum(anchorSides)
 }).refine((anchor) => anchor.startLine === void 0 || anchor.startLine < anchor.line, {
   path: ["startLine"],
   message: "must be before line"
 });
-var SignOffTimeSchema = z11.string().regex(/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,3})?Z$/, "must be an ISO 8601 UTC time ending in Z").refine((value) => {
+var SignOffTimeSchema = z14.string().regex(/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,3})?Z$/, "must be an ISO 8601 UTC time ending in Z").refine((value) => {
   const [year = 0, month = 0, day = 0] = value.slice(0, 10).split("-").map(Number);
   const date = new Date(Date.UTC(year, month - 1, day));
   return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
 }, "must be a real calendar date");
-var FocusAreaSchema = z11.strictObject({
+var FocusAreaSchema = z14.strictObject({
   id: AgentRecordIdSchema,
-  kind: z11.enum(focusAreaKinds),
+  kind: z14.enum(focusAreaKinds),
   title: oneLineTextSchema(packetLimits.title),
   rationale: textSchema(packetLimits.rationale),
-  anchors: z11.array(PacketAnchorSchema).max(packetLimits.anchors, `up to ${packetLimits.anchors} anchors`)
+  anchors: z14.array(PacketAnchorSchema).max(packetLimits.anchors, `up to ${packetLimits.anchors} anchors`)
 });
-var PacketPrSchema = z11.strictObject({
-  repo: z11.string().regex(/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9_.-]{1,100}$/, "must be owner/name"),
+var PacketPrSchema = z14.strictObject({
+  repo: z14.string().regex(/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9_.-]{1,100}$/, "must be owner/name"),
   number: PositiveIntSchema,
   headSha: HeadShaSchema,
   title: oneLineTextSchema(packetLimits.title),
   ticket: optionalSchema(oneLineTextSchema(packetLimits.ticket)),
-  signOff: z11.strictObject({ at: SignOffTimeSchema, headSha: HeadShaSchema }).nullable().optional(),
-  focusAreas: z11.array(FocusAreaSchema).max(packetLimits.focusAreas, `up to ${packetLimits.focusAreas} focus areas per PR`)
+  signOff: z14.strictObject({ at: SignOffTimeSchema, headSha: HeadShaSchema }).nullable().optional(),
+  focusAreas: z14.array(FocusAreaSchema).max(packetLimits.focusAreas, `up to ${packetLimits.focusAreas} focus areas per PR`)
 });
-var PacketInputSchema = z11.strictObject({
+var PacketInputSchema = z14.strictObject({
   id: PacketIdSchema,
   title: oneLineTextSchema(packetLimits.title),
-  overview: z11.strictObject({
+  overview: z14.strictObject({
     objective: textSchema(packetLimits.objective),
-    highlights: z11.array(oneLineTextSchema(packetLimits.highlight)).min(1, "at least 1 highlight").max(packetLimits.highlights, `up to ${packetLimits.highlights} highlights`)
+    highlights: z14.array(oneLineTextSchema(packetLimits.highlight)).min(1, "at least 1 highlight").max(packetLimits.highlights, `up to ${packetLimits.highlights} highlights`)
   }),
-  prs: z11.array(PacketPrSchema).min(1, "at least 1 PR").max(packetLimits.prs, `up to ${packetLimits.prs} PRs`),
-  reviewers: z11.array(GithubLoginSchema).min(1, "at least 1 reviewer").max(packetLimits.reviewers, `up to ${packetLimits.reviewers} reviewers`)
+  prs: z14.array(PacketPrSchema).min(1, "at least 1 PR").max(packetLimits.prs, `up to ${packetLimits.prs} PRs`),
+  reviewers: z14.array(GithubLoginSchema).min(1, "at least 1 reviewer").max(packetLimits.reviewers, `up to ${packetLimits.reviewers} reviewers`)
 });
-var PacketUpdateSchema = z11.strictObject({
-  expectedRevision: z11.number().int().nonnegative(),
+var PacketUpdateSchema = z14.strictObject({
+  expectedRevision: z14.number().int().nonnegative(),
   operationId: OperationIdSchema,
   packet: PacketInputSchema.omit({ id: true })
 });
-var GithubSnapshotSchema = z11.looseObject({ id: z11.union([z11.string(), z11.number()]), login: z11.string() });
-var PacketSchema = z11.looseObject({
-  id: z11.string(),
-  authorId: z11.string(),
-  title: z11.string(),
-  overview: z11.looseObject({ objective: z11.string(), highlights: z11.array(z11.string()) }),
-  prs: z11.array(z11.looseObject({ repo: z11.string(), number: z11.number() })),
-  reviewers: z11.array(z11.looseObject({ id: z11.string(), github: GithubSnapshotSchema })),
-  status: z11.enum(["open", "closed"]),
-  revision: z11.number().int(),
-  createdAt: z11.string(),
-  updatedAt: z11.string()
+var GithubSnapshotSchema = z14.looseObject({ id: z14.union([z14.string(), z14.number()]), login: z14.string() });
+var PacketSchema = z14.looseObject({
+  id: z14.string(),
+  authorId: z14.string(),
+  title: z14.string(),
+  overview: z14.looseObject({ objective: z14.string(), highlights: z14.array(z14.string()) }),
+  prs: z14.array(z14.looseObject({ repo: z14.string(), number: z14.number() })),
+  reviewers: z14.array(z14.looseObject({ id: z14.string(), github: GithubSnapshotSchema })),
+  status: z14.enum(["open", "closed"]),
+  revision: z14.number().int(),
+  createdAt: z14.string(),
+  updatedAt: z14.string()
 });
-var ReviewerSchema = z11.looseObject({ id: z11.string(), name: z11.string(), github: GithubSnapshotSchema });
-var PacketResponseSchema = z11.looseObject({ packet: PacketSchema }).transform((response) => response.packet);
-var ReviewerListResponseSchema = z11.looseObject({ reviewers: z11.array(ReviewerSchema) });
+var ReviewerSchema = z14.looseObject({ id: z14.string(), name: z14.string(), github: GithubSnapshotSchema });
+var PacketResponseSchema = z14.looseObject({ packet: PacketSchema }).transform((response) => response.packet);
+var ReviewerListResponseSchema = z14.looseObject({ reviewers: z14.array(ReviewerSchema) });
 
 // src/shared/ariadne/ariadne-transport.ts
 var FetchAriadneTransport = class {
@@ -1302,12 +1503,12 @@ var AriadneClient = class {
 };
 
 // src/shared/ariadne/board-session-store.ts
-import { z as z12 } from "zod";
+import { z as z15 } from "zod";
 
 // src/shared/ariadne/board-state-files.ts
-import { existsSync as existsSync5, mkdirSync as mkdirSync3, readFileSync as readFileSync5, readdirSync as readdirSync2, rmSync, statSync as statSync3, writeFileSync as writeFileSync3 } from "node:fs";
-import { homedir as homedir2 } from "node:os";
-import { join as join6 } from "node:path";
+import { existsSync as existsSync7, mkdirSync as mkdirSync5, readFileSync as readFileSync7, readdirSync as readdirSync2, rmSync, statSync as statSync3, writeFileSync as writeFileSync5 } from "node:fs";
+import { homedir as homedir4 } from "node:os";
+import { join as join8 } from "node:path";
 var stateIdPattern = /^[A-Za-z0-9_-]{1,80}$/;
 var BoardStateFiles = class {
   now;
@@ -1315,19 +1516,19 @@ var BoardStateFiles = class {
   home;
   constructor(props = {}) {
     this.env = props.env ?? process.env;
-    this.home = props.home ?? homedir2();
+    this.home = props.home ?? homedir4();
     this.now = props.now ?? Date.now;
   }
   root() {
     const stateHome = this.env["XDG_STATE_HOME"];
-    const base = stateHome !== void 0 && stateHome !== "" ? stateHome : join6(this.home, ".local", "state");
-    return join6(base, "flight-rules", "board");
+    const base = stateHome !== void 0 && stateHome !== "" ? stateHome : join8(this.home, ".local", "state");
+    return join8(base, "flight-rules", "board");
   }
   read(folder, id, schema) {
     const path = this.pathFor(folder, id);
-    if (path === void 0 || !existsSync5(path)) return void 0;
+    if (path === void 0 || !existsSync7(path)) return void 0;
     try {
-      const parsed = schema.safeParse(JSON.parse(readFileSync5(path, "utf-8")));
+      const parsed = schema.safeParse(JSON.parse(readFileSync7(path, "utf-8")));
       return parsed.success ? parsed.data : void 0;
     } catch {
       return void 0;
@@ -1336,8 +1537,20 @@ var BoardStateFiles = class {
   write(folder, id, value) {
     const path = this.pathFor(folder, id);
     if (path === void 0) return;
-    mkdirSync3(this.folder(folder), { recursive: true, mode: 448 });
-    writeFileSync3(path, JSON.stringify(value), { mode: 384 });
+    mkdirSync5(this.folder(folder), { recursive: true, mode: 448 });
+    writeFileSync5(path, JSON.stringify(value), { mode: 384 });
+  }
+  /** Writes a file only if none exists, atomically; returns whether it wrote. */
+  create(folder, id, value) {
+    const path = this.pathFor(folder, id);
+    if (path === void 0) return false;
+    mkdirSync5(this.folder(folder), { recursive: true, mode: 448 });
+    try {
+      writeFileSync5(path, JSON.stringify(value), { mode: 384, flag: "wx" });
+      return true;
+    } catch {
+      return false;
+    }
   }
   remove(folder, id) {
     const path = this.pathFor(folder, id);
@@ -1346,10 +1559,10 @@ var BoardStateFiles = class {
   /** Deletes a folder's files last written more than `maxAgeMs` ago. */
   prune(folder, maxAgeMs) {
     const dir = this.folder(folder);
-    if (!existsSync5(dir)) return;
+    if (!existsSync7(dir)) return;
     const cutoff = this.now() - maxAgeMs;
     for (const name of readdirSync2(dir)) {
-      const path = join6(dir, name);
+      const path = join8(dir, name);
       try {
         if (statSync3(path).mtimeMs < cutoff) rmSync(path, { force: true });
       } catch {
@@ -1358,44 +1571,46 @@ var BoardStateFiles = class {
     }
   }
   folder(folder) {
-    return folder === void 0 ? this.root() : join6(this.root(), folder);
+    return folder === void 0 ? this.root() : join8(this.root(), folder);
   }
   pathFor(folder, id) {
-    return stateIdPattern.test(id) ? join6(this.folder(folder), `${id}.json`) : void 0;
+    return stateIdPattern.test(id) ? join8(this.folder(folder), `${id}.json`) : void 0;
   }
 };
 
 // src/shared/ariadne/board-session-store.ts
-var HeartbeatRecordSchema = z12.object({
-  session: z12.string(),
-  step: z12.string(),
-  state: z12.enum(agentStates),
-  ticket: z12.string().optional(),
-  repo: z12.string().optional(),
-  branch: z12.string().optional(),
-  skill: z12.string().optional(),
-  detail: z12.string().optional()
+var HeartbeatRecordSchema = z15.object({
+  session: z15.string(),
+  step: z15.string(),
+  state: z15.enum(agentStates),
+  ticket: z15.string().optional(),
+  repo: z15.string().optional(),
+  branch: z15.string().optional(),
+  skill: z15.string().optional(),
+  detail: z15.string().optional()
 });
-var SessionRecordSchema = z12.object({
+var SessionRecordSchema = z15.object({
   heartbeat: HeartbeatRecordSchema,
   /** When a skill last posted this heartbeat. */
-  recordedAt: z12.number(),
+  recordedAt: z15.number(),
   /** When any heartbeat for the session was last sent, by a skill or the hook. */
-  sentAt: z12.number()
+  sentAt: z15.number()
 });
-var InferredRecordSchema = z12.object({
+var InferredRecordSchema = z15.object({
   heartbeat: HeartbeatRecordSchema,
   /** When the hook last sent this inferred heartbeat. */
-  sentAt: z12.number()
+  sentAt: z15.number()
 });
-var ThreadRecordSchema = z12.object({
+var ThreadRecordSchema = z15.object({
   /** The board session a skill last posted to by default from this Claude Code session. */
-  board: z12.string().optional(),
+  board: z15.string().optional(),
   /** When the hook last spawned a branch lookup for this Claude Code session's main thread. */
-  branchCheckedAt: z12.number().optional()
+  branchCheckedAt: z15.number().optional()
 });
+var ThreadSkillRecordSchema = z15.object({ skill: z15.string() });
 var inferredFolder = "inferred";
 var threadsFolder = "threads";
+var threadSkillsFolder = "thread-skills";
 var unsafeSessionCharacters = /[^A-Za-z0-9_-]/g;
 var maxSessionLength = 80;
 var TicketSessionKey = class {
@@ -1423,6 +1638,28 @@ var BoardSessionStore = class {
   record(heartbeat) {
     const now = this.now();
     this.files.write(void 0, heartbeat.session, { heartbeat: this.compact(heartbeat), recordedAt: now, sentAt: now });
+  }
+  /**
+   * The skill heartbeat a skill recorded for the session within `maxAgeMs`,
+   * whatever its state; an older record counts as none.
+   */
+  recent(session, maxAgeMs) {
+    const record = this.read(session);
+    return record !== void 0 && this.now() - record.recordedAt <= maxAgeMs ? record.heartbeat : void 0;
+  }
+  /**
+   * Remembers a placeholder heartbeat only where no skill has recorded a
+   * recent one: a fresh record is never replaced, and a missing file is
+   * created atomically, so a skill's own heartbeat landing at the same
+   * moment from another process wins. Returns whether it was remembered.
+   */
+  recordIfAbsent(heartbeat, maxAgeMs) {
+    if (this.recent(heartbeat.session, maxAgeMs) !== void 0) return false;
+    const now = this.now();
+    const record = { heartbeat: this.compact(heartbeat), recordedAt: now, sentAt: now };
+    if (this.read(heartbeat.session) === void 0) return this.files.create(void 0, heartbeat.session, record);
+    this.files.write(void 0, heartbeat.session, record);
+    return true;
   }
   /**
    * Claims the next liveness heartbeat for a session: returns its record and
@@ -1481,10 +1718,20 @@ var BoardSessionStore = class {
     this.files.write(threadsFolder, claudeSession, { ...thread, branchCheckedAt: now });
     return true;
   }
+  /** Remembers the skill this Claude Code session's main thread just loaded. */
+  recordThreadSkill(claudeSession, skill) {
+    if (this.threadSkill(claudeSession) === skill) return;
+    this.files.write(threadSkillsFolder, claudeSession, { skill });
+  }
+  /** The skill this Claude Code session's main thread last loaded, if any. */
+  threadSkill(claudeSession) {
+    return this.files.read(threadSkillsFolder, claudeSession, ThreadSkillRecordSchema)?.skill;
+  }
   /** Deletes inferred heartbeats and thread records untouched for `maxAgeMs`. */
   prune(maxAgeMs) {
     this.files.prune(inferredFolder, maxAgeMs);
     this.files.prune(threadsFolder, maxAgeMs);
+    this.files.prune(threadSkillsFolder, maxAgeMs);
   }
   thread(claudeSession) {
     return this.files.read(threadsFolder, claudeSession, ThreadRecordSchema);
@@ -1501,6 +1748,7 @@ var BoardSessionStore = class {
 // src/shared/ariadne/ariadne-board.ts
 var claudeSessionEnv = "CLAUDE_CODE_SESSION_ID";
 var bootstrapStep = "started";
+var bootstrapRecoveryMs = 60 * 6e4;
 var personalScopes = /* @__PURE__ */ new Set(["user", "local"]);
 var scopeLabels = {
   user: "user settings",
@@ -1632,14 +1880,19 @@ var AriadneBoard = class {
   }
   /**
    * Posts an item. A session that has never sent a heartbeat (or has aged
-   * out) gets one first, with step `started` and state `nominal`, and the item
-   * is posted again. A live session's step is never overwritten this way.
+   * out) gets one first, with step `started`, state `nominal` and the
+   * reporting skill when one is named, and the item is posted again. A live
+   * session's step is never overwritten this way.
    */
   async item(input, options = {}) {
     return this.call(
       options,
       input.session,
-      (client, session) => this.withSession(client, session, input.ticket, () => client.postItem({ ...input, session })),
+      (client, session) => this.withSession(
+        client,
+        { session, ticket: input.ticket, skill: options.skill, defaulted: input.session === void 0 },
+        () => client.postItem({ ...input, session })
+      ),
       input.ticket
     );
   }
@@ -1648,7 +1901,11 @@ var AriadneBoard = class {
     return this.call(
       options,
       input.session,
-      (client, session) => this.withSession(client, session, input.ticket, () => client.postActivity({ ...input, session })),
+      (client, session) => this.withSession(
+        client,
+        { session, ticket: input.ticket, skill: options.skill, defaulted: input.session === void 0 },
+        () => client.postActivity({ ...input, session })
+      ),
       input.ticket
     );
   }
@@ -1676,14 +1933,47 @@ var AriadneBoard = class {
       return;
     }
   }
-  async withSession(client, session, ticket, post) {
+  /**
+   * Runs `post`, first creating the session when the API has none. A skill
+   * heartbeat recorded for the session in the last hour, such as one that
+   * failed in transit, creates it with its own step and state. Otherwise the
+   * session starts as `started`, and when a skill is named that placeholder
+   * is remembered as the skill's heartbeat, so the heartbeat hook keeps it
+   * alive and never replaces its skill with an agent type it infers. The
+   * placeholder never replaces a heartbeat a skill recorded meanwhile.
+   */
+  async withSession(client, target, post) {
     try {
       return await post();
     } catch (err) {
       if (!(err instanceof AriadneError) || err.code !== "session_not_found") throw err;
     }
-    await client.heartbeat({ session, ticket, step: bootstrapStep, state: "nominal" });
+    const { session, ticket, skill, defaulted } = target;
+    const recorded = this.bestEffort(() => this.sessions?.recent(session, bootstrapRecoveryMs));
+    if (recorded !== void 0) {
+      await client.heartbeat(recorded);
+      return post();
+    }
+    const named = skill !== void 0 && skill !== "";
+    const heartbeat = { session, ticket, step: bootstrapStep, state: "nominal", ...named ? { skill } : {} };
+    await client.heartbeat(heartbeat);
+    if (named) this.rememberPlaceholder(heartbeat, defaulted);
     return post();
+  }
+  rememberPlaceholder(heartbeat, defaulted) {
+    const remembered = this.bestEffort(() => this.sessions?.recordIfAbsent(heartbeat, bootstrapRecoveryMs));
+    const claudeSession = this.defaultSession();
+    if (remembered === true && defaulted && claudeSession !== void 0 && claudeSession !== heartbeat.session) {
+      this.bestEffort(() => this.sessions?.pointThread(claudeSession, heartbeat.session));
+    }
+  }
+  /** Local state is best effort: a full or unreadable disk must not fail a report. */
+  bestEffort(run) {
+    try {
+      return run();
+    } catch {
+      return void 0;
+    }
   }
   async call(options, requestedSession, run, ticket) {
     let settings;
@@ -1926,9 +2216,9 @@ var AriadnePackets = class {
 };
 
 // src/shared/ariadne/ariadne-token-store.ts
-import { chmodSync, existsSync as existsSync6, mkdirSync as mkdirSync4, readFileSync as readFileSync6, rmSync as rmSync2, writeFileSync as writeFileSync4 } from "node:fs";
-import { homedir as homedir3 } from "node:os";
-import { dirname as dirname7, join as join7 } from "node:path";
+import { chmodSync, existsSync as existsSync8, mkdirSync as mkdirSync6, readFileSync as readFileSync8, rmSync as rmSync2, writeFileSync as writeFileSync6 } from "node:fs";
+import { homedir as homedir5 } from "node:os";
+import { dirname as dirname9, join as join9 } from "node:path";
 var agentTokenPattern = /^ariadne_agent_[0-9a-f]{16}_[A-Za-z0-9_-]{43}$/;
 var ariadneTokenEnvNames = ["ARIADNE_AGENT_TOKEN", "ARIADNE_TOKEN"];
 var AriadneTokenStore = class {
@@ -1936,7 +2226,7 @@ var AriadneTokenStore = class {
   home;
   constructor(props = {}) {
     this.env = props.env ?? process.env;
-    this.home = props.home ?? homedir3();
+    this.home = props.home ?? homedir5();
   }
   isAgentToken(value) {
     return agentTokenPattern.test(value);
@@ -1944,8 +2234,8 @@ var AriadneTokenStore = class {
   /** `$XDG_CONFIG_HOME/flight-rules/ariadne-token`, else `~/.config/flight-rules/ariadne-token`. */
   path() {
     const configHome = this.env["XDG_CONFIG_HOME"];
-    const base = configHome !== void 0 && configHome !== "" ? configHome : join7(this.home, ".config");
-    return join7(base, "flight-rules", "ariadne-token");
+    const base = configHome !== void 0 && configHome !== "" ? configHome : join9(this.home, ".config");
+    return join9(base, "flight-rules", "ariadne-token");
   }
   resolve() {
     for (const name of ariadneTokenEnvNames) {
@@ -1953,8 +2243,8 @@ var AriadneTokenStore = class {
       if (value2 !== void 0 && value2 !== "") return { token: value2, source: name };
     }
     const path = this.path();
-    if (!existsSync6(path)) return void 0;
-    const value = readFileSync6(path, "utf-8").trim();
+    if (!existsSync8(path)) return void 0;
+    const value = readFileSync8(path, "utf-8").trim();
     return value === "" ? void 0 : { token: value, source: "file" };
   }
   /** The environment variable that would win over a saved file, if one is set. */
@@ -1970,8 +2260,8 @@ var AriadneTokenStore = class {
       );
     }
     const path = this.path();
-    mkdirSync4(dirname7(path), { recursive: true, mode: 448 });
-    writeFileSync4(path, `${value}
+    mkdirSync6(dirname9(path), { recursive: true, mode: 448 });
+    writeFileSync6(path, `${value}
 `, { mode: 384 });
     chmodSync(path, 384);
     return path;
@@ -1979,38 +2269,40 @@ var AriadneTokenStore = class {
   /** Deletes the saved token; returns whether one existed. */
   remove() {
     const path = this.path();
-    if (!existsSync6(path)) return false;
+    if (!existsSync8(path)) return false;
     rmSync2(path);
     return true;
   }
 };
 
 // src/shared/ariadne/board-agent-store.ts
-import { existsSync as existsSync7, readdirSync as readdirSync3 } from "node:fs";
-import { join as join8 } from "node:path";
-import { z as z13 } from "zod";
-var DispatchRecordSchema = z13.object({
+import { existsSync as existsSync9, readdirSync as readdirSync3 } from "node:fs";
+import { join as join10 } from "node:path";
+import { z as z16 } from "zod";
+var DispatchRecordSchema = z16.object({
   /** The Jira key the dispatch named, or null when it named none. */
-  ticket: z13.string().nullable(),
-  description: z13.string(),
+  ticket: z16.string().nullable(),
+  description: z16.string(),
   /** The dispatching Claude Code session. */
-  session: z13.string(),
+  session: z16.string(),
   /** A digest of the prompt, so a sub-agent found only through its transcript still finds its dispatch. */
-  promptDigest: z13.string().optional(),
-  at: z13.number()
+  promptDigest: z16.string().optional(),
+  at: z16.number()
 });
-var AgentRecordSchema = z13.object({
+var AgentRecordSchema = z16.object({
   /** The Jira key the sub-agent works on, or null once resolved to none. */
-  ticket: z13.string().nullable(),
-  description: z13.string().optional(),
-  agentType: z13.string().optional(),
-  toolUseId: z13.string().optional(),
+  ticket: z16.string().nullable(),
+  description: z16.string().optional(),
+  agentType: z16.string().optional(),
+  toolUseId: z16.string().optional(),
   /** The Claude Code session the sub-agent runs in. */
-  session: z13.string(),
-  at: z13.number()
+  session: z16.string(),
+  at: z16.number()
 });
+var AgentSkillRecordSchema = z16.object({ skill: z16.string() });
 var dispatchFolder = "dispatch";
 var agentsFolder = "agents";
+var agentSkillsFolder = "agent-skills";
 var BoardAgentStore = class {
   files;
   constructor(props = {}) {
@@ -2027,8 +2319,8 @@ var BoardAgentStore = class {
   }
   /** The dispatch in `session` whose prompt has this digest; reads every dispatch file, so only a fallback uses it. */
   findDispatchByPrompt(session, promptDigest) {
-    const dir = join8(this.files.root(), dispatchFolder);
-    if (!existsSync7(dir)) return void 0;
+    const dir = join10(this.files.root(), dispatchFolder);
+    if (!existsSync9(dir)) return void 0;
     for (const name of readdirSync3(dir)) {
       if (!name.endsWith(".json")) continue;
       const record = this.readDispatch(name.slice(0, -".json".length));
@@ -2047,11 +2339,21 @@ var BoardAgentStore = class {
   }
   removeAgent(agentId) {
     this.files.remove(agentsFolder, agentId);
+    this.files.remove(agentSkillsFolder, agentId);
+  }
+  /** Remembers the skill a sub-agent just loaded; rewrites nothing when it is unchanged. */
+  recordAgentSkill(agentId, skill) {
+    if (this.readAgentSkill(agentId) === skill) return;
+    this.files.write(agentSkillsFolder, agentId, { skill });
+  }
+  readAgentSkill(agentId) {
+    return this.files.read(agentSkillsFolder, agentId, AgentSkillRecordSchema)?.skill;
   }
   /** Deletes dispatch and sub-agent records untouched for `maxAgeMs`. */
   prune(maxAgeMs) {
     this.files.prune(dispatchFolder, maxAgeMs);
     this.files.prune(agentsFolder, maxAgeMs);
+    this.files.prune(agentSkillsFolder, maxAgeMs);
   }
 };
 
@@ -2063,118 +2365,118 @@ import { graphql } from "@octokit/graphql";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
 // src/tasks/task-tracker/task-tracker.ts
-import { z as z14 } from "zod";
-var TrackerUserSchema = z14.object({
-  accountId: z14.string(),
-  displayName: z14.string()
+import { z as z17 } from "zod";
+var TrackerUserSchema = z17.object({
+  accountId: z17.string(),
+  displayName: z17.string()
 });
-var EntityMetadataSchema = z14.object({
-  tddId: z14.number().optional(),
-  epicId: z14.number().optional(),
-  notes: z14.string().optional(),
+var EntityMetadataSchema = z17.object({
+  tddId: z17.number().optional(),
+  epicId: z17.number().optional(),
+  notes: z17.string().optional(),
   /** Explicit body-format override read first by BodyFormatDetector (docs/bug-report-format.md). */
-  kind: z14.enum(["bug", "story"]).optional(),
+  kind: z17.enum(["bug", "story"]).optional(),
   /** Why a blocked-by edge leaves this ticket's epic, keyed by blocker id (docs/epic-boundaries.md). */
-  crossEpicReasons: z14.record(z14.string(), z14.string()).optional()
+  crossEpicReasons: z17.record(z17.string(), z17.string()).optional()
 }).passthrough();
-var CommentSchema = z14.object({
-  id: z14.string(),
-  body: z14.string(),
-  author: z14.string(),
-  createdAt: z14.string(),
-  updatedAt: z14.string()
+var CommentSchema = z17.object({
+  id: z17.string(),
+  body: z17.string(),
+  author: z17.string(),
+  createdAt: z17.string(),
+  updatedAt: z17.string()
 });
-var AttachmentSchema = z14.object({
-  id: z14.string(),
-  filename: z14.string(),
-  mimeType: z14.string(),
-  size: z14.number().optional(),
-  mediaUuid: z14.string().optional()
+var AttachmentSchema = z17.object({
+  id: z17.string(),
+  filename: z17.string(),
+  mimeType: z17.string(),
+  size: z17.number().optional(),
+  mediaUuid: z17.string().optional()
 });
-var TechnicalDesignSchema = z14.object({
-  id: z14.string(),
-  epicId: z14.string(),
-  url: z14.string().optional(),
-  body: z14.string(),
-  comments: z14.array(CommentSchema),
+var TechnicalDesignSchema = z17.object({
+  id: z17.string(),
+  epicId: z17.string(),
+  url: z17.string().optional(),
+  body: z17.string(),
+  comments: z17.array(CommentSchema),
   metadata: EntityMetadataSchema.default({}),
-  updatedAt: z14.string()
+  updatedAt: z17.string()
 });
-var TicketSchema = z14.object({
-  id: z14.string(),
-  size: z14.literal("ticket"),
-  status: z14.string(),
-  labels: z14.array(z14.string()),
-  title: z14.string(),
-  body: z14.string(),
-  comments: z14.array(CommentSchema),
-  assignee: z14.string().nullable(),
-  attachments: z14.array(AttachmentSchema).default([]),
-  reporter: z14.string().nullable().default(null),
-  issueType: z14.string().default("unknown"),
-  blockedBy: z14.array(z14.string()).default([]),
-  blocking: z14.array(z14.string()).default([]),
+var TicketSchema = z17.object({
+  id: z17.string(),
+  size: z17.literal("ticket"),
+  status: z17.string(),
+  labels: z17.array(z17.string()),
+  title: z17.string(),
+  body: z17.string(),
+  comments: z17.array(CommentSchema),
+  assignee: z17.string().nullable(),
+  attachments: z17.array(AttachmentSchema).default([]),
+  reporter: z17.string().nullable().default(null),
+  issueType: z17.string().default("unknown"),
+  blockedBy: z17.array(z17.string()).default([]),
+  blocking: z17.array(z17.string()).default([]),
   metadata: EntityMetadataSchema.default({}),
-  updatedAt: z14.string()
+  updatedAt: z17.string()
 });
-var EpicSchema = z14.object({
-  id: z14.string(),
-  size: z14.literal("epic"),
-  status: z14.string(),
-  labels: z14.array(z14.string()),
-  title: z14.string(),
-  body: z14.string(),
-  childIssues: z14.array(TicketSchema),
-  comments: z14.array(CommentSchema),
+var EpicSchema = z17.object({
+  id: z17.string(),
+  size: z17.literal("epic"),
+  status: z17.string(),
+  labels: z17.array(z17.string()),
+  title: z17.string(),
+  body: z17.string(),
+  childIssues: z17.array(TicketSchema),
+  comments: z17.array(CommentSchema),
   tdd: TechnicalDesignSchema.optional(),
   metadata: EntityMetadataSchema.default({}),
-  updatedAt: z14.string()
+  updatedAt: z17.string()
 });
-var CreateEpicInputSchema = z14.object({
-  title: z14.string(),
-  body: z14.string(),
-  labels: z14.array(z14.string()).default([]),
+var CreateEpicInputSchema = z17.object({
+  title: z17.string(),
+  body: z17.string(),
+  labels: z17.array(z17.string()).default([]),
   metadata: EntityMetadataSchema.partial().optional()
 });
-var CreateTicketInputSchema = z14.object({
-  title: z14.string(),
-  body: z14.string(),
+var CreateTicketInputSchema = z17.object({
+  title: z17.string(),
+  body: z17.string(),
   /** Absent for a standalone ticket: a ticket-sized RFC has no epic to parent to. */
-  epicId: z14.string().optional(),
-  labels: z14.array(z14.string()).default([]),
-  assignee: z14.string().optional(),
+  epicId: z17.string().optional(),
+  labels: z17.array(z17.string()).default([]),
+  assignee: z17.string().optional(),
   metadata: EntityMetadataSchema.partial().optional()
 });
-var CreateTechnicalDesignInputSchema = z14.object({
-  title: z14.string(),
-  body: z14.string(),
-  epicId: z14.string(),
+var CreateTechnicalDesignInputSchema = z17.object({
+  title: z17.string(),
+  body: z17.string(),
+  epicId: z17.string(),
   metadata: EntityMetadataSchema.partial().optional()
 });
-var UpdateEpicInputSchema = z14.object({
-  body: z14.string(),
-  title: z14.string().optional(),
-  labels: z14.array(z14.string()).optional()
+var UpdateEpicInputSchema = z17.object({
+  body: z17.string(),
+  title: z17.string().optional(),
+  labels: z17.array(z17.string()).optional()
 });
-var UpdateTicketInputSchema = z14.object({
-  body: z14.string(),
-  title: z14.string().optional(),
-  labels: z14.array(z14.string()).optional()
+var UpdateTicketInputSchema = z17.object({
+  body: z17.string(),
+  title: z17.string().optional(),
+  labels: z17.array(z17.string()).optional()
 });
-var UpdateInitiativeInputSchema = z14.object({
-  body: z14.string(),
-  title: z14.string().optional()
+var UpdateInitiativeInputSchema = z17.object({
+  body: z17.string(),
+  title: z17.string().optional()
 });
-var InitiativeSchema = z14.object({
-  id: z14.string(),
-  size: z14.literal("initiative"),
-  title: z14.string(),
-  body: z14.string(),
-  epics: z14.array(z14.object({ id: z14.string(), title: z14.string() })).default([])
+var InitiativeSchema = z17.object({
+  id: z17.string(),
+  size: z17.literal("initiative"),
+  title: z17.string(),
+  body: z17.string(),
+  epics: z17.array(z17.object({ id: z17.string(), title: z17.string() })).default([])
 });
-var CreateInitiativeInputSchema = z14.object({
-  title: z14.string(),
-  body: z14.string()
+var CreateInitiativeInputSchema = z17.object({
+  title: z17.string(),
+  body: z17.string()
 });
 
 // src/tasks/body-metadata/body-metadata.ts
@@ -2222,14 +2524,14 @@ ${block}`;
 };
 
 // src/tasks/github-task-tracker/github-task-tracker.ts
-import { z as z16 } from "zod";
+import { z as z19 } from "zod";
 
 // src/tasks/task-tracker/unsupported-tracker-operation-error.ts
-import { z as z15 } from "zod";
-var UnsupportedTrackerOperationPropsSchema = z15.object({
-  tracker: z15.string().min(1),
-  operation: z15.string().min(1),
-  remedy: z15.string().min(1).optional()
+import { z as z18 } from "zod";
+var UnsupportedTrackerOperationPropsSchema = z18.object({
+  tracker: z18.string().min(1),
+  operation: z18.string().min(1),
+  remedy: z18.string().min(1).optional()
 });
 var UnsupportedTrackerOperationError = class extends Error {
   tracker;
@@ -2246,9 +2548,9 @@ var UnsupportedTrackerOperationError = class extends Error {
 };
 
 // src/tasks/github-task-tracker/github-task-tracker.ts
-var IssueRefSchema = z16.object({ number: z16.number() });
-var IssueRefListSchema = z16.array(IssueRefSchema);
-var ParentNotFoundSchema = z16.object({ status: z16.literal(404) });
+var IssueRefSchema = z19.object({ number: z19.number() });
+var IssueRefListSchema = z19.array(IssueRefSchema);
+var ParentNotFoundSchema = z19.object({ status: z19.literal(404) });
 var GitHubTaskTracker = class {
   octokit;
   gql;
@@ -2681,8 +2983,8 @@ var GitHubTaskTracker = class {
     });
     return data.map((member) => ({ accountId: member.login, displayName: member.login }));
   }
-  async ping() {
-    await this.octokit.rest.repos.get({ owner: this.owner, repo: this.repo });
+  async ping(options) {
+    await this.octokit.rest.repos.get({ owner: this.owner, repo: this.repo, ...options?.signal === void 0 ? {} : { request: { signal: options.signal } } });
   }
   async replaceIssueBody(id, role, input) {
     const issueNumber = parseInt(id, 10);
@@ -2773,12 +3075,12 @@ var GitHubTaskTracker = class {
 };
 
 // src/tasks/jira-task-tracker/jira-task-tracker.ts
-import { readFileSync as readFileSync7 } from "node:fs";
+import { readFileSync as readFileSync9 } from "node:fs";
 import { basename as basename2 } from "node:path";
-import { z as z20 } from "zod";
+import { z as z23 } from "zod";
 
 // src/tasks/jira-task-tracker/jira-client.ts
-import { z as z17 } from "zod";
+import { z as z20 } from "zod";
 
 // src/tasks/jira-task-tracker/jira-api-error.ts
 var JiraApiError = class extends Error {
@@ -2801,11 +3103,11 @@ var defaultRetryAfterSeconds = 2;
 var maxBackoffMs = 3e4;
 var attachmentXsrfHeader = "no-check";
 var redirectStatuses = /* @__PURE__ */ new Set([301, 302, 303, 307, 308]);
-var JiraErrorBodySchema = z17.object({
-  errorMessages: z17.array(z17.string()).optional(),
+var JiraErrorBodySchema = z20.object({
+  errorMessages: z20.array(z20.string()).optional(),
   // Caught per-field so an off-contract `errors` map cannot discard a valid sibling `errorMessages`.
-  errors: z17.record(z17.string(), z17.string()).optional().catch(void 0),
-  message: z17.string().optional()
+  errors: z20.record(z20.string(), z20.string()).optional().catch(void 0),
+  message: z20.string().optional()
 });
 var JiraClient = class {
   baseUrl;
@@ -2814,13 +3116,14 @@ var JiraClient = class {
     this.baseUrl = `https://${config.host}/rest/api/3`;
     this.authHeader = `Basic ${Buffer.from(`${config.email}:${config.token}`).toString("base64")}`;
   }
-  async request(method, path, body, params) {
+  async request(method, path, body, params, signal) {
     const url = new URL(`${this.baseUrl}${path}`);
     if (params) Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, String(v)));
     const res = await this.fetchWithRetry(url.toString(), {
       method,
       headers: { Authorization: this.authHeader, "Content-Type": "application/json", Accept: "application/json" },
-      ...body !== void 0 ? { body: JSON.stringify(body) } : {}
+      ...body !== void 0 ? { body: JSON.stringify(body) } : {},
+      ...signal === void 0 ? {} : { signal }
     });
     if (!res.ok) await this.throwApiError(res);
     const text = await res.text();
@@ -2870,13 +3173,13 @@ var JiraClient = class {
   }
   async fetchWithRetry(url, init, attempt = 0) {
     const res = await fetch(url, init);
-    if (res.status === 429 && attempt < maxRetries) {
+    if (res.status === 429 && attempt < maxRetries && init.signal === void 0) {
       const retryAfterHeader = res.headers.get("Retry-After");
       const parsedRetryAfter = retryAfterHeader !== null ? Number(retryAfterHeader) : NaN;
       const retryAfterSeconds = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : defaultRetryAfterSeconds;
       const jitter = 0.7 + Math.random() * 0.6;
       const delayMs = Math.min(retryAfterSeconds * 1e3 * jitter, maxBackoffMs);
-      await new Promise((resolve3) => setTimeout(resolve3, delayMs));
+      await new Promise((resolve6) => setTimeout(resolve6, delayMs));
       return this.fetchWithRetry(url, init, attempt + 1);
     }
     return res;
@@ -2891,13 +3194,13 @@ var JiraClient = class {
 };
 
 // src/tasks/jira-task-tracker/confluence-client.ts
-import { z as z18 } from "zod";
+import { z as z21 } from "zod";
 var maxRetries2 = 4;
 var defaultRetryAfterSeconds2 = 2;
 var maxBackoffMs2 = 3e4;
-var ConfluenceErrorBodySchema = z18.object({
-  errors: z18.array(z18.object({ title: z18.string().optional(), detail: z18.string().optional() })).optional().catch(void 0),
-  message: z18.string().optional()
+var ConfluenceErrorBodySchema = z21.object({
+  errors: z21.array(z21.object({ title: z21.string().optional(), detail: z21.string().optional() })).optional().catch(void 0),
+  message: z21.string().optional()
 });
 var ConfluenceClient = class {
   siteBaseUrl;
@@ -2929,7 +3232,7 @@ var ConfluenceClient = class {
       const retryAfterSeconds = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : defaultRetryAfterSeconds2;
       const jitter = 0.7 + Math.random() * 0.6;
       const delayMs = Math.min(retryAfterSeconds * 1e3 * jitter, maxBackoffMs2);
-      await new Promise((resolve3) => setTimeout(resolve3, delayMs));
+      await new Promise((resolve6) => setTimeout(resolve6, delayMs));
       return this.fetchWithRetry(url, init, attempt + 1);
     }
     return res;
@@ -2972,14 +3275,14 @@ import { fromMarkdown } from "mdast-util-from-markdown";
 import { gfmFromMarkdown } from "mdast-util-gfm";
 import { gfm } from "micromark-extension-gfm";
 import { decodeString } from "micromark-util-decode-string";
-import { z as z19 } from "zod";
-var MediaRefSchema = z19.object({
-  mediaUuid: z19.string().min(1),
-  collection: z19.string().default(""),
-  width: z19.number().int().positive().optional(),
-  height: z19.number().int().positive().optional()
+import { z as z22 } from "zod";
+var MediaRefSchema = z22.object({
+  mediaUuid: z22.string().min(1),
+  collection: z22.string().default(""),
+  width: z22.number().int().positive().optional(),
+  height: z22.number().int().positive().optional()
 });
-var MediaLookupSchema = z19.record(z19.string(), MediaRefSchema);
+var MediaLookupSchema = z22.record(z22.string(), MediaRefSchema);
 var attachmentPrefix = /^attachment:/;
 var externalTarget = /^[a-zA-Z][a-zA-Z0-9+.-]*:|^\/\//;
 var detailsOpen = /^<details>/;
@@ -3137,8 +3440,8 @@ var LayeredBodyAdfConverter = class {
   }
   /** Looks up a target's basename as an OWN entry, so inherited names (`constructor`, `__proto__`) never resolve. */
   mediaByName(target, media) {
-    const basename4 = target.slice(target.lastIndexOf("/") + 1);
-    return Object.hasOwn(media, basename4) ? media[basename4] : void 0;
+    const basename5 = target.slice(target.lastIndexOf("/") + 1);
+    return Object.hasOwn(media, basename5) ? media[basename5] : void 0;
   }
   /** The ADF block type an mdast node maps to, or `''` when it only degrades to literal text. */
   adfType(node) {
@@ -3972,13 +4275,13 @@ var deliveryLinkOutward = "implements";
 var tddMetadataPropertyKey = "flight-rules-metadata";
 var mediaFilePath = /^\/file\/([0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12})\/binary$/;
 var mediaLocationBase = "https://media.invalid/";
-var JiraUploadedAttachmentSchema = z20.object({
-  id: z20.union([z20.string(), z20.number()]).transform(String),
-  filename: z20.string(),
-  mimeType: z20.string(),
-  size: z20.number().optional()
+var JiraUploadedAttachmentSchema = z23.object({
+  id: z23.union([z23.string(), z23.number()]).transform(String),
+  filename: z23.string(),
+  mimeType: z23.string(),
+  size: z23.number().optional()
 });
-var JiraUploadedAttachmentsSchema = z20.array(JiraUploadedAttachmentSchema);
+var JiraUploadedAttachmentsSchema = z23.array(JiraUploadedAttachmentSchema);
 var JiraTaskTracker = class {
   client;
   confluence;
@@ -4236,7 +4539,7 @@ var JiraTaskTracker = class {
    */
   async addAttachment(ticketId, filePath) {
     const filename = basename2(filePath);
-    const file = new File([readFileSync7(filePath)], filename, { type: this.mimeTypes.forFilename(filename) });
+    const file = new File([readFileSync9(filePath)], filename, { type: this.mimeTypes.forFilename(filename) });
     const uploaded = JiraUploadedAttachmentsSchema.parse(
       await this.client.upload(`/issue/${ticketId}/attachments`, [file])
     );
@@ -4253,8 +4556,9 @@ var JiraTaskTracker = class {
     });
     return users.map((user) => ({ accountId: user.accountId, displayName: user.displayName }));
   }
-  async ping() {
-    await this.client.request("GET", "/myself");
+  async ping(options) {
+    if (options?.signal === void 0) await this.client.request("GET", "/myself");
+    else await this.client.request("GET", "/myself", void 0, void 0, options.signal);
   }
   async searchChildren(epicKey) {
     const [page, blocksLinkType] = await Promise.all([
@@ -4486,33 +4790,115 @@ var JiraTaskTracker = class {
 // src/tasks/tool-probe/tool-probe.ts
 import { execFile as execFile3 } from "node:child_process";
 import { promisify as promisify3 } from "node:util";
+import { z as z25 } from "zod";
+
+// src/tasks/readiness/probe-diagnostics.ts
+import { z as z24 } from "zod";
+var ProbeDiagnosticsPropsSchema = z24.object({ env: z24.record(z24.string(), z24.string().optional()) });
+var ErrorFactsSchema = z24.object({
+  code: z24.union([z24.string(), z24.number()]).nullable().optional(),
+  status: z24.number().optional(),
+  statusCode: z24.number().optional(),
+  killed: z24.boolean().optional(),
+  name: z24.string().optional(),
+  message: z24.string().optional(),
+  stderr: z24.string().optional(),
+  cause: z24.unknown().optional()
+});
+var RedactedProbeDiagnostics = class {
+  secrets;
+  constructor(props) {
+    const { env } = ProbeDiagnosticsPropsSchema.parse({
+      ...props,
+      env: props.env === void 0 ? void 0 : { ...props.env }
+    });
+    this.secrets = Object.entries(env).filter(
+      ([key, value]) => /token|secret|password|api[_-]?key|credential/i.test(key) && Boolean(value)
+    ).flatMap(([, value]) => value === void 0 ? [] : [value, encodeURIComponent(value)]).sort((a, b) => b.length - a.length);
+  }
+  redact(text) {
+    let result = text.replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/@]+@/gi, "$1[REDACTED]@").replace(/\b(Bearer|Basic)\s+[^\s,'";]+/gi, "$1 [REDACTED]").replace(/([?&](?:token|access_token|api_key|key|signature)=)[^&#\s]+/gi, "$1[REDACTED]").replace(/\b(?:gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+)\b/g, "[REDACTED]");
+    for (const secret of this.secrets) result = result.replaceAll(secret, "[REDACTED]");
+    return result;
+  }
+  failure(name, error, required, fallback = "UNKNOWN") {
+    const parsed = ErrorFactsSchema.safeParse(error);
+    const facts = parsed.success ? parsed.data : {};
+    const cause = ErrorFactsSchema.safeParse(facts.cause);
+    const code = facts.code ?? (cause.success ? cause.data.code : void 0);
+    const status = facts.status ?? facts.statusCode;
+    const raw = facts.stderr?.trim() || facts.message || String(error);
+    let category = fallback;
+    if (code === "ENOENT")
+      category = name.startsWith("local:") ? "PATH_UNAVAILABLE" : "MISSING_TOOL";
+    else if (facts.killed || facts.name === "TimeoutError" || code === "ETIMEDOUT" || /timed? out/i.test(raw))
+      category = "TIMEOUT";
+    else if (status === 401 || /HTTP 401|bad credentials|authentication failed|not logged in|could not read Username|Permission denied \(publickey\)/i.test(
+      raw
+    ))
+      category = "AUTHENTICATION";
+    else if (code === "EACCES" || code === "EPERM" || status === 403 || /HTTP 403|operation not permitted|permission denied|sandbox.*denied/i.test(raw))
+      category = "PERMISSION_DENIED";
+    else if (["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "ECONNRESET"].includes(String(code)) || status !== void 0 && status >= 500 || /connection refused|could not resolve|network is unreachable|failed to connect|fetch failed|HTTP 5\d\d/i.test(
+      raw
+    ))
+      category = "NETWORK";
+    const remedies = {
+      MISSING_TOOL: "Install the missing executable and make it available on this invocation PATH.",
+      PATH_UNAVAILABLE: "Resolve the intended existing filesystem path before relying on write access.",
+      TIMEOUT: "Check service connectivity or a stalled credential helper, then rerun the bounded probe.",
+      AUTHENTICATION: "Authenticate the relevant account through its supported login or credential setup, then rerun.",
+      PERMISSION_DENIED: "Inspect the named account or host policy denial and use its normal scoped approval/setup path.",
+      NETWORK: "Check DNS, routing and service availability. A connection failure alone does not establish sandbox denial.",
+      UNKNOWN: "Inspect the operation and establish the missing capability before relying on it."
+    };
+    return {
+      name,
+      ok: false,
+      required,
+      code: category,
+      detail: category === "MISSING_TOOL" ? "not installed" : this.redact(raw),
+      remedy: remedies[category] ?? remedies.UNKNOWN
+    };
+  }
+};
+
+// src/tasks/tool-probe/tool-probe.ts
 var minimumGhVersion = [2, 99, 0];
 var ghVersionLine = /gh version (\d+)\.(\d+)\.(\d+)/;
+var NodeToolProbePropsSchema = z25.object({ cwd: z25.string().optional(), env: z25.record(z25.string(), z25.string().optional()).optional(), timeoutMs: z25.int().positive().max(6e4).default(1e4) });
 var NodeToolProbe = class {
   execFile;
+  env;
   constructor(props = {}) {
+    const input = NodeToolProbePropsSchema.parse({ ...props, env: props.env === void 0 ? void 0 : { ...props.env } });
     const promisified = promisify3(execFile3);
-    this.execFile = props.execFileFn ?? ((file, args) => promisified(file, [...args]));
+    const cwd = input.cwd ?? process.cwd();
+    const env = props.env ?? process.env;
+    this.env = env;
+    this.execFile = props.execFileFn ?? ((file, args) => promisified(file, [...args], { cwd, env, timeout: input.timeoutMs, killSignal: "SIGKILL", maxBuffer: 1024 * 1024 }));
   }
   async probe(input) {
+    const diagnostics = new RedactedProbeDiagnostics({ env: this.env });
     const qaRequired = input.qaInstructionsFound;
-    const ghRequired = input.repo !== void 0;
+    const ghRequired = input.githubRequired ?? input.repo !== void 0;
+    const pushRequired = input.pushRequired ?? ghRequired;
     const [gh, ghAuth, ghPush, playwright, ffmpeg, curl] = await Promise.all([
-      this.ghVersion(ghRequired),
-      this.ghAuth(ghRequired),
-      this.ghPush(input.repo, ghRequired),
-      this.present("tools:playwright-cli", "playwright-cli", ["--version"], qaRequired),
-      this.present("tools:ffmpeg", "ffmpeg", ["-version"], qaRequired),
-      this.present("tools:curl", "curl", ["--version"], qaRequired)
+      this.ghVersion(ghRequired, diagnostics),
+      this.ghAuth(ghRequired, diagnostics),
+      this.ghPush(input.repo, pushRequired, diagnostics),
+      this.present("tools:playwright-cli", "playwright-cli", ["--version"], qaRequired, diagnostics),
+      this.present("tools:ffmpeg", "ffmpeg", ["-version"], qaRequired, diagnostics),
+      this.present("tools:curl", "curl", ["--version"], qaRequired, diagnostics)
     ]);
     return [gh, ghAuth, ghPush, playwright, ffmpeg, curl];
   }
-  async ghVersion(required) {
+  async ghVersion(required, diagnostics) {
     try {
       const { stdout } = await this.execFile("gh", ["--version"]);
       const match = ghVersionLine.exec(stdout);
       if (match === null) {
-        return { name: "tools:gh", ok: false, detail: `unrecognized version output: ${stdout.trim()}`, required };
+        return { name: "tools:gh", ok: false, detail: `unrecognized version output: ${diagnostics.redact(stdout.trim())}`, required, code: "UNKNOWN", remedy: "Inspect the gh executable selected by PATH and verify its version." };
       }
       const [, major, minor, patch] = match;
       const version = [Number(major), Number(minor), Number(patch)];
@@ -4522,23 +4908,22 @@ var NodeToolProbe = class {
         name: "tools:gh",
         ok,
         detail: ok ? `gh ${found}` : `gh ${found} is older than the required ${minimumGhVersion.join(".")}`,
-        required
+        required,
+        ...ok ? {} : { code: "TOOL_VERSION", remedy: `Install gh ${minimumGhVersion.join(".")} or newer before this workflow.` }
       };
     } catch (err) {
-      const detail = this.isMissingBinary(err) ? "not installed" : this.stderrOf(err);
-      return { name: "tools:gh", ok: false, detail, required };
+      return { ...diagnostics.failure("tools:gh", err, required), required };
     }
   }
-  async ghAuth(required) {
+  async ghAuth(required, diagnostics) {
     try {
       await this.execFile("gh", ["auth", "status"]);
       return { name: "tools:gh-auth", ok: true, detail: "authenticated", required };
     } catch (err) {
-      const detail = this.isMissingBinary(err) ? "not installed" : this.stderrOf(err);
-      return { name: "tools:gh-auth", ok: false, detail, required };
+      return { ...diagnostics.failure("tools:gh-auth", err, required, "AUTHENTICATION"), required };
     }
   }
-  async ghPush(repo, required) {
+  async ghPush(repo, required, diagnostics) {
     if (repo === void 0) {
       return { name: "tools:gh-push", ok: false, detail: "skipped \u2014 repo is not configured", required };
     }
@@ -4553,21 +4938,21 @@ var NodeToolProbe = class {
       return {
         name: "tools:gh-push",
         ok,
-        detail: ok ? `push access to ${repo}` : `no push access to ${repo}`,
+        detail: ok ? `GitHub account has push entitlement to ${repo}; transport and branch policy are not tested` : stdout.trim() === "false" ? `no push entitlement to ${repo}` : `push entitlement to ${repo} is unverified`,
+        code: ok ? "AVAILABLE" : stdout.trim() === "false" ? "PERMISSION_DENIED" : "UNKNOWN",
+        ...ok ? {} : { remedy: "Verify the selected GitHub account has push entitlement to this repository; this probe does not change access." },
         required
       };
     } catch (err) {
-      const detail = this.isMissingBinary(err) ? "not installed" : this.stderrOf(err);
-      return { name: "tools:gh-push", ok: false, detail, required };
+      return { ...diagnostics.failure("tools:gh-push", err, required), required };
     }
   }
-  async present(name, file, args, required) {
+  async present(name, file, args, required, diagnostics) {
     try {
       const { stdout } = await this.execFile(file, args);
-      return { name, ok: true, detail: stdout.trim().split("\n")[0] ?? "installed", required };
+      return { name, ok: true, detail: diagnostics.redact(stdout.trim().split("\n")[0] ?? "installed"), required };
     } catch (err) {
-      const detail = this.isMissingBinary(err) ? "not installed" : this.stderrOf(err);
-      return { name, ok: false, detail, required };
+      return { ...diagnostics.failure(name, err, required), required };
     }
   }
   /** True when `version` is at least `minimum`, comparing major, minor, then patch. */
@@ -4579,27 +4964,726 @@ var NodeToolProbe = class {
     }
     return true;
   }
-  /** Distinguishes a missing binary (ENOENT) from a binary that ran and failed. */
-  isMissingBinary(err) {
-    return typeof err === "object" && err !== null && "code" in err && err.code === "ENOENT";
-  }
-  stderrOf(err) {
-    if (typeof err === "object" && err !== null && "stderr" in err) {
-      const stderr = err.stderr;
-      if (typeof stderr === "string") return stderr.trim();
-    }
-    if (err instanceof Error) return err.message;
-    return String(err);
-  }
 };
 var nodeToolProbe = new NodeToolProbe();
 
+// src/tasks/readiness/repository-readiness.ts
+import { z as z31 } from "zod";
+
+// src/tasks/readiness/workflow-preflight.ts
+import { execFile as execFile4 } from "node:child_process";
+import { access, realpath } from "node:fs/promises";
+import { constants } from "node:fs";
+import { resolve as resolve4 } from "node:path";
+import { promisify as promisify4 } from "node:util";
+import { z as z30 } from "zod";
+
+// src/orchestration/orchestration-policy.ts
+import { isDeepStrictEqual } from "node:util";
+import { z as z28 } from "zod";
+
+// src/agents/agent-emitter/agent-emitter.schema.ts
+import { z as z26 } from "zod";
+var ModelBindingsSchema = z26.strictObject({
+  standard: z26.string().trim().min(1),
+  escalated: z26.string().trim().min(1),
+  expert: z26.string().trim().min(1)
+});
+var AgentDefinitionSchema = z26.strictObject({
+  frontmatter: AgentRegistrationSchema,
+  body: z26.string().refine((body) => body.trim() !== "", "agent prompt must not be empty")
+});
+
+// src/orchestration/orchestration.schema.ts
+import { isAbsolute as isAbsolute2, relative, sep as sep2 } from "node:path";
+import { z as z27 } from "zod";
+var OrchestrationTextSchema = z27.string().refine((value) => value.trim().length > 0, "must not be blank");
+var AbsolutePathSchema = OrchestrationTextSchema.refine(
+  isAbsolute2,
+  "must be an absolute path on this host"
+);
+var CapabilityNameSchema = z27.string().regex(/^[a-z][a-zA-Z0-9:.-]*$/);
+var RunContextObjectSchema = z27.strictObject({
+  runId: OrchestrationTextSchema,
+  taskId: OrchestrationTextSchema,
+  cwd: AbsolutePathSchema,
+  repositoryRoot: AbsolutePathSchema,
+  baseRef: OrchestrationTextSchema,
+  skill: OrchestrationTextSchema
+});
+var RunContextSchema = RunContextObjectSchema.refine((value) => {
+  const path = relative(value.repositoryRoot, value.cwd);
+  return path !== ".." && !path.startsWith(`..${sep2}`) && !isAbsolute2(path);
+}, "working directory must be inside the active repository root");
+var CallerContextSchema = RunContextSchema.safeExtend({ attempt: z27.int().positive() });
+var CapabilityEvidenceSchema = z27.discriminatedUnion("state", [
+  z27.strictObject({ state: z27.literal("available"), evidence: OrchestrationTextSchema }),
+  z27.strictObject({
+    state: z27.enum(["denied", "unknown"]),
+    evidence: OrchestrationTextSchema,
+    remedy: OrchestrationTextSchema
+  })
+]);
+var AdapterLimitsSchema = z27.strictObject({
+  maxConcurrent: z27.int().nonnegative().nullable(),
+  activeWorkers: z27.int().nonnegative(),
+  currentDepth: z27.int().nonnegative(),
+  maxDepth: z27.int().nonnegative().nullable(),
+  source: OrchestrationTextSchema
+});
+var RuntimeSnapshotSchema = z27.strictObject({
+  context: CallerContextSchema,
+  host: z27.strictObject({ name: OrchestrationTextSchema, version: OrchestrationTextSchema }),
+  observedAt: z27.iso.datetime(),
+  agent: AgentFrontmatterSchema.shape.name.nullable(),
+  spawn: CapabilityEvidenceSchema,
+  ask: CapabilityEvidenceSchema,
+  permissions: z27.record(CapabilityNameSchema, CapabilityEvidenceSchema),
+  limits: AdapterLimitsSchema
+});
+var DispatchRequestSchema = z27.strictObject({
+  id: OrchestrationTextSchema,
+  agent: AgentFrontmatterSchema.shape.name,
+  context: CallerContextSchema,
+  input: z27.record(z27.string(), z27.json()),
+  requiredCapabilities: z27.array(CapabilityNameSchema).optional()
+});
+var OrchestrationFailureSchema = z27.strictObject({
+  code: z27.enum([
+    "UNKNOWN_AGENT",
+    "UNSUPPORTED_AGENT_SETTINGS",
+    "CONTEXT_MISMATCH",
+    "CAPABILITY_DENIED",
+    "CAPABILITY_UNKNOWN",
+    "DISPATCH_UNAVAILABLE",
+    "LIMITS_UNKNOWN",
+    "CAPACITY_EXHAUSTED",
+    "DEPTH_EXCEEDED",
+    "QUESTIONS_DISABLED",
+    "QUESTIONS_UNAVAILABLE",
+    "INVALID_HANDOFF",
+    "INVALID_REPORT",
+    "INVALID_HISTORY",
+    "OPEN_QUESTIONS",
+    "UNVERIFIABLE",
+    "ATTEMPTS_EXHAUSTED",
+    "EXECUTION_FAILED",
+    "CANCELLED"
+  ]),
+  message: OrchestrationTextSchema,
+  remedy: OrchestrationTextSchema,
+  capability: CapabilityNameSchema.optional()
+});
+var OutcomeIdentitySchema = z27.strictObject({
+  dispatchId: OrchestrationTextSchema,
+  agent: AgentFrontmatterSchema.shape.name,
+  context: CallerContextSchema
+});
+var DispatchOutcomeSchema = z27.discriminatedUnion("status", [
+  OutcomeIdentitySchema.extend({
+    status: z27.literal("completed"),
+    report: z27.record(z27.string(), z27.json())
+  }),
+  OutcomeIdentitySchema.extend({
+    status: z27.enum(["failed", "unavailable"]),
+    failure: OrchestrationFailureSchema
+  })
+]);
+var QuestionRequestSchema = z27.strictObject({
+  context: CallerContextSchema,
+  question: OrchestrationTextSchema,
+  allowHumanQuestions: z27.boolean()
+});
+var SiblingSkillRequestSchema = z27.strictObject({
+  context: CallerContextSchema,
+  skill: OrchestrationTextSchema,
+  input: z27.record(z27.string(), z27.json())
+});
+
+// src/orchestration/orchestration-policy.ts
+var RegistryOrchestrationPolicyPropsSchema = z28.strictObject({
+  agents: z28.array(AgentDefinitionSchema).min(1).refine(
+    (agents) => new Set(agents.map((agent) => agent.frontmatter.name)).size === agents.length,
+    "duplicate agent name"
+  )
+});
+var RegistryOrchestrationPolicy = class {
+  agents;
+  constructor(props) {
+    this.agents = new Map(
+      RegistryOrchestrationPolicyPropsSchema.parse(props).agents.map((agent) => [
+        agent.frontmatter.name,
+        agent
+      ])
+    );
+  }
+  prepare(request, runtime) {
+    const input = DispatchRequestSchema.parse(request);
+    const snapshot = RuntimeSnapshotSchema.parse(runtime);
+    const definition = this.agents.get(input.agent);
+    if (definition === void 0) {
+      return {
+        status: "unavailable",
+        failure: {
+          code: "UNKNOWN_AGENT",
+          message: `No registered agent named ${input.agent}.`,
+          remedy: "Install or load the named registration before dispatch."
+        }
+      };
+    }
+    if (!isDeepStrictEqual(input.context, snapshot.context) || snapshot.agent !== input.agent) {
+      return {
+        status: "unavailable",
+        failure: {
+          code: "CONTEXT_MISMATCH",
+          message: "Runtime evidence belongs to another context or worker.",
+          remedy: "Observe effective access for this named worker in this task, checkout and attempt."
+        }
+      };
+    }
+    if (definition.frontmatter.sandbox !== void 0 || definition.frontmatter.dispatch !== void 0) {
+      return {
+        status: "unavailable",
+        failure: {
+          code: "UNSUPPORTED_AGENT_SETTINGS",
+          message: "Explicit worker sandbox or dispatch restrictions need an enforcing runtime binding.",
+          remedy: "Provide an adapter that can enforce the declared restrictions before dispatch; do not drop them."
+        }
+      };
+    }
+    if (snapshot.spawn.state !== "available") {
+      return {
+        status: "unavailable",
+        failure: {
+          code: "DISPATCH_UNAVAILABLE",
+          capability: "spawn",
+          message: snapshot.spawn.evidence,
+          remedy: snapshot.spawn.remedy
+        }
+      };
+    }
+    const { maxConcurrent, activeWorkers, currentDepth, maxDepth } = snapshot.limits;
+    if (maxConcurrent === null || maxDepth === null) {
+      return {
+        status: "unavailable",
+        failure: {
+          code: "LIMITS_UNKNOWN",
+          message: "Concurrency or nesting capacity has not been established.",
+          remedy: "Read the host limits or provide a documented conservative adapter bound with its provenance."
+        }
+      };
+    }
+    if (currentDepth >= maxDepth) {
+      return {
+        status: "unavailable",
+        failure: {
+          code: "DEPTH_EXCEEDED",
+          message: `A child at depth ${currentDepth + 1} exceeds the bound ${maxDepth}.`,
+          remedy: "Invoke orchestration in a supported caller context with remaining worker depth."
+        }
+      };
+    }
+    if (activeWorkers >= maxConcurrent) {
+      return {
+        status: "unavailable",
+        failure: {
+          code: "CAPACITY_EXHAUSTED",
+          message: `All ${maxConcurrent} worker slots are occupied or disabled.`,
+          remedy: "Wait for a worker to finish, refresh current usage, then plan the remaining work."
+        }
+      };
+    }
+    const required = /* @__PURE__ */ new Set([
+      ...definition.frontmatter.capabilities,
+      ...input.requiredCapabilities ?? []
+    ]);
+    for (const capability of required) {
+      const permission = snapshot.permissions[capability];
+      if (permission === void 0 || permission.state !== "available") {
+        return {
+          status: "unavailable",
+          failure: {
+            code: permission?.state === "denied" ? "CAPABILITY_DENIED" : "CAPABILITY_UNKNOWN",
+            capability,
+            message: permission?.evidence ?? `No effective worker access evidence for ${capability}.`,
+            remedy: permission?.remedy ?? `Establish ${capability} access for this worker and working directory before dispatch.`
+          }
+        };
+      }
+    }
+    return { status: "ready", request: input, definition: AgentDefinitionSchema.parse(definition) };
+  }
+  ask(request, runtime) {
+    const input = QuestionRequestSchema.parse(request);
+    const snapshot = RuntimeSnapshotSchema.parse(runtime);
+    if (!isDeepStrictEqual(input.context, snapshot.context)) {
+      return {
+        status: "unavailable",
+        failure: {
+          code: "CONTEXT_MISMATCH",
+          message: "Question capability evidence belongs to another caller context.",
+          remedy: "Refresh capability evidence for this caller before asking."
+        }
+      };
+    }
+    if (!input.allowHumanQuestions) {
+      return {
+        status: "unavailable",
+        failure: {
+          code: "QUESTIONS_DISABLED",
+          capability: "ask",
+          message: "This invocation is unattended or has not opted into human questions.",
+          remedy: "Return the unresolved question to the caller as a named failure; do not prompt."
+        }
+      };
+    }
+    if (snapshot.ask.state !== "available") {
+      return {
+        status: "unavailable",
+        failure: {
+          code: "QUESTIONS_UNAVAILABLE",
+          capability: "ask",
+          message: snapshot.ask.evidence,
+          remedy: snapshot.ask.remedy
+        }
+      };
+    }
+    return { status: "awaiting-answer", request: input };
+  }
+  sibling(request) {
+    return SiblingSkillRequestSchema.parse(request);
+  }
+};
+
+// src/tasks/readiness/readiness.schema.ts
+import { z as z29 } from "zod";
+var WorkflowSchema = z29.enum([
+  "execute-work",
+  "execute-wave",
+  "break-down-work",
+  "reproduce-bug",
+  "verify-ticket"
+]);
+var WorkflowEvidenceSchema = z29.strictObject({
+  context: CallerContextSchema,
+  callerCapabilities: z29.record(z29.string(), CapabilityEvidenceSchema),
+  workers: z29.array(
+    z29.strictObject({ registration: AgentRegistrationSchema, runtime: RuntimeSnapshotSchema })
+  ).refine(
+    (workers) => new Set(workers.map((worker) => worker.registration.name)).size === workers.length,
+    "duplicate worker evidence"
+  )
+});
+var ReadinessOptionsSchema = z29.strictObject({
+  workflow: WorkflowSchema.optional(),
+  evidence: WorkflowEvidenceSchema.optional()
+}).refine(
+  (value) => value.evidence === void 0 || value.workflow !== void 0,
+  "workflow is required with capability evidence"
+);
+
+// src/tasks/readiness/workflow-preflight.ts
+var WorkflowPreflightPropsSchema = z30.object({
+  cwd: z30.string(),
+  env: z30.record(z30.string(), z30.string().optional()),
+  timeoutMs: z30.int().positive().max(6e4).default(1e4)
+});
+var NodeWorkflowPreflight = class {
+  cwd;
+  env;
+  timeoutMs;
+  constructor(props) {
+    const input = WorkflowPreflightPropsSchema.parse({
+      ...props,
+      env: props.env === void 0 ? void 0 : { ...props.env }
+    });
+    this.cwd = input.cwd;
+    this.env = props.env;
+    this.timeoutMs = input.timeoutMs;
+  }
+  async inspect(workflow, evidence) {
+    const selected = WorkflowSchema.parse(workflow);
+    const parsed = evidence === void 0 ? void 0 : WorkflowEvidenceSchema.parse(evidence);
+    const diagnostics = new RedactedProbeDiagnostics({ env: this.env });
+    const codeWorkflow = selected === "execute-work" || selected === "execute-wave";
+    const requiredAgents = codeWorkflow ? ["code-implementation", "code-implementation-escalated", "code-verifier", "tech-writer"] : selected === "break-down-work" ? ["research-agent"] : [selected === "reproduce-bug" ? "qa-engineer" : "qa-engineer-verify"];
+    const checks = [];
+    const contextMatches = parsed !== void 0 && resolve4(parsed.context.cwd) === resolve4(this.cwd);
+    checks.push({
+      name: "host:context",
+      ok: contextMatches,
+      required: true,
+      code: contextMatches ? "AVAILABLE" : "CONTEXT_MISMATCH",
+      detail: contextMatches ? "Caller context matches this working directory" : "Missing or mismatched caller context",
+      remedy: "Supply current host observations for this task and active checkout, then rerun the workflow check."
+    });
+    const required = [
+      "shell",
+      "network",
+      "tracker.write",
+      ...codeWorkflow ? ["edit", "git.write", "git.push"] : [],
+      ...["reproduce-bug", "verify-ticket"].includes(selected) ? ["evidence.write"] : []
+    ];
+    for (const capability of required) {
+      const observed = contextMatches ? parsed?.callerCapabilities[capability] : void 0;
+      checks.push({
+        name: `host:${capability}`,
+        ok: observed?.state === "available",
+        required: true,
+        code: observed?.state === "available" ? "AVAILABLE" : observed?.state === "denied" ? "CAPABILITY_DENIED" : "CAPABILITY_UNKNOWN",
+        detail: diagnostics.redact(
+          observed?.evidence ?? `No effective caller evidence for ${capability}`
+        ),
+        remedy: observed?.state === "available" ? void 0 : diagnostics.redact(
+          observed?.remedy ?? `Establish ${capability} through the host's scoped setup/approval path before mutations.`
+        )
+      });
+    }
+    const policy = parsed?.workers.length ? new RegistryOrchestrationPolicy({
+      agents: parsed.workers.map((worker) => ({
+        frontmatter: worker.registration,
+        body: "Preflight registration requirements; this check does not dispatch."
+      }))
+    }) : void 0;
+    for (const agent of requiredAgents) {
+      const worker = contextMatches ? parsed?.workers.find((item) => item.registration.name === agent) : void 0;
+      if (worker === void 0 || parsed === void 0 || policy === void 0) {
+        checks.push({
+          name: `dispatch:${agent}`,
+          ok: false,
+          required: true,
+          code: "CAPABILITY_UNKNOWN",
+          detail: `No scoped runtime evidence for ${agent}`,
+          remedy: "Discover the installed registration and observe its effective permissions, dispatch support and limits."
+        });
+        continue;
+      }
+      const decision = policy.prepare(
+        { id: `preflight:${agent}`, agent, context: parsed.context, input: {} },
+        worker.runtime
+      );
+      checks.push(
+        decision.status === "ready" ? {
+          name: `dispatch:${agent}`,
+          ok: true,
+          required: true,
+          code: "AVAILABLE",
+          detail: "Reported worker access, dispatch capacity and depth satisfy this registration; no worker was launched"
+        } : {
+          name: `dispatch:${agent}`,
+          ok: false,
+          required: true,
+          code: decision.failure.code,
+          detail: diagnostics.redact(decision.failure.message),
+          remedy: diagnostics.redact(decision.failure.remedy)
+        }
+      );
+    }
+    if (codeWorkflow) {
+      checks.push(await this.checkoutContext(parsed, diagnostics));
+      checks.push(await this.remoteRead(diagnostics));
+      checks.push(await this.localWrite("local:workspace-write", this.cwd, diagnostics));
+      checks.push(await this.gitWrite(diagnostics));
+    }
+    return checks;
+  }
+  async command(args) {
+    const run = promisify4(execFile4);
+    const { stdout } = await run("git", args, {
+      cwd: this.cwd,
+      env: { ...this.env, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "Never" },
+      timeout: this.timeoutMs,
+      killSignal: "SIGKILL",
+      maxBuffer: 1024 * 1024
+    });
+    return stdout.trim();
+  }
+  async remoteRead(diagnostics) {
+    try {
+      await this.command(["ls-remote", "origin"]);
+      return {
+        name: "git:remote-read",
+        ok: true,
+        required: true,
+        code: "AVAILABLE",
+        detail: "Read origin refs successfully; this does not test push transport or branch policy"
+      };
+    } catch (error) {
+      return diagnostics.failure("git:remote-read", error, true);
+    }
+  }
+  async checkoutContext(evidence, diagnostics) {
+    if (evidence === void 0)
+      return {
+        name: "git:context",
+        ok: false,
+        required: true,
+        code: "CONTEXT_MISMATCH",
+        detail: "No repository/base context supplied",
+        remedy: "Identify the active checkout and fixed comparison base before starting the workflow."
+      };
+    try {
+      const root = await this.command(["rev-parse", "--show-toplevel"]);
+      if (await realpath(root) !== await realpath(evidence.context.repositoryRoot)) {
+        return {
+          name: "git:context",
+          ok: false,
+          required: true,
+          code: "CONTEXT_MISMATCH",
+          detail: "Runtime evidence names another repository root",
+          remedy: "Use the active worktree root in caller and worker context."
+        };
+      }
+      await this.command([
+        "rev-parse",
+        "--verify",
+        "--end-of-options",
+        `${evidence.context.baseRef}^{commit}`
+      ]);
+      return {
+        name: "git:context",
+        ok: true,
+        required: true,
+        code: "AVAILABLE",
+        detail: "Active checkout matches and the fixed base resolves to a commit"
+      };
+    } catch (error) {
+      return diagnostics.failure("git:context", error, true);
+    }
+  }
+  async localWrite(name, path, diagnostics) {
+    try {
+      await access(path, constants.W_OK);
+      return {
+        name,
+        ok: true,
+        required: true,
+        code: "AVAILABLE",
+        detail: "Filesystem access check permits directory writes; no file was created and host authorization is checked separately"
+      };
+    } catch (error) {
+      return diagnostics.failure(name, error, true);
+    }
+  }
+  async gitWrite(diagnostics) {
+    try {
+      const paths = await this.command(["rev-parse", "--git-dir", "--git-common-dir"]);
+      const directories = paths.split("\n").map((path) => resolve4(this.cwd, path));
+      if (directories.length !== 2) {
+        return {
+          name: "local:git-write",
+          ok: false,
+          required: true,
+          code: "UNKNOWN",
+          detail: "Could not resolve Git metadata directories",
+          remedy: "Inspect the active repository/worktree metadata before branching or committing."
+        };
+      }
+      await Promise.all(directories.map((directory) => access(directory, constants.W_OK)));
+      return {
+        name: "local:git-write",
+        ok: true,
+        required: true,
+        code: "AVAILABLE",
+        detail: "Git and common metadata directories pass filesystem write-access checks; no git mutation was attempted"
+      };
+    } catch (error) {
+      return diagnostics.failure("local:git-write", error, true);
+    }
+  }
+};
+
+// src/tasks/readiness/repository-readiness.ts
+var RepositoryReadinessPropsSchema = z31.object({
+  cwd: z31.string().optional(),
+  env: z31.record(z31.string(), z31.string().optional()).optional(),
+  timeoutMs: z31.int().positive().max(6e4).default(1e4)
+});
+var NodeRepositoryReadiness = class {
+  cwd;
+  env;
+  timeoutMs;
+  constructor(props = {}) {
+    const input = RepositoryReadinessPropsSchema.parse({
+      ...props,
+      env: props.env === void 0 ? void 0 : { ...props.env }
+    });
+    this.cwd = input.cwd ?? process.cwd();
+    this.env = props.env ?? process.env;
+    this.timeoutMs = input.timeoutMs;
+  }
+  async inspect(input) {
+    const parsed = ReadinessOptionsSchema.safeParse(input.options ?? {});
+    if (!parsed.success)
+      return {
+        tracker: null,
+        repo: null,
+        checks: [
+          {
+            name: "runtime",
+            ok: false,
+            required: true,
+            code: "INVALID_CONTEXT",
+            detail: "Workflow or runtime evidence does not match the readiness schema",
+            remedy: "Supply a valid WorkflowEvidence document for the selected workflow; do not fill unknown capabilities with available."
+          }
+        ],
+        ok: false,
+        scope: "workflow"
+      };
+    const options = parsed.data;
+    const scope = options.workflow === void 0 ? "environment" : "workflow";
+    const diagnostics = new RedactedProbeDiagnostics({ env: this.env });
+    const checks = [];
+    let config;
+    try {
+      config = input.config();
+    } catch (error) {
+      checks.push(diagnostics.failure("config", error, true, "CONFIGURATION"));
+      return {
+        tracker: null,
+        repo: null,
+        checks,
+        ok: false,
+        scope,
+        ...options.workflow === void 0 ? {} : { workflow: options.workflow }
+      };
+    }
+    checks.push({
+      name: "config",
+      ok: true,
+      detail: `tracker=${config.tracker} repo=${config.repo}`
+    });
+    let missing;
+    try {
+      missing = this.missingCredentials(config);
+    } catch (error) {
+      checks.push(diagnostics.failure("credentials", error, true, "CONFIGURATION"));
+      return {
+        tracker: config.tracker,
+        repo: config.repo,
+        checks,
+        ok: false,
+        scope,
+        ...options.workflow === void 0 ? {} : { workflow: options.workflow }
+      };
+    }
+    checks.push({
+      name: "credentials",
+      ok: missing.length === 0,
+      detail: missing.length === 0 ? "present" : `not set: ${missing.join(", ")}`,
+      ...missing.length ? { code: "AUTHENTICATION" } : {}
+    });
+    if (missing.length === 0) {
+      const controller = new AbortController();
+      const timer = setTimeout(
+        () => controller.abort(
+          new DOMException("Tracker reachability probe timed out", "TimeoutError")
+        ),
+        this.timeoutMs
+      );
+      try {
+        await Promise.race([
+          input.tracker().ping({ signal: controller.signal }),
+          new Promise(
+            (_, reject) => controller.signal.addEventListener("abort", () => reject(controller.signal.reason), {
+              once: true
+            })
+          )
+        ]);
+        checks.push({
+          name: "reachable",
+          ok: true,
+          detail: `${config.repo ?? config.jiraProject} responded; write operations were not tested`
+        });
+      } catch (error) {
+        checks.push(diagnostics.failure("reachable", error, true));
+      } finally {
+        clearTimeout(timer);
+      }
+    } else
+      checks.push({
+        name: "reachable",
+        ok: false,
+        detail: "skipped \u2014 credentials missing",
+        code: "AUTHENTICATION"
+      });
+    const qaWorkflow = options.workflow === "reproduce-bug" || options.workflow === "verify-ticket";
+    let qa = { found: false, sources: [] };
+    try {
+      qa = input.finder.discover({
+        from: this.cwd,
+        legacyRecipePath: getQaRecipePath(config, input.configPath())
+      });
+      const [nearest] = qa.sources;
+      checks.push({
+        name: "qa-instructions",
+        ok: qa.found,
+        required: qaWorkflow,
+        detail: nearest === void 0 ? "none found \u2014 add a QA.md or a QA section in AGENTS.md to enable the QA lane" : [nearest.path, ...qa.sources.slice(1).map((source) => source.path)].join(", ") + (nearest.legacy === true ? " (legacy recipe \u2014 migrate to QA.md)" : "")
+      });
+    } catch (error) {
+      checks.push(diagnostics.failure("qa-instructions", error, qaWorkflow));
+    }
+    const codeWorkflow = options.workflow === "execute-work" || options.workflow === "execute-wave";
+    checks.push(
+      ...await input.probe.probe({
+        repo: config.repo,
+        qaInstructionsFound: options.workflow === "break-down-work" ? false : qa.found || qaWorkflow,
+        ...options.workflow === void 0 ? {} : {
+          githubRequired: codeWorkflow || config.tracker === "github",
+          pushRequired: codeWorkflow
+        }
+      })
+    );
+    if (codeWorkflow && config.repo === void 0)
+      checks.push({
+        name: "pr:repo",
+        ok: false,
+        required: true,
+        code: "CONFIGURATION",
+        detail: "A GitHub owner/repo is required to open the PR",
+        remedy: "Resolve and store the intended repository before starting work."
+      });
+    if (options.workflow !== void 0)
+      checks.push(
+        ...await new NodeWorkflowPreflight({
+          cwd: this.cwd,
+          env: this.env,
+          timeoutMs: this.timeoutMs
+        }).inspect(options.workflow, options.evidence)
+      );
+    const redacted = checks.map((check) => ({
+      ...check,
+      detail: diagnostics.redact(check.detail),
+      ...check.remedy === void 0 ? {} : { remedy: diagnostics.redact(check.remedy) }
+    }));
+    return {
+      tracker: config.tracker,
+      repo: config.repo,
+      checks: redacted,
+      ok: redacted.every((check) => check.ok || check.required === false),
+      scope,
+      ...options.workflow === void 0 ? {} : { workflow: options.workflow }
+    };
+  }
+  missingCredentials(config) {
+    const env = new EnvLoader().load(this.env);
+    if (config.tracker === "github") return env.githubToken?.trim() ? [] : ["GITHUB_TOKEN"];
+    return [
+      ...env.jiraToken?.trim() ? [] : ["JIRA_TOKEN (or JIRA_API_TOKEN / JIRA_API_KEY)"],
+      ...(env.jiraEmail ?? config.jiraEmail)?.trim() ? [] : ["JIRA_EMAIL (or jiraEmail in the config)"]
+    ];
+  }
+};
+
 // src/flight-rules/flight-rules.schema.ts
-import { z as z21 } from "zod";
-var FlightRulesPropsSchema = z21.object({
-  cwd: z21.string().optional().describe("Directory used for config discovery; defaults to process.cwd()"),
-  env: z21.record(z21.string(), z21.string().optional()).optional().describe("Live environment record; defaults to process.env"),
-  configPath: z21.string().optional().describe("Explicit config file, taking precedence over FLIGHT_RULES_CONFIG and discovery")
+import { z as z32 } from "zod";
+var FlightRulesPropsSchema = z32.object({
+  cwd: z32.string().optional().describe("Directory used for config discovery; defaults to process.cwd()"),
+  env: z32.record(z32.string(), z32.string().optional()).optional().describe("Live environment record; defaults to process.env"),
+  configPath: z32.string().optional().describe("Explicit config file, taking precedence over FLIGHT_RULES_CONFIG and discovery"),
+  host: NativeHostSchema.optional().describe("Explicit configuration host; otherwise FLIGHT_RULES_HOST, the native package host, or Claude for compatibility")
 });
 
 // src/flight-rules/flight-rules.ts
@@ -4608,6 +5692,7 @@ var DefaultFlightRules = class {
   env;
   explicitConfigPath;
   hostSettings;
+  host;
   untrackedRoot;
   constructor(props = {}) {
     const parsed = FlightRulesPropsSchema.parse({ ...props, env: props.env === void 0 ? void 0 : { ...props.env } });
@@ -4615,6 +5700,7 @@ var DefaultFlightRules = class {
     this.env = props.env ?? process.env;
     this.explicitConfigPath = parsed.configPath;
     this.hostSettings = props.hostSettings;
+    this.host = parsed.host;
   }
   configPath() {
     return this.configStore().filePath();
@@ -4625,9 +5711,13 @@ var DefaultFlightRules = class {
     return new ConfigStore({
       cwd: this.cwd,
       env,
+      host: NativeHostSchema.parse(this.host ?? env["FLIGHT_RULES_HOST"] ?? this.installation().host() ?? "claude"),
       ...this.hostSettings !== void 0 ? { hostSettings: this.hostSettings } : {},
       ...untrackedRoot !== void 0 ? { untrackedRoot } : {}
     });
+  }
+  installation() {
+    return FileNativeInstallation.fromInstall({ moduleUrl: import.meta.url, cwd: this.cwd, env: this.env });
   }
   /** Looked up once per instance. */
   mainCheckout() {
@@ -4685,7 +5775,10 @@ var DefaultFlightRules = class {
     return new NodeGitExecutor();
   }
   probe() {
-    return nodeToolProbe;
+    return new NodeToolProbe({ cwd: this.cwd, env: this.env });
+  }
+  readiness() {
+    return new NodeRepositoryReadiness({ cwd: this.cwd, env: this.env });
   }
   docs() {
     return FileDocResolver.fromInstall({ moduleUrl: import.meta.url, env: this.env });
@@ -4719,8 +5812,8 @@ function createFlightRules(props = {}) {
 }
 
 // src/git/commit-message-builder/commit-message-builder.ts
-import { readFileSync as readFileSync8 } from "node:fs";
-import { dirname as dirname8, join as join9 } from "node:path";
+import { readFileSync as readFileSync10 } from "node:fs";
+import { dirname as dirname10, join as join11 } from "node:path";
 
 // src/shared/attribution-stripper/attribution-stripper.ts
 var trailerText = String.raw`(?:Co-Authored-By:[^\n"']*(?:Claude|anthropic\.com)[^\n"']*|Claude-Session:[^\n"']*|https://claude\.ai/code/session_[A-Za-z0-9_-]+)`;
@@ -4751,25 +5844,25 @@ ${line.trim()}`) === "";
 };
 
 // src/git/commit-message-builder/commit-message.schema.ts
-import { z as z22 } from "zod";
-var CommitMessageInputSchema = z22.object({
+import { z as z33 } from "zod";
+var CommitMessageInputSchema = z33.object({
   type: SemanticTypeSchema,
   // Bare issue numbers make one-character scopes legitimate; 32 clears a 10-character tracker key plus a six-digit number.
-  scope: z22.string().min(1).max(32),
-  description: z22.string().min(2).max(50),
-  body: z22.string().optional(),
-  model: z22.string().max(72).optional(),
-  footers: z22.array(z22.string().regex(/^[a-zA-Z0-9-]+(: |=).*$/)).default([])
+  scope: z33.string().min(1).max(32),
+  description: z33.string().min(2).max(50),
+  body: z33.string().optional(),
+  model: z33.string().max(72).optional(),
+  footers: z33.array(z33.string().regex(/^[a-zA-Z0-9-]+(: |=).*$/)).default([])
 });
-var CommitMessageHeaderSchema = z22.preprocess(
+var CommitMessageHeaderSchema = z33.preprocess(
   (arg) => {
-    return z22.string({ error: "Git Commit headers should be 72 characters or less" }).max(72).parse(arg);
+    return z33.string({ error: "Git Commit headers should be 72 characters or less" }).max(72).parse(arg);
   },
-  z22.templateLiteral([SemanticTypeSchema, "(", z22.string(), "): ", z22.string()])
+  z33.templateLiteral([SemanticTypeSchema, "(", z33.string(), "): ", z33.string()])
 );
-var CommitMessageBuilderPropsSchema = z22.object({
-  binPath: z22.string().min(1),
-  agentEnv: z22.string().optional()
+var CommitMessageBuilderPropsSchema = z33.object({
+  binPath: z33.string().min(1),
+  agentEnv: z33.string().optional()
 });
 
 // src/git/commit-message-builder/commit-message-builder.ts
@@ -4807,8 +5900,8 @@ var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
   }
   static readPluginVersion(binPath) {
     try {
-      const pkgPath = join9(dirname8(binPath), "..", "package.json");
-      const parsed = JSON.parse(readFileSync8(pkgPath, "utf-8"));
+      const pkgPath = join11(dirname10(binPath), "..", "package.json");
+      const parsed = JSON.parse(readFileSync10(pkgPath, "utf-8"));
       if (typeof parsed === "object" && parsed !== null && "version" in parsed && typeof parsed.version === "string") {
         return parsed.version;
       }
@@ -5062,12 +6155,12 @@ var bodyFormatDetector = new PrecedenceBodyFormatDetector();
 
 // src/tasks/evidence/evidence.ts
 import { basename as basename3 } from "node:path/posix";
-import { z as z23 } from "zod";
+import { z as z34 } from "zod";
 var mediaReference = /(!?)\[([^\]]*)\]\(\s*<?([^\s()<>]+)>?(?:\s+"[^"]*")?\s*\)/g;
 var absoluteTarget = /^[a-zA-Z][a-zA-Z0-9+.-]*:|^\/\/|^#/;
 var localPrefix = /^(?:\.\/)+/;
 var fenceRun = /^ {0,3}(`{3,}|~{3,})(.*)$/;
-var AttachmentSpecSchema = z23.string().min(1).transform((spec) => {
+var AttachmentSpecSchema = z34.string().min(1).transform((spec) => {
   const hash = spec.lastIndexOf("#");
   const path = hash > 0 ? spec.slice(0, hash) : spec;
   const caption = hash > 0 ? spec.slice(hash + 1).trim() : "";
@@ -5188,86 +6281,8 @@ var TrackerEvidenceService = class {
 // src/shared/host-settings/host-settings-source.ts
 var settingsScopes = ["user", "project", "local"];
 
-// src/bundled-docs/charter-catalog/charter-catalog.ts
-import { matchesGlob } from "node:path";
-import { parse as parseYaml3 } from "yaml";
-import { z as z24 } from "zod";
-var coreCharterId = "coding-charter";
-var languageCharterPrefix = `${coreCharterId}-`;
-var LanguageFrontmatterSchema = z24.strictObject({
-  language: z24.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
-  "applies-to": z24.array(z24.string().min(1)).min(1)
-}).transform(({ language, "applies-to": appliesTo }) => ({ language, appliesTo }));
-var FrontmatterSchema = z24.string().transform((contents, ctx) => {
-  const block = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/.exec(contents)?.[1];
-  if (block === void 0) {
-    ctx.addIssue({ code: "custom", message: "missing YAML frontmatter" });
-    return z24.NEVER;
-  }
-  return parseYaml3(block);
-}).pipe(LanguageFrontmatterSchema);
-var DocCharterCatalog = class {
-  docs;
-  constructor(props) {
-    this.docs = props.docs;
-  }
-  all() {
-    const core = this.docs.resolve(coreCharterId);
-    const languages = this.docs.list().filter((id) => id.startsWith(languageCharterPrefix)).map((id) => this.languageCharter(this.docs.resolve(id)));
-    return [{ id: core.id, language: null, appliesTo: [], path: core.path, contents: core.contents }, ...languages];
-  }
-  select(paths) {
-    const normalized = paths.map((path) => path.trim().replace(/^\.\//, "")).filter((path) => path.length > 0);
-    return this.all().filter(
-      (charter) => charter.language === null || normalized.some((path) => charter.appliesTo.some((glob) => matchesGlob(path, glob)))
-    );
-  }
-  languageCharter(doc) {
-    const parsed = FrontmatterSchema.safeParse(doc.contents);
-    if (!parsed.success) {
-      throw new CharterFormatError(`Charter "${doc.id}" has invalid frontmatter: ${z24.prettifyError(parsed.error)}`);
-    }
-    const expectedId = `${languageCharterPrefix}${parsed.data.language}`;
-    if (doc.id !== expectedId) {
-      throw new CharterFormatError(`Charter "${doc.id}" declares language "${parsed.data.language}"; its file must be ${expectedId}.md`);
-    }
-    return { id: doc.id, ...parsed.data, path: doc.path, contents: doc.contents };
-  }
-};
-var CharterFormatError = class extends Error {
-  name = "CharterFormatError";
-};
-
-// src/agents/agent-frontmatter/agent-frontmatter.schema.ts
-import { z as z25 } from "zod";
-var agentCapabilities = ["read", "edit", "shell", "web", "spawn", "ask"];
-var modelTiers = ["standard", "escalated", "expert"];
-var reasoningLevels = ["low", "medium", "high"];
-var claudeAgentColors = ["red", "blue", "green", "yellow", "purple", "orange", "pink", "cyan"];
-var AgentCapabilitySchema = z25.enum(agentCapabilities);
-var ModelTierSchema = z25.enum(modelTiers);
-var AgentFrontmatterSchema = z25.strictObject({
-  name: z25.string().regex(/^[a-z][a-z0-9-]*$/),
-  description: z25.string().min(1),
-  capabilities: z25.array(AgentCapabilitySchema).min(1).refine(
-    (capabilities) => new Set(capabilities).size === capabilities.length,
-    { message: "duplicate capability" }
-  ),
-  model: ModelTierSchema,
-  reasoning: z25.enum(reasoningLevels).optional(),
-  sandbox: z25.strictObject({
-    fs: z25.enum(["read-only", "workspace-write"]),
-    network: z25.enum(["none", "enabled"])
-  }).optional(),
-  dispatch: z25.strictObject({
-    maxConcurrent: z25.int().positive(),
-    maxDepth: z25.int().positive()
-  }).optional(),
-  "x-claude": z25.strictObject({ color: z25.enum(claudeAgentColors).optional() }).optional()
-});
-
 // src/agents/agent-frontmatter/agent-frontmatter.ts
-import { parse as parseYaml4 } from "yaml";
+import { parse as parseYaml3 } from "yaml";
 var MissingFrontmatterError = class extends Error {
   name = "MissingFrontmatterError";
 };
@@ -5277,7 +6292,7 @@ var YamlAgentFrontmatterParser = class {
     if (match === null || match.index !== 0 || match[1] === void 0) {
       throw new MissingFrontmatterError("agent file has no leading --- frontmatter block");
     }
-    const raw = parseYaml4(match[1]);
+    const raw = parseYaml3(match[1]);
     if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
       throw new MissingFrontmatterError("frontmatter is not a YAML mapping");
     }
@@ -5285,15 +6300,644 @@ var YamlAgentFrontmatterParser = class {
   }
 };
 var agentFrontmatterParser = new YamlAgentFrontmatterParser();
+
+// src/agents/agent-registry/agent-registry.ts
+import { readFileSync as readFileSync11, readdirSync as readdirSync4 } from "node:fs";
+import { basename as basename4, join as join12 } from "node:path";
+import { z as z35 } from "zod";
+var AgentNameSchema = AgentFrontmatterSchema.shape.name;
+var AgentVariantSchema = z35.strictObject({
+  name: AgentNameSchema,
+  extends: AgentNameSchema,
+  description: AgentFrontmatterSchema.shape.description,
+  model: ModelTierSchema,
+  modelReason: z35.string().trim().min(1).optional()
+});
+var AgentVariantsSchema = z35.array(AgentVariantSchema);
+var InvalidAgentDefinitionError = class extends Error {
+  name = "InvalidAgentDefinitionError";
+};
+var FileAgentRegistry = class {
+  load(directory) {
+    const agents = readdirSync4(directory, { withFileTypes: true }).filter((entry) => entry.isFile() && entry.name.endsWith(".md")).sort((a, b) => a.name.localeCompare(b.name)).map((entry) => {
+      const markdown = readFileSync11(join12(directory, entry.name), "utf8");
+      const frontmatter = AgentRegistrationSchema.parse(agentFrontmatterParser.parse(markdown));
+      const body = markdown.replace(/^---\r?\n[\s\S]*?^---(?:\r?\n|$)/m, "");
+      if (frontmatter.name !== basename4(entry.name, ".md") || body.trim() === "") {
+        throw new InvalidAgentDefinitionError(`Agent ${entry.name} needs a matching name and a nonempty prompt`);
+      }
+      return { frontmatter, body };
+    });
+    const canonical = new Map(agents.map((agent) => [agent.frontmatter.name, agent]));
+    const names = new Set(canonical.keys());
+    const variants = AgentVariantsSchema.parse(JSON.parse(readFileSync11(join12(directory, "variants.json"), "utf8")));
+    for (const variant of variants) {
+      const base = canonical.get(variant.extends);
+      if (base === void 0 || names.has(variant.name)) {
+        throw new InvalidAgentDefinitionError(`Variant ${variant.name} needs a unique name and canonical base ${variant.extends}`);
+      }
+      const { name, description, model, modelReason } = variant;
+      const frontmatter = AgentRegistrationSchema.parse({
+        ...base.frontmatter,
+        name,
+        description,
+        model,
+        modelReason
+      });
+      agents.push({ frontmatter, body: base.body });
+      names.add(variant.name);
+    }
+    return agents.sort((a, b) => a.frontmatter.name.localeCompare(b.frontmatter.name));
+  }
+};
+
+// src/agents/agent-emitter/claude-agent-emitter.ts
+import { stringify as stringifyYaml3 } from "yaml";
+import { z as z36 } from "zod";
+
+// src/agents/agent-emitter/agent-emitter.ts
+var UnsupportedAgentSettingError = class extends Error {
+  name = "UnsupportedAgentSettingError";
+};
+
+// src/agents/agent-emitter/claude-agent-emitter.ts
+var ClaudeAgentEmitterPropsSchema = z36.strictObject({ models: ModelBindingsSchema });
+var MarkdownClaudeAgentEmitter = class {
+  models;
+  constructor(props) {
+    this.models = ClaudeAgentEmitterPropsSchema.parse(props).models;
+  }
+  emit(agent) {
+    const { frontmatter, body } = AgentDefinitionSchema.parse(agent);
+    if (frontmatter.sandbox !== void 0 || frontmatter.dispatch !== void 0) {
+      throw new UnsupportedAgentSettingError(`${frontmatter.name}: sandbox and dispatch restrictions need a runtime adapter`);
+    }
+    const native = {
+      name: frontmatter.name,
+      description: frontmatter.description,
+      tools: frontmatter.capabilities.flatMap((capability) => this.tools(capability)).join(", "),
+      model: this.models[frontmatter.model],
+      ...frontmatter.reasoning === void 0 ? {} : { effort: frontmatter.reasoning },
+      ...frontmatter["x-claude"]?.color === void 0 ? {} : { color: frontmatter["x-claude"].color }
+    };
+    return `---
+${stringifyYaml3(native, { lineWidth: 0 })}---
+${body}`;
+  }
+  tools(capability) {
+    if (capability === "read") return ["Glob", "Grep", "Read"];
+    if (capability === "edit") return ["Write", "Edit"];
+    if (capability === "shell") return ["Bash"];
+    if (capability === "web") return ["WebSearch", "WebFetch"];
+    throw new UnsupportedAgentSettingError(`Worker agent capability ${capability} needs an orchestration adapter`);
+  }
+};
+
+// src/agents/agent-emitter/codex-agent-emitter.ts
+import { z as z37 } from "zod";
+var ReasoningBindingsSchema = z37.strictObject({
+  standard: z37.enum(reasoningLevels),
+  escalated: z37.enum(reasoningLevels),
+  expert: z37.enum(reasoningLevels)
+});
+var CodexAgentEmitterPropsSchema = z37.strictObject({
+  models: ModelBindingsSchema,
+  reasoning: ReasoningBindingsSchema
+});
+var TomlCodexAgentEmitter = class {
+  props;
+  constructor(props) {
+    this.props = CodexAgentEmitterPropsSchema.parse(props);
+  }
+  emit(agent) {
+    const { frontmatter, body } = AgentDefinitionSchema.parse(agent);
+    if (frontmatter.dispatch !== void 0 || frontmatter.capabilities.some((capability) => capability === "spawn" || capability === "ask")) {
+      throw new UnsupportedAgentSettingError(`${frontmatter.name}: worker orchestration needs a runtime adapter`);
+    }
+    if (frontmatter.sandbox !== void 0) {
+      throw new UnsupportedAgentSettingError(`${frontmatter.name}: explicit filesystem/network restrictions need a runtime permission adapter`);
+    }
+    const settings = [
+      ["name", frontmatter.name],
+      ["description", frontmatter.description],
+      ["model", this.props.models[frontmatter.model]],
+      ["model_reasoning_effort", frontmatter.reasoning ?? this.props.reasoning[frontmatter.model]],
+      ["sandbox_mode", frontmatter.capabilities.includes("edit") ? "workspace-write" : "read-only"],
+      ["web_search", frontmatter.capabilities.includes("web") ? "live" : "disabled"],
+      ["developer_instructions", body]
+    ];
+    return settings.map(([key, value]) => `${key} = ${JSON.stringify(value)}`).join("\n") + "\n";
+  }
+  diagnostics(agent) {
+    const { frontmatter } = AgentDefinitionSchema.parse(agent);
+    const diagnostics = [
+      "Codex has no equivalent per-agent tool allowlist; capabilities remain instruction constraints and host permissions govern tools.",
+      "The parent session can override agent sandbox defaults; evidence directories need writable access from the runtime adapter."
+    ];
+    if (frontmatter["x-claude"]?.color !== void 0) diagnostics.push("Claude display color has no Codex mapping and is omitted.");
+    return diagnostics;
+  }
+};
+
+// src/plugins/plugin-compiler/plugin-compiler.ts
+import { chmodSync as chmodSync2, copyFileSync, existsSync as existsSync10, lstatSync as lstatSync2, mkdirSync as mkdirSync7, readFileSync as readFileSync12, readdirSync as readdirSync5, realpathSync as realpathSync3, rmSync as rmSync3, writeFileSync as writeFileSync7 } from "node:fs";
+import { join as join13, resolve as resolve5 } from "node:path";
+import { createHash as createHash2 } from "node:crypto";
+import { z as z38 } from "zod";
+var NativePluginCompilerPropsSchema = z38.strictObject({ sourceDir: z38.string().min(1) });
+var PluginHostSchema = z38.enum(["claude", "codex"]);
+var PackageVersionSchema = z38.object({ version: z38.string().min(1) });
+var PluginIdentitySchema = z38.strictObject({
+  name: z38.string().regex(/^[a-z][a-z0-9-]*$/),
+  description: z38.string().min(1),
+  repository: z38.url(),
+  author: z38.strictObject({ name: z38.string().min(1) }),
+  license: z38.string().min(1)
+});
+var InvalidPluginSourceError = class extends Error {
+  name = "InvalidPluginSourceError";
+};
+var NativePluginCompiler = class {
+  sourceDir;
+  constructor(props) {
+    this.sourceDir = realpathSync3(resolve5(NativePluginCompilerPropsSchema.parse(props).sourceDir));
+  }
+  compile(host = "claude") {
+    const target = PluginHostSchema.parse(host);
+    for (const resource of ["package.json", "adapters", "agents", "skills", "docs", "hooks", "bin"]) {
+      this.validateSource(join13(this.sourceDir, resource));
+    }
+    const identity = PluginIdentitySchema.parse(JSON.parse(readFileSync12(join13(this.sourceDir, "adapters/plugin.json"), "utf8")));
+    const { version } = PackageVersionSchema.parse(JSON.parse(readFileSync12(join13(this.sourceDir, "package.json"), "utf8")));
+    const definitions = new FileAgentRegistry().load(join13(this.sourceDir, "agents"));
+    const models = JSON.parse(readFileSync12(join13(this.sourceDir, "adapters", target, "model-tiers.json"), "utf8"));
+    const codexEmitter = target === "codex" ? new TomlCodexAgentEmitter({
+      models,
+      reasoning: JSON.parse(readFileSync12(join13(this.sourceDir, "adapters/codex/reasoning-tiers.json"), "utf8"))
+    }) : void 0;
+    const emitter = codexEmitter ?? new MarkdownClaudeAgentEmitter({ models });
+    const agents = definitions.map((agent) => ({ name: agent.frontmatter.name, contents: emitter.emit(agent), registration: agent.frontmatter }));
+    const diagnostics = codexEmitter === void 0 ? [] : [...new Set(definitions.flatMap((agent) => codexEmitter.diagnostics(agent)))];
+    if (target === "codex") diagnostics.push("Claude commit and Ariadne hooks are omitted; this target emits no Codex hooks.");
+    for (const executable of ["flight-rules", "flight-rules.mjs"]) {
+      if (!existsSync10(join13(this.sourceDir, "bin", executable))) {
+        throw new InvalidPluginSourceError(`Build the CLI before native assembly: missing bin/${executable}`);
+      }
+    }
+    const directory = join13(this.sourceDir, "dist", target);
+    if (existsSync10(join13(this.sourceDir, "dist")) && lstatSync2(join13(this.sourceDir, "dist")).isSymbolicLink()) {
+      throw new InvalidPluginSourceError("Native output cannot use a symlinked dist directory");
+    }
+    rmSync3(directory, { recursive: true, force: true });
+    mkdirSync7(directory, { recursive: true });
+    const resources = target === "claude" ? ["skills", "docs", "hooks", "bin"] : ["skills", "docs", "bin"];
+    for (const resource of resources) this.copyDirectory(join13(this.sourceDir, resource), join13(directory, resource));
+    const agentDirectory = target === "claude" ? join13(directory, "agents") : join13(directory, ".codex", "agents");
+    mkdirSync7(agentDirectory, { recursive: true });
+    const extension = target === "claude" ? "md" : "toml";
+    for (const agent of agents) writeFileSync7(join13(agentDirectory, `${agent.name}.${extension}`), agent.contents);
+    writeFileSync7(join13(directory, "flight-rules-install.json"), JSON.stringify({
+      host: target,
+      agents: agents.map((agent) => ({ name: agent.name, sha256: createHash2("sha256").update(agent.contents).digest("hex"), registration: agent.registration }))
+    }, null, 2) + "\n");
+    mkdirSync7(join13(directory, "adapters", target), { recursive: true });
+    copyFileSync(join13(this.sourceDir, "adapters", target, "model-tiers.json"), join13(directory, "adapters", target, "model-tiers.json"));
+    if (target === "codex") copyFileSync(join13(this.sourceDir, "adapters/codex/reasoning-tiers.json"), join13(directory, "adapters/codex/reasoning-tiers.json"));
+    for (const executable of ["flight-rules", "flight-rules.mjs"]) chmodSync2(join13(directory, "bin", executable), 493);
+    const manifestDirectory = join13(directory, target === "claude" ? ".claude-plugin" : ".codex-plugin");
+    mkdirSync7(manifestDirectory);
+    const manifest = target === "claude" ? {
+      ...identity,
+      version,
+      skills: "./skills/",
+      agents: agents.map((agent) => `./agents/${agent.name}.md`)
+    } : { ...identity, version, skills: "./skills/" };
+    writeFileSync7(join13(manifestDirectory, "plugin.json"), JSON.stringify(manifest, null, 2) + "\n");
+    if (target === "codex") {
+      writeFileSync7(join13(directory, "plugin.json"), JSON.stringify({
+        $schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+        ...identity,
+        version
+      }, null, 2) + "\n");
+      writeFileSync7(join13(directory, ".codex", "config.toml"), "[agents]\nenabled = true\n");
+      writeFileSync7(join13(directory, "diagnostics.json"), JSON.stringify(diagnostics, null, 2) + "\n");
+    }
+    return { directory, agents: agents.map((agent) => agent.name), diagnostics };
+  }
+  validateSource(path) {
+    const stat = lstatSync2(path);
+    if (stat.isSymbolicLink() || !stat.isFile() && !stat.isDirectory()) {
+      throw new InvalidPluginSourceError(`Native resources must be regular files/directories: ${path}`);
+    }
+    if (stat.isDirectory()) {
+      for (const entry of readdirSync5(path)) this.validateSource(join13(path, entry));
+    }
+  }
+  copyDirectory(source, destination) {
+    mkdirSync7(destination, { recursive: true });
+    for (const entry of readdirSync5(source, { withFileTypes: true })) {
+      const from = join13(source, entry.name);
+      const to = join13(destination, entry.name);
+      if (entry.isDirectory()) this.copyDirectory(from, to);
+      else copyFileSync(from, to);
+    }
+  }
+};
+
+// src/orchestration/report-handoff.ts
+import { isDeepStrictEqual as isDeepStrictEqual2 } from "node:util";
+var ValidatedReportHandoff = class {
+  accept(request, outcome, reportSchema) {
+    const expected = DispatchRequestSchema.parse(request);
+    const parsed = DispatchOutcomeSchema.safeParse(outcome);
+    if (!parsed.success) {
+      return {
+        status: "rejected",
+        failure: {
+          code: "INVALID_HANDOFF",
+          message: parsed.error.message,
+          remedy: "Return a complete structured outcome with the original dispatch identity and caller context."
+        }
+      };
+    }
+    const value = parsed.data;
+    if (value.dispatchId !== expected.id || value.agent !== expected.agent || !isDeepStrictEqual2(value.context, expected.context)) {
+      return {
+        status: "rejected",
+        failure: {
+          code: "INVALID_HANDOFF",
+          message: "The result does not belong to this dispatch, agent and caller context.",
+          remedy: "Reconcile the original invocation; do not route another task or attempt's report into this run."
+        }
+      };
+    }
+    if (value.status !== "completed") return { status: "accepted", outcome: value };
+    const report = reportSchema.safeParse(value.report);
+    if (!report.success) {
+      return {
+        status: "rejected",
+        failure: {
+          code: "INVALID_REPORT",
+          message: report.error.message,
+          remedy: "Obtain a report matching the requested role's schema; do not fabricate or infer a successful result."
+        }
+      };
+    }
+    return { status: "accepted", outcome: { ...value, status: "completed", report: report.data } };
+  }
+};
+
+// src/orchestration/implementation-loop.schema.ts
+import { z as z39 } from "zod";
+var ImplementationReportSchema = z39.strictObject({
+  summary: OrchestrationTextSchema,
+  filesChanged: z39.array(
+    z39.strictObject({ path: OrchestrationTextSchema, why: OrchestrationTextSchema })
+  ),
+  testsRun: z39.array(
+    z39.strictObject({ command: OrchestrationTextSchema, result: OrchestrationTextSchema })
+  ),
+  approach: OrchestrationTextSchema,
+  openQuestions: z39.array(OrchestrationTextSchema).optional()
+});
+var CriterionResultSchema = z39.strictObject({
+  criterion: OrchestrationTextSchema,
+  verdict: z39.enum(["PASS", "FAIL", "UNVERIFIABLE"]),
+  evidence: OrchestrationTextSchema
+});
+var VerificationReportSchema = z39.strictObject({
+  summary: OrchestrationTextSchema,
+  criteria: z39.array(CriterionResultSchema).min(1),
+  charterConcerns: z39.array(OrchestrationTextSchema).optional(),
+  openQuestions: z39.array(OrchestrationTextSchema).optional(),
+  verified: z39.boolean()
+}).refine(
+  (report) => report.verified === report.criteria.every((criterion) => criterion.verdict === "PASS"),
+  "verified must agree with every itemized verdict"
+);
+var HandoffRecordSchema = z39.strictObject({
+  request: DispatchRequestSchema,
+  outcome: z39.unknown()
+});
+var ImplementationRunSchema = z39.strictObject({
+  context: RunContextSchema,
+  criteria: z39.array(OrchestrationTextSchema).min(1).refine((criteria) => new Set(criteria).size === criteria.length, "criteria must be distinct"),
+  implementationInput: z39.record(z39.string(), z39.json()).refine(
+    (input) => !Object.hasOwn(input, "verifierFailures"),
+    "verifierFailures is reserved for validated retry evidence"
+  ),
+  history: z39.array(
+    z39.strictObject({ implementation: HandoffRecordSchema, verification: HandoffRecordSchema })
+  ).max(3)
+});
+
+// src/orchestration/implementation-loop.ts
+import { isDeepStrictEqual as isDeepStrictEqual3 } from "node:util";
+var VerifiedImplementationLoop = class {
+  reports = new ValidatedReportHandoff();
+  next(run) {
+    const parsed = ImplementationRunSchema.safeParse(run);
+    if (!parsed.success) {
+      return {
+        status: "stopped",
+        failure: {
+          code: "INVALID_HISTORY",
+          message: parsed.error.message,
+          remedy: "Supply the original run context and at most three ordered implementation/verification receipts."
+        }
+      };
+    }
+    const input = parsed.data;
+    const filesChanged = /* @__PURE__ */ new Set();
+    let failures = [];
+    for (const [index, round] of input.history.entries()) {
+      const expected = this.implementationRequest(input, index + 1, failures);
+      const implementation = this.readReport(
+        expected,
+        round.implementation,
+        ImplementationReportSchema
+      );
+      if (implementation.status === "stopped") return implementation;
+      if (implementation.report.openQuestions?.length)
+        return this.openQuestions(implementation.report.openQuestions);
+      for (const file of implementation.report.filesChanged) filesChanged.add(file.path);
+      const verification = this.readReport(
+        this.verificationRequest(input, index + 1, [...filesChanged]),
+        round.verification,
+        VerificationReportSchema
+      );
+      if (verification.status === "stopped") return verification;
+      const report = verification.report;
+      if (!isDeepStrictEqual3(
+        report.criteria.map((criterion) => criterion.criterion),
+        input.criteria
+      )) {
+        return {
+          status: "stopped",
+          failure: {
+            code: "INVALID_REPORT",
+            message: "Verifier criteria do not match the original criteria in order and text.",
+            remedy: "Have the verifier quote each original criterion exactly once, in its original order."
+          }
+        };
+      }
+      const terminal = report.verified || report.criteria.some((criterion) => criterion.verdict === "UNVERIFIABLE") || Boolean(report.openQuestions?.length);
+      if (terminal && index < input.history.length - 1) {
+        return {
+          status: "stopped",
+          failure: {
+            code: "INVALID_HISTORY",
+            message: "History continues after a terminal verification result.",
+            remedy: "Reconcile the stopped run before starting further work; do not reinterpret it as a retry."
+          }
+        };
+      }
+      if (report.openQuestions?.length) return this.openQuestions(report.openQuestions);
+      if (report.criteria.some((criterion) => criterion.verdict === "UNVERIFIABLE")) {
+        return {
+          status: "stopped",
+          failure: {
+            code: "UNVERIFIABLE",
+            message: "At least one acceptance criterion could not be verified.",
+            remedy: "Resolve the missing evidence or access described in the verifier report before starting a new run."
+          }
+        };
+      }
+      if (report.verified) return { status: "verified", report, filesChanged: [...filesChanged] };
+      failures = report.criteria.filter((criterion) => criterion.verdict === "FAIL");
+    }
+    if (input.history.length === 3) {
+      return {
+        status: "stopped",
+        failure: {
+          code: "ATTEMPTS_EXHAUSTED",
+          message: "Three implementation attempts received verifier FAIL results.",
+          remedy: "Return all remaining failed criteria to the caller for a decision; do not dispatch a fourth attempt."
+        }
+      };
+    }
+    return {
+      status: "implement",
+      request: this.implementationRequest(input, input.history.length + 1, failures),
+      filesChanged: [...filesChanged]
+    };
+  }
+  verify(run, implementation) {
+    const decision = this.next(run);
+    if (decision.status === "stopped") return decision;
+    if (decision.status === "verified") {
+      return {
+        status: "stopped",
+        failure: {
+          code: "INVALID_HISTORY",
+          message: "This run already passed verification.",
+          remedy: "Use the verified result; start a separate run if the task or checkout changes."
+        }
+      };
+    }
+    const receipt = HandoffRecordSchema.safeParse(implementation);
+    if (!receipt.success) {
+      return {
+        status: "stopped",
+        failure: {
+          code: "INVALID_HANDOFF",
+          message: receipt.error.message,
+          remedy: "Supply the original implementation request and its structured outcome."
+        }
+      };
+    }
+    const result = this.readReport(decision.request, receipt.data, ImplementationReportSchema);
+    if (result.status === "stopped") return result;
+    if (result.report.openQuestions?.length) return this.openQuestions(result.report.openQuestions);
+    const filesChanged = [
+      .../* @__PURE__ */ new Set([
+        ...decision.filesChanged,
+        ...result.report.filesChanged.map((file) => file.path)
+      ])
+    ];
+    return {
+      status: "verify",
+      request: this.verificationRequest(run, decision.request.context.attempt, filesChanged)
+    };
+  }
+  implementationRequest(run, attempt, failures) {
+    return {
+      id: `${run.context.runId}:implementation:${attempt}`,
+      agent: attempt === 3 ? "code-implementation-escalated" : "code-implementation",
+      context: { ...run.context, attempt },
+      input: {
+        ...run.implementationInput,
+        criteria: [...run.criteria],
+        ...failures.length ? { verifierFailures: failures } : {}
+      }
+    };
+  }
+  verificationRequest(run, attempt, filesChanged) {
+    return {
+      id: `${run.context.runId}:verification:${attempt}`,
+      agent: "code-verifier",
+      context: { ...run.context, attempt },
+      input: { criteria: [...run.criteria], filesChanged: filesChanged.map((path) => ({ path })) }
+    };
+  }
+  readReport(expected, record, schema) {
+    if (!isDeepStrictEqual3(expected, record.request)) {
+      return {
+        status: "stopped",
+        failure: {
+          code: "INVALID_HISTORY",
+          message: "Recorded dispatch differs from the request derived from this run.",
+          remedy: "Preserve the original task, attempt, agent and input; do not substitute or enrich verifier requests."
+        }
+      };
+    }
+    const handoff = this.reports.accept(expected, record.outcome, schema);
+    if (handoff.status === "rejected") return { status: "stopped", failure: handoff.failure };
+    if (handoff.outcome.status !== "completed")
+      return { status: "stopped", failure: handoff.outcome.failure };
+    return { status: "completed", report: handoff.outcome.report };
+  }
+  openQuestions(questions) {
+    return {
+      status: "stopped",
+      failure: {
+        code: "OPEN_QUESTIONS",
+        message: questions.join("\n"),
+        remedy: "Return these questions to the caller. Use the question policy only when this invocation explicitly permits human questions."
+      }
+    };
+  }
+};
+
+// src/orchestration/dispatch-queue.ts
+import { z as z40 } from "zod";
+var DispatchQueuePropsSchema = z40.strictObject({
+  agents: z40.array(AgentDefinitionSchema).min(1),
+  requests: z40.array(DispatchRequestSchema).refine(
+    (requests) => new Set(requests.map((request) => request.id)).size === requests.length,
+    "dispatch IDs must be unique"
+  ),
+  maxConcurrent: z40.int().positive()
+});
+var ObservedDispatchIdsSchema = z40.array(z40.string().min(1)).refine((ids) => new Set(ids).size === ids.length, "observed dispatch IDs must be unique");
+var InvalidDispatchQueueStateError = class extends Error {
+  name = "InvalidDispatchQueueStateError";
+};
+var BoundedDispatchQueue = class {
+  policy;
+  reports = new ValidatedReportHandoff();
+  requests;
+  maxConcurrent;
+  active = /* @__PURE__ */ new Map();
+  outcomes = /* @__PURE__ */ new Map();
+  cursor = 0;
+  batchSealed = false;
+  constructor(props) {
+    const input = DispatchQueuePropsSchema.parse(props);
+    this.policy = new RegistryOrchestrationPolicy({ agents: input.agents });
+    this.requests = input.requests;
+    this.maxConcurrent = input.maxConcurrent;
+  }
+  pending() {
+    const request = this.requests[this.cursor];
+    return request === void 0 ? void 0 : DispatchRequestSchema.parse(request);
+  }
+  admit(runtime, observedDispatchIds) {
+    const complete = this.results();
+    if (complete !== void 0) return { status: "complete", outcomes: complete };
+    if (this.active.size > 0 && (this.batchSealed || this.active.size >= this.maxConcurrent || this.cursor === this.requests.length)) {
+      this.batchSealed = true;
+      return { status: "waiting", dispatchIds: [...this.active.keys()] };
+    }
+    const request = this.pending();
+    if (request === void 0)
+      throw new InvalidDispatchQueueStateError("Unsettled queue has no pending or active requests");
+    const snapshot = RuntimeSnapshotSchema.parse(runtime);
+    const observed = ObservedDispatchIdsSchema.parse(observedDispatchIds);
+    if (observed.some((id) => !this.active.has(id)) || observed.length > snapshot.limits.activeWorkers) {
+      throw new InvalidDispatchQueueStateError(
+        "Observed local dispatches must be active reservations included in the host worker count"
+      );
+    }
+    const unobservedReservations = this.active.size - observed.length;
+    const decision = this.policy.prepare(request, {
+      ...snapshot,
+      limits: {
+        ...snapshot.limits,
+        activeWorkers: snapshot.limits.activeWorkers + unobservedReservations
+      }
+    });
+    if (decision.status === "unavailable" && decision.failure.code === "CAPACITY_EXHAUSTED" && this.active.size > 0) {
+      this.batchSealed = true;
+      return { status: "waiting", dispatchIds: [...this.active.keys()] };
+    }
+    this.cursor++;
+    if (decision.status === "unavailable") {
+      const outcome = {
+        status: "unavailable",
+        dispatchId: request.id,
+        agent: request.agent,
+        context: request.context,
+        failure: decision.failure
+      };
+      this.outcomes.set(request.id, structuredClone(outcome));
+      return { status: "unavailable", outcome };
+    }
+    this.active.set(request.id, DispatchRequestSchema.parse(request));
+    if (this.active.size === this.maxConcurrent) this.batchSealed = true;
+    return decision;
+  }
+  settle(dispatchId, outcome, schema) {
+    const request = this.active.get(dispatchId);
+    if (request === void 0)
+      throw new InvalidDispatchQueueStateError(`No active reservation for ${dispatchId}`);
+    const result = this.reports.accept(request, outcome, schema);
+    if (result.status === "rejected") return result;
+    this.outcomes.set(dispatchId, structuredClone(result.outcome));
+    this.active.delete(dispatchId);
+    this.batchSealed = this.active.size > 0;
+    return result;
+  }
+  cancel() {
+    for (const request of this.requests.slice(this.cursor)) {
+      this.outcomes.set(request.id, {
+        status: "failed",
+        dispatchId: request.id,
+        agent: request.agent,
+        context: request.context,
+        failure: {
+          code: "CANCELLED",
+          message: "The caller cancelled queued work before dispatch.",
+          remedy: "Start a new invocation only when the caller chooses to resume."
+        }
+      });
+    }
+    this.cursor = this.requests.length;
+    this.batchSealed = this.active.size > 0;
+  }
+  results() {
+    if (this.outcomes.size !== this.requests.length) return void 0;
+    return this.requests.map((request) => {
+      const outcome = this.outcomes.get(request.id);
+      if (outcome === void 0)
+        throw new InvalidDispatchQueueStateError(`Missing terminal outcome for ${request.id}`);
+      return structuredClone(outcome);
+    });
+  }
+};
 export {
+  AdapterLimitsSchema,
   AgentCapabilitySchema,
   AgentFrontmatterSchema,
+  AgentInstallScopeSchema,
   AttachmentSchema,
   AttachmentSpecSchema,
   BlobSectionSource,
   BodyMetadataService,
   BodySectionSelector,
-  CharterFormatError,
+  BoundedDispatchQueue,
+  CallerContextSchema,
+  CapabilityEvidenceSchema,
   ClaudeSettingsSource,
   CommentSchema,
   CommitMessageInputSchema,
@@ -5303,40 +6947,73 @@ export {
   CreateInitiativeInputSchema,
   CreateTechnicalDesignInputSchema,
   CreateTicketInputSchema,
+  CriterionResultSchema,
   DefaultCommitMessageBuilder,
   DefaultFlightRules,
   DefaultPullRequestBuilder,
   DependencyPlannerService,
-  DocCharterCatalog,
+  DispatchOutcomeSchema,
+  DispatchRequestSchema,
   DocIdSchema,
   DuplicateEvidenceNameError,
   EntityMetadataSchema,
   EnvLoader,
   EpicSchema,
+  FileAgentRegistry,
   FileDocResolver,
+  FileNativeInstallation,
   GhOutputParseError,
   GhPullRequestHost,
   GitHubTaskTracker,
+  HandoffRecordSchema,
+  ImplementationReportSchema,
+  ImplementationRunSchema,
   InitiativeSchema,
+  InstallationManifestSchema,
+  InvalidAgentDefinitionError,
+  InvalidDispatchQueueStateError,
+  InvalidPluginSourceError,
+  InvalidSettingsError,
   JiraTaskTracker,
   LayeredBodyAdfConverter,
+  MarkdownClaudeAgentEmitter,
   MediaLookupSchema,
   MediaRefSchema,
   ModelTierSchema,
+  NativeHostSchema,
+  NativeInstallationError,
+  NativePluginCompiler,
+  NeutralSettingsSource,
   NodeGitExecutor,
+  NodeRepositoryReadiness,
   NodeToolProbe,
+  NodeWorkflowPreflight,
+  OrchestrationFailureSchema,
   PrecedenceBodyFormatDetector,
   PullRequestTemplateSchema,
   PushSpecSchema,
+  QuestionRequestSchema,
+  ReadinessOptionsSchema,
+  RegistryOrchestrationPolicy,
+  RunContextSchema,
+  RuntimeSnapshotSchema,
   SemanticTypeSchema,
+  SiblingSkillRequestSchema,
   TechnicalDesignSchema,
   TicketSchema,
+  TomlCodexAgentEmitter,
   TrackerEvidenceService,
   TrackerUserSchema,
+  UnsupportedAgentSettingError,
   UnsupportedTrackerOperationError,
   UpdateEpicInputSchema,
   UpdateInitiativeInputSchema,
   UpdateTicketInputSchema,
+  ValidatedReportHandoff,
+  VerificationReportSchema,
+  VerifiedImplementationLoop,
+  WorkflowEvidenceSchema,
+  WorkflowSchema,
   YamlAgentFrontmatterParser,
   agentCapabilities,
   agentFrontmatterParser,

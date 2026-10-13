@@ -1,0 +1,42 @@
+{
+  "validatedAt": "2026-10-13T01:16:00.881189+00:00",
+  "codex": {
+    "hostVersion": "codex-cli 0.162.1",
+    "artifact": "extracted npm package/dist/codex",
+    "registrations": [
+      "code-implementation",
+      "code-implementation-escalated",
+      "code-verifier",
+      "qa-engineer",
+      "qa-engineer-verify",
+      "research-agent",
+      "tech-writer"
+    ],
+    "negativeControlObserved": true,
+    "validRoleWarnings": 0,
+    "marketplace": {
+      "discovered": true,
+      "pluginRead": true,
+      "skills": 13,
+      "installed": false,
+      "version": "1.69.0"
+    },
+    "modelTurns": 0
+  },
+  "claude": {
+    "hostVersion": "2.1.296",
+    "artifact": "dist/claude",
+    "nativeValidatorWarnings": 0,
+    "liveRoles": [
+      "code-verifier",
+      "code-implementation-escalated",
+      "qa-engineer-verify"
+    ],
+    "fixtureTransition": "failing to passing",
+    "permissionDenials": 0
+  },
+  "limits": [
+    "Codex model execution and installation are not exercised.",
+    "Parent orchestration and runtime permissions remain E4; project installation and full pipeline evidence remain E5."
+  ]
+}

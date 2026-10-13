@@ -291,6 +291,33 @@ describe("board hooks", () => {
       expect(await toolCall("a1")).toMatchObject({ sent: [], stdout: 0, stderr: 0 });
       expect(agents().readAgent("a1")?.ticket).toBe("FRT-1");
     });
+
+    it("names the skill a sub-agent loads instead of its agent type, from then on", async () => {
+      await dispatch("toolu_1", "Build FRT-1 api", "p1");
+      startSubagent("a1", "toolu_1", "Build FRT-1 api", "p1");
+      await toolCall("a1", { tool_name: "Skill", tool_input: { skill: "flight-rules:execute-work" } });
+      expect(sessions().readInferred(`${claude}-FRT-1`)?.heartbeat.skill).toBe("flight-rules:execute-work");
+
+      now += heartbeatIntervalMs;
+      await toolCall("a1");
+      expect(sessions().readInferred(`${claude}-FRT-1`)?.heartbeat.skill).toBe("flight-rules:execute-work");
+    });
+
+    it("keeps a sub-agent's skill when its background launch maps it after the skill was recorded", async () => {
+      await dispatch("toolu_bg", "Build FRT-5678 probe", "p");
+      // The sub-agent's Skill hook lands first, from its own process.
+      agents().recordAgentSkill("abg", "flight-rules:execute-work");
+      await toolCall(undefined, { tool_name: "Agent", tool_use_id: "toolu_bg", tool_response: { status: "async_launched", agentId: "abg" } });
+      await toolCall("abg");
+      expect(sessions().readInferred(`${claude}-FRT-5678`)?.heartbeat.skill).toBe("flight-rules:execute-work");
+    });
+
+    it("keeps the agent type when a Skill call names no skill Ariadne accepts", async () => {
+      await dispatch("toolu_1", "Build FRT-1 api", "p1");
+      startSubagent("a1", "toolu_1", "Build FRT-1 api", "p1");
+      await toolCall("a1", { tool_name: "Skill", tool_input: { skill: "not a skill name" } });
+      expect(sessions().readInferred(`${claude}-FRT-1`)?.heartbeat.skill).toBe("general-purpose");
+    });
   });
 
   describe("skill steps win", () => {
@@ -328,6 +355,55 @@ describe("board hooks", () => {
       expect(transport.bodies()).toEqual([skillStep]);
     });
 
+    it("keeps a session an item created for a skill, rather than inferring over it", async () => {
+      env = { ...env, CLAUDE_CODE_SESSION_ID: claude };
+      const transport = new FakeTransport(
+        FakeTransport.json(404, { error: "session_not_found", message: "Send a heartbeat for this session first." }),
+        FakeTransport.json(200, { session: contract.session }),
+        FakeTransport.json(200, { item: contract.item, created: true }),
+      );
+      await board(transport).item({ kind: "testable", ticket: "FRT-1", title: "Ready to test" }, { skill: "flight-rules:verify-ticket" });
+      now += heartbeatIntervalMs;
+      expect((await toolCall("a1")).sent).toEqual([`${claude}-FRT-1`]);
+      expect(sessions().readInferred(`${claude}-FRT-1`)).toBeUndefined();
+      expect(sessions().read(`${claude}-FRT-1`)?.heartbeat).toMatchObject({ step: "started", skill: "flight-rules:verify-ticket" });
+    });
+
+    it("creates a missing session from a skill heartbeat that failed in transit, keeping its verdict", async () => {
+      env = { ...env, CLAUDE_CODE_SESSION_ID: claude };
+      const verdict = { ...skillStep, step: "qa", state: "abort", skill: "flight-rules:verify-ticket", detail: "2 of 3 failed" } as const;
+      sessions().record(verdict);
+      const transport = new FakeTransport(
+        FakeTransport.json(404, { error: "session_not_found", message: "Send a heartbeat for this session first." }),
+        FakeTransport.json(200, { session: contract.session }),
+        FakeTransport.json(200, { activity: contract.activity, created: true }),
+      );
+      await board(transport).activity({ ticket: "FRT-1", text: "Verification failed" }, { skill: "flight-rules:verify-ticket" });
+      expect(transport.bodies()[1]).toEqual(verdict);
+      expect(sessions().read(`${claude}-FRT-1`)?.heartbeat).toEqual(verdict);
+    });
+
+    it("starts a fresh placeholder, not a finished run's old verdict, when the record is over an hour old", async () => {
+      env = { ...env, CLAUDE_CODE_SESSION_ID: claude };
+      sessions().record({ ...skillStep, step: "qa", state: "abort", skill: "flight-rules:verify-ticket" });
+      now += heartbeatMaxAgeMs + 1;
+      const transport = new FakeTransport(
+        FakeTransport.json(404, { error: "session_not_found", message: "Send a heartbeat for this session first." }),
+        FakeTransport.json(200, { session: contract.session }),
+        FakeTransport.json(200, { item: contract.item, created: true }),
+      );
+      await board(transport).item({ kind: "question", ticket: "FRT-1", title: "Open PRs?" }, { skill: "flight-rules:execute-work" });
+      const placeholder = { session: `${claude}-FRT-1`, ticket: "FRT-1", step: "started", state: "nominal", skill: "flight-rules:execute-work" };
+      expect(transport.bodies()[1]).toEqual(placeholder);
+      expect(sessions().read(`${claude}-FRT-1`)?.heartbeat).toEqual(placeholder);
+    });
+
+    it("never remembers a placeholder over a recent skill heartbeat", () => {
+      sessions().record({ ...skillStep, step: "qa", state: "caution" });
+      expect(sessions().recordIfAbsent({ ...skillStep, step: "started" }, heartbeatMaxAgeMs)).toBe(false);
+      expect(sessions().read(`${claude}-FRT-1`)?.heartbeat.step).toBe("qa");
+    });
+
     it("sends nothing for an aborted skill run or one quiet for over an hour", async () => {
       sessions().record({ ...skillStep, state: "abort" });
       now += heartbeatIntervalMs;
@@ -348,6 +424,18 @@ describe("board hooks", () => {
         ticket: "FRT-42",
         step: "working",
         state: "nominal",
+      });
+    });
+
+    it("names the skill the main thread last loaded", async () => {
+      const cwd = join(home, "pd302", "crime-linking-aws-FRT-42");
+      await toolCall(undefined, { cwd, tool_name: "Skill", tool_input: { skill: "flight-rules:review-prose" } });
+      expect(sessions().readInferred(`${claude}-FRT-42`)?.heartbeat).toEqual({
+        session: `${claude}-FRT-42`,
+        ticket: "FRT-42",
+        step: "working",
+        state: "nominal",
+        skill: "flight-rules:review-prose",
       });
     });
 

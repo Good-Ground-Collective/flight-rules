@@ -66,7 +66,7 @@ export default defineConfig([
   // dependency's whole body is often a `throw`, and a suite is worth a
   // paragraph describing the contract it pins.
   {
-    files: ["**/*.test.ts"],
+    files: ["**/*.test.ts", "**/__tests__/**/*.ts"],
     rules: {
       "@typescript-eslint/consistent-type-assertions": "off",
       "@typescript-eslint/no-unsafe-type-assertion": "off",

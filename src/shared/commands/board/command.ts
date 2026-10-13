@@ -31,6 +31,7 @@ interface ItemOptions extends ReportOptions {
   detail?: string;
   option: string[];
   id?: string;
+  skill?: string;
 }
 
 interface ActivityOptions extends ReportOptions {
@@ -38,6 +39,7 @@ interface ActivityOptions extends ReportOptions {
   text: string;
   level?: AgentActivityLevel;
   id?: string;
+  skill?: string;
 }
 
 /** Reads a secret from piped stdin, or prompts on a terminal without echoing what is typed. */
@@ -59,7 +61,9 @@ export class HiddenPrompt {
 const ticketHelp = "Jira issue key";
 const sessionHelp = "session id; defaults to <$CLAUDE_CODE_SESSION_ID>-<TICKET>, the row the heartbeat hook keeps alive for that ticket";
 const itemsSessionHelp = "session id; defaults to <$CLAUDE_CODE_SESSION_ID>-<TICKET> with --ticket, else $CLAUDE_CODE_SESSION_ID";
-const strictHelp = "exit 1 when the post fails, and post even without a token so a missing one fails with 401";
+const skillHelp = "the skill reporting, e.g. flight-rules:execute-work";
+const bootstrapSkillHelp = `${skillHelp}; names the skill on a session this post has to create`;
+const strictHelp ="exit 1 when the post fails, and post even without a token so a missing one fails with 401";
 
 /**
  * `flight-rules board`: reports this run to Ariadne's Agents page. Not
@@ -143,7 +147,7 @@ export function createBoardCommand(
       .addOption(new Option("--state <state>", "how the run is going").choices(agentStates).makeOptionMandatory())
       .option("--branch <branch>", "the branch as git prints it")
       .option("--repo <repo>", "owner/name")
-      .option("--skill <skill>", "the skill reporting, e.g. flight-rules:execute-work")
+      .option("--skill <skill>", skillHelp)
       .option("--detail <line>", "one line up to 500 characters"),
     "print the API response {session} as JSON",
   ).action(async (opts: HeartbeatOptions) => {
@@ -172,7 +176,8 @@ export function createBoardCommand(
       .requiredOption("--title <text>", "one line up to 200 characters")
       .option("--detail <text>", "up to 2,000 characters; line breaks allowed")
       .option("--option <label>", "an answer the person can choose (repeatable, up to 6)", collect, [])
-      .option("--id <id>", "client id; reposting the same id returns the stored item and its chosenOption"),
+      .option("--id <id>", "client id; reposting the same id returns the stored item and its chosenOption")
+      .option("--skill <skill>", bootstrapSkillHelp),
     "print the API response {item, created} as JSON, including any chosenOption",
   ).action(async (opts: ItemOptions) => {
     const outcome = await getBoard().item(
@@ -185,7 +190,7 @@ export function createBoardCommand(
         ...(opts.option.length > 0 ? { options: opts.option } : {}),
         id: opts.id,
       },
-      { strict: opts.strict === true },
+      { strict: opts.strict === true, skill: opts.skill },
     );
     finish(outcome, opts, printJson(opts));
   });
@@ -197,12 +202,13 @@ export function createBoardCommand(
       .requiredOption("--ticket <key>", ticketHelp)
       .requiredOption("--text <line>", "one line up to 500 characters")
       .addOption(new Option("--level <level>", "defaults to info").choices(agentActivityLevels))
-      .option("--id <id>", "client id; reposting the same id stores nothing new"),
+      .option("--id <id>", "client id; reposting the same id stores nothing new")
+      .option("--skill <skill>", bootstrapSkillHelp),
     "print the API response {activity, created} as JSON",
   ).action(async (opts: ActivityOptions) => {
     const outcome = await getBoard().activity(
       { session: opts.session, ticket: opts.ticket, text: opts.text, level: opts.level, id: opts.id },
-      { strict: opts.strict === true },
+      { strict: opts.strict === true, skill: opts.skill },
     );
     finish(outcome, opts, printJson(opts));
   });

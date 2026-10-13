@@ -230,6 +230,7 @@ export function resolveConfigPath( // eslint-disable-line preflight/no-loose-fun
   cwd: string,
   override: string | undefined,
   probe: PathProbe = nodePathProbe,
+  host: "claude" | "codex" = "claude",
 ): string {
   if (override !== undefined) {
     return isAbsolute(override) ? override : resolve(cwd, override);
@@ -240,6 +241,8 @@ export function resolveConfigPath( // eslint-disable-line preflight/no-loose-fun
   const candidates = [claudePath, agentsPath];
   const existing = candidates.find((path) => probe.isFile(path));
   if (existing !== undefined) return existing;
+
+  if (host === "codex") return agentsPath;
 
   return candidates.find((path) => probe.isDirectory(dirname(path))) ?? claudePath;
 }

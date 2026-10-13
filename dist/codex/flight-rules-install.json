@@ -1,0 +1,118 @@
+{
+  "host": "codex",
+  "agents": [
+    {
+      "name": "code-implementation",
+      "sha256": "b9f05372e7c5341c1b42d1a468f24eb1cab7a62515b71d4fa0ee07d4453053bf",
+      "registration": {
+        "name": "code-implementation",
+        "description": "Implements a single ticket's acceptance criteria against the coding charter. Dispatched by the execute-work skill with the ticket's layered body, any RFC/TDD context, and — on a retry — the verifier's itemized failures. Writes and edits code and tests; it never commits, branches, or opens PRs (the orchestrating skill owns git). Use when a ticket needs to be built.",
+        "capabilities": [
+          "read",
+          "edit",
+          "shell"
+        ],
+        "model": "standard",
+        "x-claude": {
+          "color": "green"
+        }
+      }
+    },
+    {
+      "name": "code-implementation-escalated",
+      "sha256": "78f7a417b491ee7f72e12599c8d79c71163a7976e823a05ba6f91e7871702567",
+      "registration": {
+        "name": "code-implementation-escalated",
+        "description": "Implements the final attempt for a ticket after two recorded verifier rejections. Shares the code-implementation instructions, acceptance criteria and structured report; use only on attempt three of execute-work.",
+        "capabilities": [
+          "read",
+          "edit",
+          "shell"
+        ],
+        "model": "escalated",
+        "x-claude": {
+          "color": "green"
+        }
+      }
+    },
+    {
+      "name": "code-verifier",
+      "sha256": "c7c24e227ed98ec50020bf26b3254b582b6731d06f14d38707ac1a0b4f8bb22f",
+      "registration": {
+        "name": "code-verifier",
+        "description": "Verifies a completed implementation against a ticket's acceptance criteria, itemized, one verdict per criterion with evidence. Dispatched by the execute-work skill after code-implementation runs. Read-only — it inspects code and runs tests but never edits anything. Use to independently confirm a ticket is actually done.",
+        "capabilities": [
+          "read",
+          "shell"
+        ],
+        "model": "standard",
+        "x-claude": {
+          "color": "yellow"
+        }
+      }
+    },
+    {
+      "name": "qa-engineer",
+      "sha256": "567382b8f66ac669fe0f4d9b25ed9f6ee89e90ab8ad4279de8308f64a282904c",
+      "registration": {
+        "name": "qa-engineer",
+        "description": "Reproduces a bug or verifies a bug fix or a story in the running product, following the repo's QA instructions — usually driving the web client through playwright-cli and capturing screenshots and a one-take recording, otherwise the API, CLI, Salesforce org, or cloud account those instructions describe. Dispatched by reproduce-bug in reproduce mode; the qa-engineer-verify registration shares these instructions for verify-ticket in verify mode. Read-and-run only: it never writes to the tracker, git, or a PR, never fixes anything, and never prompts. Use when a ticket needs to be seen working, or failing, in a live environment.",
+        "capabilities": [
+          "read",
+          "shell"
+        ],
+        "model": "escalated",
+        "x-claude": {
+          "color": "blue"
+        }
+      }
+    },
+    {
+      "name": "qa-engineer-verify",
+      "sha256": "232b13900c207c2c602261e31ce7319c2d318a2fb8d961fa90470f2ed521c3f4",
+      "registration": {
+        "name": "qa-engineer-verify",
+        "description": "Verifies a recorded bug fix or story contract in the running product in verify mode. Shares the qa-engineer capture protocol and structured report; use for verify-ticket rather than initial symptom investigation.",
+        "capabilities": [
+          "read",
+          "shell"
+        ],
+        "model": "standard",
+        "x-claude": {
+          "color": "blue"
+        }
+      }
+    },
+    {
+      "name": "research-agent",
+      "sha256": "5ba8fba4922e3a5b19101973a4c8b9519f9390f872bd89db81a811e0e445138a",
+      "registration": {
+        "name": "research-agent",
+        "description": "Single-shot investigator that answers one focused research brief by reading code and/or searching the web, and returns a structured, mode-typed findings report. Dispatch one per question; parallel fan-out is the caller's job. Use for grounding decomposition/planning in real code, or for ad-hoc questions like \"does library X support Y, and how do I do it with the Z SDK?\".",
+        "capabilities": [
+          "read",
+          "web"
+        ],
+        "model": "escalated",
+        "x-claude": {
+          "color": "cyan"
+        }
+      }
+    },
+    {
+      "name": "tech-writer",
+      "sha256": "cd541cd1421bbf31a68c56424bb1ed681eef0d87018fc00fd7e68ff01e9e0952",
+      "registration": {
+        "name": "tech-writer",
+        "description": "Reviews, rewrites, or authors human-readable prose — RFCs, tickets, design docs, READMEs, PR descriptions, release notes — against the bundled prose charter, and strips machine-writing tells. Dispatched by the review-prose skill in feedback (findings only) or rewrite (proposes exact edits the skill applies) mode, and by execute-work in author mode to construct a PR body from change context. Read-only; it never writes files and never touches code. Use when a written artifact needs to read like a human wrote it.",
+        "capabilities": [
+          "read"
+        ],
+        "model": "escalated",
+        "x-claude": {
+          "color": "purple"
+        }
+      }
+    }
+  ]
+}

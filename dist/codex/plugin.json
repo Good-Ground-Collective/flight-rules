@@ -1,0 +1,11 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "flight-rules",
+  "description": "PM-to-engineering pipeline for Good Ground Collective",
+  "repository": "https://github.com/good-ground-collective/flight-rules",
+  "author": {
+    "name": "Good Ground Collective"
+  },
+  "license": "MIT",
+  "version": "1.77.0"
+}

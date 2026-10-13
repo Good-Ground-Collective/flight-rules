@@ -1,0 +1,5 @@
+{
+  "standard": "gpt-6-luna",
+  "escalated": "gpt-6.1-sol",
+  "expert": "gpt-6-astra"
+}

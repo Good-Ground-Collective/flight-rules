@@ -1,0 +1,14 @@
+[
+  {
+    "name": "code-implementation-escalated",
+    "extends": "code-implementation",
+    "description": "Implements the final attempt for a ticket after two recorded verifier rejections. Shares the code-implementation instructions, acceptance criteria and structured report; use only on attempt three of execute-work.",
+    "model": "escalated"
+  },
+  {
+    "name": "qa-engineer-verify",
+    "extends": "qa-engineer",
+    "description": "Verifies a recorded bug fix or story contract in the running product in verify mode. Shares the qa-engineer capture protocol and structured report; use for verify-ticket rather than initial symptom investigation.",
+    "model": "standard"
+  }
+]

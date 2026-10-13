@@ -22,6 +22,10 @@ export type AgentTicketRecord = z.infer<typeof AgentRecordSchema>;
  * records: `dispatch/<tool_use_id>.json` is written when an Agent call is
  * made, and `agents/<agent_id>.json` caches what each sub-agent resolved to,
  * including "no ticket", so it is worked out once per sub-agent.
+ * `agent-skills/<agent_id>.json` holds the skill it loaded. It is a separate
+ * file because the parent's background-launch hook and the sub-agent's own
+ * hooks write the mapping from different processes, and neither may undo the
+ * other's skill.
  */
 export declare class BoardAgentStore {
     private readonly files;
@@ -35,6 +39,9 @@ export declare class BoardAgentStore {
     recordAgent(agentId: string, record: AgentTicketRecord): void;
     readAgent(agentId: string): AgentTicketRecord | undefined;
     removeAgent(agentId: string): void;
+    /** Remembers the skill a sub-agent just loaded; rewrites nothing when it is unchanged. */
+    recordAgentSkill(agentId: string, skill: string): void;
+    readAgentSkill(agentId: string): string | undefined;
     /** Deletes dispatch and sub-agent records untouched for `maxAgeMs`. */
     prune(maxAgeMs: number): void;
 }

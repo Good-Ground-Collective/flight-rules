@@ -2,6 +2,7 @@ import { accessSync, constants, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { FileDocResolver } from "../../bundled-docs/doc-resolver/doc-resolver.js";
+import { agentFrontmatterParser } from "../../agents/agent-frontmatter/agent-frontmatter.js";
 
 const root = join(import.meta.dirname, "..", "..", "..");
 const writer = readFileSync(join(root, "agents/tech-writer.md"), "utf8");
@@ -9,10 +10,10 @@ const resolver = new FileDocResolver({ docsDir: join(root, "docs") });
 
 describe("read-only tech-writer document handoff", () => {
   it("keeps the writer read-only and free of CLI instructions", () => {
-    expect(writer).toMatch(/^tools: Glob, Grep, LS, Read$/m);
+    expect(agentFrontmatterParser.parse(writer).capabilities).toEqual(["read"]);
     expect(writer).not.toMatch(/flight-rules doc/);
     expect(writer).toMatch(/Read both required files in full/);
-    expect(writer).toMatch(/Use Read to read that file in full before drafting/);
+    expect(writer).toMatch(/Read that file in full before drafting/);
   });
 
   it.each([

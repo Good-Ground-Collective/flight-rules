@@ -413,8 +413,9 @@ export class JiraTaskTracker implements TaskTracker {
     return users.map((user) => ({ accountId: user.accountId, displayName: user.displayName }))
   }
 
-  async ping(): Promise<void> {
-    await this.client.request('GET', '/myself')
+  async ping(options?: { signal?: AbortSignal }): Promise<void> {
+    if (options?.signal === undefined) await this.client.request('GET', '/myself')
+    else await this.client.request('GET', '/myself', undefined, undefined, options.signal)
   }
 
   private async searchChildren(epicKey: string): Promise<Ticket[]> {

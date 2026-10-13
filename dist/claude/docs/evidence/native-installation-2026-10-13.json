@@ -1,0 +1,90 @@
+{
+  "scratch": "<scratch>",
+  "modelTurns": 0,
+  "claude": {
+    "version": "2.1.296 (Claude Code)",
+    "installed": true,
+    "agents": [
+      "code-implementation",
+      "code-implementation-escalated",
+      "code-verifier",
+      "qa-engineer",
+      "qa-engineer-verify",
+      "research-agent",
+      "tech-writer"
+    ],
+    "skills": [
+      "author-review-packet",
+      "autonomous-code-review",
+      "break-down-work",
+      "capture-evidence",
+      "draft-request-for-comments",
+      "execute-wave",
+      "execute-work",
+      "guided-code-review",
+      "reproduce-bug",
+      "review-prose",
+      "setup",
+      "sharpen-the-saw",
+      "verify-ticket"
+    ],
+    "installPath": "<scratch>/claude-home/plugins/cache/flight-rules/flight-rules/1.76.0"
+  },
+  "codex": {
+    "version": "codex-cli 0.162.1",
+    "installResult": {
+      "pluginId": "flight-rules@flight-rules",
+      "name": "flight-rules",
+      "marketplaceName": "flight-rules",
+      "version": "1.76.0",
+      "installedPath": "<scratch>/codex-home/plugins/cache/flight-rules/flight-rules/1.76.0",
+      "authPolicy": "ON_USE"
+    },
+    "negativeControls": [
+      "Ignoring malformed agent role definition: agent role file at <scratch>/repo/.codex/agents/code-implementation-escalated.toml.developer_instructions cannot be blank",
+      "Ignoring malformed agent role definition: agent role file at <scratch>/repo/.codex/agents/code-implementation.toml.developer_instructions cannot be blank",
+      "Ignoring malformed agent role definition: agent role file at <scratch>/repo/.codex/agents/code-verifier.toml.developer_instructions cannot be blank",
+      "Ignoring malformed agent role definition: agent role file at <scratch>/repo/.codex/agents/qa-engineer-verify.toml.developer_instructions cannot be blank",
+      "Ignoring malformed agent role definition: agent role file at <scratch>/repo/.codex/agents/qa-engineer.toml.developer_instructions cannot be blank",
+      "Ignoring malformed agent role definition: agent role file at <scratch>/repo/.codex/agents/research-agent.toml.developer_instructions cannot be blank",
+      "Ignoring malformed agent role definition: agent role file at <scratch>/repo/.codex/agents/tech-writer.toml.developer_instructions cannot be blank"
+    ],
+    "skills": [
+      "flight-rules:author-review-packet",
+      "flight-rules:autonomous-code-review",
+      "flight-rules:break-down-work",
+      "flight-rules:capture-evidence",
+      "flight-rules:draft-request-for-comments",
+      "flight-rules:execute-wave",
+      "flight-rules:execute-work",
+      "flight-rules:guided-code-review",
+      "flight-rules:reproduce-bug",
+      "flight-rules:review-prose",
+      "flight-rules:setup",
+      "flight-rules:sharpen-the-saw",
+      "flight-rules:verify-ticket"
+    ],
+    "installed": true,
+    "agents": [
+      "code-implementation",
+      "code-implementation-escalated",
+      "code-verifier",
+      "qa-engineer",
+      "qa-engineer-verify",
+      "research-agent",
+      "tech-writer"
+    ],
+    "installPath": "<scratch>/codex-home/plugins/cache/flight-rules/flight-rules/1.76.0",
+    "registrationEvidence": "every role rejected with a deliberate invalid prompt, then accepted when restored"
+  },
+  "artifacts": {
+    "claude": {
+      "bin/flight-rules.mjs": "104879e1312588d05ea09eb798879482ee95d6672213d208a33bf1b3075c07ff",
+      "flight-rules-install.json": "0df7607662f3b4609170051a27ed8c1ae27086e22f17e104efcaead761a544cf"
+    },
+    "codex": {
+      "bin/flight-rules.mjs": "104879e1312588d05ea09eb798879482ee95d6672213d208a33bf1b3075c07ff",
+      "flight-rules-install.json": "875332ede10db0e5f2fbc392a2a3f015c1ce509efb7a3fb75c2ddba4ca41ec2c"
+    }
+  }
+}

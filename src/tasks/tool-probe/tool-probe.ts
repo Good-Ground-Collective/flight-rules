@@ -1,5 +1,7 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import { z } from 'zod'
+import { RedactedProbeDiagnostics } from '../readiness/probe-diagnostics.js'
 
 type ExecFileFn = (
   file: string,
@@ -11,12 +13,17 @@ export interface ToolCheck {
   ok: boolean
   detail: string
   required: boolean
+  code?: string | undefined
+  remedy?: string | undefined
 }
 
 export interface ToolProbeInput {
   repo?: string | undefined
   /** True when QA instructions apply to the repo, which makes the capture tools required. */
   qaInstructionsFound: boolean
+  /** Omitted preserves the general environment check's existing requirements. */
+  githubRequired?: boolean
+  pushRequired?: boolean
 }
 
 export interface ToolProbe {
@@ -28,7 +35,12 @@ const ghVersionLine = /gh version (\d+)\.(\d+)\.(\d+)/
 
 export interface NodeToolProbeProps {
   execFileFn?: ExecFileFn
+  cwd?: string
+  env?: Record<string, string | undefined>
+  timeoutMs?: number
 }
+
+const NodeToolProbePropsSchema = z.object({ cwd: z.string().optional(), env: z.record(z.string(), z.string().optional()).optional(), timeoutMs: z.int().positive().max(60_000).default(10_000) })
 
 /**
  * Probes the CLI's operating environment for the binaries `flight-rules`
@@ -37,34 +49,41 @@ export interface NodeToolProbeProps {
  */
 export class NodeToolProbe implements ToolProbe {
   private readonly execFile: ExecFileFn
+  private readonly env: Record<string, string | undefined>
 
   constructor(props: NodeToolProbeProps = {}) {
+    const input = NodeToolProbePropsSchema.parse({ ...props, env: props.env === undefined ? undefined : { ...props.env } })
     const promisified = promisify(execFile)
-    this.execFile = props.execFileFn ?? ((file, args) => promisified(file, [...args]))
+    const cwd = input.cwd ?? process.cwd()
+    const env = props.env ?? process.env
+    this.env = env
+    this.execFile = props.execFileFn ?? ((file, args) => promisified(file, [...args], { cwd, env, timeout: input.timeoutMs, killSignal: 'SIGKILL', maxBuffer: 1024 * 1024 }))
   }
 
   async probe(input: ToolProbeInput): Promise<ToolCheck[]> {
+    const diagnostics = new RedactedProbeDiagnostics({ env: this.env })
     const qaRequired = input.qaInstructionsFound
-    const ghRequired = input.repo !== undefined
+    const ghRequired = input.githubRequired ?? input.repo !== undefined
+    const pushRequired = input.pushRequired ?? ghRequired
 
     const [gh, ghAuth, ghPush, playwright, ffmpeg, curl] = await Promise.all([
-      this.ghVersion(ghRequired),
-      this.ghAuth(ghRequired),
-      this.ghPush(input.repo, ghRequired),
-      this.present('tools:playwright-cli', 'playwright-cli', ['--version'], qaRequired),
-      this.present('tools:ffmpeg', 'ffmpeg', ['-version'], qaRequired),
-      this.present('tools:curl', 'curl', ['--version'], qaRequired),
+      this.ghVersion(ghRequired, diagnostics),
+      this.ghAuth(ghRequired, diagnostics),
+      this.ghPush(input.repo, pushRequired, diagnostics),
+      this.present('tools:playwright-cli', 'playwright-cli', ['--version'], qaRequired, diagnostics),
+      this.present('tools:ffmpeg', 'ffmpeg', ['-version'], qaRequired, diagnostics),
+      this.present('tools:curl', 'curl', ['--version'], qaRequired, diagnostics),
     ])
 
     return [gh, ghAuth, ghPush, playwright, ffmpeg, curl]
   }
 
-  private async ghVersion(required: boolean): Promise<ToolCheck> {
+  private async ghVersion(required: boolean, diagnostics: RedactedProbeDiagnostics): Promise<ToolCheck> {
     try {
       const { stdout } = await this.execFile('gh', ['--version'])
       const match = ghVersionLine.exec(stdout)
       if (match === null) {
-        return { name: 'tools:gh', ok: false, detail: `unrecognized version output: ${stdout.trim()}`, required }
+        return { name: 'tools:gh', ok: false, detail: `unrecognized version output: ${diagnostics.redact(stdout.trim())}`, required, code: 'UNKNOWN', remedy: 'Inspect the gh executable selected by PATH and verify its version.' }
       }
       const [, major, minor, patch] = match
       const version: readonly [number, number, number] = [Number(major), Number(minor), Number(patch)]
@@ -77,24 +96,23 @@ export class NodeToolProbe implements ToolProbe {
           ? `gh ${found}`
           : `gh ${found} is older than the required ${minimumGhVersion.join('.')}`,
         required,
+        ...(ok ? {} : { code: 'TOOL_VERSION', remedy: `Install gh ${minimumGhVersion.join('.')} or newer before this workflow.` }),
       }
     } catch (err) {
-      const detail = this.isMissingBinary(err) ? 'not installed' : this.stderrOf(err)
-      return { name: 'tools:gh', ok: false, detail, required }
+      return { ...diagnostics.failure('tools:gh', err, required), required }
     }
   }
 
-  private async ghAuth(required: boolean): Promise<ToolCheck> {
+  private async ghAuth(required: boolean, diagnostics: RedactedProbeDiagnostics): Promise<ToolCheck> {
     try {
       await this.execFile('gh', ['auth', 'status'])
       return { name: 'tools:gh-auth', ok: true, detail: 'authenticated', required }
     } catch (err) {
-      const detail = this.isMissingBinary(err) ? 'not installed' : this.stderrOf(err)
-      return { name: 'tools:gh-auth', ok: false, detail, required }
+      return { ...diagnostics.failure('tools:gh-auth', err, required, 'AUTHENTICATION'), required }
     }
   }
 
-  private async ghPush(repo: string | undefined, required: boolean): Promise<ToolCheck> {
+  private async ghPush(repo: string | undefined, required: boolean, diagnostics: RedactedProbeDiagnostics): Promise<ToolCheck> {
     if (repo === undefined) {
       return { name: 'tools:gh-push', ok: false, detail: 'skipped — repo is not configured', required }
     }
@@ -109,12 +127,13 @@ export class NodeToolProbe implements ToolProbe {
       return {
         name: 'tools:gh-push',
         ok,
-        detail: ok ? `push access to ${repo}` : `no push access to ${repo}`,
+        detail: ok ? `GitHub account has push entitlement to ${repo}; transport and branch policy are not tested` : stdout.trim() === 'false' ? `no push entitlement to ${repo}` : `push entitlement to ${repo} is unverified`,
+        code: ok ? 'AVAILABLE' : stdout.trim() === 'false' ? 'PERMISSION_DENIED' : 'UNKNOWN',
+        ...(ok ? {} : { remedy: 'Verify the selected GitHub account has push entitlement to this repository; this probe does not change access.' }),
         required,
       }
     } catch (err) {
-      const detail = this.isMissingBinary(err) ? 'not installed' : this.stderrOf(err)
-      return { name: 'tools:gh-push', ok: false, detail, required }
+      return { ...diagnostics.failure('tools:gh-push', err, required), required }
     }
   }
 
@@ -123,13 +142,13 @@ export class NodeToolProbe implements ToolProbe {
     file: string,
     args: readonly string[],
     required: boolean,
+    diagnostics: RedactedProbeDiagnostics,
   ): Promise<ToolCheck> {
     try {
       const { stdout } = await this.execFile(file, args)
-      return { name, ok: true, detail: stdout.trim().split('\n')[0] ?? 'installed', required }
+      return { name, ok: true, detail: diagnostics.redact(stdout.trim().split('\n')[0] ?? 'installed'), required }
     } catch (err) {
-      const detail = this.isMissingBinary(err) ? 'not installed' : this.stderrOf(err)
-      return { name, ok: false, detail, required }
+      return { ...diagnostics.failure(name, err, required), required }
     }
   }
 
@@ -146,19 +165,6 @@ export class NodeToolProbe implements ToolProbe {
     return true
   }
 
-  /** Distinguishes a missing binary (ENOENT) from a binary that ran and failed. */
-  private isMissingBinary(err: unknown): boolean {
-    return typeof err === 'object' && err !== null && 'code' in err && err.code === 'ENOENT'
-  }
-
-  private stderrOf(err: unknown): string {
-    if (typeof err === 'object' && err !== null && 'stderr' in err) {
-      const stderr = err.stderr
-      if (typeof stderr === 'string') return stderr.trim()
-    }
-    if (err instanceof Error) return err.message
-    return String(err)
-  }
 }
 
 export const nodeToolProbe: ToolProbe = new NodeToolProbe()

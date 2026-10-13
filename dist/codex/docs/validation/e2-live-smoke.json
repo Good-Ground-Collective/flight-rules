@@ -1,0 +1,124 @@
+{
+  "pluginVersion": "1.67.0",
+  "discoveredAgents": [
+    "flight-rules:code-implementation",
+    "flight-rules:code-implementation-escalated",
+    "flight-rules:code-verifier",
+    "flight-rules:qa-engineer",
+    "flight-rules:qa-engineer-verify",
+    "flight-rules:research-agent",
+    "flight-rules:tech-writer"
+  ],
+  "cases": [
+    {
+      "agent": "code-verifier",
+      "model": "claude-sonnet-5-5",
+      "tools": [
+        "Read",
+        "Bash"
+      ],
+      "costUsd": 0.0322307,
+      "commands": [
+        "flight-rules doc coding-charter",
+        "ls; cat witness.txt",
+        "node -e \"const b=require('fs').readFileSync('witness.txt');console.log(JSON.stringify(b.toString()),b.length,b.equals(Buffer.from('fixture-proof: 7642\\n')))\""
+      ],
+      "verified": true,
+      "report": {
+        "summary": "witness.txt contains exactly 'fixture-proof: 7642' followed by a single newline (20 bytes). The criterion is satisfied.",
+        "criteria": [
+          {
+            "criterion": "witness.txt contains exactly 'fixture-proof: 7642' followed by one newline",
+            "verdict": "PASS",
+            "evidence": "Ran cat witness.txt, which showed 'fixture-proof: 7642'. Ran a Node command that read the file as a Buffer. It printed JSON.stringify output \"fixture-proof: 7642\\n\", length 20, and Buffer.equals(Buffer.from('fixture-proof: 7642\\n')) returned true."
+          }
+        ],
+        "charterConcerns": [],
+        "verified": true
+      }
+    },
+    {
+      "agent": "code-implementation-escalated",
+      "model": "claude-opus-5-5",
+      "tools": [
+        "Read",
+        "Write",
+        "Edit",
+        "Bash"
+      ],
+      "costUsd": 0.0680434,
+      "commands": [
+        "flight-rules doc coding-charter",
+        "cat answer.mjs answer.test.mjs",
+        "node --test answer.test.mjs"
+      ],
+      "verified": null,
+      "report": {
+        "summary": "Changed answer() in answer.mjs to return 42 instead of 41, so the acceptance criteria are met and the test passes.",
+        "filesChanged": [
+          {
+            "path": "answer.mjs",
+            "why": "Changed the return value from 41 to 42 so answer() returns 42 as the acceptance criteria require."
+          }
+        ],
+        "testsRun": [
+          {
+            "command": "node --test answer.test.mjs",
+            "result": "pass (1 test, 1 pass, 0 fail)"
+          }
+        ],
+        "approach": "Made the smallest possible change, editing only the returned literal. I read the full coding charter output first; none of its rules (M-1 through M-13) apply to a one-line arrow function with no services, constructors or parsing. I edited only answer.mjs, ran no git commands and left the change unstaged."
+      }
+    },
+    {
+      "agent": "qa-engineer-verify",
+      "model": "claude-sonnet-5-5",
+      "tools": [
+        "Read",
+        "Bash"
+      ],
+      "costUsd": 0.058707999999999996,
+      "commands": [
+        "flight-rules doc qa-charter",
+        "flight-rules doc evidence-capture",
+        "pwd; ls",
+        "node --test answer.test.mjs",
+        "node -e '\nconst {spawnSync}=require(\"child_process\");const fs=require(\"fs\");\nconst r=spawnSync(\"node\",[\"--test\",\"answer.test.mjs\"],{encoding:\"utf8\"});\nfs.writeFileSync(\"evidence/test-run.txt\",\"$ node --test answer.test.mjs\\n\"+r.stdout+r.stderr+\"exit: \"+r.status+\"\\n\");\nimport(\"./answer.mjs\").then(m=>{const v=m.answer();fs.writeFileSync(\"evidence/answer-value.txt\",\"answer() => \"+JSON.stringify(v)+\" (strict equal 42: \"+(v===42)+\")\\n\");console.log(v)});\n'; cat evidence/test-run.txt evidence/answer-value.txt"
+      ],
+      "verified": true,
+      "report": {
+        "summary": "Ran `node --test answer.test.mjs` (1 of 1 passed, exit 0). I also called `answer()` directly and it returned 42, strictly equal to 42. Text evidence is saved under evidence/.",
+        "items": [
+          {
+            "item": "answer() returns 42",
+            "verdict": "PASS",
+            "evidence": "CLI layer. `node --test answer.test.mjs` printed 'the answer is 42' as passing, with pass 1 and fail 0 (exit 0). A direct import of answer.mjs and a call to `answer()` printed 42 (strict equal true)."
+          }
+        ],
+        "evidence": {
+          "dir": "evidence/",
+          "items": [
+            {
+              "path": "evidence/test-run.txt",
+              "kind": "text",
+              "phase": "after",
+              "caption": "Command `node --test answer.test.mjs` with full output: 1 test, 1 pass, 0 fail, exit 0"
+            },
+            {
+              "path": "evidence/answer-value.txt",
+              "kind": "text",
+              "phase": "after",
+              "caption": "Direct call to answer() returned 42, strictly equal to 42"
+            }
+          ]
+        },
+        "verified": true
+      }
+    }
+  ],
+  "fixtureBefore": "fail",
+  "fixtureAfter": "pass",
+  "hostVersion": "Claude Code 2.1.296",
+  "testedArtifact": "Extracted npm tarball of the E2 branch; linked existing runtime dependencies.",
+  "scope": "Native main-thread agent registrations, selected models, tool access, full charter retrieval, parseable reports and fixture execution. Parent subagent dispatch/retries and marketplace installation are not covered."
+}

@@ -1,24 +1,30 @@
 ---
 name: setup
-description: "First-run setup for the flight-rules plugin. Writes the flight-rules config — shared values to the user's Claude Code settings, per-project values to the project — and verifies the environment is ready to use."
+description: "First-run setup for the flight-rules plugin. Configures flight-rules for the current host, installs required native registrations, and verifies workflow readiness."
 ---
 
 # Setup
 
 This skill writes the flight-rules configuration and verifies your environment is ready. It takes about two minutes the first time, and less in every later repository, because shared values only need setting once.
 
+## Host and installation
+
+Read `flight-rules doc native-installation` for the current host's installation and settings mechanics. Use the native package's CLI, which identifies its host. With the generic npm CLI, set `FLIGHT_RULES_HOST` to the current host as documented there. Do not infer the host from which hidden directory happens to exist in the repository.
+
+Check that the installed skills and named worker registrations are discoverable by the running host. Follow the adapter's registration step when needed, preserving existing definitions; a file-presence check alone does not establish native discovery or dispatch permissions. If the CLI is unavailable, read the bundled `docs/native-installation.md` beside this skill's plugin installation and follow its PATH instructions.
+
 ## Where config lives
 
-The CLI merges config key by key from four layers, lowest precedence first:
+The CLI merges four scopes, lowest precedence first. `flight-rules config show` reports the selected `host` and the exact `layers` paths; use those paths rather than constructing them.
 
-| Scope | File | Use it for |
-| --- | --- | --- |
-| `user` | `~/.claude/settings.json` | Values shared by every project: `tracker`, `jiraHost`, `jiraEmail`, `jiraProject`, `jpdProject`, `confluenceSpaceKey`, the status names, `rfcStorage`/`rfcStoragePath`, `defaultLabels` |
-| `project` | `.claude/settings.json` | Per-project values the team shares through git, such as `repo` |
-| `local` | `.claude/settings.local.json` | Per-project values for this machine only |
-| `file` | the path `flight-rules config path` prints (`$FLIGHT_RULES_CONFIG` overrides it) | The older config file; still read, and it outranks the settings files |
+| Scope | Use it for |
+| --- | --- |
+| `user` | Shared tracker, account, status and RFC-storage defaults |
+| `project` | Team-shared repository values such as `repo` |
+| `local` | Values for this checkout/machine |
+| `file` | The existing flight-rules config file; it retains highest precedence |
 
-In the settings files the values sit under `pluginConfigs["flight-rules@flight-rules"].options`. Never edit any of these files by hand. Write each value with `flight-rules config set <key> <value…> --scope <scope>`; array keys such as `defaultLabels` take several values.
+Write values through `flight-rules config set <key> <value…> --scope <scope>`; array keys take several values. Native installation documentation describes where each adapter stores the scopes. Never store credentials in these files.
 
 ## Step 0: Read what is already configured
 
@@ -28,9 +34,9 @@ Run:
 flight-rules config show
 ```
 
-It prints the merged `values`, the scope each came from (`sources`), and whether they form a complete config (`valid`, with `error` naming what is missing). Show the user the current values and their scopes. Ask whether to reconfigure or only fill the gaps. When user-scope settings already cover the tracker, skip every question below whose answer is already there; a new repository usually needs only `repo`. When `values` is empty, nothing is configured yet; continue from Step 1.
+It prints the selected `host`, exact `layers`, merged `values`, the scope each came from (`sources`), and whether they form a complete config (`valid`, with `error` naming what is missing). Show the user the current values and their scopes. Ask whether to reconfigure or only fill the gaps. When user-scope settings already cover the tracker, skip every question below whose answer is already there; a new repository usually needs only `repo`. When `values` is empty, nothing is configured yet; continue from Step 1.
 
-When writing, offer the scope from the table above as the default for each key, and let the user override it. When a `flight-rules.local.md` already exists, offer to move its values into settings: `config set` each one in its new scope, then delete the file once `config show` reports every key from the new scope.
+When writing, offer the scope from the table above as the default for each key, and let the user override it. When a `flight-rules.local.md` already exists, offer to move its values into settings: `config set` each one in its new scope, preserve the original file while comparing every key, then remove it only when the user has authorized the migration and the destination scopes contain the original values. Rerun `config show` to confirm precedence after removal.
 
 ---
 
@@ -44,7 +50,7 @@ flight-rules --help
 
 If this fails, the binary is missing or not in PATH. Tell the user:
 
-> "The flight-rules binary isn't reachable. Make sure the plugin is installed (`claude plugin list`) and that `${CLAUDE_PLUGIN_ROOT}/bin` is in your PATH, or run commands via the full path `${CLAUDE_PLUGIN_ROOT}/bin/flight-rules`."
+> "The flight-rules binary is not reachable. Follow the current host’s bundled native-installation guide, then put that installation’s `bin` directory on PATH or invoke its CLI by absolute path."
 
 Stop if the binary is not working.
 
@@ -234,6 +240,12 @@ flight-rules check
 
 ---
 
+## Workflow readiness after configuration
+
+A successful ordinary `flight-rules check` establishes environment checks, not permission to run every workflow. Before reporting a selected workflow ready, read `flight-rules doc workflow-preflight` and `flight-rules doc native-orchestration`. Identify the actual installed host/version, effective caller and worker access, named registrations, current worker usage and depth. Record observations without credentials in the documented runtime evidence format, then run `flight-rules check --workflow <workflow-name> --runtime-file <host-runtime-json>` from the active checkout.
+
+Show every failed required check with its code and remedy. Distinguish authentication, connectivity, known permission denial and unknown access; connection refusal alone does not identify a sandbox. A remote read and GitHub push entitlement do not prove a future push will succeed. Do not change sandbox settings, grant access, raise worker caps or disable approvals automatically. Apply only a requested scoped setup correction through the installed host's supported options, refresh observations and rerun the check. When the current workflow is unattended, return the missing capability rather than starting a permission prompt. Native project placement remains separate from this readiness check.
+
 ## Step 7: Scaffold the QA instructions
 
 This step is shared by both branches and does not depend on the tracker. If the user declined the QA lane in Step 4, skip this step.
@@ -291,7 +303,7 @@ If not, skip this step; every `flight-rules board` command stays silent without 
 Never ask the user to paste the token into this conversation, and never print it. Once they say it is set, check it:
 
 ```bash
-flight-rules board post heartbeat --ticket <any Jira key> --step setup --state nominal --session setup-check --strict
+flight-rules board post heartbeat --skill flight-rules:setup --ticket <any Jira key> --step setup --state nominal --session setup-check --strict
 ```
 
 Exit 0 means reporting works. Otherwise show the one-line reason it printed; `agents_opt_in_required` means Agents is still off in Ariadne, and `401` means the token is missing, expired or not recognised.

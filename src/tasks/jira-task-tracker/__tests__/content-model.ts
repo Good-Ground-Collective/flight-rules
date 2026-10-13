@@ -1,4 +1,3 @@
-/* eslint-disable preflight/no-loose-functions -- assertContentModel is a module-level tree walk shared by the golden test; a service seam would add an interface with no second implementation */
 import type { AdfNode } from '../adf.js'
 
 /**

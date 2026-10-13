@@ -19,6 +19,8 @@ export declare class BoardStateFiles {
     root(): string;
     read<T>(folder: string | undefined, id: string, schema: z.ZodType<T>): T | undefined;
     write(folder: string | undefined, id: string, value: unknown): void;
+    /** Writes a file only if none exists, atomically; returns whether it wrote. */
+    create(folder: string | undefined, id: string, value: unknown): boolean;
     remove(folder: string | undefined, id: string): void;
     /** Deletes a folder's files last written more than `maxAgeMs` ago. */
     prune(folder: string, maxAgeMs: number): void;

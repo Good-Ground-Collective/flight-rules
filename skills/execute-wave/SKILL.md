@@ -24,12 +24,18 @@ building on unreviewed work.
 reason it parked, the working tree is clean, HEAD is back on the base branch, and
 the user is holding a report they can act on.
 
+## Orchestration context
+
+Read `flight-rules doc orchestration-interface` and `flight-rules doc native-orchestration`. This is a caller-level driver: invoke `execute-work` and other sibling skills in the current session, never in a wrapper subagent. Before each ticket, initialize its distinct run ID/task ID and attempt 1 in the caller while retaining the active checkout and chosen base. Pass that exact context to `execute-work`; its retries preserve it and its worker depth starts at this caller's actual depth. Ticket runs remain sequential regardless of available concurrency.
+
+Human questions require invocation-level `allowHumanQuestions: true` and available `ask`, inherited by sibling skills. Otherwise return `QUESTIONS_DISABLED` or `QUESTIONS_UNAVAILABLE` with the unresolved question at a decision boundary; do not prompt or infer approval. When opted in, wait for an actual answer, reusing existing answers that already authorize the selected work. Missing worker dispatch, depth or permission evidence is a named stop before the first mutation.
+
 ## Preconditions
 
 - You are handed an **epic id** or an **initiative id**.
 - Run everything from the **repo root**.
 - The **working tree is clean**. Checked once, here, before any mutation.
-- `flight-rules check` reports `"ok": true`.
+- Read `flight-rules doc workflow-preflight`, gather current host observations, and require `flight-rules check --workflow execute-wave --runtime-file <host-runtime-json>` to report `"ok": true` before the first repository or tracker mutation. Missing/unknown access stops with the named remedy. Each ticket's sibling invocation refreshes its own scoped preflight and dispatch evidence; an earlier wave check does not authorize changed context.
 - Config carries a **`repo`** field (`owner/repo`). `execute-work` needs it to open each PR, and discovering it missing on ticket four means three PRs and a broken run. Settle it now.
 - **Ariadne reporting is optional.** The `flight-rules board` lines below report the wave to Ariadne's Agents page and read answers people gave there. When Ariadne is not configured, or the node is not a Jira key, they print nothing and exit 0. Treat empty output as "no answer". Never let a post change the run. Answers come only from people in Ariadne; this skill reads them and never answers an item itself.
 
@@ -79,7 +85,7 @@ someone means. Post that closed question to Ariadne too, and take whichever
 answer comes first, in chat or in `chosenOption` from `flight-rules board items --ticket <node id> --json`:
 
 ```bash
-flight-rules board post item --kind question --ticket <node id> --title "Drain the wave onto <base branch>, not the default branch?" --option Continue --option Stop
+flight-rules board post item --skill flight-rules:execute-wave --kind question --ticket <node id> --title "Drain the wave onto <base branch>, not the default branch?" --option Continue --option Stop
 ```
 
 ### 3. Plan the graph
@@ -173,7 +179,7 @@ Show the user the wave: each ticket id, its title, and the count. List what you
 dropped and why. Then ask for a go-ahead. Post the same closed question to Ariadne, and take whichever answer comes first, in chat or in `chosenOption` from `flight-rules board items --ticket <node id> --json`:
 
 ```bash
-flight-rules board post item --kind question --ticket <node id> --title "Start <count> tickets under <node id>?" --option Start --option Stop
+flight-rules board post item --skill flight-rules:execute-wave --kind question --ticket <node id> --title "Start <count> tickets under <node id>?" --option Start --option Stop
 ```
 
 **Past five tickets, make the cost explicit** before asking. Each ticket runs an
@@ -188,7 +194,7 @@ Never start draining without an explicit go-ahead.
 
 For each selected ticket, in `waves[0]` order:
 
-1. **Invoke `execute-work`** with the ticket id **and the base branch from step 2**. Passing the base is not optional: `execute-work` cuts its branch with `git checkout -b <branch> <from>`, and without `--from` it branches off current HEAD — which, after ticket one, is ticket one's branch. Omitting it silently stacks every ticket in the wave on its predecessor and puts the previous ticket's commits in the next ticket's PR diff.
+1. **Invoke `execute-work` as a sibling skill** with the ticket id, its caller-created run context **and the base branch from step 2**. Preserve that context without another worker level. Passing the base is not optional: `execute-work` cuts its branch with `git checkout -b <branch> <from>`, and without `--from` it branches off current HEAD — which, after ticket one, is ticket one's branch. Omitting it silently stacks every ticket in the wave on its predecessor and puts the previous ticket's commits in the next ticket's PR diff.
 2. **Record the outcome** as a short structured entry: ticket id, iterations used, PR URL, review verdict, and any unresolved `charterConcerns` or `openQuestions`.
 3. **Move on.** Do not carry the full transcript of a finished ticket forward. The entry from (2) is the whole record you need, and context is the binding constraint on how wide a wave can go.
 
@@ -285,7 +291,7 @@ First post the wave gate, so a person can approve the next wave in Ariadne. Run 
 
 ```bash
 flight-rules board post heartbeat --session wave-<node id> --ticket <node id> --step "wave gate" --state hold --skill flight-rules:execute-wave
-flight-rules board post item --session wave-<node id> --kind wave-gate --ticket <node id> --id wave-<node id>-<n> --title "<k> PRs open for review; <m> tickets can start once they merge" --detail "<waves[1] ids>" --option "Start wave" --option "Review wave"
+flight-rules board post item --skill flight-rules:execute-wave --session wave-<node id> --kind wave-gate --ticket <node id> --id wave-<node id>-<n> --title "<k> PRs open for review; <m> tickets can start once they merge" --detail "<waves[1] ids>" --option "Start wave" --option "Review wave"
 ```
 
 Then give the user, in this order:
