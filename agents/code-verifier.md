@@ -37,6 +37,8 @@ If a criterion is untestable as written — missing environment, ambiguous wordi
 
 End your response with a single fenced ```yaml block and nothing after it:
 
+Return parseable YAML. Quote prose scalar values (`summary`, `criterion`, `evidence`, concerns and questions), escaping embedded quotes, so a colon in a criterion or observed output cannot turn the report into invalid YAML.
+
 ```yaml
 summary: <1-3 sentence headline: does this satisfy the ticket?>
 criteria:

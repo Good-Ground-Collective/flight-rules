@@ -68,4 +68,18 @@ Bindings change without editing a canonical prompt. Account access and host poli
 
 The current Claude emitter maps read to file discovery/search/reading tools, edit to writing/editing tools, shell to command execution and web to search/retrieval. It maps optional reasoning to effort and preserves display color. It rejects worker `spawn`/`ask`, explicit sandbox restrictions and dispatch limits because this emitter cannot enforce them. A future runtime adapter must implement those settings before accepting them.
 
+## Reproduce the live smoke test
+
+From a checkout with dependencies installed and an authenticated Claude CLI, run:
+
+```bash
+npm run test:agents:live
+```
+
+This builds the plugin and launches three isolated native-role sessions in a temporary directory: the verifier checks exact fixture bytes; the escalated implementer fixes a failing program and runs its test; the QA verification variant confirms it and captures text evidence. Each session is capped at $1. It does not run in normal CI.
+
+The runner asserts discovery of all seven registrations, actual selected models and tool access, complete charter retrieval, parseable YAML, no permission denials, read-only roles preserving the implementation, and an independently checked failing-to-passing test. It retains a report and raw local traces at the printed scratch path. An optional directory argument to `node scripts/test-agents-live.mjs <plugin-directory>` tests an extracted package instead of the checkout.
+
+The [recorded smoke results](validation/e2-live-smoke.json) came from an extracted npm package on Claude Code 2.1.296. Earlier exploratory runs exposed a fixture permission mismatch and an invalid verifier YAML scalar; the final run uses corrected fixture permissions and the canonical verifier's explicit quoting rule. This proves role loading and execution on the fixture. Parent dispatch/retry orchestration, marketplace installation and Codex execution remain the later epics' live checks.
+
 Build generates Claude registrations under `dist/claude/agents` and points the existing plugin manifest at them. Release commits those generated registrations so marketplace installs remain usable; npm includes them too. This compatibility bridge keeps the existing skills/docs/CLI layout. E3 will assemble complete host trees and own the wider generated-artifact migration. The Codex table is ready for that emitter; E2 does not yet ship a Codex plugin.
