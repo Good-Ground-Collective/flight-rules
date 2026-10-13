@@ -172,11 +172,10 @@ export class GitHubReviewVerifier implements ReviewVerifier {
           `/repos/${this.props.repo}/contents/${path.split("/").map(encodeURIComponent).join("/")}?ref=${ref}`,
         ),
       );
-    return (
-      file.type === "file" &&
-      file.encoding === "base64" &&
-      line <= Buffer.from(file.content, "base64").toString("utf8").split("\n").length
-    );
+    if (file.type !== "file" || file.encoding !== "base64") return false;
+    const text = Buffer.from(file.content, "base64").toString("utf8");
+    const lines = text === "" ? 0 : text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
+    return line <= lines;
   }
 
   private async comment(

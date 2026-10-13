@@ -163,6 +163,9 @@ describe("GitHub provenance and decision authority", () => {
     expect(ancestor.get).toHaveBeenCalledWith(contents(head));
     expect(await verifier(client("ahead")).verify(code(fix, 4), head)).toBe(false);
     expect(await verifier(client("ahead", file("a\nb"))).verify(code(fix), head)).toBe(false);
+    expect(await verifier(client("ahead", file("a\nb\n"))).verify(code(fix), head)).toBe(false);
+    expect(await verifier(client("ahead", file(""))).verify(code(fix, 1), head)).toBe(false);
+    expect(await verifier(client("ahead", file("a\n\n\n"))).verify(code(fix), head)).toBe(true);
     for (const status of ["diverged", "behind"]) {
       const unrelated = client(status);
       expect(await verifier(unrelated).verify(code(fix), head)).toBe(false);
@@ -176,6 +179,9 @@ describe("GitHub provenance and decision authority", () => {
     expect(await verifier(atHead).verify(code(head, 4), head)).toBe(false);
     expect(atHead.get).not.toHaveBeenCalledWith(expect.stringContaining("/compare/"));
     expect(atHead.get).not.toHaveBeenCalledWith(contents(fix));
+    const terminated = api({ [contents(head)]: file("a\nb\n") });
+    expect(await verifier(terminated).verify(code(head, 2), head)).toBe(true);
+    expect(await verifier(terminated).verify(code(head), head)).toBe(false);
   });
   it("rejects check runs on an ancestor of the head", async () => {
     const ancestor = "c".repeat(40);
