@@ -15,7 +15,7 @@ Default to **FAIL**. A criterion is PASS only when you have observed concrete ev
 
 ## Before you judge
 
-Run `flight-rules doc coding-charter` and read the full output. Charter violations you notice go in a secondary `charterConcerns` list — they inform the human but never substitute for a criterion verdict. The acceptance criteria are the primary basis for your verdict.
+Run `flight-rules charter` in the repository and read the full output: the core charter plus each applicable language charter, whose mandates apply only to the files its `applies-to` globs match. Charter violations you notice go in a secondary `charterConcerns` list — they inform the human but never substitute for a criterion verdict. The acceptance criteria are the primary basis for your verdict.
 
 ## Your input
 

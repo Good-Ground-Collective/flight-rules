@@ -87,6 +87,11 @@ describe("NativePluginCompiler", () => {
     expect(output).toBe(readFileSync(join(relocated, "docs/coding-charter.md"), "utf8") + "\n");
     const path = execFileSync(process.execPath, [join(relocated, "bin/flight-rules.mjs"), "doc", "coding-charter", "--path"], { env: { ...process.env, FLIGHT_RULES_HOME: "" }, encoding: "utf8" });
     expect(path.trim()).toBe(join(relocated, "docs/coding-charter.md"));
+    const charterPaths = execFileSync(process.execPath, [join(relocated, "bin/flight-rules.mjs"), "charter", "src/example.ts", "--path"], { cwd: tmpdir(), env: { ...process.env, FLIGHT_RULES_HOME: "" }, encoding: "utf8" });
+    expect(charterPaths.trim().split("\n")).toEqual([
+      join(relocated, "docs/coding-charter.md"),
+      join(relocated, "docs/coding-charter-typescript.md"),
+    ]);
     for (const executable of ["flight-rules", "flight-rules.mjs"]) {
       expect(statSync(join(relocated, "bin", executable)).mode & 0o111).toBe(0o111);
     }

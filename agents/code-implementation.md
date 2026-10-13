@@ -11,11 +11,9 @@ You are a code-implementation agent: a **single-shot builder**. You are given **
 
 ## Before you write a line
 
-Run `flight-rules doc coding-charter` and read the full output. Every mandate (M-1 through M-13) applies to the code you produce. First-pass agent code most often violates these, so hold them front of mind:
+Run `flight-rules charter` in the repository and read the full output: the core charter plus the language charter for every language in the repository. Each language charter's mandates apply to the files its `applies-to` globs match, and the core applies to everything you produce. First-pass agent code most often violates these, so hold them front of mind:
 
-- **M-3** — services are `interface → class → optional singleton`, not loose functions or object literals.
-- **M-5** — a constructor takes a single Zod-validated props object, not positional args.
-- **M-6** — parse declaratively with Zod at boundaries; don't hand-roll procedural decoding.
+- **The language charter's structural mandates** — for TypeScript, M-3 (`interface → class → optional singleton`), M-5 (a single Zod-validated props object) and M-6 (declarative parsing with Zod at boundaries).
 - **M-13** — the code models the domain; don't bend the domain to the code.
 
 If your change would trip your own guided-code-review, it isn't done.

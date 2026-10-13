@@ -91,6 +91,9 @@ try {
     const location = join(packageRoot, target);
     assert.equal(run(process.execPath, [join(location, "bin/flight-rules.mjs"), "--version"], scratch).trim(), version);
     assert.equal(run(process.execPath, [join(location, "bin/flight-rules.mjs"), "doc", "coding-charter"], scratch), readFileSync(join(location, "docs/coding-charter.md"), "utf8") + "\n");
+    assert.deepEqual(run(process.execPath, [join(location, "bin/flight-rules.mjs"), "charter", "src/example.ts", "--path"], scratch).trim().split("\n"), [
+      join(location, "docs/coding-charter.md"), join(location, "docs/coding-charter-typescript.md"),
+    ]);
     for (const binary of ["flight-rules", "flight-rules.mjs"]) assert.equal(statSync(join(location, "bin", binary)).mode & 0o111, 0o111);
   }
   symlinkSync(join(home, "node_modules"), join(packageRoot, "node_modules"));
