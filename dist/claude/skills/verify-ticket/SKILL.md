@@ -1,0 +1,191 @@
+---
+name: verify-ticket
+description: "Verifies a ticket in the running product once its fix or feature has landed in the target environment: gates on verify-readiness, re-runs a bug's documented reproduction or exercises a story's acceptance criteria through the qa-engineer agent, posts a verdict comment with after evidence, and swaps the Agentic-Verification label. One skill for bugs and stories. Never fixes, never changes workflow status, never prompts. Use when a ticket reaches the QA column."
+---
+
+# Verify Ticket
+
+This is the skill that confirms the thing. You are handed a **ticket id**; you hand back a verdict comment, backed by evidence captured in the running product, and exactly one outcome label — or, when an item could not be tested, no label and a stated reason. A fixed bug and a finished story both reach the QA column with nothing yet proving them in the app. This skill produces that proof for either one: it re-runs a bug's recorded reproduction and confirms the symptom is gone, or it exercises a story's acceptance criteria and confirms each held.
+
+**The hard rule: this skill never fixes code or data, never changes workflow status, and never prompts in its happy path.** It reads the contract, dispatches a tester, and records what the tester saw. If you catch yourself editing a file to make an item pass, moving the ticket's board column, or asking the user a question to get past a gate, stop — none of those is this skill's job, and each one destroys the value of an independent after-the-fact check.
+
+**Terminal state:** the ticket carries a verdict comment with a per-item verdict and after evidence, plus exactly one of `Agentic-Verification-Success` or `Agentic-Verification-Failure` — or, when an item was UNVERIFIABLE, no outcome label and a comment stating what blocked verification.
+
+## Preconditions
+
+- You are handed a **ticket id**.
+- Run everything from the **repo root of the app under test** — the `flight-rules` CLI resolves config relative to CWD, and the tester drives that app.
+- **Config comes from the CLI.** It merges the user's and project's Claude Code settings with the flight-rules config file; `flight-rules config show` prints the result and where each value came from. Never hand-edit a config file; write with `flight-rules config set`.
+- `flight-rules check` reports `"ok": true`, including the tool probes the QA lane depends on. A half-configured CLI fails partway through, after it has already labelled the ticket in progress.
+- The **tracker is Jira**. The failure mention and the native attachments are Jira shapes.
+- **QA instructions exist.** Read them, passing `--from` the directory of the code the ticket changed when the ticket names it:
+
+  ```bash
+  flight-rules qa instructions --from <dir>
+  ```
+
+  Hand the tester every source path, nearest first. `"found": false` is a stop, not a prompt — report it and point the user at the output of `flight-rules doc qa-instructions`.
+- **The access the QA instructions name is available headlessly.** Check each environment variable they name with `printenv <VAR> >/dev/null`, never by printing it. When something a human must supply is missing, stop with one line, `needs: <what to provide>`, before you mutate the ticket. Do not pre-check a secrets manager's sign-in state; the tester resolves secrets inside the wrapper the instructions name.
+- **The fix or feature under test is already deployed** to the environment the QA instructions name. This skill verifies; it does not deploy.
+- **Ariadne reporting is optional.** The `flight-rules board post` lines below tell Ariadne's Agents page what is ready to test and how verification went. When Ariadne is not configured they print nothing and exit 0. A failed post prints one line and still exits 0. They are reports, not prompts: never wait on one or let it change the run.
+
+## Process
+
+You MUST create a todo per step and complete them in order.
+
+### 1. Read the ticket and detect the format
+
+```bash
+flight-rules ticket get <id>
+```
+
+The format is **bug** when `issueType` is `Bug` or `metadata.kind` is `bug`; otherwise it is a **story**. Say which you settled on; every later step keys off it.
+
+Stop before touching anything when `labels` already contains `Agentic-Verification-In-Progress` — reason: **another verification is active** for this ticket. Note `assignee` and `reporter` from the JSON; the failure comment mentions one of them.
+
+### 2. Gate on verify-readiness
+
+The gate is a hard stop with a stated reason. It does not label, dispatch, or prompt.
+
+**Bug:**
+
+```bash
+flight-rules ticket get <id> --section steps-to-reproduce
+```
+
+Stop unless `labels` contains `Agentic-Reproduction-Success` **and** the returned `markdown` is non-null. Reason: **not verify-ready: run reproduce-bug first**. A bug with no recorded reproduction has no script to re-run, so there is nothing to confirm gone.
+
+**Story:**
+
+```bash
+flight-rules ticket get <id> --section acceptance-criteria
+```
+
+Stop unless `items` is non-empty. Reason: **no acceptance criteria to verify**. A story with no criteria has no contract to exercise.
+
+### 3. Mark the ticket in progress
+
+```bash
+flight-rules ticket label <id> --add Agentic-Verification-In-Progress
+```
+
+This is the lock. From here on, a CLI error must clear it before you stop (see Error handling).
+
+The change is deployed and about to be checked, so put the run on its QA step and report it as testable:
+
+```bash
+flight-rules board post heartbeat --ticket <id> --step qa --state nominal --skill flight-rules:verify-ticket --detail "Verifying on <environment>"
+flight-rules board post item --kind testable --ticket <id> --skill flight-rules:verify-ticket --title "<id> is deployed to <environment> and ready to test"
+```
+
+### 4. Fetch the contract fresh
+
+Read the contract from the ticket now, so a stale copy from step 1 can never stand in for it. Hand the tester only the contract and, for a bug, the recorded script — **never a summary of the fix, the PR, the ticket's comments, or the implementation.** A tester that has read the victory lap is not an independent check.
+
+**Bug** — the Fixed When items are the contract:
+
+```bash
+flight-rules ticket get <id> --section fixed-when
+```
+
+```bash
+flight-rules ticket get <id> --section root-cause
+```
+
+plus the Steps To Reproduce from step 2. Hand the tester the `items[].text` numbered, and the recorded steps and root cause verbatim.
+
+**Story** — the Acceptance Criteria items from step 2 are the contract, and the Solution is context only:
+
+```bash
+flight-rules ticket get <id> --section solution
+```
+
+Hand the tester the `items[].text` numbered.
+
+### 5. Dispatch the tester
+
+Dispatch the **`qa-engineer-verify`** agent in **`verify` mode**. Verify follows a recorded script rather than locating a symptom's layer from scratch, so this named registration uses the standard tier and shares the QA prompt with the escalated reproduction registration. Do not override its model at dispatch. Hand the agent:
+
+- the **numbered contract items** — Fixed When for a bug, Acceptance Criteria for a story;
+- for a bug, the recorded **Steps To Reproduce** and **Root Cause**, verbatim;
+- the **QA instruction source paths** from Preconditions, nearest first;
+- the **evidence directory**: the `path` printed by `flight-rules qa evidence-dir <id>`;
+- the paths printed by `flight-rules doc qa-charter --path` and `flight-rules doc evidence-capture --path`. Run each command and pass its output; require the agent to read each file in full.
+
+Read the single trailing `yaml` block it returns: `items[].{item, verdict, evidence}`, an `evidence.items[].{path, kind, phase, caption}` manifest, `verified`, and optional `needs` and `openQuestions` lists. `verified` is true only when every item is PASS. Treat each `needs` entry like an `openQuestions` entry on the UNVERIFIABLE path, and report it to the user as a `needs:` line.
+
+### 6. Branch on the verdict, in this order
+
+1. **`verified: true`** — success. Write the comment to a file: the first line is `✅ **Fix verified in staging.** Re-ran the documented reproduction; the bug no longer occurs.` for a bug, or `✅ **Verified in staging.** Exercised each acceptance criterion in the running product.` for a story; then one line per item as `- PASS — <item>: <evidence>`; then each after frame referenced as `![<caption>](./<basename>)`. Post it, then swap the label:
+
+   ```bash
+   flight-rules ticket comment <id> --body-file <path> --attach <file>#<caption>
+   ```
+
+   ```bash
+   flight-rules ticket label <id> --remove Agentic-Verification-In-Progress --add Agentic-Verification-Success
+   ```
+
+   ```bash
+   flight-rules board post heartbeat --ticket <id> --step qa --state nominal --skill flight-rules:verify-ticket --detail "Verified on <environment>: <m> of <m> passed"
+   flight-rules board post activity --ticket <id> --level success --skill flight-rules:verify-ticket --text "Verified on <environment>: <m> of <m> passed; labelled Agentic-Verification-Success"
+   ```
+
+   Repeat `--attach` once per manifest item, referencing each in the body as `![<caption>](./<basename>)` with the same basename.
+
+2. **Any FAIL** — failure. Write the comment to a file. The first line opens with a mention of the assignee, falling back to the reporter — `@{<accountId>|<display name>}` using that person's `accountId` and display name — then, for a bug, `⚠️ this fix does not resolve the bug — re-running the documented reproduction still triggers it; <reason>. Details/evidence below.`, or, for a story, `⚠️ this change does not satisfy the acceptance criteria — <n> of <m> failed; <reason>. Details/evidence below.`. `<reason>` is the first FAIL item's evidence with any trailing period stripped. A symptom that merely changed shape is a FAIL, not a pass — record its new shape as that item's evidence, per Q-2. Then one line per item with its verdict and evidence, then the evidence references. Post with the same `ticket comment … --attach` form, then swap the label:
+
+   ```bash
+   flight-rules ticket label <id> --remove Agentic-Verification-In-Progress --add Agentic-Verification-Failure
+   ```
+
+   ```bash
+   flight-rules board post heartbeat --ticket <id> --step qa --state abort --skill flight-rules:verify-ticket --detail "Verification failed on <environment>: <n> of <m> failed"
+   flight-rules board post activity --ticket <id> --level abort --skill flight-rules:verify-ticket --text "Verification failed on <environment>: <n> of <m> failed; labelled Agentic-Verification-Failure"
+   ```
+
+3. **Any UNVERIFIABLE and no FAIL** — the item could not be tested as handed over, which is a contract or environment problem, not a demonstrated defect. Write a comment: `Verification could not complete.` then one line per UNVERIFIABLE item with its evidence and the matching `openQuestions` entry. Post it with `ticket comment`, then remove the lock and add **no** outcome label:
+
+   ```bash
+   flight-rules ticket label <id> --remove Agentic-Verification-In-Progress
+   ```
+
+   ```bash
+   flight-rules board post heartbeat --ticket <id> --step qa --state caution --skill flight-rules:verify-ticket --detail "Verification could not complete on <environment>"
+   flight-rules board post activity --ticket <id> --level caution --skill flight-rules:verify-ticket --text "Verification could not complete on <environment>; no outcome label"
+   ```
+
+   Surface every `openQuestions` entry to the user in the report.
+
+Check FAIL before the UNVERIFIABLE branch: an observed failure is a real signal about the deployed change and belongs on the ticket as `Agentic-Verification-Failure`, whereas UNVERIFIABLE only applies when nothing failed. Never collapse `verified: false` into FAIL without inspecting the items — an item that could not be tested is not an item that failed.
+
+### 7. Report
+
+Give the user, in order: the detected format, the gate result, the per-item verdicts, the final label (or that none was applied), the evidence paths, the ticket URL, and every `openQuestions` entry verbatim.
+
+## Guardrails
+
+- **Never `flight-rules ticket status`.** This skill does not move the board. The QA column is where it runs, not something it advances.
+- **Never fix code or data.** A reversible flip the tester captures, observes, and restores is not a fix; anything you would edit to make an item pass is out of bounds.
+- **Never re-discover a bug's steps.** The tester replays the recorded reproduction (Q-6). If the steps no longer match the UI, that is a FAIL item with that evidence — you post it, you do not go hunting for a different symptom.
+- **Every tracker write goes through `flight-rules`** — `ticket label` and `ticket comment`, never the Jira REST API or `gh`. Read-only inspection with plain `flight-rules ticket get` is fine.
+- **The tester never writes; you do.** The `qa-engineer-verify` agent hands back a verdict and files under the evidence directory and nothing else. Comments and labels are yours.
+- **No human questions in the happy path.** Missing QA instructions or a missing credential is a stop with a named reason, not a question.
+- **Success and failure are each exactly one `ticket label` call** that removes the lock and adds the outcome in the same invocation.
+
+## Error handling
+
+- **Capture failed** — `verified: true` but `evidence.items` is empty. Do not post a success with no proof. Take the UNVERIFIABLE path with the reason **captured no evidence**: remove the lock, add no outcome label, and report it.
+- **CLI error after step 3** — the lock is on and a later command failed. Attempt `flight-rules ticket label <id> --remove Agentic-Verification-In-Progress`, then stop and report; do not retry the dispatch and do not leave the ticket locked.
+- **Missing QA instructions or access** — stop **before** step 3, name the missing thing in a `needs:` line (which variable to export, or which access to grant), and never prompt. Nothing is labelled, so there is no lock to clear.
+
+## What Good Looks Like
+
+A reviewer can grade a run against this list:
+
+- The comment lets a human see the fix or the feature working without opening the app: a per-item verdict, each backed by evidence at the layer the reproduction named, and after frames that render inline.
+- Exactly one outcome label — `Agentic-Verification-Success` or `Agentic-Verification-Failure` — or, for an UNVERIFIABLE run, none, plus a comment stating what blocked verification.
+- `Agentic-Verification-In-Progress` was added at the start and removed in the same call that set the outcome; it is never left hanging.
+- No code, no data, and no board status changed; the human was never prompted.
+- A bug marked verified is a symptom gone, not a symptom changed; a failure names the FAIL item and mentions the assignee, or the reporter when there is no assignee.
+- Every `openQuestions` entry reached the user, unanswered.

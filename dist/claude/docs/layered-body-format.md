@@ -1,0 +1,245 @@
+# Layered Body Format
+
+The body shape every decomposed node (epic, ticket) emitted by `break-down-work`
+must follow. It serves three readers from one document:
+
+1. **A human skimming product intent** — reads only the prose sections at the top.
+2. **An implementer (human or a less capable execution model like Sonnet)** — expands
+   the *Guided Walkthrough* for a dense, step-by-step walkthrough.
+3. **Machines** — read the structured YAML in the *LLM Context* block.
+
+The skill writes the prose directly. `src/tasks/body-sections/body-sections.ts`
+reads it back, splitting the body into its named sections and the Acceptance
+Criteria checklist for `ticket get --section`. The YAML round-trips separately
+through `BodyMetadataService.parse` / `splice` (see
+`src/tasks/body-metadata/body-metadata.ts`).
+
+A ticket whose Jira issue type is `Bug` uses
+[the bug report format](./bug-report-format.md) instead, with the same
+three-reader shape.
+
+## Template
+
+Emit the sections in this exact order. Headings and the two `<details>` summaries
+are verbatim.
+
+```markdown
+## Problem Statement
+
+<One paragraph. The grounding — everything below ties back to this.>
+
+## Solution
+
+<Human-readable description of what will be built.>
+
+## Acceptance Criteria
+
+- [ ] <Independently verifiable condition.>
+- [ ] <Another.>
+
+## High-level technical writeup
+
+**Context:** <parent initiative · parent epic · design artifact, by key or URL>
+
+<What's being built, at the altitude-appropriate depth.>
+
+<details><summary>Guided Walkthrough</summary>
+
+<Dense implementer walkthrough as PLAIN MARKDOWN — code fences, lists, links all
+render. This section is only present on tickets, and may be reduced to hints for
+a sharpen-the-saw ticket (the tests carry the spec).>
+
+</details>
+
+<details>
+<summary>LLM Context</summary>
+<!-- flight-rules:metadata -->
+
+```yaml
+size: ticket
+# ...other EntityMetadata fields spliced by BodyMetadataService
+```
+
+</details>
+```
+
+## Portable context
+
+A ticket is the source of truth for its work. An engineer on another machine runs
+`execute-work` against it with nothing else: a fresh clone, the tracker, and
+whatever the ticket links to. Every fact the work needs must reach them through
+one of three places:
+
+1. **The ticket body.** The contract, the walkthrough, and any decision that
+   shapes this ticket's code.
+2. **The parent epic and initiative bodies.** Shared intent, cross-ticket
+   decisions, and the reasons behind the shape of the breakdown.
+3. **A published technical artifact**, linked by URL. Use it for context too long
+   for a body. `flight-rules tdd create` publishes one: a Confluence page when the
+   tracker is Jira, a GitHub Discussion when it is GitHub. A file committed to the
+   default branch also qualifies, linked by its GitHub URL.
+
+### Allowed references
+
+- Tracker keys and URLs: `FRT-123`, `#45`, an issue or epic link.
+- Confluence, GitHub Discussion, and GitHub file URLs.
+- Repo-relative paths, such as `src/auth/session.ts`, but only for files that
+  exist on the default branch or that this ticket creates.
+
+### Forbidden references
+
+- Absolute and home paths: `/Users/…`, `/home/…`, `C:\Users\…`, `~/…`.
+- `file://` URLs.
+- Untracked, gitignored, or unmerged files: planning notes, `specs/` drafts,
+  `.claude/` scratch, an RFC that exists only in a local `rfcs/` folder.
+- Decisions that live only in a conversation. Write them into the epic body or
+  the technical artifact first, then reference that.
+
+Record decisions under a `### Decisions` heading inside the High-level technical
+writeup, one bullet each, with the choice and its reason. Use level 3: the section
+reader splits the body on level-2 headings, so a `## Decisions` heading would end
+the writeup early.
+
+The CLI enforces the mechanical part. `ticket create`, `ticket edit`,
+`epic create`, `epic edit`, `initiative create`, `initiative edit`, and
+`tdd create` reject a body that contains an absolute home path, a `~/` path, or a
+`file://` URL. The error lists each offending line. A token counts only when it
+starts a word, so `https://example.com/home/docs` passes.
+
+Pass `--allow-local-paths` when the path is the subject of the work, such as a
+ticket that fixes how a tool reads `~/.zshrc`. Never pass it to keep a pointer to
+context; publish the context instead.
+
+The CLI cannot tell whether a repo-relative path exists on the default branch, or
+whether a decision was only ever spoken. `break-down-work` checks both before it
+finishes.
+
+### Context links
+
+Open the High-level technical writeup of every epic and ticket with a
+`**Context:**` line that links its parents and artifacts by key or URL:
+
+```markdown
+**Context:** initiative DISC-12 · epic FRT-340 · design https://acme.atlassian.net/wiki/spaces/ENG/pages/98765
+```
+
+Omit a part that does not exist; a standalone ticket has no parents. `execute-work`
+reads this line to find the initiative, because an epic payload does not name it.
+
+## Supported markdown
+
+`LayeredBodyAdfConverter.toAdf` parses with `mdast-util-from-markdown` plus the
+GFM extensions and maps a fixed subset of nodes to ADF. The read direction
+(`toMarkdown`) is a hand-written emitter, so `*`/`_` are never over-escaped and
+canonical markdown round-trips byte-stably.
+
+Mapped constructs:
+
+- **Headings** (`#`–`######`) → `heading` with `attrs.level`.
+- **Paragraphs** → `paragraph`; a soft line break becomes a `hardBreak` so single
+  newlines survive the round-trip.
+- **Inline marks**, which accumulate through nesting onto one text node:
+
+  | Markdown | ADF mark |
+  | --- | --- |
+  | `*x*` / `_x_` | `em` |
+  | `**x**` | `strong` |
+  | `~~x~~` | `strike` |
+  | `` `x` `` | `code` |
+  | `[label](href)` / `[label](href "title")` | `link` with `attrs.href` and optional `attrs.title` |
+
+  So `***x***` carries `em` + `strong`, and `[**x**](u)` carries `strong` + `link`.
+  ADF's `code` mark drops any inherited `em`/`strong`/`strike` (but keeps a link),
+  so `` **`x`** `` normalizes to `` `x` ``.
+- **Fenced code** → `codeBlock`, carrying the language in `attrs.language`.
+- **Bullet, ordered, and nested lists** → `bulletList` / `orderedList`; a
+  `listItem` holds `[paragraph, nested list]` at any depth, and a bullet may nest
+  inside an ordered list or the reverse. **Task lists** (`- [ ]` / `- [x]`) →
+  `taskList` with `TODO`/`DONE` task items (top level only — task items hold
+  inline content, not nested lists).
+- **@mentions** (`@{accountId|Display Name}`) → an inline `mention` node
+  (`attrs.id` the account id, `attrs.text` the `@Display Name` hint). The
+  canonical form always carries the pipe; `@{Name}` without one stays literal
+  text, and `\@{…}` is an escape that reads back as literal `@{…}`. Only the id
+  is required — Jira may re-resolve the display name from it on render, so a
+  mention with no display reads back as `@{id|}`.
+- **Inline attachments.** A paragraph that is a single image whose target
+  resolves against the caller's media lookup → `mediaSingle` (with
+  `attrs.layout: 'center'`) wrapping a `media` node (`attrs.type: 'file'`, `id`
+  the media-services UUID, `collection` the empty string, `alt`, and
+  `width`/`height` when known). The target's basename keys the lookup after a
+  leading `attachment:` and any directories are stripped, and a target that is
+  itself a media UUID resolves too. On read, `media`/`mediaInline` become
+  `![alt](attachment:<filename>)`, degrading to `![alt](attachment:<uuid>)` when
+  the lookup is empty; a `media` node Jira authored with `type: 'external'` reads
+  back as `![alt](url)`. Local paths normalize to the `attachment:` form:
+  `![BEFORE](./before.png)` → `![BEFORE](attachment:before.png)`. An external or
+  unresolved image stays literal text on write.
+- **Thematic breaks** (`---`) → `rule`.
+- **`<details>`/`<summary>` pairs** → `expand`, the summary as `attrs.title`;
+  nested details nest.
+- **GFM tables** → `table` of `tableRow`s; the first row's cells are
+  `tableHeader`, the rest `tableCell`, and every cell holds one `paragraph`.
+- **Blockquotes** → `blockquote`, holding paragraphs, lists, and code blocks.
+- **GitHub admonitions** — a blockquote whose first line is a `[!TYPE]` marker →
+  `panel`, by this map:
+
+  | Markdown | ADF `panelType` |
+  | --- | --- |
+  | `> [!NOTE]` | `info` |
+  | `> [!TIP]` | `success` |
+  | `> [!IMPORTANT]` | `note` |
+  | `> [!WARNING]` | `warning` |
+  | `> [!CAUTION]` | `error` |
+
+  `IMPORTANT` shares the `note` panel with no dedicated Atlassian equivalent.
+
+Degradation and normalizations:
+
+- **Literal-text degradation.** An image with no matching attachment (and every
+  external image URL) and stray HTML are kept as literal text sliced from their
+  markdown source, so they round-trip byte-identically. An unclosed `<details>`
+  degrades to literal paragraph text rather than looping.
+- **Demotions on tables, quotes, and panels.** ADF's content models are narrower
+  than GFM's, so some detail is a documented one-way loss:
+  - **Column alignment is lost.** ADF paragraphs inside cells carry no alignment,
+    so `| :--- | ---: |` normalizes to `| --- | --- |`.
+  - **Headings and nested quotes stay literal inside a blockquote.** A `blockquote`
+    admits only paragraphs, lists, and code blocks, so `> ## Title` and a nested
+    `> >` re-emit verbatim as literal quoted text rather than structured nodes.
+  - **A code fence forces the blockquote fallback for alerts.** A `panel` cannot
+    hold a code block, so an admonition containing one degrades to a plain
+    `blockquote` that keeps its `[!TYPE]` marker as literal first-paragraph text.
+  - **Tables do not render on Jira mobile**, which shows their ADF as bare text.
+- **Mark normalizations.** `_x_` → `*x*`; a link whose text equals its href
+  collapses to the bare url; `` **`x`** `` drops the bold from the code span;
+  `underline`, `textColor`, `subsup`, and `border` marks emit their text
+  unmarked. Marks reapply in their stored nesting order, so `[**x**](u)` keeps the
+  link outside the bold and `**[x](u)**` keeps it inside.
+- **List normalizations.** `*` and `+` bullets render as `-`; nested indentation
+  is the parent marker width (`- ` = 2, `1. ` = 3, `10. ` = 4), so four-space
+  nesting collapses; a paragraph joins a nested list with a single newline and
+  another block with a blank line.
+- **Loose lists.** A list with blank lines between its items (a *loose* list) has
+  no ADF equivalent, so it emits as one single-item list per item; the emitter's
+  `\n\n` block join reproduces the blank lines.
+- **Ordered-list renumbering.** `orderedList` markers are rendered from the list
+  start (`attrs.order`, defaulting to 1), not from the source digits, so
+  `1. a\n1. b` renumbers to `1. a\n2. b`.
+
+## Rules
+
+- **The Guided Walkthrough is a separate `<details>` block, not inside the YAML.**
+  A nested ` ``` ` code fence in the walkthrough would prematurely close the outer
+  ` ```yaml ` fence in the LLM Context block. Keep them apart.
+- **Only the LLM Context YAML is managed by `BodyMetadataService`.** It keys off the
+  `<!-- flight-rules:metadata -->` sentinel and rewrites only the fenced YAML inside
+  that block; everything above (all prose, the Guided Walkthrough) is left
+  byte-identical on `splice`.
+- **`size`** is a typed field on `EntityMetadataSchema`
+  (`'ticket' | 'epic' | 'initiative'`). Set it to the node's altitude.
+- **Acceptance Criteria are `- [ ]` checkboxes** — verifiable by a human or a bot,
+  on epics *and* tickets.
+- **A `Bug` ticket uses [the bug report format](./bug-report-format.md) instead of
+  this one**, selected by the Jira issue type.
+- **Every reference is portable.** See [Portable context](#portable-context).

@@ -1056,7 +1056,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.69.0";
+var appVersion = false ? "0.0.0-dev" : "1.73.0";
 
 // src/shared/ariadne/review-packet.schema.ts
 import { z as z11 } from "zod";
@@ -5497,6 +5497,7 @@ import { chmodSync as chmodSync2, copyFileSync, existsSync as existsSync8, lstat
 import { join as join11, resolve as resolve3 } from "node:path";
 import { z as z29 } from "zod";
 var NativePluginCompilerPropsSchema = z29.strictObject({ sourceDir: z29.string().min(1) });
+var PluginHostSchema = z29.enum(["claude", "codex"]);
 var PackageVersionSchema = z29.object({ version: z29.string().min(1) });
 var PluginIdentitySchema = z29.strictObject({
   name: z29.string().regex(/^[a-z][a-z0-9-]*$/),
@@ -5513,41 +5514,63 @@ var NativePluginCompiler = class {
   constructor(props) {
     this.sourceDir = realpathSync2(resolve3(NativePluginCompilerPropsSchema.parse(props).sourceDir));
   }
-  compile() {
+  compile(host = "claude") {
+    const target = PluginHostSchema.parse(host);
     for (const resource of ["package.json", "adapters", "agents", "skills", "docs", "hooks", "bin"]) {
       this.validateSource(join11(this.sourceDir, resource));
     }
     const identity = PluginIdentitySchema.parse(JSON.parse(readFileSync10(join11(this.sourceDir, "adapters/plugin.json"), "utf8")));
     const { version } = PackageVersionSchema.parse(JSON.parse(readFileSync10(join11(this.sourceDir, "package.json"), "utf8")));
     const definitions = new FileAgentRegistry().load(join11(this.sourceDir, "agents"));
-    const models = JSON.parse(readFileSync10(join11(this.sourceDir, "adapters/claude/model-tiers.json"), "utf8"));
-    const emitter = new MarkdownClaudeAgentEmitter({ models });
-    const agents = definitions.map((agent) => ({ name: agent.frontmatter.name, markdown: emitter.emit(agent) }));
+    const models = JSON.parse(readFileSync10(join11(this.sourceDir, "adapters", target, "model-tiers.json"), "utf8"));
+    const codexEmitter = target === "codex" ? new TomlCodexAgentEmitter({
+      models,
+      reasoning: JSON.parse(readFileSync10(join11(this.sourceDir, "adapters/codex/reasoning-tiers.json"), "utf8"))
+    }) : void 0;
+    const emitter = codexEmitter ?? new MarkdownClaudeAgentEmitter({ models });
+    const agents = definitions.map((agent) => ({ name: agent.frontmatter.name, contents: emitter.emit(agent) }));
+    const diagnostics = codexEmitter === void 0 ? [] : [...new Set(definitions.flatMap((agent) => codexEmitter.diagnostics(agent)))];
+    if (target === "codex") diagnostics.push("Claude commit and Ariadne hooks are omitted; this target emits no Codex hooks.");
     for (const executable of ["flight-rules", "flight-rules.mjs"]) {
       if (!existsSync8(join11(this.sourceDir, "bin", executable))) {
         throw new InvalidPluginSourceError(`Build the CLI before native assembly: missing bin/${executable}`);
       }
     }
-    const directory = join11(this.sourceDir, "dist", "claude");
+    const directory = join11(this.sourceDir, "dist", target);
     if (existsSync8(join11(this.sourceDir, "dist")) && lstatSync(join11(this.sourceDir, "dist")).isSymbolicLink()) {
       throw new InvalidPluginSourceError("Native output cannot use a symlinked dist directory");
     }
     rmSync3(directory, { recursive: true, force: true });
     mkdirSync5(directory, { recursive: true });
-    for (const resource of ["skills", "docs", "hooks", "bin"]) this.copyDirectory(join11(this.sourceDir, resource), join11(directory, resource));
-    mkdirSync5(join11(directory, "agents"));
-    for (const agent of agents) writeFileSync5(join11(directory, "agents", `${agent.name}.md`), agent.markdown);
-    mkdirSync5(join11(directory, "adapters", "claude"), { recursive: true });
-    copyFileSync(join11(this.sourceDir, "adapters/claude/model-tiers.json"), join11(directory, "adapters/claude/model-tiers.json"));
+    const resources = target === "claude" ? ["skills", "docs", "hooks", "bin"] : ["skills", "docs", "bin"];
+    for (const resource of resources) this.copyDirectory(join11(this.sourceDir, resource), join11(directory, resource));
+    const agentDirectory = target === "claude" ? join11(directory, "agents") : join11(directory, ".codex", "agents");
+    mkdirSync5(agentDirectory, { recursive: true });
+    const extension = target === "claude" ? "md" : "toml";
+    for (const agent of agents) writeFileSync5(join11(agentDirectory, `${agent.name}.${extension}`), agent.contents);
+    mkdirSync5(join11(directory, "adapters", target), { recursive: true });
+    copyFileSync(join11(this.sourceDir, "adapters", target, "model-tiers.json"), join11(directory, "adapters", target, "model-tiers.json"));
+    if (target === "codex") copyFileSync(join11(this.sourceDir, "adapters/codex/reasoning-tiers.json"), join11(directory, "adapters/codex/reasoning-tiers.json"));
     for (const executable of ["flight-rules", "flight-rules.mjs"]) chmodSync2(join11(directory, "bin", executable), 493);
-    mkdirSync5(join11(directory, ".claude-plugin"));
-    writeFileSync5(join11(directory, ".claude-plugin", "plugin.json"), JSON.stringify({
+    const manifestDirectory = join11(directory, target === "claude" ? ".claude-plugin" : ".codex-plugin");
+    mkdirSync5(manifestDirectory);
+    const manifest = target === "claude" ? {
       ...identity,
       version,
       skills: "./skills/",
       agents: agents.map((agent) => `./agents/${agent.name}.md`)
-    }, null, 2) + "\n");
-    return { directory, agents: agents.map((agent) => agent.name), diagnostics: [] };
+    } : { ...identity, version, skills: "./skills/" };
+    writeFileSync5(join11(manifestDirectory, "plugin.json"), JSON.stringify(manifest, null, 2) + "\n");
+    if (target === "codex") {
+      writeFileSync5(join11(directory, "plugin.json"), JSON.stringify({
+        $schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+        ...identity,
+        version
+      }, null, 2) + "\n");
+      writeFileSync5(join11(directory, ".codex", "config.toml"), "[agents]\nenabled = true\n");
+      writeFileSync5(join11(directory, "diagnostics.json"), JSON.stringify(diagnostics, null, 2) + "\n");
+    }
+    return { directory, agents: agents.map((agent) => agent.name), diagnostics };
   }
   validateSource(path) {
     const stat = lstatSync(path);
