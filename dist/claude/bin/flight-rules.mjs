@@ -31653,7 +31653,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.79.0";
+var appVersion = false ? "0.0.0-dev" : "1.80.0";
 
 // src/shared/ariadne/review-packet.schema.ts
 var packetLimits = {

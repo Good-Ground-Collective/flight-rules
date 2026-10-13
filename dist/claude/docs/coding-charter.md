@@ -116,7 +116,7 @@ export const s3UploadHandler = async (
 import { S3Client, PutObjectCommand, GetObjectCommand, NoSuchKey } from "@aws-sdk/client-s3";
 import { lookup as lookupMime } from "mime-types";
 import z from "zod"
-import { ok, failure, type PromisedResult } from "@think-lp/cloud-sdk/results";
+import { ok, failure, type PromisedResult } from "./results";
 import { S3PathPartsValidator } from "@file-upload/schemas"
 
 
@@ -188,6 +188,10 @@ export class UploadFailureError extends FileProviderError {
 
 ```
 
+## M-14 — No commented-out code
+
+Dead code is never committed; version control is the history. Delete it.
+
 ## Review tiers
 
 Autonomous review checks Tier A mandates on every instance and raises each Tier B mandate at most once, with representative examples. A rule named here _can_ enforce a mandate; whether it does for a given file is what the review method's coverage step measures. Core mandates apply to every changed file, so a file whose linter has no rule for a mandate is always reviewed by reading.
@@ -200,6 +204,7 @@ Autonomous review checks Tier A mandates on every instance and raises each Tier 
 | M-2 structural: no paragraph block comments | eslint: `preflight/no-paragraph-comments`                           |
 | M-10 flat if-else over nested switch+if     | eslint: `preflight/no-switch-with-nested-if`                        |
 | M-11 typed errors thrown at the call site   | eslint: `preflight/no-throw-helpers`, `preflight/error-class-sets-name` |
+| M-14 no commented-out code                  | _(no rule — always reviewed by reading)_                            |
 
 **Tier B — judgment**
 

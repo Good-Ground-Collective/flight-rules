@@ -154,7 +154,8 @@ inline comment per instance.
 
 A Tier A mandate with no rule at all can never be `enforced` and is read by hand
 on every PR — a standing reminder that "linted" was never the boundary of
-Tier A.
+Tier A. A mandate split across several rows is resolved row by row: a rule that
+enforces one row says nothing about the others.
 
 **This is the exact inversion of `guided-code-review`'s weighting rules.** There,
 M-1 leaks are ignored unless there is exactly one. Here, every instance gets a
