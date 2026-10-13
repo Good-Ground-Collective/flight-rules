@@ -67,16 +67,9 @@ export class GitHubReviewVerifier implements ReviewVerifier {
       return comment !== undefined;
     }
     if (evidence.kind === "thread_resolution") return this.dismissal(evidence);
-    if (evidence.kind === "commit") {
-      const comparison = z
-        .looseObject({ status: z.string() })
-        .parse(
-          await this.api.get(`/repos/${this.props.repo}/compare/${evidence.sha}...${headSha}`),
-        );
-      return ["ahead", "identical"].includes(comparison.status);
-    }
-    if (evidence.commit_sha !== headSha) return false;
+    if (evidence.kind === "commit") return this.reaches(evidence.sha, headSha);
     if (evidence.kind === "check_run") {
+      if (evidence.commit_sha !== headSha) return false;
       const check = z
         .looseObject({
           head_sha: z.string(),
@@ -88,17 +81,11 @@ export class GitHubReviewVerifier implements ReviewVerifier {
         check.head_sha === headSha && check.status === "completed" && check.conclusion === "success"
       );
     }
-    const file = z
-      .looseObject({ type: z.string(), encoding: z.string(), content: z.string() })
-      .parse(
-        await this.api.get(
-          `/repos/${this.props.repo}/contents/${evidence.path.split("/").map(encodeURIComponent).join("/")}?ref=${headSha}`,
-        ),
-      );
+    if (!(await this.reaches(evidence.commit_sha, headSha))) return false;
     return (
-      file.type === "file" &&
-      file.encoding === "base64" &&
-      evidence.line <= Buffer.from(file.content, "base64").toString("utf8").split("\n").length
+      (evidence.commit_sha === headSha ||
+        (await this.hasLine(evidence.path, evidence.line, evidence.commit_sha))) &&
+      (await this.hasLine(evidence.path, evidence.line, headSha))
     );
   }
 
@@ -165,6 +152,30 @@ export class GitHubReviewVerifier implements ReviewVerifier {
       thread.pullRequest.number === this.props.prNumber &&
       thread.pullRequest.repository.nameWithOwner.toLowerCase() === this.props.repo.toLowerCase()
     );
+  }
+
+  /** True when `sha` is the head or an ancestor of it, so the head contains that commit. */
+  private async reaches(sha: string, headSha: string): Promise<boolean> {
+    if (sha === headSha) return true;
+    const comparison = z
+      .looseObject({ status: z.string() })
+      .parse(await this.api.get(`/repos/${this.props.repo}/compare/${sha}...${headSha}`));
+    return ["ahead", "identical"].includes(comparison.status);
+  }
+
+  /** True when `ref` has `path` as a file with at least `line` lines. */
+  private async hasLine(path: string, line: number, ref: string): Promise<boolean> {
+    const file = z
+      .looseObject({ type: z.string(), encoding: z.string(), content: z.string() })
+      .parse(
+        await this.api.get(
+          `/repos/${this.props.repo}/contents/${path.split("/").map(encodeURIComponent).join("/")}?ref=${ref}`,
+        ),
+      );
+    if (file.type !== "file" || file.encoding !== "base64") return false;
+    const text = Buffer.from(file.content, "base64").toString("utf8");
+    const lines = text === "" ? 0 : text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
+    return line <= lines;
   }
 
   private async comment(
