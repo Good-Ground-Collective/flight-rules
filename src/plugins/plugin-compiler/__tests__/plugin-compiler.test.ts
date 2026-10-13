@@ -93,6 +93,11 @@ describe("NativePluginCompiler", () => {
       join(relocated, "docs/coding-charter.md"),
       join(relocated, "docs/coding-charter-typescript.md"),
     ]);
+    const apexPaths = execFileSync(process.execPath, [join(relocated, "bin/flight-rules.mjs"), "charter", "classes/Example.cls", "triggers/Example.trigger", "--path"], { cwd: tmpdir(), env: { ...process.env, FLIGHT_RULES_HOME: "" }, encoding: "utf8" });
+    expect(apexPaths.trim().split("\n")).toEqual([
+      join(relocated, "docs/coding-charter.md"),
+      join(relocated, "docs/coding-charter-apex.md"),
+    ]);
     for (const executable of ["flight-rules", "flight-rules.mjs"]) {
       expect(statSync(join(relocated, "bin", executable)).mode & 0o111).toBe(0o111);
     }

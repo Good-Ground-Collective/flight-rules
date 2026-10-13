@@ -90,11 +90,23 @@ describe('bundled charters', () => {
   })
   it('parse Tier A mandates from the Tier A table only', () => {
     const [core, typescript] = bundled.select(['src/index.ts'])
-    expect(core?.tierA).toEqual(['M-1', 'M-2', 'M-10', 'M-11'])
+    expect(core?.tierA).toEqual(['M-1', 'M-2', 'M-10', 'M-11', 'M-14'])
     expect(typescript?.tierA).toEqual(['M-3', 'M-5', 'M-7'])
   })
   it('give TypeScript files the TypeScript charter', () => {
     expect(bundled.select(['src/index.ts']).map(charter => charter.id)).toContain('coding-charter-typescript')
+  })
+  it('give Apex classes and triggers the Apex charter, not the TypeScript one', () => {
+    expect(bundled.select(['force-app/main/default/classes/IncidentService.cls', 'force-app/main/default/triggers/Incident.trigger']).map(charter => charter.id)).toEqual([
+      'coding-charter',
+      'coding-charter-apex',
+    ])
+  })
+  it('list the Apex Tier A mandates once each', () => {
+    expect(bundled.select(['classes/A.cls'])[1]?.tierA).toEqual(['A-1', 'A-2', 'A-3', 'A-4', 'A-5', 'A-11', 'A-12', 'A-14', 'A-16', 'A-17'])
+  })
+  it('stay organization-neutral, leaving framework bindings to each repository', () => {
+    for (const charter of bundled.all()) expect(charter.contents, charter.id).not.toMatch(/think-?lp|thinksdk|ServiceRegistry__mdt|RestApiRouter/i)
   })
   it('keep TypeScript mandates out of the core', () => {
     const core = bundled.select([])[0]?.contents ?? ''
