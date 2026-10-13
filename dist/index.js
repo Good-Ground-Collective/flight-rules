@@ -1056,7 +1056,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.75.0";
+var appVersion = false ? "0.0.0-dev" : "1.76.0";
 
 // src/shared/ariadne/review-packet.schema.ts
 import { z as z11 } from "zod";
@@ -2782,8 +2782,8 @@ var GitHubTaskTracker = class {
     });
     return data.map((member) => ({ accountId: member.login, displayName: member.login }));
   }
-  async ping() {
-    await this.octokit.rest.repos.get({ owner: this.owner, repo: this.repo });
+  async ping(options) {
+    await this.octokit.rest.repos.get({ owner: this.owner, repo: this.repo, ...options?.signal === void 0 ? {} : { request: { signal: options.signal } } });
   }
   async replaceIssueBody(id, role, input) {
     const issueNumber = parseInt(id, 10);
@@ -2915,13 +2915,14 @@ var JiraClient = class {
     this.baseUrl = `https://${config.host}/rest/api/3`;
     this.authHeader = `Basic ${Buffer.from(`${config.email}:${config.token}`).toString("base64")}`;
   }
-  async request(method, path, body, params) {
+  async request(method, path, body, params, signal) {
     const url = new URL(`${this.baseUrl}${path}`);
     if (params) Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, String(v)));
     const res = await this.fetchWithRetry(url.toString(), {
       method,
       headers: { Authorization: this.authHeader, "Content-Type": "application/json", Accept: "application/json" },
-      ...body !== void 0 ? { body: JSON.stringify(body) } : {}
+      ...body !== void 0 ? { body: JSON.stringify(body) } : {},
+      ...signal === void 0 ? {} : { signal }
     });
     if (!res.ok) await this.throwApiError(res);
     const text = await res.text();
@@ -2971,13 +2972,13 @@ var JiraClient = class {
   }
   async fetchWithRetry(url, init, attempt = 0) {
     const res = await fetch(url, init);
-    if (res.status === 429 && attempt < maxRetries) {
+    if (res.status === 429 && attempt < maxRetries && init.signal === void 0) {
       const retryAfterHeader = res.headers.get("Retry-After");
       const parsedRetryAfter = retryAfterHeader !== null ? Number(retryAfterHeader) : NaN;
       const retryAfterSeconds = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : defaultRetryAfterSeconds;
       const jitter = 0.7 + Math.random() * 0.6;
       const delayMs = Math.min(retryAfterSeconds * 1e3 * jitter, maxBackoffMs);
-      await new Promise((resolve4) => setTimeout(resolve4, delayMs));
+      await new Promise((resolve5) => setTimeout(resolve5, delayMs));
       return this.fetchWithRetry(url, init, attempt + 1);
     }
     return res;
@@ -3030,7 +3031,7 @@ var ConfluenceClient = class {
       const retryAfterSeconds = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : defaultRetryAfterSeconds2;
       const jitter = 0.7 + Math.random() * 0.6;
       const delayMs = Math.min(retryAfterSeconds * 1e3 * jitter, maxBackoffMs2);
-      await new Promise((resolve4) => setTimeout(resolve4, delayMs));
+      await new Promise((resolve5) => setTimeout(resolve5, delayMs));
       return this.fetchWithRetry(url, init, attempt + 1);
     }
     return res;
@@ -4354,8 +4355,9 @@ var JiraTaskTracker = class {
     });
     return users.map((user) => ({ accountId: user.accountId, displayName: user.displayName }));
   }
-  async ping() {
-    await this.client.request("GET", "/myself");
+  async ping(options) {
+    if (options?.signal === void 0) await this.client.request("GET", "/myself");
+    else await this.client.request("GET", "/myself", void 0, void 0, options.signal);
   }
   async searchChildren(epicKey) {
     const [page, blocksLinkType] = await Promise.all([
@@ -4587,33 +4589,115 @@ var JiraTaskTracker = class {
 // src/tasks/tool-probe/tool-probe.ts
 import { execFile as execFile3 } from "node:child_process";
 import { promisify as promisify3 } from "node:util";
+import { z as z22 } from "zod";
+
+// src/tasks/readiness/probe-diagnostics.ts
+import { z as z21 } from "zod";
+var ProbeDiagnosticsPropsSchema = z21.object({ env: z21.record(z21.string(), z21.string().optional()) });
+var ErrorFactsSchema = z21.object({
+  code: z21.union([z21.string(), z21.number()]).nullable().optional(),
+  status: z21.number().optional(),
+  statusCode: z21.number().optional(),
+  killed: z21.boolean().optional(),
+  name: z21.string().optional(),
+  message: z21.string().optional(),
+  stderr: z21.string().optional(),
+  cause: z21.unknown().optional()
+});
+var RedactedProbeDiagnostics = class {
+  secrets;
+  constructor(props) {
+    const { env } = ProbeDiagnosticsPropsSchema.parse({
+      ...props,
+      env: props.env === void 0 ? void 0 : { ...props.env }
+    });
+    this.secrets = Object.entries(env).filter(
+      ([key, value]) => /token|secret|password|api[_-]?key|credential/i.test(key) && Boolean(value)
+    ).flatMap(([, value]) => value === void 0 ? [] : [value, encodeURIComponent(value)]).sort((a, b) => b.length - a.length);
+  }
+  redact(text) {
+    let result = text.replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/@]+@/gi, "$1[REDACTED]@").replace(/\b(Bearer|Basic)\s+[^\s,'";]+/gi, "$1 [REDACTED]").replace(/([?&](?:token|access_token|api_key|key|signature)=)[^&#\s]+/gi, "$1[REDACTED]").replace(/\b(?:gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+)\b/g, "[REDACTED]");
+    for (const secret of this.secrets) result = result.replaceAll(secret, "[REDACTED]");
+    return result;
+  }
+  failure(name, error, required, fallback = "UNKNOWN") {
+    const parsed = ErrorFactsSchema.safeParse(error);
+    const facts = parsed.success ? parsed.data : {};
+    const cause = ErrorFactsSchema.safeParse(facts.cause);
+    const code = facts.code ?? (cause.success ? cause.data.code : void 0);
+    const status = facts.status ?? facts.statusCode;
+    const raw = facts.stderr?.trim() || facts.message || String(error);
+    let category = fallback;
+    if (code === "ENOENT")
+      category = name.startsWith("local:") ? "PATH_UNAVAILABLE" : "MISSING_TOOL";
+    else if (facts.killed || facts.name === "TimeoutError" || code === "ETIMEDOUT" || /timed? out/i.test(raw))
+      category = "TIMEOUT";
+    else if (status === 401 || /HTTP 401|bad credentials|authentication failed|not logged in|could not read Username|Permission denied \(publickey\)/i.test(
+      raw
+    ))
+      category = "AUTHENTICATION";
+    else if (code === "EACCES" || code === "EPERM" || status === 403 || /HTTP 403|operation not permitted|permission denied|sandbox.*denied/i.test(raw))
+      category = "PERMISSION_DENIED";
+    else if (["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "ECONNRESET"].includes(String(code)) || status !== void 0 && status >= 500 || /connection refused|could not resolve|network is unreachable|failed to connect|fetch failed|HTTP 5\d\d/i.test(
+      raw
+    ))
+      category = "NETWORK";
+    const remedies = {
+      MISSING_TOOL: "Install the missing executable and make it available on this invocation PATH.",
+      PATH_UNAVAILABLE: "Resolve the intended existing filesystem path before relying on write access.",
+      TIMEOUT: "Check service connectivity or a stalled credential helper, then rerun the bounded probe.",
+      AUTHENTICATION: "Authenticate the relevant account through its supported login or credential setup, then rerun.",
+      PERMISSION_DENIED: "Inspect the named account or host policy denial and use its normal scoped approval/setup path.",
+      NETWORK: "Check DNS, routing and service availability. A connection failure alone does not establish sandbox denial.",
+      UNKNOWN: "Inspect the operation and establish the missing capability before relying on it."
+    };
+    return {
+      name,
+      ok: false,
+      required,
+      code: category,
+      detail: category === "MISSING_TOOL" ? "not installed" : this.redact(raw),
+      remedy: remedies[category] ?? remedies.UNKNOWN
+    };
+  }
+};
+
+// src/tasks/tool-probe/tool-probe.ts
 var minimumGhVersion = [2, 99, 0];
 var ghVersionLine = /gh version (\d+)\.(\d+)\.(\d+)/;
+var NodeToolProbePropsSchema = z22.object({ cwd: z22.string().optional(), env: z22.record(z22.string(), z22.string().optional()).optional(), timeoutMs: z22.int().positive().max(6e4).default(1e4) });
 var NodeToolProbe = class {
   execFile;
+  env;
   constructor(props = {}) {
+    const input = NodeToolProbePropsSchema.parse({ ...props, env: props.env === void 0 ? void 0 : { ...props.env } });
     const promisified = promisify3(execFile3);
-    this.execFile = props.execFileFn ?? ((file, args) => promisified(file, [...args]));
+    const cwd = input.cwd ?? process.cwd();
+    const env = props.env ?? process.env;
+    this.env = env;
+    this.execFile = props.execFileFn ?? ((file, args) => promisified(file, [...args], { cwd, env, timeout: input.timeoutMs, killSignal: "SIGKILL", maxBuffer: 1024 * 1024 }));
   }
   async probe(input) {
+    const diagnostics = new RedactedProbeDiagnostics({ env: this.env });
     const qaRequired = input.qaInstructionsFound;
-    const ghRequired = input.repo !== void 0;
+    const ghRequired = input.githubRequired ?? input.repo !== void 0;
+    const pushRequired = input.pushRequired ?? ghRequired;
     const [gh, ghAuth, ghPush, playwright, ffmpeg, curl] = await Promise.all([
-      this.ghVersion(ghRequired),
-      this.ghAuth(ghRequired),
-      this.ghPush(input.repo, ghRequired),
-      this.present("tools:playwright-cli", "playwright-cli", ["--version"], qaRequired),
-      this.present("tools:ffmpeg", "ffmpeg", ["-version"], qaRequired),
-      this.present("tools:curl", "curl", ["--version"], qaRequired)
+      this.ghVersion(ghRequired, diagnostics),
+      this.ghAuth(ghRequired, diagnostics),
+      this.ghPush(input.repo, pushRequired, diagnostics),
+      this.present("tools:playwright-cli", "playwright-cli", ["--version"], qaRequired, diagnostics),
+      this.present("tools:ffmpeg", "ffmpeg", ["-version"], qaRequired, diagnostics),
+      this.present("tools:curl", "curl", ["--version"], qaRequired, diagnostics)
     ]);
     return [gh, ghAuth, ghPush, playwright, ffmpeg, curl];
   }
-  async ghVersion(required) {
+  async ghVersion(required, diagnostics) {
     try {
       const { stdout } = await this.execFile("gh", ["--version"]);
       const match = ghVersionLine.exec(stdout);
       if (match === null) {
-        return { name: "tools:gh", ok: false, detail: `unrecognized version output: ${stdout.trim()}`, required };
+        return { name: "tools:gh", ok: false, detail: `unrecognized version output: ${diagnostics.redact(stdout.trim())}`, required, code: "UNKNOWN", remedy: "Inspect the gh executable selected by PATH and verify its version." };
       }
       const [, major, minor, patch] = match;
       const version = [Number(major), Number(minor), Number(patch)];
@@ -4623,23 +4707,22 @@ var NodeToolProbe = class {
         name: "tools:gh",
         ok,
         detail: ok ? `gh ${found}` : `gh ${found} is older than the required ${minimumGhVersion.join(".")}`,
-        required
+        required,
+        ...ok ? {} : { code: "TOOL_VERSION", remedy: `Install gh ${minimumGhVersion.join(".")} or newer before this workflow.` }
       };
     } catch (err) {
-      const detail = this.isMissingBinary(err) ? "not installed" : this.stderrOf(err);
-      return { name: "tools:gh", ok: false, detail, required };
+      return { ...diagnostics.failure("tools:gh", err, required), required };
     }
   }
-  async ghAuth(required) {
+  async ghAuth(required, diagnostics) {
     try {
       await this.execFile("gh", ["auth", "status"]);
       return { name: "tools:gh-auth", ok: true, detail: "authenticated", required };
     } catch (err) {
-      const detail = this.isMissingBinary(err) ? "not installed" : this.stderrOf(err);
-      return { name: "tools:gh-auth", ok: false, detail, required };
+      return { ...diagnostics.failure("tools:gh-auth", err, required, "AUTHENTICATION"), required };
     }
   }
-  async ghPush(repo, required) {
+  async ghPush(repo, required, diagnostics) {
     if (repo === void 0) {
       return { name: "tools:gh-push", ok: false, detail: "skipped \u2014 repo is not configured", required };
     }
@@ -4654,21 +4737,21 @@ var NodeToolProbe = class {
       return {
         name: "tools:gh-push",
         ok,
-        detail: ok ? `push access to ${repo}` : `no push access to ${repo}`,
+        detail: ok ? `GitHub account has push entitlement to ${repo}; transport and branch policy are not tested` : stdout.trim() === "false" ? `no push entitlement to ${repo}` : `push entitlement to ${repo} is unverified`,
+        code: ok ? "AVAILABLE" : stdout.trim() === "false" ? "PERMISSION_DENIED" : "UNKNOWN",
+        ...ok ? {} : { remedy: "Verify the selected GitHub account has push entitlement to this repository; this probe does not change access." },
         required
       };
     } catch (err) {
-      const detail = this.isMissingBinary(err) ? "not installed" : this.stderrOf(err);
-      return { name: "tools:gh-push", ok: false, detail, required };
+      return { ...diagnostics.failure("tools:gh-push", err, required), required };
     }
   }
-  async present(name, file, args, required) {
+  async present(name, file, args, required, diagnostics) {
     try {
       const { stdout } = await this.execFile(file, args);
-      return { name, ok: true, detail: stdout.trim().split("\n")[0] ?? "installed", required };
+      return { name, ok: true, detail: diagnostics.redact(stdout.trim().split("\n")[0] ?? "installed"), required };
     } catch (err) {
-      const detail = this.isMissingBinary(err) ? "not installed" : this.stderrOf(err);
-      return { name, ok: false, detail, required };
+      return { ...diagnostics.failure(name, err, required), required };
     }
   }
   /** True when `version` is at least `minimum`, comparing major, minor, then patch. */
@@ -4680,27 +4763,760 @@ var NodeToolProbe = class {
     }
     return true;
   }
-  /** Distinguishes a missing binary (ENOENT) from a binary that ran and failed. */
-  isMissingBinary(err) {
-    return typeof err === "object" && err !== null && "code" in err && err.code === "ENOENT";
-  }
-  stderrOf(err) {
-    if (typeof err === "object" && err !== null && "stderr" in err) {
-      const stderr = err.stderr;
-      if (typeof stderr === "string") return stderr.trim();
-    }
-    if (err instanceof Error) return err.message;
-    return String(err);
-  }
 };
 var nodeToolProbe = new NodeToolProbe();
 
+// src/tasks/readiness/repository-readiness.ts
+import { z as z29 } from "zod";
+
+// src/tasks/readiness/workflow-preflight.ts
+import { execFile as execFile4 } from "node:child_process";
+import { access, realpath } from "node:fs/promises";
+import { constants } from "node:fs";
+import { resolve as resolve3 } from "node:path";
+import { promisify as promisify4 } from "node:util";
+import { z as z28 } from "zod";
+
+// src/orchestration/orchestration-policy.ts
+import { isDeepStrictEqual } from "node:util";
+import { z as z26 } from "zod";
+
+// src/agents/agent-emitter/agent-emitter.schema.ts
+import { z as z24 } from "zod";
+
+// src/agents/agent-frontmatter/agent-frontmatter.schema.ts
+import { z as z23 } from "zod";
+var agentCapabilities = ["read", "edit", "shell", "web", "spawn", "ask"];
+var modelTiers = ["standard", "escalated", "expert"];
+var reasoningLevels = ["low", "medium", "high"];
+var claudeAgentColors = ["red", "blue", "green", "yellow", "purple", "orange", "pink", "cyan"];
+var AgentCapabilitySchema = z23.enum(agentCapabilities);
+var ModelTierSchema = z23.enum(modelTiers);
+var AgentFrontmatterSchema = z23.strictObject({
+  name: z23.string().regex(/^[a-z][a-z0-9-]*$/),
+  description: z23.string().min(1),
+  capabilities: z23.array(AgentCapabilitySchema).min(1).refine(
+    (capabilities) => new Set(capabilities).size === capabilities.length,
+    { message: "duplicate capability" }
+  ),
+  model: ModelTierSchema,
+  modelReason: z23.string().trim().min(1).optional(),
+  reasoning: z23.enum(reasoningLevels).optional(),
+  sandbox: z23.strictObject({
+    fs: z23.enum(["read-only", "workspace-write"]),
+    network: z23.enum(["none", "enabled"])
+  }).optional(),
+  dispatch: z23.strictObject({
+    maxConcurrent: z23.int().positive(),
+    maxDepth: z23.int().positive()
+  }).optional(),
+  "x-claude": z23.strictObject({ color: z23.enum(claudeAgentColors).optional() }).optional()
+});
+var AgentRegistrationSchema = AgentFrontmatterSchema.refine(
+  (agent) => agent.model !== "expert" || agent.modelReason !== void 0,
+  { message: "expert tier requires modelReason", path: ["modelReason"] }
+);
+
+// src/agents/agent-emitter/agent-emitter.schema.ts
+var ModelBindingsSchema = z24.strictObject({
+  standard: z24.string().trim().min(1),
+  escalated: z24.string().trim().min(1),
+  expert: z24.string().trim().min(1)
+});
+var AgentDefinitionSchema = z24.strictObject({
+  frontmatter: AgentRegistrationSchema,
+  body: z24.string().refine((body) => body.trim() !== "", "agent prompt must not be empty")
+});
+
+// src/orchestration/orchestration.schema.ts
+import { isAbsolute as isAbsolute2, relative, sep as sep2 } from "node:path";
+import { z as z25 } from "zod";
+var OrchestrationTextSchema = z25.string().refine((value) => value.trim().length > 0, "must not be blank");
+var AbsolutePathSchema = OrchestrationTextSchema.refine(
+  isAbsolute2,
+  "must be an absolute path on this host"
+);
+var CapabilityNameSchema = z25.string().regex(/^[a-z][a-zA-Z0-9:.-]*$/);
+var RunContextObjectSchema = z25.strictObject({
+  runId: OrchestrationTextSchema,
+  taskId: OrchestrationTextSchema,
+  cwd: AbsolutePathSchema,
+  repositoryRoot: AbsolutePathSchema,
+  baseRef: OrchestrationTextSchema,
+  skill: OrchestrationTextSchema
+});
+var RunContextSchema = RunContextObjectSchema.refine((value) => {
+  const path = relative(value.repositoryRoot, value.cwd);
+  return path !== ".." && !path.startsWith(`..${sep2}`) && !isAbsolute2(path);
+}, "working directory must be inside the active repository root");
+var CallerContextSchema = RunContextSchema.safeExtend({ attempt: z25.int().positive() });
+var CapabilityEvidenceSchema = z25.discriminatedUnion("state", [
+  z25.strictObject({ state: z25.literal("available"), evidence: OrchestrationTextSchema }),
+  z25.strictObject({
+    state: z25.enum(["denied", "unknown"]),
+    evidence: OrchestrationTextSchema,
+    remedy: OrchestrationTextSchema
+  })
+]);
+var AdapterLimitsSchema = z25.strictObject({
+  maxConcurrent: z25.int().nonnegative().nullable(),
+  activeWorkers: z25.int().nonnegative(),
+  currentDepth: z25.int().nonnegative(),
+  maxDepth: z25.int().nonnegative().nullable(),
+  source: OrchestrationTextSchema
+});
+var RuntimeSnapshotSchema = z25.strictObject({
+  context: CallerContextSchema,
+  host: z25.strictObject({ name: OrchestrationTextSchema, version: OrchestrationTextSchema }),
+  observedAt: z25.iso.datetime(),
+  agent: AgentFrontmatterSchema.shape.name.nullable(),
+  spawn: CapabilityEvidenceSchema,
+  ask: CapabilityEvidenceSchema,
+  permissions: z25.record(CapabilityNameSchema, CapabilityEvidenceSchema),
+  limits: AdapterLimitsSchema
+});
+var DispatchRequestSchema = z25.strictObject({
+  id: OrchestrationTextSchema,
+  agent: AgentFrontmatterSchema.shape.name,
+  context: CallerContextSchema,
+  input: z25.record(z25.string(), z25.json()),
+  requiredCapabilities: z25.array(CapabilityNameSchema).optional()
+});
+var OrchestrationFailureSchema = z25.strictObject({
+  code: z25.enum([
+    "UNKNOWN_AGENT",
+    "UNSUPPORTED_AGENT_SETTINGS",
+    "CONTEXT_MISMATCH",
+    "CAPABILITY_DENIED",
+    "CAPABILITY_UNKNOWN",
+    "DISPATCH_UNAVAILABLE",
+    "LIMITS_UNKNOWN",
+    "CAPACITY_EXHAUSTED",
+    "DEPTH_EXCEEDED",
+    "QUESTIONS_DISABLED",
+    "QUESTIONS_UNAVAILABLE",
+    "INVALID_HANDOFF",
+    "INVALID_REPORT",
+    "INVALID_HISTORY",
+    "OPEN_QUESTIONS",
+    "UNVERIFIABLE",
+    "ATTEMPTS_EXHAUSTED",
+    "EXECUTION_FAILED",
+    "CANCELLED"
+  ]),
+  message: OrchestrationTextSchema,
+  remedy: OrchestrationTextSchema,
+  capability: CapabilityNameSchema.optional()
+});
+var OutcomeIdentitySchema = z25.strictObject({
+  dispatchId: OrchestrationTextSchema,
+  agent: AgentFrontmatterSchema.shape.name,
+  context: CallerContextSchema
+});
+var DispatchOutcomeSchema = z25.discriminatedUnion("status", [
+  OutcomeIdentitySchema.extend({
+    status: z25.literal("completed"),
+    report: z25.record(z25.string(), z25.json())
+  }),
+  OutcomeIdentitySchema.extend({
+    status: z25.enum(["failed", "unavailable"]),
+    failure: OrchestrationFailureSchema
+  })
+]);
+var QuestionRequestSchema = z25.strictObject({
+  context: CallerContextSchema,
+  question: OrchestrationTextSchema,
+  allowHumanQuestions: z25.boolean()
+});
+var SiblingSkillRequestSchema = z25.strictObject({
+  context: CallerContextSchema,
+  skill: OrchestrationTextSchema,
+  input: z25.record(z25.string(), z25.json())
+});
+
+// src/orchestration/orchestration-policy.ts
+var RegistryOrchestrationPolicyPropsSchema = z26.strictObject({
+  agents: z26.array(AgentDefinitionSchema).min(1).refine(
+    (agents) => new Set(agents.map((agent) => agent.frontmatter.name)).size === agents.length,
+    "duplicate agent name"
+  )
+});
+var RegistryOrchestrationPolicy = class {
+  agents;
+  constructor(props) {
+    this.agents = new Map(
+      RegistryOrchestrationPolicyPropsSchema.parse(props).agents.map((agent) => [
+        agent.frontmatter.name,
+        agent
+      ])
+    );
+  }
+  prepare(request, runtime) {
+    const input = DispatchRequestSchema.parse(request);
+    const snapshot = RuntimeSnapshotSchema.parse(runtime);
+    const definition = this.agents.get(input.agent);
+    if (definition === void 0) {
+      return {
+        status: "unavailable",
+        failure: {
+          code: "UNKNOWN_AGENT",
+          message: `No registered agent named ${input.agent}.`,
+          remedy: "Install or load the named registration before dispatch."
+        }
+      };
+    }
+    if (!isDeepStrictEqual(input.context, snapshot.context) || snapshot.agent !== input.agent) {
+      return {
+        status: "unavailable",
+        failure: {
+          code: "CONTEXT_MISMATCH",
+          message: "Runtime evidence belongs to another context or worker.",
+          remedy: "Observe effective access for this named worker in this task, checkout and attempt."
+        }
+      };
+    }
+    if (definition.frontmatter.sandbox !== void 0 || definition.frontmatter.dispatch !== void 0) {
+      return {
+        status: "unavailable",
+        failure: {
+          code: "UNSUPPORTED_AGENT_SETTINGS",
+          message: "Explicit worker sandbox or dispatch restrictions need an enforcing runtime binding.",
+          remedy: "Provide an adapter that can enforce the declared restrictions before dispatch; do not drop them."
+        }
+      };
+    }
+    if (snapshot.spawn.state !== "available") {
+      return {
+        status: "unavailable",
+        failure: {
+          code: "DISPATCH_UNAVAILABLE",
+          capability: "spawn",
+          message: snapshot.spawn.evidence,
+          remedy: snapshot.spawn.remedy
+        }
+      };
+    }
+    const { maxConcurrent, activeWorkers, currentDepth, maxDepth } = snapshot.limits;
+    if (maxConcurrent === null || maxDepth === null) {
+      return {
+        status: "unavailable",
+        failure: {
+          code: "LIMITS_UNKNOWN",
+          message: "Concurrency or nesting capacity has not been established.",
+          remedy: "Read the host limits or provide a documented conservative adapter bound with its provenance."
+        }
+      };
+    }
+    if (currentDepth >= maxDepth) {
+      return {
+        status: "unavailable",
+        failure: {
+          code: "DEPTH_EXCEEDED",
+          message: `A child at depth ${currentDepth + 1} exceeds the bound ${maxDepth}.`,
+          remedy: "Invoke orchestration in a supported caller context with remaining worker depth."
+        }
+      };
+    }
+    if (activeWorkers >= maxConcurrent) {
+      return {
+        status: "unavailable",
+        failure: {
+          code: "CAPACITY_EXHAUSTED",
+          message: `All ${maxConcurrent} worker slots are occupied or disabled.`,
+          remedy: "Wait for a worker to finish, refresh current usage, then plan the remaining work."
+        }
+      };
+    }
+    const required = /* @__PURE__ */ new Set([
+      ...definition.frontmatter.capabilities,
+      ...input.requiredCapabilities ?? []
+    ]);
+    for (const capability of required) {
+      const permission = snapshot.permissions[capability];
+      if (permission === void 0 || permission.state !== "available") {
+        return {
+          status: "unavailable",
+          failure: {
+            code: permission?.state === "denied" ? "CAPABILITY_DENIED" : "CAPABILITY_UNKNOWN",
+            capability,
+            message: permission?.evidence ?? `No effective worker access evidence for ${capability}.`,
+            remedy: permission?.remedy ?? `Establish ${capability} access for this worker and working directory before dispatch.`
+          }
+        };
+      }
+    }
+    return { status: "ready", request: input, definition: AgentDefinitionSchema.parse(definition) };
+  }
+  ask(request, runtime) {
+    const input = QuestionRequestSchema.parse(request);
+    const snapshot = RuntimeSnapshotSchema.parse(runtime);
+    if (!isDeepStrictEqual(input.context, snapshot.context)) {
+      return {
+        status: "unavailable",
+        failure: {
+          code: "CONTEXT_MISMATCH",
+          message: "Question capability evidence belongs to another caller context.",
+          remedy: "Refresh capability evidence for this caller before asking."
+        }
+      };
+    }
+    if (!input.allowHumanQuestions) {
+      return {
+        status: "unavailable",
+        failure: {
+          code: "QUESTIONS_DISABLED",
+          capability: "ask",
+          message: "This invocation is unattended or has not opted into human questions.",
+          remedy: "Return the unresolved question to the caller as a named failure; do not prompt."
+        }
+      };
+    }
+    if (snapshot.ask.state !== "available") {
+      return {
+        status: "unavailable",
+        failure: {
+          code: "QUESTIONS_UNAVAILABLE",
+          capability: "ask",
+          message: snapshot.ask.evidence,
+          remedy: snapshot.ask.remedy
+        }
+      };
+    }
+    return { status: "awaiting-answer", request: input };
+  }
+  sibling(request) {
+    return SiblingSkillRequestSchema.parse(request);
+  }
+};
+
+// src/tasks/readiness/readiness.schema.ts
+import { z as z27 } from "zod";
+var WorkflowSchema = z27.enum([
+  "execute-work",
+  "execute-wave",
+  "break-down-work",
+  "reproduce-bug",
+  "verify-ticket"
+]);
+var WorkflowEvidenceSchema = z27.strictObject({
+  context: CallerContextSchema,
+  callerCapabilities: z27.record(z27.string(), CapabilityEvidenceSchema),
+  workers: z27.array(
+    z27.strictObject({ registration: AgentRegistrationSchema, runtime: RuntimeSnapshotSchema })
+  ).refine(
+    (workers) => new Set(workers.map((worker) => worker.registration.name)).size === workers.length,
+    "duplicate worker evidence"
+  )
+});
+var ReadinessOptionsSchema = z27.strictObject({
+  workflow: WorkflowSchema.optional(),
+  evidence: WorkflowEvidenceSchema.optional()
+}).refine(
+  (value) => value.evidence === void 0 || value.workflow !== void 0,
+  "workflow is required with capability evidence"
+);
+
+// src/tasks/readiness/workflow-preflight.ts
+var WorkflowPreflightPropsSchema = z28.object({
+  cwd: z28.string(),
+  env: z28.record(z28.string(), z28.string().optional()),
+  timeoutMs: z28.int().positive().max(6e4).default(1e4)
+});
+var NodeWorkflowPreflight = class {
+  cwd;
+  env;
+  timeoutMs;
+  constructor(props) {
+    const input = WorkflowPreflightPropsSchema.parse({
+      ...props,
+      env: props.env === void 0 ? void 0 : { ...props.env }
+    });
+    this.cwd = input.cwd;
+    this.env = props.env;
+    this.timeoutMs = input.timeoutMs;
+  }
+  async inspect(workflow, evidence) {
+    const selected = WorkflowSchema.parse(workflow);
+    const parsed = evidence === void 0 ? void 0 : WorkflowEvidenceSchema.parse(evidence);
+    const diagnostics = new RedactedProbeDiagnostics({ env: this.env });
+    const codeWorkflow = selected === "execute-work" || selected === "execute-wave";
+    const requiredAgents = codeWorkflow ? ["code-implementation", "code-implementation-escalated", "code-verifier", "tech-writer"] : selected === "break-down-work" ? ["research-agent"] : [selected === "reproduce-bug" ? "qa-engineer" : "qa-engineer-verify"];
+    const checks = [];
+    const contextMatches = parsed !== void 0 && resolve3(parsed.context.cwd) === resolve3(this.cwd);
+    checks.push({
+      name: "host:context",
+      ok: contextMatches,
+      required: true,
+      code: contextMatches ? "AVAILABLE" : "CONTEXT_MISMATCH",
+      detail: contextMatches ? "Caller context matches this working directory" : "Missing or mismatched caller context",
+      remedy: "Supply current host observations for this task and active checkout, then rerun the workflow check."
+    });
+    const required = [
+      "shell",
+      "network",
+      "tracker.write",
+      ...codeWorkflow ? ["edit", "git.write", "git.push"] : [],
+      ...["reproduce-bug", "verify-ticket"].includes(selected) ? ["evidence.write"] : []
+    ];
+    for (const capability of required) {
+      const observed = contextMatches ? parsed?.callerCapabilities[capability] : void 0;
+      checks.push({
+        name: `host:${capability}`,
+        ok: observed?.state === "available",
+        required: true,
+        code: observed?.state === "available" ? "AVAILABLE" : observed?.state === "denied" ? "CAPABILITY_DENIED" : "CAPABILITY_UNKNOWN",
+        detail: diagnostics.redact(
+          observed?.evidence ?? `No effective caller evidence for ${capability}`
+        ),
+        remedy: observed?.state === "available" ? void 0 : diagnostics.redact(
+          observed?.remedy ?? `Establish ${capability} through the host's scoped setup/approval path before mutations.`
+        )
+      });
+    }
+    const policy = parsed?.workers.length ? new RegistryOrchestrationPolicy({
+      agents: parsed.workers.map((worker) => ({
+        frontmatter: worker.registration,
+        body: "Preflight registration requirements; this check does not dispatch."
+      }))
+    }) : void 0;
+    for (const agent of requiredAgents) {
+      const worker = contextMatches ? parsed?.workers.find((item) => item.registration.name === agent) : void 0;
+      if (worker === void 0 || parsed === void 0 || policy === void 0) {
+        checks.push({
+          name: `dispatch:${agent}`,
+          ok: false,
+          required: true,
+          code: "CAPABILITY_UNKNOWN",
+          detail: `No scoped runtime evidence for ${agent}`,
+          remedy: "Discover the installed registration and observe its effective permissions, dispatch support and limits."
+        });
+        continue;
+      }
+      const decision = policy.prepare(
+        { id: `preflight:${agent}`, agent, context: parsed.context, input: {} },
+        worker.runtime
+      );
+      checks.push(
+        decision.status === "ready" ? {
+          name: `dispatch:${agent}`,
+          ok: true,
+          required: true,
+          code: "AVAILABLE",
+          detail: "Reported worker access, dispatch capacity and depth satisfy this registration; no worker was launched"
+        } : {
+          name: `dispatch:${agent}`,
+          ok: false,
+          required: true,
+          code: decision.failure.code,
+          detail: diagnostics.redact(decision.failure.message),
+          remedy: diagnostics.redact(decision.failure.remedy)
+        }
+      );
+    }
+    if (codeWorkflow) {
+      checks.push(await this.checkoutContext(parsed, diagnostics));
+      checks.push(await this.remoteRead(diagnostics));
+      checks.push(await this.localWrite("local:workspace-write", this.cwd, diagnostics));
+      checks.push(await this.gitWrite(diagnostics));
+    }
+    return checks;
+  }
+  async command(args) {
+    const run = promisify4(execFile4);
+    const { stdout } = await run("git", args, {
+      cwd: this.cwd,
+      env: { ...this.env, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "Never" },
+      timeout: this.timeoutMs,
+      killSignal: "SIGKILL",
+      maxBuffer: 1024 * 1024
+    });
+    return stdout.trim();
+  }
+  async remoteRead(diagnostics) {
+    try {
+      await this.command(["ls-remote", "origin"]);
+      return {
+        name: "git:remote-read",
+        ok: true,
+        required: true,
+        code: "AVAILABLE",
+        detail: "Read origin refs successfully; this does not test push transport or branch policy"
+      };
+    } catch (error) {
+      return diagnostics.failure("git:remote-read", error, true);
+    }
+  }
+  async checkoutContext(evidence, diagnostics) {
+    if (evidence === void 0)
+      return {
+        name: "git:context",
+        ok: false,
+        required: true,
+        code: "CONTEXT_MISMATCH",
+        detail: "No repository/base context supplied",
+        remedy: "Identify the active checkout and fixed comparison base before starting the workflow."
+      };
+    try {
+      const root = await this.command(["rev-parse", "--show-toplevel"]);
+      if (await realpath(root) !== await realpath(evidence.context.repositoryRoot)) {
+        return {
+          name: "git:context",
+          ok: false,
+          required: true,
+          code: "CONTEXT_MISMATCH",
+          detail: "Runtime evidence names another repository root",
+          remedy: "Use the active worktree root in caller and worker context."
+        };
+      }
+      await this.command([
+        "rev-parse",
+        "--verify",
+        "--end-of-options",
+        `${evidence.context.baseRef}^{commit}`
+      ]);
+      return {
+        name: "git:context",
+        ok: true,
+        required: true,
+        code: "AVAILABLE",
+        detail: "Active checkout matches and the fixed base resolves to a commit"
+      };
+    } catch (error) {
+      return diagnostics.failure("git:context", error, true);
+    }
+  }
+  async localWrite(name, path, diagnostics) {
+    try {
+      await access(path, constants.W_OK);
+      return {
+        name,
+        ok: true,
+        required: true,
+        code: "AVAILABLE",
+        detail: "Filesystem access check permits directory writes; no file was created and host authorization is checked separately"
+      };
+    } catch (error) {
+      return diagnostics.failure(name, error, true);
+    }
+  }
+  async gitWrite(diagnostics) {
+    try {
+      const paths = await this.command(["rev-parse", "--git-dir", "--git-common-dir"]);
+      const directories = paths.split("\n").map((path) => resolve3(this.cwd, path));
+      if (directories.length !== 2) {
+        return {
+          name: "local:git-write",
+          ok: false,
+          required: true,
+          code: "UNKNOWN",
+          detail: "Could not resolve Git metadata directories",
+          remedy: "Inspect the active repository/worktree metadata before branching or committing."
+        };
+      }
+      await Promise.all(directories.map((directory) => access(directory, constants.W_OK)));
+      return {
+        name: "local:git-write",
+        ok: true,
+        required: true,
+        code: "AVAILABLE",
+        detail: "Git and common metadata directories pass filesystem write-access checks; no git mutation was attempted"
+      };
+    } catch (error) {
+      return diagnostics.failure("local:git-write", error, true);
+    }
+  }
+};
+
+// src/tasks/readiness/repository-readiness.ts
+var RepositoryReadinessPropsSchema = z29.object({
+  cwd: z29.string().optional(),
+  env: z29.record(z29.string(), z29.string().optional()).optional(),
+  timeoutMs: z29.int().positive().max(6e4).default(1e4)
+});
+var NodeRepositoryReadiness = class {
+  cwd;
+  env;
+  timeoutMs;
+  constructor(props = {}) {
+    const input = RepositoryReadinessPropsSchema.parse({
+      ...props,
+      env: props.env === void 0 ? void 0 : { ...props.env }
+    });
+    this.cwd = input.cwd ?? process.cwd();
+    this.env = props.env ?? process.env;
+    this.timeoutMs = input.timeoutMs;
+  }
+  async inspect(input) {
+    const parsed = ReadinessOptionsSchema.safeParse(input.options ?? {});
+    if (!parsed.success)
+      return {
+        tracker: null,
+        repo: null,
+        checks: [
+          {
+            name: "runtime",
+            ok: false,
+            required: true,
+            code: "INVALID_CONTEXT",
+            detail: "Workflow or runtime evidence does not match the readiness schema",
+            remedy: "Supply a valid WorkflowEvidence document for the selected workflow; do not fill unknown capabilities with available."
+          }
+        ],
+        ok: false,
+        scope: "workflow"
+      };
+    const options = parsed.data;
+    const scope = options.workflow === void 0 ? "environment" : "workflow";
+    const diagnostics = new RedactedProbeDiagnostics({ env: this.env });
+    const checks = [];
+    let config;
+    try {
+      config = input.config();
+    } catch (error) {
+      checks.push(diagnostics.failure("config", error, true, "CONFIGURATION"));
+      return {
+        tracker: null,
+        repo: null,
+        checks,
+        ok: false,
+        scope,
+        ...options.workflow === void 0 ? {} : { workflow: options.workflow }
+      };
+    }
+    checks.push({
+      name: "config",
+      ok: true,
+      detail: `tracker=${config.tracker} repo=${config.repo}`
+    });
+    let missing;
+    try {
+      missing = this.missingCredentials(config);
+    } catch (error) {
+      checks.push(diagnostics.failure("credentials", error, true, "CONFIGURATION"));
+      return {
+        tracker: config.tracker,
+        repo: config.repo,
+        checks,
+        ok: false,
+        scope,
+        ...options.workflow === void 0 ? {} : { workflow: options.workflow }
+      };
+    }
+    checks.push({
+      name: "credentials",
+      ok: missing.length === 0,
+      detail: missing.length === 0 ? "present" : `not set: ${missing.join(", ")}`,
+      ...missing.length ? { code: "AUTHENTICATION" } : {}
+    });
+    if (missing.length === 0) {
+      const controller = new AbortController();
+      const timer = setTimeout(
+        () => controller.abort(
+          new DOMException("Tracker reachability probe timed out", "TimeoutError")
+        ),
+        this.timeoutMs
+      );
+      try {
+        await Promise.race([
+          input.tracker().ping({ signal: controller.signal }),
+          new Promise(
+            (_, reject) => controller.signal.addEventListener("abort", () => reject(controller.signal.reason), {
+              once: true
+            })
+          )
+        ]);
+        checks.push({
+          name: "reachable",
+          ok: true,
+          detail: `${config.repo ?? config.jiraProject} responded; write operations were not tested`
+        });
+      } catch (error) {
+        checks.push(diagnostics.failure("reachable", error, true));
+      } finally {
+        clearTimeout(timer);
+      }
+    } else
+      checks.push({
+        name: "reachable",
+        ok: false,
+        detail: "skipped \u2014 credentials missing",
+        code: "AUTHENTICATION"
+      });
+    const qaWorkflow = options.workflow === "reproduce-bug" || options.workflow === "verify-ticket";
+    let qa = { found: false, sources: [] };
+    try {
+      qa = input.finder.discover({
+        from: this.cwd,
+        legacyRecipePath: getQaRecipePath(config, input.configPath())
+      });
+      const [nearest] = qa.sources;
+      checks.push({
+        name: "qa-instructions",
+        ok: qa.found,
+        required: qaWorkflow,
+        detail: nearest === void 0 ? "none found \u2014 add a QA.md or a QA section in AGENTS.md to enable the QA lane" : [nearest.path, ...qa.sources.slice(1).map((source) => source.path)].join(", ") + (nearest.legacy === true ? " (legacy recipe \u2014 migrate to QA.md)" : "")
+      });
+    } catch (error) {
+      checks.push(diagnostics.failure("qa-instructions", error, qaWorkflow));
+    }
+    const codeWorkflow = options.workflow === "execute-work" || options.workflow === "execute-wave";
+    checks.push(
+      ...await input.probe.probe({
+        repo: config.repo,
+        qaInstructionsFound: options.workflow === "break-down-work" ? false : qa.found || qaWorkflow,
+        ...options.workflow === void 0 ? {} : {
+          githubRequired: codeWorkflow || config.tracker === "github",
+          pushRequired: codeWorkflow
+        }
+      })
+    );
+    if (codeWorkflow && config.repo === void 0)
+      checks.push({
+        name: "pr:repo",
+        ok: false,
+        required: true,
+        code: "CONFIGURATION",
+        detail: "A GitHub owner/repo is required to open the PR",
+        remedy: "Resolve and store the intended repository before starting work."
+      });
+    if (options.workflow !== void 0)
+      checks.push(
+        ...await new NodeWorkflowPreflight({
+          cwd: this.cwd,
+          env: this.env,
+          timeoutMs: this.timeoutMs
+        }).inspect(options.workflow, options.evidence)
+      );
+    const redacted = checks.map((check) => ({
+      ...check,
+      detail: diagnostics.redact(check.detail),
+      ...check.remedy === void 0 ? {} : { remedy: diagnostics.redact(check.remedy) }
+    }));
+    return {
+      tracker: config.tracker,
+      repo: config.repo,
+      checks: redacted,
+      ok: redacted.every((check) => check.ok || check.required === false),
+      scope,
+      ...options.workflow === void 0 ? {} : { workflow: options.workflow }
+    };
+  }
+  missingCredentials(config) {
+    const env = new EnvLoader().load(this.env);
+    if (config.tracker === "github") return env.githubToken?.trim() ? [] : ["GITHUB_TOKEN"];
+    return [
+      ...env.jiraToken?.trim() ? [] : ["JIRA_TOKEN (or JIRA_API_TOKEN / JIRA_API_KEY)"],
+      ...(env.jiraEmail ?? config.jiraEmail)?.trim() ? [] : ["JIRA_EMAIL (or jiraEmail in the config)"]
+    ];
+  }
+};
+
 // src/flight-rules/flight-rules.schema.ts
-import { z as z21 } from "zod";
-var FlightRulesPropsSchema = z21.object({
-  cwd: z21.string().optional().describe("Directory used for config discovery; defaults to process.cwd()"),
-  env: z21.record(z21.string(), z21.string().optional()).optional().describe("Live environment record; defaults to process.env"),
-  configPath: z21.string().optional().describe("Explicit config file, taking precedence over FLIGHT_RULES_CONFIG and discovery")
+import { z as z30 } from "zod";
+var FlightRulesPropsSchema = z30.object({
+  cwd: z30.string().optional().describe("Directory used for config discovery; defaults to process.cwd()"),
+  env: z30.record(z30.string(), z30.string().optional()).optional().describe("Live environment record; defaults to process.env"),
+  configPath: z30.string().optional().describe("Explicit config file, taking precedence over FLIGHT_RULES_CONFIG and discovery")
 });
 
 // src/flight-rules/flight-rules.ts
@@ -4786,7 +5602,10 @@ var DefaultFlightRules = class {
     return new NodeGitExecutor();
   }
   probe() {
-    return nodeToolProbe;
+    return new NodeToolProbe({ cwd: this.cwd, env: this.env });
+  }
+  readiness() {
+    return new NodeRepositoryReadiness({ cwd: this.cwd, env: this.env });
   }
   docs() {
     return FileDocResolver.fromInstall({ moduleUrl: import.meta.url, env: this.env });
@@ -4852,25 +5671,25 @@ ${line.trim()}`) === "";
 };
 
 // src/git/commit-message-builder/commit-message.schema.ts
-import { z as z22 } from "zod";
-var CommitMessageInputSchema = z22.object({
+import { z as z31 } from "zod";
+var CommitMessageInputSchema = z31.object({
   type: SemanticTypeSchema,
   // Bare issue numbers make one-character scopes legitimate; 32 clears a 10-character tracker key plus a six-digit number.
-  scope: z22.string().min(1).max(32),
-  description: z22.string().min(2).max(50),
-  body: z22.string().optional(),
-  model: z22.string().max(72).optional(),
-  footers: z22.array(z22.string().regex(/^[a-zA-Z0-9-]+(: |=).*$/)).default([])
+  scope: z31.string().min(1).max(32),
+  description: z31.string().min(2).max(50),
+  body: z31.string().optional(),
+  model: z31.string().max(72).optional(),
+  footers: z31.array(z31.string().regex(/^[a-zA-Z0-9-]+(: |=).*$/)).default([])
 });
-var CommitMessageHeaderSchema = z22.preprocess(
+var CommitMessageHeaderSchema = z31.preprocess(
   (arg) => {
-    return z22.string({ error: "Git Commit headers should be 72 characters or less" }).max(72).parse(arg);
+    return z31.string({ error: "Git Commit headers should be 72 characters or less" }).max(72).parse(arg);
   },
-  z22.templateLiteral([SemanticTypeSchema, "(", z22.string(), "): ", z22.string()])
+  z31.templateLiteral([SemanticTypeSchema, "(", z31.string(), "): ", z31.string()])
 );
-var CommitMessageBuilderPropsSchema = z22.object({
-  binPath: z22.string().min(1),
-  agentEnv: z22.string().optional()
+var CommitMessageBuilderPropsSchema = z31.object({
+  binPath: z31.string().min(1),
+  agentEnv: z31.string().optional()
 });
 
 // src/git/commit-message-builder/commit-message-builder.ts
@@ -5163,12 +5982,12 @@ var bodyFormatDetector = new PrecedenceBodyFormatDetector();
 
 // src/tasks/evidence/evidence.ts
 import { basename as basename3 } from "node:path/posix";
-import { z as z23 } from "zod";
+import { z as z32 } from "zod";
 var mediaReference = /(!?)\[([^\]]*)\]\(\s*<?([^\s()<>]+)>?(?:\s+"[^"]*")?\s*\)/g;
 var absoluteTarget = /^[a-zA-Z][a-zA-Z0-9+.-]*:|^\/\/|^#/;
 var localPrefix = /^(?:\.\/)+/;
 var fenceRun = /^ {0,3}(`{3,}|~{3,})(.*)$/;
-var AttachmentSpecSchema = z23.string().min(1).transform((spec) => {
+var AttachmentSpecSchema = z32.string().min(1).transform((spec) => {
   const hash = spec.lastIndexOf("#");
   const path = hash > 0 ? spec.slice(0, hash) : spec;
   const caption = hash > 0 ? spec.slice(hash + 1).trim() : "";
@@ -5289,39 +6108,6 @@ var TrackerEvidenceService = class {
 // src/shared/host-settings/host-settings-source.ts
 var settingsScopes = ["user", "project", "local"];
 
-// src/agents/agent-frontmatter/agent-frontmatter.schema.ts
-import { z as z24 } from "zod";
-var agentCapabilities = ["read", "edit", "shell", "web", "spawn", "ask"];
-var modelTiers = ["standard", "escalated", "expert"];
-var reasoningLevels = ["low", "medium", "high"];
-var claudeAgentColors = ["red", "blue", "green", "yellow", "purple", "orange", "pink", "cyan"];
-var AgentCapabilitySchema = z24.enum(agentCapabilities);
-var ModelTierSchema = z24.enum(modelTiers);
-var AgentFrontmatterSchema = z24.strictObject({
-  name: z24.string().regex(/^[a-z][a-z0-9-]*$/),
-  description: z24.string().min(1),
-  capabilities: z24.array(AgentCapabilitySchema).min(1).refine(
-    (capabilities) => new Set(capabilities).size === capabilities.length,
-    { message: "duplicate capability" }
-  ),
-  model: ModelTierSchema,
-  modelReason: z24.string().trim().min(1).optional(),
-  reasoning: z24.enum(reasoningLevels).optional(),
-  sandbox: z24.strictObject({
-    fs: z24.enum(["read-only", "workspace-write"]),
-    network: z24.enum(["none", "enabled"])
-  }).optional(),
-  dispatch: z24.strictObject({
-    maxConcurrent: z24.int().positive(),
-    maxDepth: z24.int().positive()
-  }).optional(),
-  "x-claude": z24.strictObject({ color: z24.enum(claudeAgentColors).optional() }).optional()
-});
-var AgentRegistrationSchema = AgentFrontmatterSchema.refine(
-  (agent) => agent.model !== "expert" || agent.modelReason !== void 0,
-  { message: "expert tier requires modelReason", path: ["modelReason"] }
-);
-
 // src/agents/agent-frontmatter/agent-frontmatter.ts
 import { parse as parseYaml3 } from "yaml";
 var MissingFrontmatterError = class extends Error {
@@ -5345,16 +6131,16 @@ var agentFrontmatterParser = new YamlAgentFrontmatterParser();
 // src/agents/agent-registry/agent-registry.ts
 import { readFileSync as readFileSync9, readdirSync as readdirSync4 } from "node:fs";
 import { basename as basename4, join as join10 } from "node:path";
-import { z as z25 } from "zod";
+import { z as z33 } from "zod";
 var AgentNameSchema = AgentFrontmatterSchema.shape.name;
-var AgentVariantSchema = z25.strictObject({
+var AgentVariantSchema = z33.strictObject({
   name: AgentNameSchema,
   extends: AgentNameSchema,
   description: AgentFrontmatterSchema.shape.description,
   model: ModelTierSchema,
-  modelReason: z25.string().trim().min(1).optional()
+  modelReason: z33.string().trim().min(1).optional()
 });
-var AgentVariantsSchema = z25.array(AgentVariantSchema);
+var AgentVariantsSchema = z33.array(AgentVariantSchema);
 var InvalidAgentDefinitionError = class extends Error {
   name = "InvalidAgentDefinitionError";
 };
@@ -5394,27 +6180,15 @@ var FileAgentRegistry = class {
 
 // src/agents/agent-emitter/claude-agent-emitter.ts
 import { stringify as stringifyYaml3 } from "yaml";
-import { z as z27 } from "zod";
+import { z as z34 } from "zod";
 
 // src/agents/agent-emitter/agent-emitter.ts
 var UnsupportedAgentSettingError = class extends Error {
   name = "UnsupportedAgentSettingError";
 };
 
-// src/agents/agent-emitter/agent-emitter.schema.ts
-import { z as z26 } from "zod";
-var ModelBindingsSchema = z26.strictObject({
-  standard: z26.string().trim().min(1),
-  escalated: z26.string().trim().min(1),
-  expert: z26.string().trim().min(1)
-});
-var AgentDefinitionSchema = z26.strictObject({
-  frontmatter: AgentRegistrationSchema,
-  body: z26.string().refine((body) => body.trim() !== "", "agent prompt must not be empty")
-});
-
 // src/agents/agent-emitter/claude-agent-emitter.ts
-var ClaudeAgentEmitterPropsSchema = z27.strictObject({ models: ModelBindingsSchema });
+var ClaudeAgentEmitterPropsSchema = z34.strictObject({ models: ModelBindingsSchema });
 var MarkdownClaudeAgentEmitter = class {
   models;
   constructor(props) {
@@ -5447,13 +6221,13 @@ ${body}`;
 };
 
 // src/agents/agent-emitter/codex-agent-emitter.ts
-import { z as z28 } from "zod";
-var ReasoningBindingsSchema = z28.strictObject({
-  standard: z28.enum(reasoningLevels),
-  escalated: z28.enum(reasoningLevels),
-  expert: z28.enum(reasoningLevels)
+import { z as z35 } from "zod";
+var ReasoningBindingsSchema = z35.strictObject({
+  standard: z35.enum(reasoningLevels),
+  escalated: z35.enum(reasoningLevels),
+  expert: z35.enum(reasoningLevels)
 });
-var CodexAgentEmitterPropsSchema = z28.strictObject({
+var CodexAgentEmitterPropsSchema = z35.strictObject({
   models: ModelBindingsSchema,
   reasoning: ReasoningBindingsSchema
 });
@@ -5494,17 +6268,17 @@ var TomlCodexAgentEmitter = class {
 
 // src/plugins/plugin-compiler/plugin-compiler.ts
 import { chmodSync as chmodSync2, copyFileSync, existsSync as existsSync8, lstatSync, mkdirSync as mkdirSync5, readFileSync as readFileSync10, readdirSync as readdirSync5, realpathSync as realpathSync2, rmSync as rmSync3, writeFileSync as writeFileSync5 } from "node:fs";
-import { join as join11, resolve as resolve3 } from "node:path";
-import { z as z29 } from "zod";
-var NativePluginCompilerPropsSchema = z29.strictObject({ sourceDir: z29.string().min(1) });
-var PluginHostSchema = z29.enum(["claude", "codex"]);
-var PackageVersionSchema = z29.object({ version: z29.string().min(1) });
-var PluginIdentitySchema = z29.strictObject({
-  name: z29.string().regex(/^[a-z][a-z0-9-]*$/),
-  description: z29.string().min(1),
-  repository: z29.url(),
-  author: z29.strictObject({ name: z29.string().min(1) }),
-  license: z29.string().min(1)
+import { join as join11, resolve as resolve4 } from "node:path";
+import { z as z36 } from "zod";
+var NativePluginCompilerPropsSchema = z36.strictObject({ sourceDir: z36.string().min(1) });
+var PluginHostSchema = z36.enum(["claude", "codex"]);
+var PackageVersionSchema = z36.object({ version: z36.string().min(1) });
+var PluginIdentitySchema = z36.strictObject({
+  name: z36.string().regex(/^[a-z][a-z0-9-]*$/),
+  description: z36.string().min(1),
+  repository: z36.url(),
+  author: z36.strictObject({ name: z36.string().min(1) }),
+  license: z36.string().min(1)
 });
 var InvalidPluginSourceError = class extends Error {
   name = "InvalidPluginSourceError";
@@ -5512,7 +6286,7 @@ var InvalidPluginSourceError = class extends Error {
 var NativePluginCompiler = class {
   sourceDir;
   constructor(props) {
-    this.sourceDir = realpathSync2(resolve3(NativePluginCompilerPropsSchema.parse(props).sourceDir));
+    this.sourceDir = realpathSync2(resolve4(NativePluginCompilerPropsSchema.parse(props).sourceDir));
   }
   compile(host = "claude") {
     const target = PluginHostSchema.parse(host);
@@ -5592,269 +6366,6 @@ var NativePluginCompiler = class {
   }
 };
 
-// src/orchestration/orchestration.schema.ts
-import { isAbsolute as isAbsolute2, relative, sep as sep2 } from "node:path";
-import { z as z30 } from "zod";
-var OrchestrationTextSchema = z30.string().refine((value) => value.trim().length > 0, "must not be blank");
-var AbsolutePathSchema = OrchestrationTextSchema.refine(
-  isAbsolute2,
-  "must be an absolute path on this host"
-);
-var CapabilityNameSchema = z30.string().regex(/^[a-z][a-zA-Z0-9:.-]*$/);
-var RunContextObjectSchema = z30.strictObject({
-  runId: OrchestrationTextSchema,
-  taskId: OrchestrationTextSchema,
-  cwd: AbsolutePathSchema,
-  repositoryRoot: AbsolutePathSchema,
-  baseRef: OrchestrationTextSchema,
-  skill: OrchestrationTextSchema
-});
-var RunContextSchema = RunContextObjectSchema.refine((value) => {
-  const path = relative(value.repositoryRoot, value.cwd);
-  return path !== ".." && !path.startsWith(`..${sep2}`) && !isAbsolute2(path);
-}, "working directory must be inside the active repository root");
-var CallerContextSchema = RunContextSchema.safeExtend({ attempt: z30.int().positive() });
-var CapabilityEvidenceSchema = z30.discriminatedUnion("state", [
-  z30.strictObject({ state: z30.literal("available"), evidence: OrchestrationTextSchema }),
-  z30.strictObject({
-    state: z30.enum(["denied", "unknown"]),
-    evidence: OrchestrationTextSchema,
-    remedy: OrchestrationTextSchema
-  })
-]);
-var AdapterLimitsSchema = z30.strictObject({
-  maxConcurrent: z30.int().nonnegative().nullable(),
-  activeWorkers: z30.int().nonnegative(),
-  currentDepth: z30.int().nonnegative(),
-  maxDepth: z30.int().nonnegative().nullable(),
-  source: OrchestrationTextSchema
-});
-var RuntimeSnapshotSchema = z30.strictObject({
-  context: CallerContextSchema,
-  host: z30.strictObject({ name: OrchestrationTextSchema, version: OrchestrationTextSchema }),
-  observedAt: z30.iso.datetime(),
-  agent: AgentFrontmatterSchema.shape.name.nullable(),
-  spawn: CapabilityEvidenceSchema,
-  ask: CapabilityEvidenceSchema,
-  permissions: z30.record(CapabilityNameSchema, CapabilityEvidenceSchema),
-  limits: AdapterLimitsSchema
-});
-var DispatchRequestSchema = z30.strictObject({
-  id: OrchestrationTextSchema,
-  agent: AgentFrontmatterSchema.shape.name,
-  context: CallerContextSchema,
-  input: z30.record(z30.string(), z30.json()),
-  requiredCapabilities: z30.array(CapabilityNameSchema).optional()
-});
-var OrchestrationFailureSchema = z30.strictObject({
-  code: z30.enum([
-    "UNKNOWN_AGENT",
-    "UNSUPPORTED_AGENT_SETTINGS",
-    "CONTEXT_MISMATCH",
-    "CAPABILITY_DENIED",
-    "CAPABILITY_UNKNOWN",
-    "DISPATCH_UNAVAILABLE",
-    "LIMITS_UNKNOWN",
-    "CAPACITY_EXHAUSTED",
-    "DEPTH_EXCEEDED",
-    "QUESTIONS_DISABLED",
-    "QUESTIONS_UNAVAILABLE",
-    "INVALID_HANDOFF",
-    "INVALID_REPORT",
-    "INVALID_HISTORY",
-    "OPEN_QUESTIONS",
-    "UNVERIFIABLE",
-    "ATTEMPTS_EXHAUSTED",
-    "EXECUTION_FAILED",
-    "CANCELLED"
-  ]),
-  message: OrchestrationTextSchema,
-  remedy: OrchestrationTextSchema,
-  capability: CapabilityNameSchema.optional()
-});
-var OutcomeIdentitySchema = z30.strictObject({
-  dispatchId: OrchestrationTextSchema,
-  agent: AgentFrontmatterSchema.shape.name,
-  context: CallerContextSchema
-});
-var DispatchOutcomeSchema = z30.discriminatedUnion("status", [
-  OutcomeIdentitySchema.extend({
-    status: z30.literal("completed"),
-    report: z30.record(z30.string(), z30.json())
-  }),
-  OutcomeIdentitySchema.extend({
-    status: z30.enum(["failed", "unavailable"]),
-    failure: OrchestrationFailureSchema
-  })
-]);
-var QuestionRequestSchema = z30.strictObject({
-  context: CallerContextSchema,
-  question: OrchestrationTextSchema,
-  allowHumanQuestions: z30.boolean()
-});
-var SiblingSkillRequestSchema = z30.strictObject({
-  context: CallerContextSchema,
-  skill: OrchestrationTextSchema,
-  input: z30.record(z30.string(), z30.json())
-});
-
-// src/orchestration/orchestration-policy.ts
-import { isDeepStrictEqual } from "node:util";
-import { z as z31 } from "zod";
-var RegistryOrchestrationPolicyPropsSchema = z31.strictObject({
-  agents: z31.array(AgentDefinitionSchema).min(1).refine(
-    (agents) => new Set(agents.map((agent) => agent.frontmatter.name)).size === agents.length,
-    "duplicate agent name"
-  )
-});
-var RegistryOrchestrationPolicy = class {
-  agents;
-  constructor(props) {
-    this.agents = new Map(
-      RegistryOrchestrationPolicyPropsSchema.parse(props).agents.map((agent) => [
-        agent.frontmatter.name,
-        agent
-      ])
-    );
-  }
-  prepare(request, runtime) {
-    const input = DispatchRequestSchema.parse(request);
-    const snapshot = RuntimeSnapshotSchema.parse(runtime);
-    const definition = this.agents.get(input.agent);
-    if (definition === void 0) {
-      return {
-        status: "unavailable",
-        failure: {
-          code: "UNKNOWN_AGENT",
-          message: `No registered agent named ${input.agent}.`,
-          remedy: "Install or load the named registration before dispatch."
-        }
-      };
-    }
-    if (!isDeepStrictEqual(input.context, snapshot.context) || snapshot.agent !== input.agent) {
-      return {
-        status: "unavailable",
-        failure: {
-          code: "CONTEXT_MISMATCH",
-          message: "Runtime evidence belongs to another context or worker.",
-          remedy: "Observe effective access for this named worker in this task, checkout and attempt."
-        }
-      };
-    }
-    if (definition.frontmatter.sandbox !== void 0 || definition.frontmatter.dispatch !== void 0) {
-      return {
-        status: "unavailable",
-        failure: {
-          code: "UNSUPPORTED_AGENT_SETTINGS",
-          message: "Explicit worker sandbox or dispatch restrictions need an enforcing runtime binding.",
-          remedy: "Provide an adapter that can enforce the declared restrictions before dispatch; do not drop them."
-        }
-      };
-    }
-    if (snapshot.spawn.state !== "available") {
-      return {
-        status: "unavailable",
-        failure: {
-          code: "DISPATCH_UNAVAILABLE",
-          capability: "spawn",
-          message: snapshot.spawn.evidence,
-          remedy: snapshot.spawn.remedy
-        }
-      };
-    }
-    const { maxConcurrent, activeWorkers, currentDepth, maxDepth } = snapshot.limits;
-    if (maxConcurrent === null || maxDepth === null) {
-      return {
-        status: "unavailable",
-        failure: {
-          code: "LIMITS_UNKNOWN",
-          message: "Concurrency or nesting capacity has not been established.",
-          remedy: "Read the host limits or provide a documented conservative adapter bound with its provenance."
-        }
-      };
-    }
-    if (currentDepth >= maxDepth) {
-      return {
-        status: "unavailable",
-        failure: {
-          code: "DEPTH_EXCEEDED",
-          message: `A child at depth ${currentDepth + 1} exceeds the bound ${maxDepth}.`,
-          remedy: "Invoke orchestration in a supported caller context with remaining worker depth."
-        }
-      };
-    }
-    if (activeWorkers >= maxConcurrent) {
-      return {
-        status: "unavailable",
-        failure: {
-          code: "CAPACITY_EXHAUSTED",
-          message: `All ${maxConcurrent} worker slots are occupied or disabled.`,
-          remedy: "Wait for a worker to finish, refresh current usage, then plan the remaining work."
-        }
-      };
-    }
-    const required = /* @__PURE__ */ new Set([
-      ...definition.frontmatter.capabilities,
-      ...input.requiredCapabilities ?? []
-    ]);
-    for (const capability of required) {
-      const permission = snapshot.permissions[capability];
-      if (permission === void 0 || permission.state !== "available") {
-        return {
-          status: "unavailable",
-          failure: {
-            code: permission?.state === "denied" ? "CAPABILITY_DENIED" : "CAPABILITY_UNKNOWN",
-            capability,
-            message: permission?.evidence ?? `No effective worker access evidence for ${capability}.`,
-            remedy: permission?.remedy ?? `Establish ${capability} access for this worker and working directory before dispatch.`
-          }
-        };
-      }
-    }
-    return { status: "ready", request: input, definition: AgentDefinitionSchema.parse(definition) };
-  }
-  ask(request, runtime) {
-    const input = QuestionRequestSchema.parse(request);
-    const snapshot = RuntimeSnapshotSchema.parse(runtime);
-    if (!isDeepStrictEqual(input.context, snapshot.context)) {
-      return {
-        status: "unavailable",
-        failure: {
-          code: "CONTEXT_MISMATCH",
-          message: "Question capability evidence belongs to another caller context.",
-          remedy: "Refresh capability evidence for this caller before asking."
-        }
-      };
-    }
-    if (!input.allowHumanQuestions) {
-      return {
-        status: "unavailable",
-        failure: {
-          code: "QUESTIONS_DISABLED",
-          capability: "ask",
-          message: "This invocation is unattended or has not opted into human questions.",
-          remedy: "Return the unresolved question to the caller as a named failure; do not prompt."
-        }
-      };
-    }
-    if (snapshot.ask.state !== "available") {
-      return {
-        status: "unavailable",
-        failure: {
-          code: "QUESTIONS_UNAVAILABLE",
-          capability: "ask",
-          message: snapshot.ask.evidence,
-          remedy: snapshot.ask.remedy
-        }
-      };
-    }
-    return { status: "awaiting-answer", request: input };
-  }
-  sibling(request) {
-    return SiblingSkillRequestSchema.parse(request);
-  }
-};
-
 // src/orchestration/report-handoff.ts
 import { isDeepStrictEqual as isDeepStrictEqual2 } from "node:util";
 var ValidatedReportHandoff = class {
@@ -5899,46 +6410,46 @@ var ValidatedReportHandoff = class {
 };
 
 // src/orchestration/implementation-loop.schema.ts
-import { z as z32 } from "zod";
-var ImplementationReportSchema = z32.strictObject({
+import { z as z37 } from "zod";
+var ImplementationReportSchema = z37.strictObject({
   summary: OrchestrationTextSchema,
-  filesChanged: z32.array(
-    z32.strictObject({ path: OrchestrationTextSchema, why: OrchestrationTextSchema })
+  filesChanged: z37.array(
+    z37.strictObject({ path: OrchestrationTextSchema, why: OrchestrationTextSchema })
   ),
-  testsRun: z32.array(
-    z32.strictObject({ command: OrchestrationTextSchema, result: OrchestrationTextSchema })
+  testsRun: z37.array(
+    z37.strictObject({ command: OrchestrationTextSchema, result: OrchestrationTextSchema })
   ),
   approach: OrchestrationTextSchema,
-  openQuestions: z32.array(OrchestrationTextSchema).optional()
+  openQuestions: z37.array(OrchestrationTextSchema).optional()
 });
-var CriterionResultSchema = z32.strictObject({
+var CriterionResultSchema = z37.strictObject({
   criterion: OrchestrationTextSchema,
-  verdict: z32.enum(["PASS", "FAIL", "UNVERIFIABLE"]),
+  verdict: z37.enum(["PASS", "FAIL", "UNVERIFIABLE"]),
   evidence: OrchestrationTextSchema
 });
-var VerificationReportSchema = z32.strictObject({
+var VerificationReportSchema = z37.strictObject({
   summary: OrchestrationTextSchema,
-  criteria: z32.array(CriterionResultSchema).min(1),
-  charterConcerns: z32.array(OrchestrationTextSchema).optional(),
-  openQuestions: z32.array(OrchestrationTextSchema).optional(),
-  verified: z32.boolean()
+  criteria: z37.array(CriterionResultSchema).min(1),
+  charterConcerns: z37.array(OrchestrationTextSchema).optional(),
+  openQuestions: z37.array(OrchestrationTextSchema).optional(),
+  verified: z37.boolean()
 }).refine(
   (report) => report.verified === report.criteria.every((criterion) => criterion.verdict === "PASS"),
   "verified must agree with every itemized verdict"
 );
-var HandoffRecordSchema = z32.strictObject({
+var HandoffRecordSchema = z37.strictObject({
   request: DispatchRequestSchema,
-  outcome: z32.unknown()
+  outcome: z37.unknown()
 });
-var ImplementationRunSchema = z32.strictObject({
+var ImplementationRunSchema = z37.strictObject({
   context: RunContextSchema,
-  criteria: z32.array(OrchestrationTextSchema).min(1).refine((criteria) => new Set(criteria).size === criteria.length, "criteria must be distinct"),
-  implementationInput: z32.record(z32.string(), z32.json()).refine(
+  criteria: z37.array(OrchestrationTextSchema).min(1).refine((criteria) => new Set(criteria).size === criteria.length, "criteria must be distinct"),
+  implementationInput: z37.record(z37.string(), z37.json()).refine(
     (input) => !Object.hasOwn(input, "verifierFailures"),
     "verifierFailures is reserved for validated retry evidence"
   ),
-  history: z32.array(
-    z32.strictObject({ implementation: HandoffRecordSchema, verification: HandoffRecordSchema })
+  history: z37.array(
+    z37.strictObject({ implementation: HandoffRecordSchema, verification: HandoffRecordSchema })
   ).max(3)
 });
 
@@ -6121,16 +6632,16 @@ var VerifiedImplementationLoop = class {
 };
 
 // src/orchestration/dispatch-queue.ts
-import { z as z33 } from "zod";
-var DispatchQueuePropsSchema = z33.strictObject({
-  agents: z33.array(AgentDefinitionSchema).min(1),
-  requests: z33.array(DispatchRequestSchema).refine(
+import { z as z38 } from "zod";
+var DispatchQueuePropsSchema = z38.strictObject({
+  agents: z38.array(AgentDefinitionSchema).min(1),
+  requests: z38.array(DispatchRequestSchema).refine(
     (requests) => new Set(requests.map((request) => request.id)).size === requests.length,
     "dispatch IDs must be unique"
   ),
-  maxConcurrent: z33.int().positive()
+  maxConcurrent: z38.int().positive()
 });
-var ObservedDispatchIdsSchema = z33.array(z33.string().min(1)).refine((ids) => new Set(ids).size === ids.length, "observed dispatch IDs must be unique");
+var ObservedDispatchIdsSchema = z38.array(z38.string().min(1)).refine((ids) => new Set(ids).size === ids.length, "observed dispatch IDs must be unique");
 var InvalidDispatchQueueStateError = class extends Error {
   name = "InvalidDispatchQueueStateError";
 };
@@ -6289,12 +6800,15 @@ export {
   ModelTierSchema,
   NativePluginCompiler,
   NodeGitExecutor,
+  NodeRepositoryReadiness,
   NodeToolProbe,
+  NodeWorkflowPreflight,
   OrchestrationFailureSchema,
   PrecedenceBodyFormatDetector,
   PullRequestTemplateSchema,
   PushSpecSchema,
   QuestionRequestSchema,
+  ReadinessOptionsSchema,
   RegistryOrchestrationPolicy,
   RunContextSchema,
   RuntimeSnapshotSchema,
@@ -6313,6 +6827,8 @@ export {
   ValidatedReportHandoff,
   VerificationReportSchema,
   VerifiedImplementationLoop,
+  WorkflowEvidenceSchema,
+  WorkflowSchema,
   YamlAgentFrontmatterParser,
   agentCapabilities,
   agentFrontmatterParser,

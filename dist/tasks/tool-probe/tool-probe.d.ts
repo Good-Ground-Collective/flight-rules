@@ -7,17 +7,25 @@ export interface ToolCheck {
     ok: boolean;
     detail: string;
     required: boolean;
+    code?: string | undefined;
+    remedy?: string | undefined;
 }
 export interface ToolProbeInput {
     repo?: string | undefined;
     /** True when QA instructions apply to the repo, which makes the capture tools required. */
     qaInstructionsFound: boolean;
+    /** Omitted preserves the general environment check's existing requirements. */
+    githubRequired?: boolean;
+    pushRequired?: boolean;
 }
 export interface ToolProbe {
     probe(input: ToolProbeInput): Promise<ToolCheck[]>;
 }
 export interface NodeToolProbeProps {
     execFileFn?: ExecFileFn;
+    cwd?: string;
+    env?: Record<string, string | undefined>;
+    timeoutMs?: number;
 }
 /**
  * Probes the CLI's operating environment for the binaries `flight-rules`
@@ -26,6 +34,7 @@ export interface NodeToolProbeProps {
  */
 export declare class NodeToolProbe implements ToolProbe {
     private readonly execFile;
+    private readonly env;
     constructor(props?: NodeToolProbeProps);
     probe(input: ToolProbeInput): Promise<ToolCheck[]>;
     private ghVersion;
@@ -34,9 +43,6 @@ export declare class NodeToolProbe implements ToolProbe {
     private present;
     /** True when `version` is at least `minimum`, comparing major, minor, then patch. */
     private meetsMinimumVersion;
-    /** Distinguishes a missing binary (ENOENT) from a binary that ran and failed. */
-    private isMissingBinary;
-    private stderrOf;
 }
 export declare const nodeToolProbe: ToolProbe;
 export {};

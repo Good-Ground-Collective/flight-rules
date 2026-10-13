@@ -11,6 +11,7 @@ import { BoardAgentStore } from '../shared/ariadne/board-agent-store.js';
 import { BoardSessionStore } from '../shared/ariadne/board-session-store.js';
 import type { TaskTracker } from '../tasks/task-tracker/task-tracker.js';
 import { type ToolProbe } from '../tasks/tool-probe/tool-probe.js';
+import { type RepositoryReadiness } from '../tasks/readiness/repository-readiness.js';
 import { type FlightRulesProps } from './flight-rules.schema.js';
 export interface FlightRules {
     configPath(): string;
@@ -23,6 +24,7 @@ export interface FlightRules {
     prHost(overrideTracker?: string): PullRequestHost;
     git(): GitExecutor;
     probe(): ToolProbe;
+    readiness(): RepositoryReadiness;
     docs(): DocResolver;
     /** Ariadne's Agents page reporter; reads only the `ariadne.*` keys from user and local scope, so it works without a valid tracker config. */
     board(): AriadneBoard;
@@ -51,6 +53,7 @@ export declare class DefaultFlightRules implements FlightRules {
     prHost(overrideTracker?: string): PullRequestHost;
     git(): GitExecutor;
     probe(): ToolProbe;
+    readiness(): RepositoryReadiness;
     docs(): DocResolver;
     board(): AriadneBoard;
     packets(): AriadnePackets;

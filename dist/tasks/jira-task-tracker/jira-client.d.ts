@@ -7,7 +7,7 @@ export declare class JiraClient {
     private readonly baseUrl;
     private readonly authHeader;
     constructor(config: JiraClientConfig);
-    request<T>(method: string, path: string, body?: unknown, params?: Record<string, string | number>): Promise<T>;
+    request<T>(method: string, path: string, body?: unknown, params?: Record<string, string | number>, signal?: AbortSignal): Promise<T>;
     /**
      * Uploads files as a multipart attachment. Jira's attachment endpoint demands the
      * `X-Atlassian-Token: no-check` XSRF opt-out, and `Content-Type` is left unset so undici

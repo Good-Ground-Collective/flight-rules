@@ -4001,10 +4001,10 @@ var require_resolve_block_map = __commonJS({
       let offset = bm.offset;
       let commentEnd = null;
       for (const collItem of bm.items) {
-        const { start, key, sep: sep3, value } = collItem;
+        const { start, key, sep: sep4, value } = collItem;
         const keyProps = resolveProps.resolveProps(start, {
           indicator: "explicit-key-ind",
-          next: key ?? sep3?.[0],
+          next: key ?? sep4?.[0],
           offset,
           onError,
           parentIndent: bm.indent,
@@ -4018,7 +4018,7 @@ var require_resolve_block_map = __commonJS({
             else if ("indent" in key && key.indent !== bm.indent)
               onError(offset, "BAD_INDENT", startColMsg);
           }
-          if (!keyProps.anchor && !keyProps.tag && !sep3) {
+          if (!keyProps.anchor && !keyProps.tag && !sep4) {
             commentEnd = keyProps.end;
             if (keyProps.comment) {
               if (map2.comment)
@@ -4042,7 +4042,7 @@ var require_resolve_block_map = __commonJS({
         ctx.atKey = false;
         if (utilMapIncludes.mapIncludes(ctx, map2.items, keyNode))
           onError(keyStart, "DUPLICATE_KEY", "Map keys must be unique");
-        const valueProps = resolveProps.resolveProps(sep3 ?? [], {
+        const valueProps = resolveProps.resolveProps(sep4 ?? [], {
           indicator: "map-value-ind",
           next: value,
           offset: keyNode.range[2],
@@ -4058,7 +4058,7 @@ var require_resolve_block_map = __commonJS({
             if (ctx.options.strict && keyProps.start < valueProps.found.offset - 1024)
               onError(keyNode.range, "KEY_OVER_1024_CHARS", "The : indicator must be at most 1024 chars after the start of an implicit block mapping key");
           }
-          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : composeEmptyNode(ctx, offset, sep3, null, valueProps, onError);
+          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : composeEmptyNode(ctx, offset, sep4, null, valueProps, onError);
           if (ctx.schema.compat)
             utilFlowIndentCheck.flowIndentCheck(bm.indent, value, onError);
           offset = valueNode.range[2];
@@ -4149,7 +4149,7 @@ var require_resolve_end = __commonJS({
       let comment = "";
       if (end) {
         let hasSpace = false;
-        let sep3 = "";
+        let sep4 = "";
         for (const token of end) {
           const { source, type } = token;
           switch (type) {
@@ -4163,13 +4163,13 @@ var require_resolve_end = __commonJS({
               if (!comment)
                 comment = cb;
               else
-                comment += sep3 + cb;
-              sep3 = "";
+                comment += sep4 + cb;
+              sep4 = "";
               break;
             }
             case "newline":
               if (comment)
-                sep3 += source;
+                sep4 += source;
               hasSpace = true;
               break;
             default:
@@ -4212,18 +4212,18 @@ var require_resolve_flow_collection = __commonJS({
       let offset = fc.offset + fc.start.source.length;
       for (let i = 0; i < fc.items.length; ++i) {
         const collItem = fc.items[i];
-        const { start, key, sep: sep3, value } = collItem;
+        const { start, key, sep: sep4, value } = collItem;
         const props = resolveProps.resolveProps(start, {
           flow: fcName,
           indicator: "explicit-key-ind",
-          next: key ?? sep3?.[0],
+          next: key ?? sep4?.[0],
           offset,
           onError,
           parentIndent: fc.indent,
           startOnNewline: false
         });
         if (!props.found) {
-          if (!props.anchor && !props.tag && !sep3 && !value) {
+          if (!props.anchor && !props.tag && !sep4 && !value) {
             if (i === 0 && props.comma)
               onError(props.comma, "UNEXPECTED_TOKEN", `Unexpected , in ${fcName}`);
             else if (i < fc.items.length - 1)
@@ -4277,8 +4277,8 @@ var require_resolve_flow_collection = __commonJS({
             }
           }
         }
-        if (!isMap && !sep3 && !props.found) {
-          const valueNode = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, sep3, null, props, onError);
+        if (!isMap && !sep4 && !props.found) {
+          const valueNode = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, sep4, null, props, onError);
           coll.items.push(valueNode);
           offset = valueNode.range[2];
           if (isBlock(value))
@@ -4290,7 +4290,7 @@ var require_resolve_flow_collection = __commonJS({
           if (isBlock(key))
             onError(keyNode.range, "BLOCK_IN_FLOW", blockMsg);
           ctx.atKey = false;
-          const valueProps = resolveProps.resolveProps(sep3 ?? [], {
+          const valueProps = resolveProps.resolveProps(sep4 ?? [], {
             flow: fcName,
             indicator: "map-value-ind",
             next: value,
@@ -4301,8 +4301,8 @@ var require_resolve_flow_collection = __commonJS({
           });
           if (valueProps.found) {
             if (!isMap && !props.found && ctx.options.strict) {
-              if (sep3)
-                for (const st of sep3) {
+              if (sep4)
+                for (const st of sep4) {
                   if (st === valueProps.found)
                     break;
                   if (st.type === "newline") {
@@ -4319,7 +4319,7 @@ var require_resolve_flow_collection = __commonJS({
             else
               onError(valueProps.start, "MISSING_CHAR", `Missing , or : between ${fcName} items`);
           }
-          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : valueProps.found ? composeEmptyNode(ctx, valueProps.end, sep3, null, valueProps, onError) : null;
+          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : valueProps.found ? composeEmptyNode(ctx, valueProps.end, sep4, null, valueProps, onError) : null;
           if (valueNode) {
             if (isBlock(value))
               onError(valueNode.range, "BLOCK_IN_FLOW", blockMsg);
@@ -4499,7 +4499,7 @@ var require_resolve_block_scalar = __commonJS({
           chompStart = i + 1;
       }
       let value = "";
-      let sep3 = "";
+      let sep4 = "";
       let prevMoreIndented = false;
       for (let i = 0; i < contentStart; ++i)
         value += lines[i][0].slice(trimIndent) + "\n";
@@ -4516,24 +4516,24 @@ var require_resolve_block_scalar = __commonJS({
           indent2 = "";
         }
         if (type === Scalar.Scalar.BLOCK_LITERAL) {
-          value += sep3 + indent2.slice(trimIndent) + content3;
-          sep3 = "\n";
+          value += sep4 + indent2.slice(trimIndent) + content3;
+          sep4 = "\n";
         } else if (indent2.length > trimIndent || content3[0] === "	") {
-          if (sep3 === " ")
-            sep3 = "\n";
-          else if (!prevMoreIndented && sep3 === "\n")
-            sep3 = "\n\n";
-          value += sep3 + indent2.slice(trimIndent) + content3;
-          sep3 = "\n";
+          if (sep4 === " ")
+            sep4 = "\n";
+          else if (!prevMoreIndented && sep4 === "\n")
+            sep4 = "\n\n";
+          value += sep4 + indent2.slice(trimIndent) + content3;
+          sep4 = "\n";
           prevMoreIndented = true;
         } else if (content3 === "") {
-          if (sep3 === "\n")
+          if (sep4 === "\n")
             value += "\n";
           else
-            sep3 = "\n";
+            sep4 = "\n";
         } else {
-          value += sep3 + content3;
-          sep3 = " ";
+          value += sep4 + content3;
+          sep4 = " ";
           prevMoreIndented = false;
         }
       }
@@ -4715,25 +4715,25 @@ var require_resolve_flow_scalar = __commonJS({
       if (!match)
         return source;
       let res = match[1];
-      let sep3 = " ";
+      let sep4 = " ";
       let pos = first.lastIndex;
       line.lastIndex = pos;
       while (match = line.exec(source)) {
         if (match[1] === "") {
-          if (sep3 === "\n")
-            res += sep3;
+          if (sep4 === "\n")
+            res += sep4;
           else
-            sep3 = "\n";
+            sep4 = "\n";
         } else {
-          res += sep3 + match[1];
-          sep3 = " ";
+          res += sep4 + match[1];
+          sep4 = " ";
         }
         pos = line.lastIndex;
       }
       const last = /[ \t]*(.*)/sy;
       last.lastIndex = pos;
       match = last.exec(source);
-      return res + sep3 + (match?.[1] ?? "");
+      return res + sep4 + (match?.[1] ?? "");
     }
     function doubleQuotedValue(source, onError) {
       let res = "";
@@ -5543,14 +5543,14 @@ var require_cst_stringify = __commonJS({
         }
       }
     }
-    function stringifyItem({ start, key, sep: sep3, value }) {
+    function stringifyItem({ start, key, sep: sep4, value }) {
       let res = "";
       for (const st of start)
         res += st.source;
       if (key)
         res += stringifyToken(key);
-      if (sep3)
-        for (const st of sep3)
+      if (sep4)
+        for (const st of sep4)
           res += st.source;
       if (value)
         res += stringifyToken(value);
@@ -6717,18 +6717,18 @@ var require_parser = __commonJS({
         if (this.type === "map-value-ind") {
           const prev = getPrevProps(this.peek(2));
           const start = getFirstKeyStartProps(prev);
-          let sep3;
+          let sep4;
           if (scalar.end) {
-            sep3 = scalar.end;
-            sep3.push(this.sourceToken);
+            sep4 = scalar.end;
+            sep4.push(this.sourceToken);
             delete scalar.end;
           } else
-            sep3 = [this.sourceToken];
+            sep4 = [this.sourceToken];
           const map2 = {
             type: "block-map",
             offset: scalar.offset,
             indent: scalar.indent,
-            items: [{ start, key: scalar, sep: sep3 }]
+            items: [{ start, key: scalar, sep: sep4 }]
           };
           this.onKeyLine = true;
           this.stack[this.stack.length - 1] = map2;
@@ -6881,15 +6881,15 @@ var require_parser = __commonJS({
                 } else if (isFlowToken(it.key) && !includesToken(it.sep, "newline")) {
                   const start2 = getFirstKeyStartProps(it.start);
                   const key = it.key;
-                  const sep3 = it.sep;
-                  sep3.push(this.sourceToken);
+                  const sep4 = it.sep;
+                  sep4.push(this.sourceToken);
                   delete it.key;
                   delete it.sep;
                   this.stack.push({
                     type: "block-map",
                     offset: this.offset,
                     indent: this.indent,
-                    items: [{ start: start2, key, sep: sep3 }]
+                    items: [{ start: start2, key, sep: sep4 }]
                   });
                 } else if (start.length > 0) {
                   it.sep = it.sep.concat(start, this.sourceToken);
@@ -7083,13 +7083,13 @@ var require_parser = __commonJS({
             const prev = getPrevProps(parent);
             const start = getFirstKeyStartProps(prev);
             fixFlowSeqItems(fc);
-            const sep3 = fc.end.splice(1, fc.end.length);
-            sep3.push(this.sourceToken);
+            const sep4 = fc.end.splice(1, fc.end.length);
+            sep4.push(this.sourceToken);
             const map2 = {
               type: "block-map",
               offset: fc.offset,
               indent: fc.indent,
-              items: [{ start, key: fc, sep: sep3 }]
+              items: [{ start, key: fc, sep: sep4 }]
             };
             this.onKeyLine = true;
             this.stack[this.stack.length - 1] = map2;
@@ -15772,7 +15772,7 @@ var recursive = /* @__PURE__ */ new WeakMap();
 var NONE = 0;
 var ASSUMED = 1;
 var PROVEN = 2;
-function isRecursive(inst, stack, resolve5) {
+function isRecursive(inst, stack, resolve6) {
   const cached2 = recursive.get(inst);
   if (cached2 !== void 0)
     return cached2 ? PROVEN : NONE;
@@ -15782,7 +15782,7 @@ function isRecursive(inst, stack, resolve5) {
   let result = NONE;
   const check2 = (child) => {
     if (result !== PROVEN && child?._zod) {
-      const answer = isRecursive(child, stack, resolve5);
+      const answer = isRecursive(child, stack, resolve6);
       if (answer > result)
         result = answer;
     }
@@ -15793,7 +15793,7 @@ function isRecursive(inst, stack, resolve5) {
       const desc = Object.getOwnPropertyDescriptor(sh, key);
       if (spread && !desc.enumerable)
         continue;
-      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve5) : NONE;
+      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve6) : NONE;
       if (child > answer)
         answer = child;
     }
@@ -15860,7 +15860,7 @@ function isRecursive(inst, stack, resolve5) {
       break;
     // `$ZodLazy` caches its inner on the def, so a resolved edge is followed exactly
     case "lazy": {
-      const inner = def._cachedInner ?? (resolve5 ? inst._zod.innerType : void 0);
+      const inner = def._cachedInner ?? (resolve6 ? inst._zod.innerType : void 0);
       merge3(inner ? isRecursive(inner, stack, false) : ASSUMED);
       break;
     }
@@ -31455,7 +31455,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.75.0";
+var appVersion = false ? "0.0.0-dev" : "1.76.0";
 
 // src/shared/ariadne/review-packet.schema.ts
 var packetLimits = {
@@ -37217,8 +37217,8 @@ var GitHubTaskTracker = class {
     });
     return data.map((member) => ({ accountId: member.login, displayName: member.login }));
   }
-  async ping() {
-    await this.octokit.rest.repos.get({ owner: this.owner, repo: this.repo });
+  async ping(options) {
+    await this.octokit.rest.repos.get({ owner: this.owner, repo: this.repo, ...options?.signal === void 0 ? {} : { request: { signal: options.signal } } });
   }
   async replaceIssueBody(id, role, input2) {
     const issueNumber = parseInt(id, 10);
@@ -37346,13 +37346,14 @@ var JiraClient = class {
     this.baseUrl = `https://${config2.host}/rest/api/3`;
     this.authHeader = `Basic ${Buffer.from(`${config2.email}:${config2.token}`).toString("base64")}`;
   }
-  async request(method, path3, body, params) {
+  async request(method, path3, body, params, signal) {
     const url2 = new URL(`${this.baseUrl}${path3}`);
     if (params) Object.entries(params).forEach(([k, v]) => url2.searchParams.set(k, String(v)));
     const res = await this.fetchWithRetry(url2.toString(), {
       method,
       headers: { Authorization: this.authHeader, "Content-Type": "application/json", Accept: "application/json" },
-      ...body !== void 0 ? { body: JSON.stringify(body) } : {}
+      ...body !== void 0 ? { body: JSON.stringify(body) } : {},
+      ...signal === void 0 ? {} : { signal }
     });
     if (!res.ok) await this.throwApiError(res);
     const text6 = await res.text();
@@ -37402,13 +37403,13 @@ var JiraClient = class {
   }
   async fetchWithRetry(url2, init, attempt = 0) {
     const res = await fetch(url2, init);
-    if (res.status === 429 && attempt < maxRetries) {
+    if (res.status === 429 && attempt < maxRetries && init.signal === void 0) {
       const retryAfterHeader = res.headers.get("Retry-After");
       const parsedRetryAfter = retryAfterHeader !== null ? Number(retryAfterHeader) : NaN;
       const retryAfterSeconds = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : defaultRetryAfterSeconds;
       const jitter = 0.7 + Math.random() * 0.6;
       const delayMs = Math.min(retryAfterSeconds * 1e3 * jitter, maxBackoffMs);
-      await new Promise((resolve5) => setTimeout(resolve5, delayMs));
+      await new Promise((resolve6) => setTimeout(resolve6, delayMs));
       return this.fetchWithRetry(url2, init, attempt + 1);
     }
     return res;
@@ -37460,7 +37461,7 @@ var ConfluenceClient = class {
       const retryAfterSeconds = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : defaultRetryAfterSeconds2;
       const jitter = 0.7 + Math.random() * 0.6;
       const delayMs = Math.min(retryAfterSeconds * 1e3 * jitter, maxBackoffMs2);
-      await new Promise((resolve5) => setTimeout(resolve5, delayMs));
+      await new Promise((resolve6) => setTimeout(resolve6, delayMs));
       return this.fetchWithRetry(url2, init, attempt + 1);
     }
     return res;
@@ -40068,10 +40069,10 @@ function resolveAll(constructs2, events, context) {
   const called = [];
   let index2 = -1;
   while (++index2 < constructs2.length) {
-    const resolve5 = constructs2[index2].resolveAll;
-    if (resolve5 && !called.includes(resolve5)) {
-      events = resolve5(events, context);
-      called.push(resolve5);
+    const resolve6 = constructs2[index2].resolveAll;
+    if (resolve6 && !called.includes(resolve6)) {
+      events = resolve6(events, context);
+      called.push(resolve6);
     }
   }
   return events;
@@ -47670,8 +47671,9 @@ var JiraTaskTracker = class {
     });
     return users.map((user) => ({ accountId: user.accountId, displayName: user.displayName }));
   }
-  async ping() {
-    await this.client.request("GET", "/myself");
+  async ping(options) {
+    if (options?.signal === void 0) await this.client.request("GET", "/myself");
+    else await this.client.request("GET", "/myself", void 0, void 0, options.signal);
   }
   async searchChildren(epicKey) {
     const [page, blocksLinkType] = await Promise.all([
@@ -47903,33 +47905,113 @@ var JiraTaskTracker = class {
 // src/tasks/tool-probe/tool-probe.ts
 import { execFile as execFile3 } from "node:child_process";
 import { promisify as promisify3 } from "node:util";
+
+// src/tasks/readiness/probe-diagnostics.ts
+var ProbeDiagnosticsPropsSchema = external_exports.object({ env: external_exports.record(external_exports.string(), external_exports.string().optional()) });
+var ErrorFactsSchema = external_exports.object({
+  code: external_exports.union([external_exports.string(), external_exports.number()]).nullable().optional(),
+  status: external_exports.number().optional(),
+  statusCode: external_exports.number().optional(),
+  killed: external_exports.boolean().optional(),
+  name: external_exports.string().optional(),
+  message: external_exports.string().optional(),
+  stderr: external_exports.string().optional(),
+  cause: external_exports.unknown().optional()
+});
+var RedactedProbeDiagnostics = class {
+  secrets;
+  constructor(props) {
+    const { env } = ProbeDiagnosticsPropsSchema.parse({
+      ...props,
+      env: props.env === void 0 ? void 0 : { ...props.env }
+    });
+    this.secrets = Object.entries(env).filter(
+      ([key, value]) => /token|secret|password|api[_-]?key|credential/i.test(key) && Boolean(value)
+    ).flatMap(([, value]) => value === void 0 ? [] : [value, encodeURIComponent(value)]).sort((a, b) => b.length - a.length);
+  }
+  redact(text6) {
+    let result = text6.replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/@]+@/gi, "$1[REDACTED]@").replace(/\b(Bearer|Basic)\s+[^\s,'";]+/gi, "$1 [REDACTED]").replace(/([?&](?:token|access_token|api_key|key|signature)=)[^&#\s]+/gi, "$1[REDACTED]").replace(/\b(?:gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+)\b/g, "[REDACTED]");
+    for (const secret of this.secrets) result = result.replaceAll(secret, "[REDACTED]");
+    return result;
+  }
+  failure(name, error62, required2, fallback = "UNKNOWN") {
+    const parsed = ErrorFactsSchema.safeParse(error62);
+    const facts = parsed.success ? parsed.data : {};
+    const cause = ErrorFactsSchema.safeParse(facts.cause);
+    const code2 = facts.code ?? (cause.success ? cause.data.code : void 0);
+    const status = facts.status ?? facts.statusCode;
+    const raw = facts.stderr?.trim() || facts.message || String(error62);
+    let category = fallback;
+    if (code2 === "ENOENT")
+      category = name.startsWith("local:") ? "PATH_UNAVAILABLE" : "MISSING_TOOL";
+    else if (facts.killed || facts.name === "TimeoutError" || code2 === "ETIMEDOUT" || /timed? out/i.test(raw))
+      category = "TIMEOUT";
+    else if (status === 401 || /HTTP 401|bad credentials|authentication failed|not logged in|could not read Username|Permission denied \(publickey\)/i.test(
+      raw
+    ))
+      category = "AUTHENTICATION";
+    else if (code2 === "EACCES" || code2 === "EPERM" || status === 403 || /HTTP 403|operation not permitted|permission denied|sandbox.*denied/i.test(raw))
+      category = "PERMISSION_DENIED";
+    else if (["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "ECONNRESET"].includes(String(code2)) || status !== void 0 && status >= 500 || /connection refused|could not resolve|network is unreachable|failed to connect|fetch failed|HTTP 5\d\d/i.test(
+      raw
+    ))
+      category = "NETWORK";
+    const remedies = {
+      MISSING_TOOL: "Install the missing executable and make it available on this invocation PATH.",
+      PATH_UNAVAILABLE: "Resolve the intended existing filesystem path before relying on write access.",
+      TIMEOUT: "Check service connectivity or a stalled credential helper, then rerun the bounded probe.",
+      AUTHENTICATION: "Authenticate the relevant account through its supported login or credential setup, then rerun.",
+      PERMISSION_DENIED: "Inspect the named account or host policy denial and use its normal scoped approval/setup path.",
+      NETWORK: "Check DNS, routing and service availability. A connection failure alone does not establish sandbox denial.",
+      UNKNOWN: "Inspect the operation and establish the missing capability before relying on it."
+    };
+    return {
+      name,
+      ok: false,
+      required: required2,
+      code: category,
+      detail: category === "MISSING_TOOL" ? "not installed" : this.redact(raw),
+      remedy: remedies[category] ?? remedies.UNKNOWN
+    };
+  }
+};
+
+// src/tasks/tool-probe/tool-probe.ts
 var minimumGhVersion = [2, 99, 0];
 var ghVersionLine = /gh version (\d+)\.(\d+)\.(\d+)/;
+var NodeToolProbePropsSchema = external_exports.object({ cwd: external_exports.string().optional(), env: external_exports.record(external_exports.string(), external_exports.string().optional()).optional(), timeoutMs: external_exports.int().positive().max(6e4).default(1e4) });
 var NodeToolProbe = class {
   execFile;
+  env;
   constructor(props = {}) {
+    const input2 = NodeToolProbePropsSchema.parse({ ...props, env: props.env === void 0 ? void 0 : { ...props.env } });
     const promisified = promisify3(execFile3);
-    this.execFile = props.execFileFn ?? ((file2, args) => promisified(file2, [...args]));
+    const cwd = input2.cwd ?? process.cwd();
+    const env = props.env ?? process.env;
+    this.env = env;
+    this.execFile = props.execFileFn ?? ((file2, args) => promisified(file2, [...args], { cwd, env, timeout: input2.timeoutMs, killSignal: "SIGKILL", maxBuffer: 1024 * 1024 }));
   }
   async probe(input2) {
+    const diagnostics = new RedactedProbeDiagnostics({ env: this.env });
     const qaRequired = input2.qaInstructionsFound;
-    const ghRequired = input2.repo !== void 0;
+    const ghRequired = input2.githubRequired ?? input2.repo !== void 0;
+    const pushRequired = input2.pushRequired ?? ghRequired;
     const [gh, ghAuth, ghPush, playwright, ffmpeg, curl] = await Promise.all([
-      this.ghVersion(ghRequired),
-      this.ghAuth(ghRequired),
-      this.ghPush(input2.repo, ghRequired),
-      this.present("tools:playwright-cli", "playwright-cli", ["--version"], qaRequired),
-      this.present("tools:ffmpeg", "ffmpeg", ["-version"], qaRequired),
-      this.present("tools:curl", "curl", ["--version"], qaRequired)
+      this.ghVersion(ghRequired, diagnostics),
+      this.ghAuth(ghRequired, diagnostics),
+      this.ghPush(input2.repo, pushRequired, diagnostics),
+      this.present("tools:playwright-cli", "playwright-cli", ["--version"], qaRequired, diagnostics),
+      this.present("tools:ffmpeg", "ffmpeg", ["-version"], qaRequired, diagnostics),
+      this.present("tools:curl", "curl", ["--version"], qaRequired, diagnostics)
     ]);
     return [gh, ghAuth, ghPush, playwright, ffmpeg, curl];
   }
-  async ghVersion(required2) {
+  async ghVersion(required2, diagnostics) {
     try {
       const { stdout } = await this.execFile("gh", ["--version"]);
       const match = ghVersionLine.exec(stdout);
       if (match === null) {
-        return { name: "tools:gh", ok: false, detail: `unrecognized version output: ${stdout.trim()}`, required: required2 };
+        return { name: "tools:gh", ok: false, detail: `unrecognized version output: ${diagnostics.redact(stdout.trim())}`, required: required2, code: "UNKNOWN", remedy: "Inspect the gh executable selected by PATH and verify its version." };
       }
       const [, major, minor, patch] = match;
       const version2 = [Number(major), Number(minor), Number(patch)];
@@ -47939,23 +48021,22 @@ var NodeToolProbe = class {
         name: "tools:gh",
         ok: ok3,
         detail: ok3 ? `gh ${found}` : `gh ${found} is older than the required ${minimumGhVersion.join(".")}`,
-        required: required2
+        required: required2,
+        ...ok3 ? {} : { code: "TOOL_VERSION", remedy: `Install gh ${minimumGhVersion.join(".")} or newer before this workflow.` }
       };
     } catch (err) {
-      const detail = this.isMissingBinary(err) ? "not installed" : this.stderrOf(err);
-      return { name: "tools:gh", ok: false, detail, required: required2 };
+      return { ...diagnostics.failure("tools:gh", err, required2), required: required2 };
     }
   }
-  async ghAuth(required2) {
+  async ghAuth(required2, diagnostics) {
     try {
       await this.execFile("gh", ["auth", "status"]);
       return { name: "tools:gh-auth", ok: true, detail: "authenticated", required: required2 };
     } catch (err) {
-      const detail = this.isMissingBinary(err) ? "not installed" : this.stderrOf(err);
-      return { name: "tools:gh-auth", ok: false, detail, required: required2 };
+      return { ...diagnostics.failure("tools:gh-auth", err, required2, "AUTHENTICATION"), required: required2 };
     }
   }
-  async ghPush(repo, required2) {
+  async ghPush(repo, required2, diagnostics) {
     if (repo === void 0) {
       return { name: "tools:gh-push", ok: false, detail: "skipped \u2014 repo is not configured", required: required2 };
     }
@@ -47970,21 +48051,21 @@ var NodeToolProbe = class {
       return {
         name: "tools:gh-push",
         ok: ok3,
-        detail: ok3 ? `push access to ${repo}` : `no push access to ${repo}`,
+        detail: ok3 ? `GitHub account has push entitlement to ${repo}; transport and branch policy are not tested` : stdout.trim() === "false" ? `no push entitlement to ${repo}` : `push entitlement to ${repo} is unverified`,
+        code: ok3 ? "AVAILABLE" : stdout.trim() === "false" ? "PERMISSION_DENIED" : "UNKNOWN",
+        ...ok3 ? {} : { remedy: "Verify the selected GitHub account has push entitlement to this repository; this probe does not change access." },
         required: required2
       };
     } catch (err) {
-      const detail = this.isMissingBinary(err) ? "not installed" : this.stderrOf(err);
-      return { name: "tools:gh-push", ok: false, detail, required: required2 };
+      return { ...diagnostics.failure("tools:gh-push", err, required2), required: required2 };
     }
   }
-  async present(name, file2, args, required2) {
+  async present(name, file2, args, required2, diagnostics) {
     try {
       const { stdout } = await this.execFile(file2, args);
-      return { name, ok: true, detail: stdout.trim().split("\n")[0] ?? "installed", required: required2 };
+      return { name, ok: true, detail: diagnostics.redact(stdout.trim().split("\n")[0] ?? "installed"), required: required2 };
     } catch (err) {
-      const detail = this.isMissingBinary(err) ? "not installed" : this.stderrOf(err);
-      return { name, ok: false, detail, required: required2 };
+      return { ...diagnostics.failure(name, err, required2), required: required2 };
     }
   }
   /** True when `version` is at least `minimum`, comparing major, minor, then patch. */
@@ -47996,20 +48077,742 @@ var NodeToolProbe = class {
     }
     return true;
   }
-  /** Distinguishes a missing binary (ENOENT) from a binary that ran and failed. */
-  isMissingBinary(err) {
-    return typeof err === "object" && err !== null && "code" in err && err.code === "ENOENT";
-  }
-  stderrOf(err) {
-    if (typeof err === "object" && err !== null && "stderr" in err) {
-      const stderr = err.stderr;
-      if (typeof stderr === "string") return stderr.trim();
-    }
-    if (err instanceof Error) return err.message;
-    return String(err);
-  }
 };
 var nodeToolProbe = new NodeToolProbe();
+
+// src/tasks/readiness/workflow-preflight.ts
+import { execFile as execFile4 } from "node:child_process";
+import { access, realpath } from "node:fs/promises";
+import { constants } from "node:fs";
+import { resolve as resolve3 } from "node:path";
+import { promisify as promisify4 } from "node:util";
+
+// src/orchestration/orchestration-policy.ts
+import { isDeepStrictEqual } from "node:util";
+
+// src/agents/agent-frontmatter/agent-frontmatter.schema.ts
+var agentCapabilities = ["read", "edit", "shell", "web", "spawn", "ask"];
+var modelTiers = ["standard", "escalated", "expert"];
+var reasoningLevels = ["low", "medium", "high"];
+var claudeAgentColors = ["red", "blue", "green", "yellow", "purple", "orange", "pink", "cyan"];
+var AgentCapabilitySchema = external_exports.enum(agentCapabilities);
+var ModelTierSchema = external_exports.enum(modelTiers);
+var AgentFrontmatterSchema = external_exports.strictObject({
+  name: external_exports.string().regex(/^[a-z][a-z0-9-]*$/),
+  description: external_exports.string().min(1),
+  capabilities: external_exports.array(AgentCapabilitySchema).min(1).refine(
+    (capabilities) => new Set(capabilities).size === capabilities.length,
+    { message: "duplicate capability" }
+  ),
+  model: ModelTierSchema,
+  modelReason: external_exports.string().trim().min(1).optional(),
+  reasoning: external_exports.enum(reasoningLevels).optional(),
+  sandbox: external_exports.strictObject({
+    fs: external_exports.enum(["read-only", "workspace-write"]),
+    network: external_exports.enum(["none", "enabled"])
+  }).optional(),
+  dispatch: external_exports.strictObject({
+    maxConcurrent: external_exports.int().positive(),
+    maxDepth: external_exports.int().positive()
+  }).optional(),
+  "x-claude": external_exports.strictObject({ color: external_exports.enum(claudeAgentColors).optional() }).optional()
+});
+var AgentRegistrationSchema = AgentFrontmatterSchema.refine(
+  (agent) => agent.model !== "expert" || agent.modelReason !== void 0,
+  { message: "expert tier requires modelReason", path: ["modelReason"] }
+);
+
+// src/agents/agent-emitter/agent-emitter.schema.ts
+var ModelBindingsSchema = external_exports.strictObject({
+  standard: external_exports.string().trim().min(1),
+  escalated: external_exports.string().trim().min(1),
+  expert: external_exports.string().trim().min(1)
+});
+var AgentDefinitionSchema = external_exports.strictObject({
+  frontmatter: AgentRegistrationSchema,
+  body: external_exports.string().refine((body) => body.trim() !== "", "agent prompt must not be empty")
+});
+
+// src/orchestration/orchestration.schema.ts
+import { isAbsolute as isAbsolute2, relative, sep as sep3 } from "node:path";
+var OrchestrationTextSchema = external_exports.string().refine((value) => value.trim().length > 0, "must not be blank");
+var AbsolutePathSchema = OrchestrationTextSchema.refine(
+  isAbsolute2,
+  "must be an absolute path on this host"
+);
+var CapabilityNameSchema = external_exports.string().regex(/^[a-z][a-zA-Z0-9:.-]*$/);
+var RunContextObjectSchema = external_exports.strictObject({
+  runId: OrchestrationTextSchema,
+  taskId: OrchestrationTextSchema,
+  cwd: AbsolutePathSchema,
+  repositoryRoot: AbsolutePathSchema,
+  baseRef: OrchestrationTextSchema,
+  skill: OrchestrationTextSchema
+});
+var RunContextSchema = RunContextObjectSchema.refine((value) => {
+  const path3 = relative(value.repositoryRoot, value.cwd);
+  return path3 !== ".." && !path3.startsWith(`..${sep3}`) && !isAbsolute2(path3);
+}, "working directory must be inside the active repository root");
+var CallerContextSchema = RunContextSchema.safeExtend({ attempt: external_exports.int().positive() });
+var CapabilityEvidenceSchema = external_exports.discriminatedUnion("state", [
+  external_exports.strictObject({ state: external_exports.literal("available"), evidence: OrchestrationTextSchema }),
+  external_exports.strictObject({
+    state: external_exports.enum(["denied", "unknown"]),
+    evidence: OrchestrationTextSchema,
+    remedy: OrchestrationTextSchema
+  })
+]);
+var AdapterLimitsSchema = external_exports.strictObject({
+  maxConcurrent: external_exports.int().nonnegative().nullable(),
+  activeWorkers: external_exports.int().nonnegative(),
+  currentDepth: external_exports.int().nonnegative(),
+  maxDepth: external_exports.int().nonnegative().nullable(),
+  source: OrchestrationTextSchema
+});
+var RuntimeSnapshotSchema = external_exports.strictObject({
+  context: CallerContextSchema,
+  host: external_exports.strictObject({ name: OrchestrationTextSchema, version: OrchestrationTextSchema }),
+  observedAt: external_exports.iso.datetime(),
+  agent: AgentFrontmatterSchema.shape.name.nullable(),
+  spawn: CapabilityEvidenceSchema,
+  ask: CapabilityEvidenceSchema,
+  permissions: external_exports.record(CapabilityNameSchema, CapabilityEvidenceSchema),
+  limits: AdapterLimitsSchema
+});
+var DispatchRequestSchema = external_exports.strictObject({
+  id: OrchestrationTextSchema,
+  agent: AgentFrontmatterSchema.shape.name,
+  context: CallerContextSchema,
+  input: external_exports.record(external_exports.string(), external_exports.json()),
+  requiredCapabilities: external_exports.array(CapabilityNameSchema).optional()
+});
+var OrchestrationFailureSchema = external_exports.strictObject({
+  code: external_exports.enum([
+    "UNKNOWN_AGENT",
+    "UNSUPPORTED_AGENT_SETTINGS",
+    "CONTEXT_MISMATCH",
+    "CAPABILITY_DENIED",
+    "CAPABILITY_UNKNOWN",
+    "DISPATCH_UNAVAILABLE",
+    "LIMITS_UNKNOWN",
+    "CAPACITY_EXHAUSTED",
+    "DEPTH_EXCEEDED",
+    "QUESTIONS_DISABLED",
+    "QUESTIONS_UNAVAILABLE",
+    "INVALID_HANDOFF",
+    "INVALID_REPORT",
+    "INVALID_HISTORY",
+    "OPEN_QUESTIONS",
+    "UNVERIFIABLE",
+    "ATTEMPTS_EXHAUSTED",
+    "EXECUTION_FAILED",
+    "CANCELLED"
+  ]),
+  message: OrchestrationTextSchema,
+  remedy: OrchestrationTextSchema,
+  capability: CapabilityNameSchema.optional()
+});
+var OutcomeIdentitySchema = external_exports.strictObject({
+  dispatchId: OrchestrationTextSchema,
+  agent: AgentFrontmatterSchema.shape.name,
+  context: CallerContextSchema
+});
+var DispatchOutcomeSchema = external_exports.discriminatedUnion("status", [
+  OutcomeIdentitySchema.extend({
+    status: external_exports.literal("completed"),
+    report: external_exports.record(external_exports.string(), external_exports.json())
+  }),
+  OutcomeIdentitySchema.extend({
+    status: external_exports.enum(["failed", "unavailable"]),
+    failure: OrchestrationFailureSchema
+  })
+]);
+var QuestionRequestSchema = external_exports.strictObject({
+  context: CallerContextSchema,
+  question: OrchestrationTextSchema,
+  allowHumanQuestions: external_exports.boolean()
+});
+var SiblingSkillRequestSchema = external_exports.strictObject({
+  context: CallerContextSchema,
+  skill: OrchestrationTextSchema,
+  input: external_exports.record(external_exports.string(), external_exports.json())
+});
+
+// src/orchestration/orchestration-policy.ts
+var RegistryOrchestrationPolicyPropsSchema = external_exports.strictObject({
+  agents: external_exports.array(AgentDefinitionSchema).min(1).refine(
+    (agents) => new Set(agents.map((agent) => agent.frontmatter.name)).size === agents.length,
+    "duplicate agent name"
+  )
+});
+var RegistryOrchestrationPolicy = class {
+  agents;
+  constructor(props) {
+    this.agents = new Map(
+      RegistryOrchestrationPolicyPropsSchema.parse(props).agents.map((agent) => [
+        agent.frontmatter.name,
+        agent
+      ])
+    );
+  }
+  prepare(request2, runtime) {
+    const input2 = DispatchRequestSchema.parse(request2);
+    const snapshot = RuntimeSnapshotSchema.parse(runtime);
+    const definition2 = this.agents.get(input2.agent);
+    if (definition2 === void 0) {
+      return {
+        status: "unavailable",
+        failure: {
+          code: "UNKNOWN_AGENT",
+          message: `No registered agent named ${input2.agent}.`,
+          remedy: "Install or load the named registration before dispatch."
+        }
+      };
+    }
+    if (!isDeepStrictEqual(input2.context, snapshot.context) || snapshot.agent !== input2.agent) {
+      return {
+        status: "unavailable",
+        failure: {
+          code: "CONTEXT_MISMATCH",
+          message: "Runtime evidence belongs to another context or worker.",
+          remedy: "Observe effective access for this named worker in this task, checkout and attempt."
+        }
+      };
+    }
+    if (definition2.frontmatter.sandbox !== void 0 || definition2.frontmatter.dispatch !== void 0) {
+      return {
+        status: "unavailable",
+        failure: {
+          code: "UNSUPPORTED_AGENT_SETTINGS",
+          message: "Explicit worker sandbox or dispatch restrictions need an enforcing runtime binding.",
+          remedy: "Provide an adapter that can enforce the declared restrictions before dispatch; do not drop them."
+        }
+      };
+    }
+    if (snapshot.spawn.state !== "available") {
+      return {
+        status: "unavailable",
+        failure: {
+          code: "DISPATCH_UNAVAILABLE",
+          capability: "spawn",
+          message: snapshot.spawn.evidence,
+          remedy: snapshot.spawn.remedy
+        }
+      };
+    }
+    const { maxConcurrent, activeWorkers, currentDepth, maxDepth } = snapshot.limits;
+    if (maxConcurrent === null || maxDepth === null) {
+      return {
+        status: "unavailable",
+        failure: {
+          code: "LIMITS_UNKNOWN",
+          message: "Concurrency or nesting capacity has not been established.",
+          remedy: "Read the host limits or provide a documented conservative adapter bound with its provenance."
+        }
+      };
+    }
+    if (currentDepth >= maxDepth) {
+      return {
+        status: "unavailable",
+        failure: {
+          code: "DEPTH_EXCEEDED",
+          message: `A child at depth ${currentDepth + 1} exceeds the bound ${maxDepth}.`,
+          remedy: "Invoke orchestration in a supported caller context with remaining worker depth."
+        }
+      };
+    }
+    if (activeWorkers >= maxConcurrent) {
+      return {
+        status: "unavailable",
+        failure: {
+          code: "CAPACITY_EXHAUSTED",
+          message: `All ${maxConcurrent} worker slots are occupied or disabled.`,
+          remedy: "Wait for a worker to finish, refresh current usage, then plan the remaining work."
+        }
+      };
+    }
+    const required2 = /* @__PURE__ */ new Set([
+      ...definition2.frontmatter.capabilities,
+      ...input2.requiredCapabilities ?? []
+    ]);
+    for (const capability of required2) {
+      const permission = snapshot.permissions[capability];
+      if (permission === void 0 || permission.state !== "available") {
+        return {
+          status: "unavailable",
+          failure: {
+            code: permission?.state === "denied" ? "CAPABILITY_DENIED" : "CAPABILITY_UNKNOWN",
+            capability,
+            message: permission?.evidence ?? `No effective worker access evidence for ${capability}.`,
+            remedy: permission?.remedy ?? `Establish ${capability} access for this worker and working directory before dispatch.`
+          }
+        };
+      }
+    }
+    return { status: "ready", request: input2, definition: AgentDefinitionSchema.parse(definition2) };
+  }
+  ask(request2, runtime) {
+    const input2 = QuestionRequestSchema.parse(request2);
+    const snapshot = RuntimeSnapshotSchema.parse(runtime);
+    if (!isDeepStrictEqual(input2.context, snapshot.context)) {
+      return {
+        status: "unavailable",
+        failure: {
+          code: "CONTEXT_MISMATCH",
+          message: "Question capability evidence belongs to another caller context.",
+          remedy: "Refresh capability evidence for this caller before asking."
+        }
+      };
+    }
+    if (!input2.allowHumanQuestions) {
+      return {
+        status: "unavailable",
+        failure: {
+          code: "QUESTIONS_DISABLED",
+          capability: "ask",
+          message: "This invocation is unattended or has not opted into human questions.",
+          remedy: "Return the unresolved question to the caller as a named failure; do not prompt."
+        }
+      };
+    }
+    if (snapshot.ask.state !== "available") {
+      return {
+        status: "unavailable",
+        failure: {
+          code: "QUESTIONS_UNAVAILABLE",
+          capability: "ask",
+          message: snapshot.ask.evidence,
+          remedy: snapshot.ask.remedy
+        }
+      };
+    }
+    return { status: "awaiting-answer", request: input2 };
+  }
+  sibling(request2) {
+    return SiblingSkillRequestSchema.parse(request2);
+  }
+};
+
+// src/tasks/readiness/readiness.schema.ts
+var WorkflowSchema = external_exports.enum([
+  "execute-work",
+  "execute-wave",
+  "break-down-work",
+  "reproduce-bug",
+  "verify-ticket"
+]);
+var WorkflowEvidenceSchema = external_exports.strictObject({
+  context: CallerContextSchema,
+  callerCapabilities: external_exports.record(external_exports.string(), CapabilityEvidenceSchema),
+  workers: external_exports.array(
+    external_exports.strictObject({ registration: AgentRegistrationSchema, runtime: RuntimeSnapshotSchema })
+  ).refine(
+    (workers) => new Set(workers.map((worker) => worker.registration.name)).size === workers.length,
+    "duplicate worker evidence"
+  )
+});
+var ReadinessOptionsSchema = external_exports.strictObject({
+  workflow: WorkflowSchema.optional(),
+  evidence: WorkflowEvidenceSchema.optional()
+}).refine(
+  (value) => value.evidence === void 0 || value.workflow !== void 0,
+  "workflow is required with capability evidence"
+);
+
+// src/tasks/readiness/workflow-preflight.ts
+var WorkflowPreflightPropsSchema = external_exports.object({
+  cwd: external_exports.string(),
+  env: external_exports.record(external_exports.string(), external_exports.string().optional()),
+  timeoutMs: external_exports.int().positive().max(6e4).default(1e4)
+});
+var NodeWorkflowPreflight = class {
+  cwd;
+  env;
+  timeoutMs;
+  constructor(props) {
+    const input2 = WorkflowPreflightPropsSchema.parse({
+      ...props,
+      env: props.env === void 0 ? void 0 : { ...props.env }
+    });
+    this.cwd = input2.cwd;
+    this.env = props.env;
+    this.timeoutMs = input2.timeoutMs;
+  }
+  async inspect(workflow, evidence) {
+    const selected = WorkflowSchema.parse(workflow);
+    const parsed = evidence === void 0 ? void 0 : WorkflowEvidenceSchema.parse(evidence);
+    const diagnostics = new RedactedProbeDiagnostics({ env: this.env });
+    const codeWorkflow = selected === "execute-work" || selected === "execute-wave";
+    const requiredAgents = codeWorkflow ? ["code-implementation", "code-implementation-escalated", "code-verifier", "tech-writer"] : selected === "break-down-work" ? ["research-agent"] : [selected === "reproduce-bug" ? "qa-engineer" : "qa-engineer-verify"];
+    const checks = [];
+    const contextMatches = parsed !== void 0 && resolve3(parsed.context.cwd) === resolve3(this.cwd);
+    checks.push({
+      name: "host:context",
+      ok: contextMatches,
+      required: true,
+      code: contextMatches ? "AVAILABLE" : "CONTEXT_MISMATCH",
+      detail: contextMatches ? "Caller context matches this working directory" : "Missing or mismatched caller context",
+      remedy: "Supply current host observations for this task and active checkout, then rerun the workflow check."
+    });
+    const required2 = [
+      "shell",
+      "network",
+      "tracker.write",
+      ...codeWorkflow ? ["edit", "git.write", "git.push"] : [],
+      ...["reproduce-bug", "verify-ticket"].includes(selected) ? ["evidence.write"] : []
+    ];
+    for (const capability of required2) {
+      const observed = contextMatches ? parsed?.callerCapabilities[capability] : void 0;
+      checks.push({
+        name: `host:${capability}`,
+        ok: observed?.state === "available",
+        required: true,
+        code: observed?.state === "available" ? "AVAILABLE" : observed?.state === "denied" ? "CAPABILITY_DENIED" : "CAPABILITY_UNKNOWN",
+        detail: diagnostics.redact(
+          observed?.evidence ?? `No effective caller evidence for ${capability}`
+        ),
+        remedy: observed?.state === "available" ? void 0 : diagnostics.redact(
+          observed?.remedy ?? `Establish ${capability} through the host's scoped setup/approval path before mutations.`
+        )
+      });
+    }
+    const policy = parsed?.workers.length ? new RegistryOrchestrationPolicy({
+      agents: parsed.workers.map((worker) => ({
+        frontmatter: worker.registration,
+        body: "Preflight registration requirements; this check does not dispatch."
+      }))
+    }) : void 0;
+    for (const agent of requiredAgents) {
+      const worker = contextMatches ? parsed?.workers.find((item) => item.registration.name === agent) : void 0;
+      if (worker === void 0 || parsed === void 0 || policy === void 0) {
+        checks.push({
+          name: `dispatch:${agent}`,
+          ok: false,
+          required: true,
+          code: "CAPABILITY_UNKNOWN",
+          detail: `No scoped runtime evidence for ${agent}`,
+          remedy: "Discover the installed registration and observe its effective permissions, dispatch support and limits."
+        });
+        continue;
+      }
+      const decision = policy.prepare(
+        { id: `preflight:${agent}`, agent, context: parsed.context, input: {} },
+        worker.runtime
+      );
+      checks.push(
+        decision.status === "ready" ? {
+          name: `dispatch:${agent}`,
+          ok: true,
+          required: true,
+          code: "AVAILABLE",
+          detail: "Reported worker access, dispatch capacity and depth satisfy this registration; no worker was launched"
+        } : {
+          name: `dispatch:${agent}`,
+          ok: false,
+          required: true,
+          code: decision.failure.code,
+          detail: diagnostics.redact(decision.failure.message),
+          remedy: diagnostics.redact(decision.failure.remedy)
+        }
+      );
+    }
+    if (codeWorkflow) {
+      checks.push(await this.checkoutContext(parsed, diagnostics));
+      checks.push(await this.remoteRead(diagnostics));
+      checks.push(await this.localWrite("local:workspace-write", this.cwd, diagnostics));
+      checks.push(await this.gitWrite(diagnostics));
+    }
+    return checks;
+  }
+  async command(args) {
+    const run2 = promisify4(execFile4);
+    const { stdout } = await run2("git", args, {
+      cwd: this.cwd,
+      env: { ...this.env, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "Never" },
+      timeout: this.timeoutMs,
+      killSignal: "SIGKILL",
+      maxBuffer: 1024 * 1024
+    });
+    return stdout.trim();
+  }
+  async remoteRead(diagnostics) {
+    try {
+      await this.command(["ls-remote", "origin"]);
+      return {
+        name: "git:remote-read",
+        ok: true,
+        required: true,
+        code: "AVAILABLE",
+        detail: "Read origin refs successfully; this does not test push transport or branch policy"
+      };
+    } catch (error62) {
+      return diagnostics.failure("git:remote-read", error62, true);
+    }
+  }
+  async checkoutContext(evidence, diagnostics) {
+    if (evidence === void 0)
+      return {
+        name: "git:context",
+        ok: false,
+        required: true,
+        code: "CONTEXT_MISMATCH",
+        detail: "No repository/base context supplied",
+        remedy: "Identify the active checkout and fixed comparison base before starting the workflow."
+      };
+    try {
+      const root = await this.command(["rev-parse", "--show-toplevel"]);
+      if (await realpath(root) !== await realpath(evidence.context.repositoryRoot)) {
+        return {
+          name: "git:context",
+          ok: false,
+          required: true,
+          code: "CONTEXT_MISMATCH",
+          detail: "Runtime evidence names another repository root",
+          remedy: "Use the active worktree root in caller and worker context."
+        };
+      }
+      await this.command([
+        "rev-parse",
+        "--verify",
+        "--end-of-options",
+        `${evidence.context.baseRef}^{commit}`
+      ]);
+      return {
+        name: "git:context",
+        ok: true,
+        required: true,
+        code: "AVAILABLE",
+        detail: "Active checkout matches and the fixed base resolves to a commit"
+      };
+    } catch (error62) {
+      return diagnostics.failure("git:context", error62, true);
+    }
+  }
+  async localWrite(name, path3, diagnostics) {
+    try {
+      await access(path3, constants.W_OK);
+      return {
+        name,
+        ok: true,
+        required: true,
+        code: "AVAILABLE",
+        detail: "Filesystem access check permits directory writes; no file was created and host authorization is checked separately"
+      };
+    } catch (error62) {
+      return diagnostics.failure(name, error62, true);
+    }
+  }
+  async gitWrite(diagnostics) {
+    try {
+      const paths = await this.command(["rev-parse", "--git-dir", "--git-common-dir"]);
+      const directories = paths.split("\n").map((path3) => resolve3(this.cwd, path3));
+      if (directories.length !== 2) {
+        return {
+          name: "local:git-write",
+          ok: false,
+          required: true,
+          code: "UNKNOWN",
+          detail: "Could not resolve Git metadata directories",
+          remedy: "Inspect the active repository/worktree metadata before branching or committing."
+        };
+      }
+      await Promise.all(directories.map((directory) => access(directory, constants.W_OK)));
+      return {
+        name: "local:git-write",
+        ok: true,
+        required: true,
+        code: "AVAILABLE",
+        detail: "Git and common metadata directories pass filesystem write-access checks; no git mutation was attempted"
+      };
+    } catch (error62) {
+      return diagnostics.failure("local:git-write", error62, true);
+    }
+  }
+};
+
+// src/tasks/readiness/repository-readiness.ts
+var RepositoryReadinessPropsSchema = external_exports.object({
+  cwd: external_exports.string().optional(),
+  env: external_exports.record(external_exports.string(), external_exports.string().optional()).optional(),
+  timeoutMs: external_exports.int().positive().max(6e4).default(1e4)
+});
+var NodeRepositoryReadiness = class {
+  cwd;
+  env;
+  timeoutMs;
+  constructor(props = {}) {
+    const input2 = RepositoryReadinessPropsSchema.parse({
+      ...props,
+      env: props.env === void 0 ? void 0 : { ...props.env }
+    });
+    this.cwd = input2.cwd ?? process.cwd();
+    this.env = props.env ?? process.env;
+    this.timeoutMs = input2.timeoutMs;
+  }
+  async inspect(input2) {
+    const parsed = ReadinessOptionsSchema.safeParse(input2.options ?? {});
+    if (!parsed.success)
+      return {
+        tracker: null,
+        repo: null,
+        checks: [
+          {
+            name: "runtime",
+            ok: false,
+            required: true,
+            code: "INVALID_CONTEXT",
+            detail: "Workflow or runtime evidence does not match the readiness schema",
+            remedy: "Supply a valid WorkflowEvidence document for the selected workflow; do not fill unknown capabilities with available."
+          }
+        ],
+        ok: false,
+        scope: "workflow"
+      };
+    const options = parsed.data;
+    const scope = options.workflow === void 0 ? "environment" : "workflow";
+    const diagnostics = new RedactedProbeDiagnostics({ env: this.env });
+    const checks = [];
+    let config2;
+    try {
+      config2 = input2.config();
+    } catch (error62) {
+      checks.push(diagnostics.failure("config", error62, true, "CONFIGURATION"));
+      return {
+        tracker: null,
+        repo: null,
+        checks,
+        ok: false,
+        scope,
+        ...options.workflow === void 0 ? {} : { workflow: options.workflow }
+      };
+    }
+    checks.push({
+      name: "config",
+      ok: true,
+      detail: `tracker=${config2.tracker} repo=${config2.repo}`
+    });
+    let missing;
+    try {
+      missing = this.missingCredentials(config2);
+    } catch (error62) {
+      checks.push(diagnostics.failure("credentials", error62, true, "CONFIGURATION"));
+      return {
+        tracker: config2.tracker,
+        repo: config2.repo,
+        checks,
+        ok: false,
+        scope,
+        ...options.workflow === void 0 ? {} : { workflow: options.workflow }
+      };
+    }
+    checks.push({
+      name: "credentials",
+      ok: missing.length === 0,
+      detail: missing.length === 0 ? "present" : `not set: ${missing.join(", ")}`,
+      ...missing.length ? { code: "AUTHENTICATION" } : {}
+    });
+    if (missing.length === 0) {
+      const controller = new AbortController();
+      const timer = setTimeout(
+        () => controller.abort(
+          new DOMException("Tracker reachability probe timed out", "TimeoutError")
+        ),
+        this.timeoutMs
+      );
+      try {
+        await Promise.race([
+          input2.tracker().ping({ signal: controller.signal }),
+          new Promise(
+            (_, reject) => controller.signal.addEventListener("abort", () => reject(controller.signal.reason), {
+              once: true
+            })
+          )
+        ]);
+        checks.push({
+          name: "reachable",
+          ok: true,
+          detail: `${config2.repo ?? config2.jiraProject} responded; write operations were not tested`
+        });
+      } catch (error62) {
+        checks.push(diagnostics.failure("reachable", error62, true));
+      } finally {
+        clearTimeout(timer);
+      }
+    } else
+      checks.push({
+        name: "reachable",
+        ok: false,
+        detail: "skipped \u2014 credentials missing",
+        code: "AUTHENTICATION"
+      });
+    const qaWorkflow = options.workflow === "reproduce-bug" || options.workflow === "verify-ticket";
+    let qa = { found: false, sources: [] };
+    try {
+      qa = input2.finder.discover({
+        from: this.cwd,
+        legacyRecipePath: getQaRecipePath(config2, input2.configPath())
+      });
+      const [nearest] = qa.sources;
+      checks.push({
+        name: "qa-instructions",
+        ok: qa.found,
+        required: qaWorkflow,
+        detail: nearest === void 0 ? "none found \u2014 add a QA.md or a QA section in AGENTS.md to enable the QA lane" : [nearest.path, ...qa.sources.slice(1).map((source) => source.path)].join(", ") + (nearest.legacy === true ? " (legacy recipe \u2014 migrate to QA.md)" : "")
+      });
+    } catch (error62) {
+      checks.push(diagnostics.failure("qa-instructions", error62, qaWorkflow));
+    }
+    const codeWorkflow = options.workflow === "execute-work" || options.workflow === "execute-wave";
+    checks.push(
+      ...await input2.probe.probe({
+        repo: config2.repo,
+        qaInstructionsFound: options.workflow === "break-down-work" ? false : qa.found || qaWorkflow,
+        ...options.workflow === void 0 ? {} : {
+          githubRequired: codeWorkflow || config2.tracker === "github",
+          pushRequired: codeWorkflow
+        }
+      })
+    );
+    if (codeWorkflow && config2.repo === void 0)
+      checks.push({
+        name: "pr:repo",
+        ok: false,
+        required: true,
+        code: "CONFIGURATION",
+        detail: "A GitHub owner/repo is required to open the PR",
+        remedy: "Resolve and store the intended repository before starting work."
+      });
+    if (options.workflow !== void 0)
+      checks.push(
+        ...await new NodeWorkflowPreflight({
+          cwd: this.cwd,
+          env: this.env,
+          timeoutMs: this.timeoutMs
+        }).inspect(options.workflow, options.evidence)
+      );
+    const redacted = checks.map((check2) => ({
+      ...check2,
+      detail: diagnostics.redact(check2.detail),
+      ...check2.remedy === void 0 ? {} : { remedy: diagnostics.redact(check2.remedy) }
+    }));
+    return {
+      tracker: config2.tracker,
+      repo: config2.repo,
+      checks: redacted,
+      ok: redacted.every((check2) => check2.ok || check2.required === false),
+      scope,
+      ...options.workflow === void 0 ? {} : { workflow: options.workflow }
+    };
+  }
+  missingCredentials(config2) {
+    const env = new EnvLoader().load(this.env);
+    if (config2.tracker === "github") return env.githubToken?.trim() ? [] : ["GITHUB_TOKEN"];
+    return [
+      ...env.jiraToken?.trim() ? [] : ["JIRA_TOKEN (or JIRA_API_TOKEN / JIRA_API_KEY)"],
+      ...(env.jiraEmail ?? config2.jiraEmail)?.trim() ? [] : ["JIRA_EMAIL (or jiraEmail in the config)"]
+    ];
+  }
+};
 
 // src/flight-rules/flight-rules.schema.ts
 var FlightRulesPropsSchema = external_exports.object({
@@ -48101,7 +48904,10 @@ var DefaultFlightRules = class {
     return new NodeGitExecutor();
   }
   probe() {
-    return nodeToolProbe;
+    return new NodeToolProbe({ cwd: this.cwd, env: this.env });
+  }
+  readiness() {
+    return new NodeRepositoryReadiness({ cwd: this.cwd, env: this.env });
   }
   docs() {
     return FileDocResolver.fromInstall({ moduleUrl: import.meta.url, env: this.env });
@@ -48457,7 +49263,7 @@ var reviewContract = new ZodReviewContract();
 // src/code-review/review-policy.ts
 import { execFileSync as execFileSync3 } from "node:child_process";
 import { readFileSync as readFileSync8, realpathSync as realpathSync2 } from "node:fs";
-import { dirname as dirname8, join as join9, relative } from "node:path";
+import { dirname as dirname8, join as join9, relative as relative2 } from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 var ReviewPolicyPropsSchema = external_exports.strictObject({ home: external_exports.string().min(1).optional() });
 var RepositoryContextPropsSchema = external_exports.strictObject({
@@ -48475,7 +49281,7 @@ var FileReviewPolicy = class {
     const docs = realpathSync2(join9(this.home, "docs"));
     const read = (id) => {
       const path3 = realpathSync2(join9(docs, `${id}.md`));
-      if (relative(docs, path3).startsWith(".."))
+      if (relative2(docs, path3).startsWith(".."))
         throw new ReviewPolicyError("review policy path leaves the installed docs directory");
       return readFileSync8(path3, "utf8");
     };
@@ -48673,8 +49479,8 @@ var ValidatedEvidencePropsSchema = external_exports.strictObject({
 });
 
 // src/code-review/github-review-verifier.ts
-import { execFile as execFile4 } from "node:child_process";
-import { promisify as promisify4 } from "node:util";
+import { execFile as execFile5 } from "node:child_process";
+import { promisify as promisify5 } from "node:util";
 var GhReviewGitHubApi = class {
   async get(path3) {
     return this.run(["api", path3]);
@@ -48692,7 +49498,7 @@ var GhReviewGitHubApi = class {
     ]);
   }
   async run(args) {
-    const { stdout } = await promisify4(execFile4)("gh", args, { maxBuffer: 2e7 });
+    const { stdout } = await promisify5(execFile5)("gh", args, { maxBuffer: 2e7 });
     return JSON.parse(stdout);
   }
 };
@@ -49036,7 +49842,7 @@ var HiddenPrompt = class {
     const muted = new Writable({ write: (_chunk, _encoding, done) => done() });
     const prompt = createInterface({ input: process.stdin, output: muted, terminal: true });
     try {
-      return await new Promise((resolve5) => prompt.once("line", resolve5));
+      return await new Promise((resolve6) => prompt.once("line", resolve6));
     } finally {
       prompt.close();
       process.stderr.write("\n");
@@ -50257,7 +51063,7 @@ function createRfcCommand(getConfig, getCwd = () => process.cwd()) {
 
 // src/tasks/qa-instructions/qa-instructions.ts
 import { existsSync as existsSync8, readFileSync as readFileSync12, statSync as statSync4 } from "node:fs";
-import { dirname as dirname9, join as join10, resolve as resolve3 } from "node:path";
+import { dirname as dirname9, join as join10, resolve as resolve4 } from "node:path";
 var atxHeading = /^ {0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$/;
 var fenceRun2 = /^ {0,3}(`{3,}|~{3,})/;
 var legacyHint = 'Legacy QA recipe in use. Move its content into a QA.md at the repo root (or a "QA" section of AGENTS.md); see docs/qa-instructions.md.';
@@ -50313,7 +51119,7 @@ var QaInstructionsFinder = class {
   }
   /** The start directory and each parent up to the repository root; only the start when no root is found. */
   levels(from) {
-    const absolute = resolve3(from);
+    const absolute = resolve4(from);
     const start = this.fs.isFile(absolute) ? dirname9(absolute) : absolute;
     const levels = [];
     let current = start;
@@ -50403,91 +51209,35 @@ function createCompetenciesCommand(getConfig) {
 }
 
 // src/tasks/commands/check/command.ts
-function missingCredentials(config2, env) {
-  if (config2.tracker === "github")
-    return env.githubToken === void 0 ? ["GITHUB_TOKEN"] : [];
-  const missing = [];
-  if (env.jiraToken === void 0)
-    missing.push("JIRA_TOKEN (or JIRA_API_TOKEN / JIRA_API_KEY)");
-  if ((env.jiraEmail ?? config2.jiraEmail) === void 0)
-    missing.push("JIRA_EMAIL (or jiraEmail in the config)");
-  return missing;
-}
-function createCheckCommand(getConfig, getTracker, getConfigPath, getProbe, getFinder = () => new QaInstructionsFinder()) {
+import { readFileSync as readFileSync13 } from "node:fs";
+var ReadinessFailedError = class extends Error {
+  name = "ReadinessFailedError";
+};
+function createCheckCommand(getConfig, getTracker, getConfigPath, getProbe, getFinder = () => new QaInstructionsFinder(), getReadiness = () => new NodeRepositoryReadiness()) {
   const check2 = new Command("check");
-  check2.exitOverride().action(async () => {
-    const checks = [];
-    let config2;
+  check2.addOption(new Option("--workflow <name>", "check readiness for this workflow before its first mutation").choices(WorkflowSchema.options)).option("--runtime-file <path>", "JSON containing current caller/worker capability observations; requires --workflow").exitOverride().action(async (options) => {
+    let evidence;
     try {
-      config2 = getConfig();
-    } catch (err) {
-      const detail = err instanceof Error ? err.message : String(err);
-      checks.push({ name: "config", ok: false, detail });
-      process.stdout.write(
-        JSON.stringify({ tracker: null, repo: null, checks, ok: false }) + "\n"
-      );
-      throw new Error(
-        "flight-rules check failed \u2014 config could not be resolved",
-        { cause: err }
-      );
+      evidence = options.runtimeFile === void 0 ? void 0 : JSON.parse(readFileSync13(options.runtimeFile, "utf8"));
+    } catch {
+      process.stdout.write(JSON.stringify({ tracker: null, repo: null, checks: [{ name: "runtime", ok: false, required: true, code: "INVALID_CONTEXT", detail: "Cannot read a JSON runtime evidence file", remedy: "Supply a readable evidence file; see flight-rules doc workflow-preflight." }], ok: false, scope: "workflow" }) + "\n");
+      throw new ReadinessFailedError("flight-rules check failed \u2014 see report above");
     }
-    checks.push({
-      name: "config",
-      ok: true,
-      detail: `tracker=${config2.tracker} repo=${config2.repo}`
-    });
-    const missing = missingCredentials(config2, new EnvLoader().load());
-    const credOk = missing.length === 0;
-    checks.push({
-      name: "credentials",
-      ok: credOk,
-      detail: credOk ? "present" : `not set: ${missing.join(", ")}`
-    });
-    if (credOk) {
-      try {
-        await getTracker().ping();
-        checks.push({
-          name: "reachable",
-          ok: true,
-          detail: `${config2.repo} responded`
-        });
-      } catch (err) {
-        const detail = err instanceof Error ? err.message : String(err);
-        checks.push({ name: "reachable", ok: false, detail });
-      }
-    } else {
-      checks.push({
-        name: "reachable",
-        ok: false,
-        detail: "skipped \u2014 credentials missing"
-      });
+    const parsed = ReadinessOptionsSchema.safeParse({ workflow: options.workflow, evidence });
+    if (!parsed.success) {
+      process.stdout.write(JSON.stringify({ tracker: null, repo: null, checks: [{ name: "runtime", ok: false, required: true, code: "INVALID_CONTEXT", detail: "Invalid workflow runtime evidence", remedy: "Supply evidence matching WorkflowEvidenceSchema with a --workflow selection." }], ok: false, scope: "workflow" }) + "\n");
+      throw new ReadinessFailedError("flight-rules check failed \u2014 see report above");
     }
-    const qa = getFinder().discover({
-      from: process.cwd(),
-      legacyRecipePath: getQaRecipePath(config2, getConfigPath())
+    const report = await getReadiness().inspect({
+      config: getConfig,
+      tracker: getTracker,
+      configPath: getConfigPath,
+      probe: getProbe(),
+      finder: getFinder(),
+      options: parsed.data
     });
-    const [nearest] = qa.sources;
-    checks.push({
-      name: "qa-instructions",
-      ok: qa.found,
-      detail: nearest === void 0 ? "none found \u2014 add a QA.md or a QA section in AGENTS.md to enable the QA lane" : [nearest.path, ...qa.sources.slice(1).map((s) => s.path)].join(", ") + (nearest.legacy === true ? " (legacy recipe \u2014 migrate to QA.md)" : ""),
-      required: false
-    });
-    const tools = await getProbe().probe({
-      repo: config2.repo,
-      qaInstructionsFound: qa.found
-    });
-    checks.push(...tools);
-    const ok3 = checks.every((c) => c.ok || c.required === false);
-    process.stdout.write(
-      JSON.stringify({
-        tracker: config2.tracker,
-        repo: config2.repo,
-        checks,
-        ok: ok3
-      }) + "\n"
-    );
-    if (!ok3) throw new Error("flight-rules check failed \u2014 see report above");
+    process.stdout.write(JSON.stringify(report) + "\n");
+    if (!report.ok) throw new ReadinessFailedError("flight-rules check failed \u2014 see report above");
   });
   return check2;
 }
@@ -50804,7 +51554,7 @@ import { execFileSync as execFileSync4 } from "node:child_process";
 
 // src/hooks/board-heartbeat/agent-ticket-resolver.ts
 import { createHash as createHash2 } from "node:crypto";
-import { closeSync, existsSync as existsSync9, openSync, readFileSync as readFileSync13, readSync } from "node:fs";
+import { closeSync, existsSync as existsSync9, openSync, readFileSync as readFileSync14, readSync } from "node:fs";
 import { basename as basename5, dirname as dirname10, join as join11 } from "node:path";
 var SubagentMetaSchema = external_exports.looseObject({
   agentType: external_exports.string().optional(),
@@ -50897,7 +51647,7 @@ var AgentTicketResolver = class {
   readMeta(path3) {
     if (!existsSync9(path3)) return void 0;
     try {
-      const parsed = SubagentMetaSchema.safeParse(JSON.parse(readFileSync13(path3, "utf-8")));
+      const parsed = SubagentMetaSchema.safeParse(JSON.parse(readFileSync14(path3, "utf-8")));
       return parsed.success ? parsed.data : void 0;
     } catch {
       return void 0;
@@ -51009,8 +51759,8 @@ ${line.trim()}`) === "";
 };
 
 // src/hooks/commit-guard/commit-guard.ts
-import { readFileSync as readFileSync14 } from "node:fs";
-import { isAbsolute as isAbsolute2, resolve as resolve4 } from "node:path";
+import { readFileSync as readFileSync15 } from "node:fs";
+import { isAbsolute as isAbsolute3, resolve as resolve5 } from "node:path";
 var PreToolUseInputSchema = external_exports.looseObject({
   tool_name: external_exports.string().optional(),
   tool_input: external_exports.looseObject({ command: external_exports.string().optional() }).optional(),
@@ -51100,9 +51850,9 @@ var CommitGuard = class {
   }
   isCliMessage(file2, cwd) {
     const unquoted = file2.replace(/^["']|["']$/g, "");
-    if (unquoted === "-" || !isAbsolute2(unquoted) && cwd === void 0) return false;
+    if (unquoted === "-" || !isAbsolute3(unquoted) && cwd === void 0) return false;
     try {
-      const contents = readFileSync14(isAbsolute2(unquoted) ? unquoted : resolve4(cwd ?? "", unquoted), "utf8");
+      const contents = readFileSync15(isAbsolute3(unquoted) ? unquoted : resolve5(cwd ?? "", unquoted), "utf8");
       return /^Flight-Rules-Version: /m.test(contents);
     } catch {
       return false;
@@ -51223,10 +51973,10 @@ function createHookCommand(getHandler = () => new PreBashHook(), readStdin = () 
 }
 
 // src/git/commands/commit/command.ts
-import { readFileSync as readFileSync16 } from "node:fs";
+import { readFileSync as readFileSync17 } from "node:fs";
 
 // src/git/commit-message-builder/commit-message-builder.ts
-import { readFileSync as readFileSync15 } from "node:fs";
+import { readFileSync as readFileSync16 } from "node:fs";
 import { dirname as dirname11, join as join12 } from "node:path";
 
 // src/git/commit-message-builder/commit-message.schema.ts
@@ -51286,7 +52036,7 @@ var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
   static readPluginVersion(binPath) {
     try {
       const pkgPath = join12(dirname11(binPath), "..", "package.json");
-      const parsed = JSON.parse(readFileSync15(pkgPath, "utf-8"));
+      const parsed = JSON.parse(readFileSync16(pkgPath, "utf-8"));
       if (typeof parsed === "object" && parsed !== null && "version" in parsed && typeof parsed.version === "string") {
         return parsed.version;
       }
@@ -51323,7 +52073,7 @@ function createGitCommand(getExecutor) {
       type: opts.type,
       scope: opts.scope,
       description: opts.description,
-      body: opts.bodyFile !== void 0 ? readFileSync16(opts.bodyFile, "utf8") : opts.body,
+      body: opts.bodyFile !== void 0 ? readFileSync17(opts.bodyFile, "utf8") : opts.body,
       footers: opts.footer,
       model: opts.model ?? void 0
     });
@@ -51361,7 +52111,7 @@ function createGitCommand(getExecutor) {
 }
 
 // src/git/commands/message/command.ts
-import { mkdtempSync, readFileSync as readFileSync17, writeFileSync as writeFileSync6 } from "node:fs";
+import { mkdtempSync, readFileSync as readFileSync18, writeFileSync as writeFileSync6 } from "node:fs";
 import { tmpdir as tmpdir2 } from "node:os";
 import { join as join13 } from "node:path";
 function createCommitMessageCommand() {
@@ -51370,7 +52120,7 @@ function createCommitMessageCommand() {
       type: opts.type,
       scope: opts.scope,
       description: opts.description,
-      body: opts.bodyFile !== void 0 ? readFileSync17(opts.bodyFile, "utf8") : opts.body,
+      body: opts.bodyFile !== void 0 ? readFileSync18(opts.bodyFile, "utf8") : opts.body,
       footers: opts.footer,
       model: opts.model
     });
@@ -51480,7 +52230,7 @@ function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = () => cr
   program2.addCommand(createCompetenciesCommand(config2));
   program2.addCommand(createDocCommand(() => services.docs()));
   program2.addCommand(createReviewCommand());
-  program2.addCommand(createCheckCommand(config2, tracker, getConfigPath, () => services.probe()));
+  program2.addCommand(createCheckCommand(config2, tracker, getConfigPath, () => services.probe(), void 0, () => services.readiness()));
   program2.addCommand(
     createBoardCommand(
       () => services.board(),
@@ -51504,40 +52254,6 @@ async function run(argv, flightRules = createFlightRules()) {
 
 // src/agents/agent-frontmatter/agent-frontmatter.ts
 var import_yaml3 = __toESM(require_dist(), 1);
-
-// src/agents/agent-frontmatter/agent-frontmatter.schema.ts
-var agentCapabilities = ["read", "edit", "shell", "web", "spawn", "ask"];
-var modelTiers = ["standard", "escalated", "expert"];
-var reasoningLevels = ["low", "medium", "high"];
-var claudeAgentColors = ["red", "blue", "green", "yellow", "purple", "orange", "pink", "cyan"];
-var AgentCapabilitySchema = external_exports.enum(agentCapabilities);
-var ModelTierSchema = external_exports.enum(modelTiers);
-var AgentFrontmatterSchema = external_exports.strictObject({
-  name: external_exports.string().regex(/^[a-z][a-z0-9-]*$/),
-  description: external_exports.string().min(1),
-  capabilities: external_exports.array(AgentCapabilitySchema).min(1).refine(
-    (capabilities) => new Set(capabilities).size === capabilities.length,
-    { message: "duplicate capability" }
-  ),
-  model: ModelTierSchema,
-  modelReason: external_exports.string().trim().min(1).optional(),
-  reasoning: external_exports.enum(reasoningLevels).optional(),
-  sandbox: external_exports.strictObject({
-    fs: external_exports.enum(["read-only", "workspace-write"]),
-    network: external_exports.enum(["none", "enabled"])
-  }).optional(),
-  dispatch: external_exports.strictObject({
-    maxConcurrent: external_exports.int().positive(),
-    maxDepth: external_exports.int().positive()
-  }).optional(),
-  "x-claude": external_exports.strictObject({ color: external_exports.enum(claudeAgentColors).optional() }).optional()
-});
-var AgentRegistrationSchema = AgentFrontmatterSchema.refine(
-  (agent) => agent.model !== "expert" || agent.modelReason !== void 0,
-  { message: "expert tier requires modelReason", path: ["modelReason"] }
-);
-
-// src/agents/agent-frontmatter/agent-frontmatter.ts
 var MissingFrontmatterError = class extends Error {
   name = "MissingFrontmatterError";
 };

@@ -61,7 +61,9 @@ export declare class JiraTaskTracker implements TaskTracker {
      */
     addAttachment(ticketId: string, filePath: string): Promise<Attachment>;
     getUsers(): Promise<TrackerUser[]>;
-    ping(): Promise<void>;
+    ping(options?: {
+        signal?: AbortSignal;
+    }): Promise<void>;
     private searchChildren;
     private mapTicket;
     private mapAttachment;
