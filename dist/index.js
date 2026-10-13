@@ -1056,7 +1056,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.67.0";
+var appVersion = false ? "0.0.0-dev" : "1.69.0";
 
 // src/shared/ariadne/review-packet.schema.ts
 import { z as z11 } from "zod";
@@ -5394,24 +5394,27 @@ var FileAgentRegistry = class {
 
 // src/agents/agent-emitter/claude-agent-emitter.ts
 import { stringify as stringifyYaml3 } from "yaml";
-import { z as z26 } from "zod";
+import { z as z27 } from "zod";
 
 // src/agents/agent-emitter/agent-emitter.ts
 var UnsupportedAgentSettingError = class extends Error {
   name = "UnsupportedAgentSettingError";
 };
 
-// src/agents/agent-emitter/claude-agent-emitter.ts
+// src/agents/agent-emitter/agent-emitter.schema.ts
+import { z as z26 } from "zod";
 var ModelBindingsSchema = z26.strictObject({
   standard: z26.string().trim().min(1),
   escalated: z26.string().trim().min(1),
   expert: z26.string().trim().min(1)
 });
-var ClaudeAgentEmitterPropsSchema = z26.strictObject({ models: ModelBindingsSchema });
 var AgentDefinitionSchema = z26.strictObject({
   frontmatter: AgentRegistrationSchema,
   body: z26.string().refine((body) => body.trim() !== "", "agent prompt must not be empty")
 });
+
+// src/agents/agent-emitter/claude-agent-emitter.ts
+var ClaudeAgentEmitterPropsSchema = z27.strictObject({ models: ModelBindingsSchema });
 var MarkdownClaudeAgentEmitter = class {
   models;
   constructor(props) {
@@ -5440,6 +5443,52 @@ ${body}`;
     if (capability === "shell") return ["Bash"];
     if (capability === "web") return ["WebSearch", "WebFetch"];
     throw new UnsupportedAgentSettingError(`Worker agent capability ${capability} needs an orchestration adapter`);
+  }
+};
+
+// src/agents/agent-emitter/codex-agent-emitter.ts
+import { z as z28 } from "zod";
+var ReasoningBindingsSchema = z28.strictObject({
+  standard: z28.enum(reasoningLevels),
+  escalated: z28.enum(reasoningLevels),
+  expert: z28.enum(reasoningLevels)
+});
+var CodexAgentEmitterPropsSchema = z28.strictObject({
+  models: ModelBindingsSchema,
+  reasoning: ReasoningBindingsSchema
+});
+var TomlCodexAgentEmitter = class {
+  props;
+  constructor(props) {
+    this.props = CodexAgentEmitterPropsSchema.parse(props);
+  }
+  emit(agent) {
+    const { frontmatter, body } = AgentDefinitionSchema.parse(agent);
+    if (frontmatter.dispatch !== void 0 || frontmatter.capabilities.some((capability) => capability === "spawn" || capability === "ask")) {
+      throw new UnsupportedAgentSettingError(`${frontmatter.name}: worker orchestration needs a runtime adapter`);
+    }
+    if (frontmatter.sandbox !== void 0) {
+      throw new UnsupportedAgentSettingError(`${frontmatter.name}: explicit filesystem/network restrictions need a runtime permission adapter`);
+    }
+    const settings = [
+      ["name", frontmatter.name],
+      ["description", frontmatter.description],
+      ["model", this.props.models[frontmatter.model]],
+      ["model_reasoning_effort", frontmatter.reasoning ?? this.props.reasoning[frontmatter.model]],
+      ["sandbox_mode", frontmatter.capabilities.includes("edit") ? "workspace-write" : "read-only"],
+      ["web_search", frontmatter.capabilities.includes("web") ? "live" : "disabled"],
+      ["developer_instructions", body]
+    ];
+    return settings.map(([key, value]) => `${key} = ${JSON.stringify(value)}`).join("\n") + "\n";
+  }
+  diagnostics(agent) {
+    const { frontmatter } = AgentDefinitionSchema.parse(agent);
+    const diagnostics = [
+      "Codex has no equivalent per-agent tool allowlist; capabilities remain instruction constraints and host permissions govern tools.",
+      "The parent session can override agent sandbox defaults; evidence directories need writable access from the runtime adapter."
+    ];
+    if (frontmatter["x-claude"]?.color !== void 0) diagnostics.push("Claude display color has no Codex mapping and is omitted.");
+    return diagnostics;
   }
 };
 export {
@@ -5489,6 +5538,7 @@ export {
   SemanticTypeSchema,
   TechnicalDesignSchema,
   TicketSchema,
+  TomlCodexAgentEmitter,
   TrackerEvidenceService,
   TrackerUserSchema,
   UnsupportedAgentSettingError,

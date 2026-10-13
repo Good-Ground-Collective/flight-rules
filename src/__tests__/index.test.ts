@@ -40,6 +40,7 @@ describe('public library surface', () => {
       'MediaRefSchema',
       'ModelTierSchema',
       'MarkdownClaudeAgentEmitter',
+      'TomlCodexAgentEmitter',
       'NodeGitExecutor',
       'NodeToolProbe',
       'PrecedenceBodyFormatDetector',

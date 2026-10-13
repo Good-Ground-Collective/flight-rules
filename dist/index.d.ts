@@ -55,5 +55,6 @@ export type { AgentFrontmatterParser } from './agents/agent-frontmatter/agent-fr
 export { FileAgentRegistry, InvalidAgentDefinitionError } from './agents/agent-registry/agent-registry.js';
 export type { AgentDefinition, AgentRegistry } from './agents/agent-registry/agent-registry.js';
 export { MarkdownClaudeAgentEmitter } from './agents/agent-emitter/claude-agent-emitter.js';
+export { TomlCodexAgentEmitter } from './agents/agent-emitter/codex-agent-emitter.js';
 export { UnsupportedAgentSettingError } from './agents/agent-emitter/agent-emitter.js';
 export type { AgentEmitter } from './agents/agent-emitter/agent-emitter.js';
