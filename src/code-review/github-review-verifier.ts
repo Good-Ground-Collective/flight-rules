@@ -82,17 +82,10 @@ export class GitHubReviewVerifier implements ReviewVerifier {
       );
     }
     if (!(await this.reaches(evidence.commit_sha, headSha))) return false;
-    const file = z
-      .looseObject({ type: z.string(), encoding: z.string(), content: z.string() })
-      .parse(
-        await this.api.get(
-          `/repos/${this.props.repo}/contents/${evidence.path.split("/").map(encodeURIComponent).join("/")}?ref=${headSha}`,
-        ),
-      );
     return (
-      file.type === "file" &&
-      file.encoding === "base64" &&
-      evidence.line <= Buffer.from(file.content, "base64").toString("utf8").split("\n").length
+      (evidence.commit_sha === headSha ||
+        (await this.hasLine(evidence.path, evidence.line, evidence.commit_sha))) &&
+      (await this.hasLine(evidence.path, evidence.line, headSha))
     );
   }
 
@@ -168,6 +161,22 @@ export class GitHubReviewVerifier implements ReviewVerifier {
       .looseObject({ status: z.string() })
       .parse(await this.api.get(`/repos/${this.props.repo}/compare/${sha}...${headSha}`));
     return ["ahead", "identical"].includes(comparison.status);
+  }
+
+  /** True when `ref` has `path` as a file with at least `line` lines. */
+  private async hasLine(path: string, line: number, ref: string): Promise<boolean> {
+    const file = z
+      .looseObject({ type: z.string(), encoding: z.string(), content: z.string() })
+      .parse(
+        await this.api.get(
+          `/repos/${this.props.repo}/contents/${path.split("/").map(encodeURIComponent).join("/")}?ref=${ref}`,
+        ),
+      );
+    return (
+      file.type === "file" &&
+      file.encoding === "base64" &&
+      line <= Buffer.from(file.content, "base64").toString("utf8").split("\n").length
+    );
   }
 
   private async comment(

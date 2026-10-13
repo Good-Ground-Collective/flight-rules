@@ -140,27 +140,33 @@ describe("GitHub provenance and decision authority", () => {
       ),
     ).toBe(false);
   });
-  it("accepts code evidence cited at the head or an ancestor, and reads the line at the head", async () => {
+  it("accepts code evidence cited at the head or an ancestor when the line exists at both", async () => {
     const fix = "c".repeat(40);
-    const file = {
+    const file = (text: string) => ({
       type: "file",
       encoding: "base64",
-      content: Buffer.from("a\nb\nc").toString("base64"),
-    };
-    const contents = `/repos/org/repo/contents/src/auth.ts?ref=${head}`;
+      content: Buffer.from(text).toString("base64"),
+    });
+    const contents = (ref: string) => `/repos/org/repo/contents/src/auth.ts?ref=${ref}`;
     const code = (sha: string, line = 3) =>
       ({ kind: "code", commit_sha: sha, path: "src/auth.ts", line }) as const;
-    const client = (status: string) =>
-      api({ [`/repos/org/repo/compare/${fix}...${head}`]: { status }, [contents]: file });
+    const client = (status: string, atFix = file("a\nb\nc")) =>
+      api({
+        [`/repos/org/repo/compare/${fix}...${head}`]: { status },
+        [contents(fix)]: atFix,
+        [contents(head)]: file("a\nb\nc"),
+      });
 
     const ancestor = client("ahead");
     expect(await verifier(ancestor).verify(code(fix), head)).toBe(true);
-    expect(ancestor.get).toHaveBeenCalledWith(contents);
+    expect(ancestor.get).toHaveBeenCalledWith(contents(fix));
+    expect(ancestor.get).toHaveBeenCalledWith(contents(head));
     expect(await verifier(client("ahead")).verify(code(fix, 4), head)).toBe(false);
+    expect(await verifier(client("ahead", file("a\nb"))).verify(code(fix), head)).toBe(false);
     for (const status of ["diverged", "behind"]) {
       const unrelated = client(status);
       expect(await verifier(unrelated).verify(code(fix), head)).toBe(false);
-      expect(unrelated.get).not.toHaveBeenCalledWith(contents);
+      expect(unrelated.get).not.toHaveBeenCalledWith(expect.stringContaining("/contents/"));
       expect(await verifier(unrelated).verify({ kind: "commit", sha: fix }, head)).toBe(false);
     }
     expect(await verifier(client("ahead")).verify({ kind: "commit", sha: fix }, head)).toBe(true);
@@ -169,6 +175,7 @@ describe("GitHub provenance and decision authority", () => {
     expect(await verifier(atHead).verify(code(head), head)).toBe(true);
     expect(await verifier(atHead).verify(code(head, 4), head)).toBe(false);
     expect(atHead.get).not.toHaveBeenCalledWith(expect.stringContaining("/compare/"));
+    expect(atHead.get).not.toHaveBeenCalledWith(contents(fix));
   });
   it("rejects check runs on an ancestor of the head", async () => {
     const ancestor = "c".repeat(40);

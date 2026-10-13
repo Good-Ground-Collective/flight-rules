@@ -67,9 +67,9 @@ check. Parse/reconcile before any write even if a model reports a valid result.
 `GitHubReviewVerifier` uses gh by default, or the action's GitHub client adapter.
 It checks artifact provenance, code evidence and eligible humans. Code
 evidence may cite the head or an ancestor of it, such as the fix commit; the
-cited line must exist at the head. CI evidence must be on the head itself. It
-does not decide whether a reply answers a question; the reviewer does that and
-must give a reason. The default adapter rejects local command
+cited line must exist at that commit and at the head. CI evidence must be on
+the head itself. It does not decide whether a reply answers a question; the
+reviewer does that and must give a reason. The default adapter rejects local command
 verification because it has no trusted executor. A consumer with a trusted
 executor can implement the ReviewVerifier interface. ValidatedReviewVerifier
 is for already verified adapter attestations; never populate it from model
