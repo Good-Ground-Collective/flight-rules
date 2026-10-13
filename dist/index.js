@@ -1257,7 +1257,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.80.1";
+var appVersion = false ? "0.0.0-dev" : "1.81.0";
 
 // src/shared/ariadne/review-packet.schema.ts
 import { z as z14 } from "zod";
@@ -6498,7 +6498,18 @@ var TomlCodexAgentEmitter = class {
 };
 
 // src/plugins/plugin-compiler/plugin-compiler.ts
-import { chmodSync as chmodSync2, copyFileSync, existsSync as existsSync10, lstatSync as lstatSync2, mkdirSync as mkdirSync7, readFileSync as readFileSync12, readdirSync as readdirSync5, realpathSync as realpathSync3, rmSync as rmSync3, writeFileSync as writeFileSync7 } from "node:fs";
+import {
+  chmodSync as chmodSync2,
+  copyFileSync,
+  existsSync as existsSync10,
+  lstatSync as lstatSync2,
+  mkdirSync as mkdirSync7,
+  readFileSync as readFileSync12,
+  readdirSync as readdirSync5,
+  realpathSync as realpathSync3,
+  rmSync as rmSync3,
+  writeFileSync as writeFileSync7
+} from "node:fs";
 import { join as join13, resolve as resolve5 } from "node:path";
 import { createHash as createHash2 } from "node:crypto";
 import { z as z39 } from "zod";
@@ -6522,24 +6533,49 @@ var NativePluginCompiler = class {
   }
   compile(host = "claude") {
     const target = PluginHostSchema.parse(host);
-    for (const resource of ["package.json", "adapters", "agents", "skills", "docs", "hooks", "bin"]) {
+    for (const resource of [
+      "package.json",
+      "adapters",
+      "agents",
+      "skills",
+      "docs",
+      "hooks",
+      "bin"
+    ]) {
       this.validateSource(join13(this.sourceDir, resource));
     }
-    const identity = PluginIdentitySchema.parse(JSON.parse(readFileSync12(join13(this.sourceDir, "adapters/plugin.json"), "utf8")));
-    const { version } = PackageVersionSchema.parse(JSON.parse(readFileSync12(join13(this.sourceDir, "package.json"), "utf8")));
+    const identity = PluginIdentitySchema.parse(
+      JSON.parse(readFileSync12(join13(this.sourceDir, "adapters/plugin.json"), "utf8"))
+    );
+    const { version } = PackageVersionSchema.parse(
+      JSON.parse(readFileSync12(join13(this.sourceDir, "package.json"), "utf8"))
+    );
     const definitions = new FileAgentRegistry().load(join13(this.sourceDir, "agents"));
-    const models = JSON.parse(readFileSync12(join13(this.sourceDir, "adapters", target, "model-tiers.json"), "utf8"));
+    const models = JSON.parse(
+      readFileSync12(join13(this.sourceDir, "adapters", target, "model-tiers.json"), "utf8")
+    );
     const codexEmitter = target === "codex" ? new TomlCodexAgentEmitter({
       models,
-      reasoning: JSON.parse(readFileSync12(join13(this.sourceDir, "adapters/codex/reasoning-tiers.json"), "utf8"))
+      reasoning: JSON.parse(
+        readFileSync12(join13(this.sourceDir, "adapters/codex/reasoning-tiers.json"), "utf8")
+      )
     }) : void 0;
     const emitter = codexEmitter ?? new MarkdownClaudeAgentEmitter({ models });
-    const agents = definitions.map((agent) => ({ name: agent.frontmatter.name, contents: emitter.emit(agent), registration: agent.frontmatter }));
+    const agents = definitions.map((agent) => ({
+      name: agent.frontmatter.name,
+      contents: emitter.emit(agent),
+      registration: agent.frontmatter
+    }));
     const diagnostics = codexEmitter === void 0 ? [] : [...new Set(definitions.flatMap((agent) => codexEmitter.diagnostics(agent)))];
-    if (target === "codex") diagnostics.push("Claude commit and Ariadne hooks are omitted; this target emits no Codex hooks.");
+    if (target === "codex")
+      diagnostics.push(
+        "Claude commit and Ariadne hooks are omitted; this target emits no Codex hooks."
+      );
     for (const executable of ["flight-rules", "flight-rules.mjs"]) {
       if (!existsSync10(join13(this.sourceDir, "bin", executable))) {
-        throw new InvalidPluginSourceError(`Build the CLI before native assembly: missing bin/${executable}`);
+        throw new InvalidPluginSourceError(
+          `Build the CLI before native assembly: missing bin/${executable}`
+        );
       }
     }
     const directory = join13(this.sourceDir, "dist", target);
@@ -6549,20 +6585,48 @@ var NativePluginCompiler = class {
     rmSync3(directory, { recursive: true, force: true });
     mkdirSync7(directory, { recursive: true });
     const resources = target === "claude" ? ["skills", "docs", "hooks", "bin"] : ["skills", "docs", "bin"];
-    for (const resource of resources) this.copyDirectory(join13(this.sourceDir, resource), join13(directory, resource));
+    for (const resource of resources)
+      this.copyDirectory(join13(this.sourceDir, resource), join13(directory, resource));
+    this.copyDirectory(
+      join13(this.sourceDir, "agents"),
+      join13(directory, "bin", "resources", "agents")
+    );
     const agentDirectory = target === "claude" ? join13(directory, "agents") : join13(directory, ".codex", "agents");
     mkdirSync7(agentDirectory, { recursive: true });
     const extension = target === "claude" ? "md" : "toml";
-    for (const agent of agents) writeFileSync7(join13(agentDirectory, `${agent.name}.${extension}`), agent.contents);
-    writeFileSync7(join13(directory, "flight-rules-install.json"), JSON.stringify({
-      host: target,
-      agents: agents.map((agent) => ({ name: agent.name, sha256: createHash2("sha256").update(agent.contents).digest("hex"), registration: agent.registration }))
-    }, null, 2) + "\n");
+    for (const agent of agents)
+      writeFileSync7(join13(agentDirectory, `${agent.name}.${extension}`), agent.contents);
+    writeFileSync7(
+      join13(directory, "flight-rules-install.json"),
+      JSON.stringify(
+        {
+          host: target,
+          agents: agents.map((agent) => ({
+            name: agent.name,
+            sha256: createHash2("sha256").update(agent.contents).digest("hex"),
+            registration: agent.registration
+          }))
+        },
+        null,
+        2
+      ) + "\n"
+    );
     mkdirSync7(join13(directory, "adapters", target), { recursive: true });
-    copyFileSync(join13(this.sourceDir, "adapters", target, "model-tiers.json"), join13(directory, "adapters", target, "model-tiers.json"));
-    if (target === "codex") copyFileSync(join13(this.sourceDir, "adapters/codex/reasoning-tiers.json"), join13(directory, "adapters/codex/reasoning-tiers.json"));
-    for (const executable of ["flight-rules", "flight-rules.mjs"]) chmodSync2(join13(directory, "bin", executable), 493);
-    const manifestDirectory = join13(directory, target === "claude" ? ".claude-plugin" : ".codex-plugin");
+    copyFileSync(
+      join13(this.sourceDir, "adapters", target, "model-tiers.json"),
+      join13(directory, "adapters", target, "model-tiers.json")
+    );
+    if (target === "codex")
+      copyFileSync(
+        join13(this.sourceDir, "adapters/codex/reasoning-tiers.json"),
+        join13(directory, "adapters/codex/reasoning-tiers.json")
+      );
+    for (const executable of ["flight-rules", "flight-rules.mjs"])
+      chmodSync2(join13(directory, "bin", executable), 493);
+    const manifestDirectory = join13(
+      directory,
+      target === "claude" ? ".claude-plugin" : ".codex-plugin"
+    );
     mkdirSync7(manifestDirectory);
     const manifest = target === "claude" ? {
       ...identity,
@@ -6572,20 +6636,32 @@ var NativePluginCompiler = class {
     } : { ...identity, version, skills: "./skills/" };
     writeFileSync7(join13(manifestDirectory, "plugin.json"), JSON.stringify(manifest, null, 2) + "\n");
     if (target === "codex") {
-      writeFileSync7(join13(directory, "plugin.json"), JSON.stringify({
-        $schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
-        ...identity,
-        version
-      }, null, 2) + "\n");
+      writeFileSync7(
+        join13(directory, "plugin.json"),
+        JSON.stringify(
+          {
+            $schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+            ...identity,
+            version
+          },
+          null,
+          2
+        ) + "\n"
+      );
       writeFileSync7(join13(directory, ".codex", "config.toml"), "[agents]\nenabled = true\n");
-      writeFileSync7(join13(directory, "diagnostics.json"), JSON.stringify(diagnostics, null, 2) + "\n");
+      writeFileSync7(
+        join13(directory, "diagnostics.json"),
+        JSON.stringify(diagnostics, null, 2) + "\n"
+      );
     }
     return { directory, agents: agents.map((agent) => agent.name), diagnostics };
   }
   validateSource(path) {
     const stat = lstatSync2(path);
     if (stat.isSymbolicLink() || !stat.isFile() && !stat.isDirectory()) {
-      throw new InvalidPluginSourceError(`Native resources must be regular files/directories: ${path}`);
+      throw new InvalidPluginSourceError(
+        `Native resources must be regular files/directories: ${path}`
+      );
     }
     if (stat.isDirectory()) {
       for (const entry of readdirSync5(path)) this.validateSource(join13(path, entry));
