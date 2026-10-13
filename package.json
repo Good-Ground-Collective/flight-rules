@@ -1,7 +1,7 @@
 {
   "name": "@good-ground-collective/flight-rules",
   "version": "1.72.0",
-  "description": "Claude Code Skills for the Good Ground Collective org",
+  "description": "Harness-agnostic software workflow skills and review library",
   "repository": {
     "type": "git",
     "url": "https://github.com/Good-Ground-Collective/flight-rules.git"
@@ -34,7 +34,8 @@
     "adapters/",
     ".claude-plugin/",
     "dist/",
-    "contracts/"
+    "contracts/",
+    ".agents/"
   ],
   "scripts": {
     "build": "node scripts/build.mjs && tsc -p tsconfig.build.json",
@@ -44,7 +45,9 @@
     "test": "vitest run",
     "test:agents:live": "npm run build && node scripts/test-agents-live.mjs",
     "test:agents:codex-config": "npm run build && node scripts/test-codex-agent-config.mjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check:source-status": "node scripts/check-source-artifacts.mjs --working-tree",
+    "test:release:artifacts": "node scripts/test-release-artifacts.mjs"
   },
   "release": {
     "branches": [
@@ -65,10 +68,13 @@
         {
           "assets": [
             "package.json",
-            ".claude-plugin/plugin.json",
-            "bin/flight-rules",
-            "bin/flight-rules.mjs",
-            "dist/claude/agents/*.md"
+            "package-lock.json",
+            "bin/**",
+            "dist/**",
+            "contracts/code-review/*.schema.json",
+            ".claude-plugin/marketplace.json",
+            ".agents/plugins/marketplace.json",
+            ".claude-plugin/plugin.json"
           ],
           "message": "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}"
         }

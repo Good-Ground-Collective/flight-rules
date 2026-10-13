@@ -54,12 +54,13 @@ describe("canonical agent and skill sources", () => {
   });
 
   it("the built plugin registers every resolved agent and preserves source prompt bytes", () => {
-    const plugin = JSON.parse(readFileSync(join(root, ".claude-plugin/plugin.json"), "utf8"));
+    const pluginRoot = join(root, "dist/claude");
+    const plugin = JSON.parse(readFileSync(join(pluginRoot, ".claude-plugin/plugin.json"), "utf8"));
     const emitter = new MarkdownClaudeAgentEmitter({ models: JSON.parse(readFileSync(join(root, "adapters/claude/model-tiers.json"), "utf8")) });
-    const expected = agents.map((agent) => `./dist/claude/agents/${agent.frontmatter.name}.md`);
+    const expected = agents.map((agent) => `./agents/${agent.frontmatter.name}.md`);
     expect(plugin.agents).toEqual(expected);
     for (const [index, agent] of agents.entries()) {
-      const native = readFileSync(join(root, expected[index] ?? ""), "utf8");
+      const native = readFileSync(join(pluginRoot, expected[index] ?? ""), "utf8");
       expect(native).toBe(emitter.emit(agent));
       const header = /^---\n([\s\S]*?)^---\n/m.exec(native);
       expect(parseYaml(header?.[1] ?? "").name).toBe(agent.frontmatter.name);
@@ -73,14 +74,22 @@ describe("canonical agent and skill sources", () => {
       const output = execFileSync("npm", ["pack", "--dry-run", "--ignore-scripts", "--json", "--cache", cache], { cwd: root, encoding: "utf8" });
       const packed: { files: { path: string }[] }[] = JSON.parse(output);
       const paths = new Set(packed[0]?.files.map((file) => file.path));
-      for (const agent of agents) expect(paths.has(`dist/claude/agents/${agent.frontmatter.name}.md`)).toBe(true);
+      for (const agent of agents) {
+        expect(paths.has(`dist/claude/agents/${agent.frontmatter.name}.md`)).toBe(true);
+        expect(paths.has(`dist/codex/.codex/agents/${agent.frontmatter.name}.toml`)).toBe(true);
+      }
       for (const path of ["agents/variants.json", "adapters/claude/model-tiers.json", "adapters/codex/model-tiers.json", "dist/review.js"]) {
+        expect(paths.has(path)).toBe(true);
+      }
+      for (const path of ["dist/claude/.claude-plugin/plugin.json", "dist/codex/.codex-plugin/plugin.json", "dist/codex/plugin.json", ".agents/plugins/marketplace.json"]) {
         expect(paths.has(path)).toBe(true);
       }
 
       const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
       const releaseGit = pkg.release.plugins.find((plugin: unknown) => Array.isArray(plugin) && plugin[0] === "@semantic-release/git");
-      expect(releaseGit[1].assets).toContain("dist/claude/agents/*.md");
+      expect(releaseGit[1].assets).toContain("dist/**");
+      expect(releaseGit[1].assets).toContain("bin/**");
+      expect(releaseGit[1].assets).toContain("contracts/code-review/*.schema.json");
     } finally {
       rmSync(cache, { recursive: true, force: true });
     }

@@ -23,7 +23,7 @@ The live command uses three Claude sessions capped at $1 each. The complete tree
 
 The Codex tree includes a portable root `plugin.json` and a `.codex-plugin/plugin.json` compatibility manifest. Codex discovers skills from the plugin, but its plugin manifest has no agent component. Installing the plugin therefore does not register `.codex/agents` in a consuming project. E5 will handle project registration and CLI placement; this package supplies their native source files. The Codex tree emits no Claude hooks. `diagnostics.json` records that omission, absent per-agent tool allowlists, parent sandbox overrides and ignored Claude color metadata.
 
-The repository catalog at `.agents/plugins/marketplace.json` points to `./dist/codex`, relative to the repository root. Run the installed client's parser and read-only marketplace APIs against a relocated fixture with:
+The generated repository catalog at `.agents/plugins/marketplace.json` points to `./dist/codex`, relative to the repository root. Its canonical template is `adapters/codex/marketplace.json`. Run the installed client's parser and read-only marketplace APIs against a relocated fixture with:
 
 ```bash
 node scripts/test-codex-agent-config.mjs dist/codex
@@ -31,4 +31,4 @@ node scripts/test-codex-agent-config.mjs dist/codex
 
 The check copies the package's actual `.codex` files into a trusted temporary project, requires an intentionally malformed role to generate a parser warning, then requires all seven generated roles to load without warnings. It also discovers the native catalog, reads the plugin and checks every canonical skill name and version. It makes no model turns or installation changes. Codex 0.162.1 passed these checks. This proves native parsing and discovery; actual Codex execution, model access and orchestrated permissions remain later work. The packaged CLI resolves docs after relocation, but consumers still need to expose it on PATH.
 
-The existing Claude marketplace still loads the repository root. Its agent bridge points at the same generated registrations. The release-ownership slice will commit both complete native trees and move the Claude marketplace source to `dist/claude`; publishing complete catalog targets is part of that slice.
+The build copies marketplace templates from `adapters/<host>/marketplace.json` after assembling both complete trees. Release preparation commits both trees with their catalogs, moving the Claude marketplace source to `dist/claude` and removing the legacy root plugin manifest in the same commit. Source PRs omit generated artifacts; see [release artifact ownership](release-artifacts.md) for reproducible checks and reinstall instructions.

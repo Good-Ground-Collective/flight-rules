@@ -3,13 +3,26 @@
 // Used by `npm run build`; semantic-release's prepareCmd runs set-version.mjs
 // (which writes the released version into package.json) and then this build,
 // so the binary always reports the version it was released as.
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import * as esbuild from "esbuild";
 
 const pkg = JSON.parse(
   readFileSync(fileURLToPath(new URL("../package.json", import.meta.url)), "utf8"),
 );
+// Release preparation owns these trees. Rebuild from sources so removed
+// modules/resources cannot survive an earlier build.
+for (const resource of ["../bin/", "../dist/"]) {
+  const directory = fileURLToPath(new URL(resource, import.meta.url));
+  if (existsSync(directory) && lstatSync(directory).isSymbolicLink()) {
+    throw new Error(`Generated output cannot use a symlink: ${directory}`);
+  }
+  rmSync(directory, { recursive: true, force: true });
+  mkdirSync(directory, { recursive: true });
+}
+const shim = fileURLToPath(new URL("../bin/flight-rules", import.meta.url));
+writeFileSync(shim, '#!/bin/sh\n# Generated PATH shim; canonical source is scripts/build.mjs.\nexec node "$(dirname "$0")/flight-rules.mjs" "$@"\n');
+chmodSync(shim, 0o755);
 // .mjs, not extensionless: Node refuses extensionless ESM entries under "type": "module"
 const outfile = fileURLToPath(new URL("../bin/flight-rules.mjs", import.meta.url));
 
@@ -61,10 +74,15 @@ writeFileSync(
 );
 
 const { NativePluginCompiler } = await import(new URL("../dist/index.js", import.meta.url));
-const compiled = new NativePluginCompiler({ sourceDir: fileURLToPath(new URL("../", import.meta.url)) }).compile();
+new NativePluginCompiler({ sourceDir: fileURLToPath(new URL("../", import.meta.url)) }).compile();
 const codex = new NativePluginCompiler({ sourceDir: fileURLToPath(new URL("../", import.meta.url)) }).compile("codex");
 for (const diagnostic of codex.diagnostics) process.stderr.write(`Codex: ${diagnostic}\n`);
-const pluginUrl = new URL("../.claude-plugin/plugin.json", import.meta.url);
-const plugin = JSON.parse(readFileSync(pluginUrl, "utf8"));
-plugin.agents = compiled.agents.map((name) => `./dist/claude/agents/${name}.md`);
-writeFileSync(pluginUrl, `${JSON.stringify(plugin, null, 2)}\n`);
+// Switch native catalogs only once both complete targets exist. Release commits
+// these generated catalogs together with their targets, preserving the previous
+// installation path until that commit reaches main.
+for (const [host, destination] of [["claude", "../.claude-plugin/marketplace.json"], ["codex", "../.agents/plugins/marketplace.json"]]) {
+  const path = fileURLToPath(new URL(destination, import.meta.url));
+  mkdirSync(fileURLToPath(new URL("./", new URL(destination, import.meta.url))), { recursive: true });
+  copyFileSync(new URL(`../adapters/${host}/marketplace.json`, import.meta.url), path);
+}
+rmSync(new URL("../.claude-plugin/plugin.json", import.meta.url), { force: true });

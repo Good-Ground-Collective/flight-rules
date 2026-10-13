@@ -2,3 +2,8 @@ node_modules
 .claude
 docs/superpowers/
 dist/
+bin/
+contracts/code-review/*.schema.json
+.claude-plugin/marketplace.json
+.claude-plugin/plugin.json
+.agents/plugins/marketplace.json
