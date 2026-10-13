@@ -64,6 +64,12 @@ If the input is ambiguous, resolve a real file path as an RFC file; otherwise tr
 
 Each invocation moves the work **exactly one altitude down**. Tickets come out of the epic hop already executable — depth comes from the **fan-out going deep**, not a second per-ticket pass. Starting from an initiative RFC that yields 5 epics × 5 tickets: `1` (initiative→epics) + `5` (each epic→tickets) = **6 calls**, not 31. If per-ticket quality falls short, turn up **fan-out depth/breadth** — never add a fourth altitude.
 
+## Orchestration context
+
+Read `flight-rules doc orchestration-interface` and `flight-rules doc native-orchestration`. Establish one caller context for the input node/RFC, active checkout, fixed base and run ID; use attempt 1 for independent research briefs. Give each brief its own dispatch ID. Research `depth` means survey/deep analysis, not worker nesting depth. Invoke any sibling skill in this caller context, without consuming another worker level.
+
+Human questions and the creation go-ahead require invocation-level `allowHumanQuestions: true` and supported `ask`. Without that opt-in, return `QUESTIONS_DISABLED` with the unresolved decision; unavailable host questions return `QUESTIONS_UNAVAILABLE`. Do not publish a question or mutate the tracker to bypass this boundary. When opted in, wait for an actual answer and honor already supplied answers/authorization.
+
 ## Working with the human
 
 You are a staff engineer working **with** a PM — not a batch job. Decompose confidently when the picture is clear, but **check in rather than guess** when it isn't.
@@ -110,13 +116,15 @@ Turn each sketched item into a **research brief** for the #22 `research-agent`:
 
 Add one or two **cross-cutting briefs** for shared concerns the sketch implies (a data model, an auth boundary, an existing convention all children must follow).
 
-### 4. Fan out the research — in parallel
+### 4. Fan out the research — in bounded batches
 
-Dispatch **all briefs at once** (concurrently, in a single batch) to the `research-agent`. Each is single-shot: one brief in, one mode-typed findings report out. Do not dispatch serially; do not fold them into one mega-brief. Keep the batch reasonable (≈ one per child plus the cross-cutting briefs).
+Use `dispatchMany` for the separate briefs addressed to `research-agent`. Admit at most the smaller of the explicit batch bound and the host's observed available slots. Refresh current usage before each launch and reserve its slot immediately, including launches the host has not yet counted. Wait for every worker in a batch and reconcile/release its occupied host capacity before launching the next batch. The shared `BoundedDispatchQueue` implements this admission and report-ordering policy for programmatic consumers; native parents follow the same decisions through their host tools.
+
+One available slot means one brief at a time, preserving every separate input. Zero capacity with no running batch returns `CAPACITY_EXHAUSTED`; unknown bounds return `LIMITS_UNKNOWN`; insufficient nesting returns `DEPTH_EXCEEDED`. Return the named remedy, never change global/project caps, assume unlimited workers, merge briefs or do research inline to conceal unavailable dispatch. Missing required capabilities also stop before dispatch.
 
 **Dispatch `research-agent` at its declared escalated tier**, deliberately. Research is the one stage in this pipeline with no gate downstream: an implementation is checked criterion-by-criterion by `code-verifier` before it can reach a PR, but a findings report goes straight into the Guided Walkthrough and from there into every ticket derived from it. An error here is amplified, not caught. It is also the cheapest stage — a handful of single-shot, read-only dispatches sitting in front of a per-ticket, multi-turn, up-to-three-attempt execution loop. Do not route by `depth` or `mode` to save money; the saving is a rounding error and the rule is one more thing to get wrong. If a human explicitly requests a cheaper survey, select a named standard-tier registration supplied by the adapter; if none exists, report that limitation rather than overriding the model at dispatch.
 
-Collect every findings report before synthesizing.
+Collect and validate every mode-specific findings report against its original dispatch ID and caller context before synthesizing. Preserve input order even when workers finish out of order. A failure, cancellation or malformed report remains attached to its brief and stops synthesis with the named reason; do not invent findings for it.
 
 ### 5. Synthesize the breakdown
 

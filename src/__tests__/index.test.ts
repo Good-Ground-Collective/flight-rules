@@ -22,6 +22,8 @@ describe('public library surface', () => {
       'HandoffRecordSchema',
       'ImplementationRunSchema',
       'VerifiedImplementationLoop',
+      'BoundedDispatchQueue',
+      'InvalidDispatchQueueStateError',
       'AgentCapabilitySchema',
       'AgentFrontmatterSchema',
       'AttachmentSchema',

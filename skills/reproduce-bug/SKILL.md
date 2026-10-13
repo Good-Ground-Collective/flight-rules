@@ -11,6 +11,12 @@ This is the skill that turns a landed bug into a document a human can act on. Yo
 
 **Terminal state:** the ticket carries a Bug Report body per the output of `flight-rules doc bug-report-format`, a comment with the before/after evidence inline, and exactly one of `Agentic-Reproduction-Success` or `Agentic-Reproduction-Failure`; the user holds a run summary with the outcome, the label, the evidence paths, and any open questions.
 
+## Orchestration context
+
+Read `flight-rules doc orchestration-interface` and `flight-rules doc native-orchestration`. Preserve or initialize the ticket's caller context (run/task IDs, active checkout, working directory, fixed base and attempt 1). Use `dispatch` with the named `qa-engineer` registration and retain the original request beside its role report. Missing capability, unavailable dispatch or exhausted depth is a named stop before any ticket label/write. If a later report has a mismatched identity or invalid shape, follow Error handling to clear the in-progress label and stop. Invoke sibling skills in the same caller context, without an extra worker level.
+
+This invocation is unattended: `allowHumanQuestions` is always false. Return missing inputs as `needs`/`openQuestions` and a named failure; never invoke `ask`, publish a question or infer an answer. A failed execution or malformed report cannot stand in for reproduction evidence.
+
 ## Preconditions
 
 - You are handed a **ticket id**.

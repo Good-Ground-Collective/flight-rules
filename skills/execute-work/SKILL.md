@@ -11,6 +11,12 @@ This is the skill that builds the thing. You are handed a **ticket id**; you han
 
 **Terminal state:** the PR is open and carries an autonomous charter review, the ticket sits in the tracker's in-review status, and the user is holding a run summary they can grade.
 
+## Orchestration context
+
+Read `flight-rules doc orchestration-interface` and `flight-rules doc native-orchestration` before dispatch. Initialize one run context with the ticket ID, unique run ID, active checkout root, working directory, fixed base and attempt 1, or preserve the context supplied by `execute-wave`. Select agents by registry name through `dispatch`, validate each role report with its original request identity, and retain the paired receipts across retries. An unavailable dispatch is a named stop, never inline replacement work.
+
+Human questions require invocation-level `allowHumanQuestions: true` and supported `ask`; otherwise every instruction below to ask means return `QUESTIONS_DISABLED` or `QUESTIONS_UNAVAILABLE` with the unresolved question. When opted in, wait for an actual answer before dependent work. Existing user answers and authorizations remain valid; do not ask again for an already settled decision. Invoke sibling skills in this caller context, without adding a worker nesting level.
+
 ## Preconditions
 
 - You are handed a **ticket id**, and optionally a **base branch**. `execute-wave` supplies the base when it drives you as one ticket of a wave; a human invoking you directly normally doesn't.
@@ -215,7 +221,7 @@ Do not include your own opinion on how to build it. The walkthrough and the char
 
 ### 6. The implement / verify loop — hard maximum 3 iterations
 
-Dispatch the two agents in strict alternation. Count iterations out loud; you will report the count.
+Dispatch the two agents in strict alternation. Count iterations out loud; you will report the count. Follow `VerifiedImplementationLoop` from the shared contract: `next` derives the implementation request from paired receipts and `verify` derives the independent verifier request. Native parents apply the same transitions through their available dispatch tools. Check current capability evidence before each dispatch; three attempts never imply three concurrent workers or three levels of nesting.
 
 **a. Dispatch the implementer selected in the table below** with the brief from step 5. Report the step first, with `--state caution` on iterations 2 and 3:
 
@@ -274,7 +280,7 @@ for a layered body, or
 flight-rules ticket get <id> --section fixed-when
 ```
 
-for a bug report. Either returns `{id, section, markdown, items:[{text,done}]}`. Hand the verifier the items as its criteria and nothing that could bias it — **not** the implementer's `summary`, `approach`, or `testsRun`. Its contract permits `filesChanged` as a map of _where to look_; never pass it as a claim that the work is done. A verifier that has read the implementer's victory lap is not an independent check.
+for a bug report. Either returns `{id, section, markdown, items:[{text,done}]}`. Compare the items to the original ordered contract from step 1; a changed contract stops this run for a caller decision, rather than silently changing what a retry must satisfy. Hand the verifier the original criteria and the union of changed paths across attempts as `filesChanged: [{ path }]` — **not** the implementer's `summary`, `approach`, `testsRun` or change descriptions. Require the verifier to quote every criterion exactly once, in its original order, so each verdict binds to its criterion without interpreting a paraphrase. A verifier that has read the implementer's victory lap is not an independent check.
 
 It returns:
 
@@ -289,7 +295,7 @@ charterConcerns:
 verified: true | false
 ```
 
-**c. Read `verified`, then branch in this order:**
+**c. Validate the report and handoff before reading `verified`:** reject mismatched context/attempt, missing or altered criteria, and a `verified` flag that disagrees with the itemized verdicts. Malformed or failed execution is a named stop, not a verifier FAIL. Surface any `openQuestions` and stop before shipping or retrying. Then branch in this order:
 
 1. **`verified: true`** → exit the loop and ship (step 7).
 2. **Any `UNVERIFIABLE` verdict** → **stop and ask the user**, before spending another iteration. UNVERIFIABLE takes precedence over FAIL. The verifier also reports `verified: false` in this case, so do not let that pull you into a retry: an UNVERIFIABLE criterion is untestable _as written_, which is a ticket bug the implementer cannot fix with code. Re-dispatching burns an iteration of a hard-capped three and changes nothing.

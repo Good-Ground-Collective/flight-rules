@@ -70,3 +70,5 @@ export { ImplementationReportSchema, VerificationReportSchema, CriterionResultSc
 export type { ImplementationReport, VerificationReport, CriterionResult, HandoffRecord, ImplementationRun } from './orchestration/implementation-loop.schema.js'
 export { VerifiedImplementationLoop } from './orchestration/implementation-loop.js'
 export type { ImplementationLoop, ImplementationDecision, VerificationDecision, StoppedImplementation } from './orchestration/implementation-loop.js'
+export { BoundedDispatchQueue, InvalidDispatchQueueStateError } from './orchestration/dispatch-queue.js'
+export type { DispatchQueue, DispatchAdmission } from './orchestration/dispatch-queue.js'

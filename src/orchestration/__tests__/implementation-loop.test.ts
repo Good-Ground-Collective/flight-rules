@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { VerifiedImplementationLoop } from "./implementation-loop.js";
+import { VerifiedImplementationLoop } from "../implementation-loop.js";
 import {
   ImplementationReportSchema,
   type HandoffRecord,
   type ImplementationReport,
   type ImplementationRun,
   type VerificationReport,
-} from "./implementation-loop.schema.js";
-import type { DispatchRequest } from "./orchestration.schema.js";
+} from "../implementation-loop.schema.js";
+import type { DispatchRequest } from "../orchestration.schema.js";
 
 const loop = new VerifiedImplementationLoop();
 function run(): ImplementationRun {
