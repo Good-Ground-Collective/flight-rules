@@ -44,9 +44,13 @@ Installation copies missing definitions and accepts identical files. It checks e
 
 `agents status` returns `evidence: "files-only"`. Confirm actual native discovery in the fresh host, then supply observed registration and permission evidence to `flight-rules check --workflow ... --runtime-file ...` as described in [workflow-preflight](./workflow-preflight.md). A successful copy cannot establish model availability, dispatch access, occupancy, or network permission.
 
+For project registrations, trust must apply to the actual workflow checkout. Trusting another scratch repository or the marketplace directory is insufficient. In the E5 live proof, valid role files remained unselectable until the operator trusted that specific test checkout; the spawn tool then exposed its `agent_type` selector. Inspect the live tool schema: a generic `task_name` label is not proof that a named registration can be selected. Do not automatically trust arbitrary repositories to make the check pass.
+
 ## Evidence boundaries
 
 Implementation targets inspected here: Codex CLI 0.162.1 and Claude Code 2.1.296. Recheck native commands when versions differ. Deterministic tests cover host selection, source integrity, repeat installation, conflicts, settings precedence and worktree fallback. Native discovery and the full model-driven RFC → breakdown → implementation proof are recorded separately; the latter belongs to E5's workflow proof ticket #250.
+
+See the [installed workflow proof](./installed-workflow-proof.md) for reproduction commands, real verifier failure/retry evidence and the actual human decision round trip. Its model execution remains separate from the discovery-only checks below.
 
 Run `npm run test:installation:native` with both native clients installed. The script installs local marketplace copies into temporary host configuration directories, checks Claude's initialization registry, checks Codex's installed skill registry, and tests each Codex role with a malformed negative control before restoring it. It sends no model turns. Temporary evidence remains at the reported scratch path for inspection; remove that directory when finished.
 
