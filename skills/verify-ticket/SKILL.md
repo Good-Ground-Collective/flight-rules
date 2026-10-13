@@ -103,7 +103,7 @@ Hand the tester the `items[].text` numbered.
 
 ### 5. Dispatch the tester
 
-Dispatch the **`qa-engineer`** agent in **`verify` mode**, **with `model: sonnet`** passed explicitly. Verify follows a recorded script rather than locating a symptom's layer from scratch, so it runs the cheap tier — the agent declares `opus` for reproduction, and this dispatch overrides it. Hand the agent:
+Dispatch the **`qa-engineer-verify`** agent in **`verify` mode**. Verify follows a recorded script rather than locating a symptom's layer from scratch, so this named registration uses the standard tier and shares the QA prompt with the escalated reproduction registration. Do not override its model at dispatch. Hand the agent:
 
 - the **numbered contract items** — Fixed When for a bug, Acceptance Criteria for a story;
 - for a bug, the recorded **Steps To Reproduce** and **Root Cause**, verbatim;
@@ -165,8 +165,8 @@ Give the user, in order: the detected format, the gate result, the per-item verd
 - **Never fix code or data.** A reversible flip the tester captures, observes, and restores is not a fix; anything you would edit to make an item pass is out of bounds.
 - **Never re-discover a bug's steps.** The tester replays the recorded reproduction (Q-6). If the steps no longer match the UI, that is a FAIL item with that evidence — you post it, you do not go hunting for a different symptom.
 - **Every tracker write goes through `flight-rules`** — `ticket label` and `ticket comment`, never the Jira REST API or `gh`. Read-only inspection with plain `flight-rules ticket get` is fine.
-- **The tester never writes; you do.** The `qa-engineer` agent hands back a verdict and files under the evidence directory and nothing else. Comments and labels are yours.
-- **No `AskUserQuestion` in the happy path.** Missing QA instructions or a missing credential is a stop with a named reason, not a question.
+- **The tester never writes; you do.** The `qa-engineer-verify` agent hands back a verdict and files under the evidence directory and nothing else. Comments and labels are yours.
+- **No human questions in the happy path.** Missing QA instructions or a missing credential is a stop with a named reason, not a question.
 - **Success and failure are each exactly one `ticket label` call** that removes the lock and adds the outcome in the same invocation.
 
 ## Error handling

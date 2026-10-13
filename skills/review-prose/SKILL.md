@@ -125,7 +125,7 @@ with no file.
 
 **Inline text** — show the rewritten text. Nothing to apply.
 
-**A file** — apply each change with the Edit tool, using `before` as the exact
+**A file** — apply each change through file editing, using `before` as the exact
 match string and `after` as the replacement. Then:
 
 1. **A `before` that doesn't match** — do not fuzzy-match it, and do not hand-repair it. Drop the change and list it as dropped.

@@ -31,6 +31,7 @@
     "docs/",
     "skills/",
     "agents/",
+    "adapters/",
     ".claude-plugin/",
     "dist/",
     "contracts/"
@@ -64,7 +65,8 @@
             "package.json",
             ".claude-plugin/plugin.json",
             "bin/flight-rules",
-            "bin/flight-rules.mjs"
+            "bin/flight-rules.mjs",
+            "dist/claude/agents/*.md"
           ],
           "message": "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}"
         }

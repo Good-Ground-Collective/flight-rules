@@ -1056,7 +1056,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.66.0";
+var appVersion = false ? "0.0.0-dev" : "1.67.0";
 
 // src/shared/ariadne/review-packet.schema.ts
 import { z as z11 } from "zod";
@@ -3137,8 +3137,8 @@ var LayeredBodyAdfConverter = class {
   }
   /** Looks up a target's basename as an OWN entry, so inherited names (`constructor`, `__proto__`) never resolve. */
   mediaByName(target, media) {
-    const basename4 = target.slice(target.lastIndexOf("/") + 1);
-    return Object.hasOwn(media, basename4) ? media[basename4] : void 0;
+    const basename5 = target.slice(target.lastIndexOf("/") + 1);
+    return Object.hasOwn(media, basename5) ? media[basename5] : void 0;
   }
   /** The ADF block type an mdast node maps to, or `''` when it only degrades to literal text. */
   adfType(node) {
@@ -5204,6 +5204,7 @@ var AgentFrontmatterSchema = z24.strictObject({
     { message: "duplicate capability" }
   ),
   model: ModelTierSchema,
+  modelReason: z24.string().trim().min(1).optional(),
   reasoning: z24.enum(reasoningLevels).optional(),
   sandbox: z24.strictObject({
     fs: z24.enum(["read-only", "workspace-write"]),
@@ -5215,6 +5216,10 @@ var AgentFrontmatterSchema = z24.strictObject({
   }).optional(),
   "x-claude": z24.strictObject({ color: z24.enum(claudeAgentColors).optional() }).optional()
 });
+var AgentRegistrationSchema = AgentFrontmatterSchema.refine(
+  (agent) => agent.model !== "expert" || agent.modelReason !== void 0,
+  { message: "expert tier requires modelReason", path: ["modelReason"] }
+);
 
 // src/agents/agent-frontmatter/agent-frontmatter.ts
 import { parse as parseYaml3 } from "yaml";
@@ -5235,6 +5240,107 @@ var YamlAgentFrontmatterParser = class {
   }
 };
 var agentFrontmatterParser = new YamlAgentFrontmatterParser();
+
+// src/agents/agent-registry/agent-registry.ts
+import { readFileSync as readFileSync9, readdirSync as readdirSync4 } from "node:fs";
+import { basename as basename4, join as join10 } from "node:path";
+import { z as z25 } from "zod";
+var AgentNameSchema = AgentFrontmatterSchema.shape.name;
+var AgentVariantSchema = z25.strictObject({
+  name: AgentNameSchema,
+  extends: AgentNameSchema,
+  description: AgentFrontmatterSchema.shape.description,
+  model: ModelTierSchema,
+  modelReason: z25.string().trim().min(1).optional()
+});
+var AgentVariantsSchema = z25.array(AgentVariantSchema);
+var InvalidAgentDefinitionError = class extends Error {
+  name = "InvalidAgentDefinitionError";
+};
+var FileAgentRegistry = class {
+  load(directory) {
+    const agents = readdirSync4(directory, { withFileTypes: true }).filter((entry) => entry.isFile() && entry.name.endsWith(".md")).sort((a, b) => a.name.localeCompare(b.name)).map((entry) => {
+      const markdown = readFileSync9(join10(directory, entry.name), "utf8");
+      const frontmatter = AgentRegistrationSchema.parse(agentFrontmatterParser.parse(markdown));
+      const body = markdown.replace(/^---\r?\n[\s\S]*?^---(?:\r?\n|$)/m, "");
+      if (frontmatter.name !== basename4(entry.name, ".md") || body.trim() === "") {
+        throw new InvalidAgentDefinitionError(`Agent ${entry.name} needs a matching name and a nonempty prompt`);
+      }
+      return { frontmatter, body };
+    });
+    const canonical = new Map(agents.map((agent) => [agent.frontmatter.name, agent]));
+    const names = new Set(canonical.keys());
+    const variants = AgentVariantsSchema.parse(JSON.parse(readFileSync9(join10(directory, "variants.json"), "utf8")));
+    for (const variant of variants) {
+      const base = canonical.get(variant.extends);
+      if (base === void 0 || names.has(variant.name)) {
+        throw new InvalidAgentDefinitionError(`Variant ${variant.name} needs a unique name and canonical base ${variant.extends}`);
+      }
+      const { name, description, model, modelReason } = variant;
+      const frontmatter = AgentRegistrationSchema.parse({
+        ...base.frontmatter,
+        name,
+        description,
+        model,
+        modelReason
+      });
+      agents.push({ frontmatter, body: base.body });
+      names.add(variant.name);
+    }
+    return agents.sort((a, b) => a.frontmatter.name.localeCompare(b.frontmatter.name));
+  }
+};
+
+// src/agents/agent-emitter/claude-agent-emitter.ts
+import { stringify as stringifyYaml3 } from "yaml";
+import { z as z26 } from "zod";
+
+// src/agents/agent-emitter/agent-emitter.ts
+var UnsupportedAgentSettingError = class extends Error {
+  name = "UnsupportedAgentSettingError";
+};
+
+// src/agents/agent-emitter/claude-agent-emitter.ts
+var ModelBindingsSchema = z26.strictObject({
+  standard: z26.string().trim().min(1),
+  escalated: z26.string().trim().min(1),
+  expert: z26.string().trim().min(1)
+});
+var ClaudeAgentEmitterPropsSchema = z26.strictObject({ models: ModelBindingsSchema });
+var AgentDefinitionSchema = z26.strictObject({
+  frontmatter: AgentRegistrationSchema,
+  body: z26.string().refine((body) => body.trim() !== "", "agent prompt must not be empty")
+});
+var MarkdownClaudeAgentEmitter = class {
+  models;
+  constructor(props) {
+    this.models = ClaudeAgentEmitterPropsSchema.parse(props).models;
+  }
+  emit(agent) {
+    const { frontmatter, body } = AgentDefinitionSchema.parse(agent);
+    if (frontmatter.sandbox !== void 0 || frontmatter.dispatch !== void 0) {
+      throw new UnsupportedAgentSettingError(`${frontmatter.name}: sandbox and dispatch restrictions need a runtime adapter`);
+    }
+    const native = {
+      name: frontmatter.name,
+      description: frontmatter.description,
+      tools: frontmatter.capabilities.flatMap((capability) => this.tools(capability)).join(", "),
+      model: this.models[frontmatter.model],
+      ...frontmatter.reasoning === void 0 ? {} : { effort: frontmatter.reasoning },
+      ...frontmatter["x-claude"]?.color === void 0 ? {} : { color: frontmatter["x-claude"].color }
+    };
+    return `---
+${stringifyYaml3(native, { lineWidth: 0 })}---
+${body}`;
+  }
+  tools(capability) {
+    if (capability === "read") return ["Glob", "Grep", "Read"];
+    if (capability === "edit") return ["Write", "Edit"];
+    if (capability === "shell") return ["Bash"];
+    if (capability === "web") return ["WebSearch", "WebFetch"];
+    throw new UnsupportedAgentSettingError(`Worker agent capability ${capability} needs an orchestration adapter`);
+  }
+};
 export {
   AgentCapabilitySchema,
   AgentFrontmatterSchema,
@@ -5261,13 +5367,16 @@ export {
   EntityMetadataSchema,
   EnvLoader,
   EpicSchema,
+  FileAgentRegistry,
   FileDocResolver,
   GhOutputParseError,
   GhPullRequestHost,
   GitHubTaskTracker,
   InitiativeSchema,
+  InvalidAgentDefinitionError,
   JiraTaskTracker,
   LayeredBodyAdfConverter,
+  MarkdownClaudeAgentEmitter,
   MediaLookupSchema,
   MediaRefSchema,
   ModelTierSchema,
@@ -5281,6 +5390,7 @@ export {
   TicketSchema,
   TrackerEvidenceService,
   TrackerUserSchema,
+  UnsupportedAgentSettingError,
   UnsupportedTrackerOperationError,
   UpdateEpicInputSchema,
   UpdateInitiativeInputSchema,

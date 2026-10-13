@@ -51394,6 +51394,7 @@ var AgentFrontmatterSchema = external_exports.strictObject({
     { message: "duplicate capability" }
   ),
   model: ModelTierSchema,
+  modelReason: external_exports.string().trim().min(1).optional(),
   reasoning: external_exports.enum(reasoningLevels).optional(),
   sandbox: external_exports.strictObject({
     fs: external_exports.enum(["read-only", "workspace-write"]),
@@ -51405,6 +51406,10 @@ var AgentFrontmatterSchema = external_exports.strictObject({
   }).optional(),
   "x-claude": external_exports.strictObject({ color: external_exports.enum(claudeAgentColors).optional() }).optional()
 });
+var AgentRegistrationSchema = AgentFrontmatterSchema.refine(
+  (agent) => agent.model !== "expert" || agent.modelReason !== void 0,
+  { message: "expert tier requires modelReason", path: ["modelReason"] }
+);
 
 // src/agents/agent-frontmatter/agent-frontmatter.ts
 var MissingFrontmatterError = class extends Error {

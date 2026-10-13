@@ -17,6 +17,7 @@ export const AgentFrontmatterSchema = z.strictObject({
     { message: "duplicate capability" },
   ),
   model: ModelTierSchema,
+  modelReason: z.string().trim().min(1).optional(),
   reasoning: z.enum(reasoningLevels).optional(),
   sandbox: z.strictObject({
     fs: z.enum(["read-only", "workspace-write"]),
@@ -28,5 +29,11 @@ export const AgentFrontmatterSchema = z.strictObject({
   }).optional(),
   "x-claude": z.strictObject({ color: z.enum(claudeAgentColors).optional() }).optional(),
 });
+
+/** Authored registrations must explain use of the reserved tier; wire parsing remains backwards compatible. */
+export const AgentRegistrationSchema = AgentFrontmatterSchema.refine(
+  (agent) => agent.model !== "expert" || agent.modelReason !== undefined,
+  { message: "expert tier requires modelReason", path: ["modelReason"] },
+);
 
 export type AgentFrontmatter = z.infer<typeof AgentFrontmatterSchema>;

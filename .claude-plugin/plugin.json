@@ -5,10 +5,12 @@
   "repository": "https://github.com/good-ground-collective/flight-rules",
   "skills": "./skills/",
   "agents": [
-    "./agents/research-agent.md",
-    "./agents/code-implementation.md",
-    "./agents/code-verifier.md",
-    "./agents/tech-writer.md",
-    "./agents/qa-engineer.md"
+    "./dist/claude/agents/code-implementation.md",
+    "./dist/claude/agents/code-implementation-escalated.md",
+    "./dist/claude/agents/code-verifier.md",
+    "./dist/claude/agents/qa-engineer.md",
+    "./dist/claude/agents/qa-engineer-verify.md",
+    "./dist/claude/agents/research-agent.md",
+    "./dist/claude/agents/tech-writer.md"
   ]
 }
