@@ -12,6 +12,38 @@ afterEach(() => {
 const git = (cwd: string, ...args: string[]) =>
   execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
 
+describe("review policy charters", () => {
+  const policy = new FileReviewPolicy({ home: join(import.meta.dirname, "..", "..", "..") });
+  const ids = (paths?: string[]) => policy.load(paths ? { paths } : {}).charters.map(({ id }) => id);
+
+  it("loads the core and every language charter when no paths are given", () => {
+    expect(ids()).toEqual(expect.arrayContaining(["coding-charter", "coding-charter-typescript"]));
+    expect(ids()[0]).toBe("coding-charter");
+  });
+  it("selects language charters for the changed paths", () => {
+    expect(ids(["src/review.ts"])).toEqual(["coding-charter", "coding-charter-typescript"]);
+    expect(ids(["README.md"])).toEqual(["coding-charter"]);
+  });
+  it("lists every Tier A mandate of the selected charters", () => {
+    expect(policy.load({ paths: ["README.md"] }).tierA).toEqual(["M-1", "M-2", "M-10", "M-11"]);
+    expect(policy.load({ paths: ["src/review.ts"] }).tierA).toEqual([
+      "M-1",
+      "M-2",
+      "M-10",
+      "M-11",
+      "M-3",
+      "M-5",
+      "M-7",
+    ]);
+  });
+  it("renders the selected charters into one charter document, core first", () => {
+    const loaded = policy.load({ paths: ["src/review.ts"] });
+    expect(loaded.charter.indexOf("# Code Standards\n")).toBe(0);
+    expect(loaded.charter).toContain("# Code Standards: TypeScript");
+    expect(loaded.method).toContain("# Autonomous review method");
+  });
+});
+
 describe("trusted review context", () => {
   it("reads the pinned commit, not modified PR-head or working-tree rules, with path overrides", () => {
     const cwd = mkdtempSync(join(tmpdir(), "review-policy-"));

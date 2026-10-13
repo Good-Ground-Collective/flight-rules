@@ -90,7 +90,8 @@ try {
   for (const target of ["", "dist/claude", "dist/codex"]) {
     const location = join(packageRoot, target);
     assert.equal(run(process.execPath, [join(location, "bin/flight-rules.mjs"), "--version"], scratch).trim(), version);
-    assert.equal(run(process.execPath, [join(location, "bin/flight-rules.mjs"), "doc", "coding-charter"], scratch), readFileSync(join(location, "docs/coding-charter.md"), "utf8") + "\n");
+    const coreCharter = readFileSync(join(location, "docs/coding-charter.md"), "utf8");
+    assert.equal(run(process.execPath, [join(location, "bin/flight-rules.mjs"), "doc", "coding-charter"], scratch), coreCharter.endsWith("\n") ? coreCharter : `${coreCharter}\n`);
     assert.deepEqual(run(process.execPath, [join(location, "bin/flight-rules.mjs"), "charter", "src/example.ts", "--path"], scratch).trim().split("\n"), [
       join(location, "docs/coding-charter.md"), join(location, "docs/coding-charter-typescript.md"),
     ]);

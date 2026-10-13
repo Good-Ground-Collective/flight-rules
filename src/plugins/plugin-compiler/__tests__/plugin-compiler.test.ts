@@ -84,7 +84,8 @@ describe("NativePluginCompiler", () => {
     const relocated = join(parent, "relocated-plugin");
     renameSync(result.directory, relocated);
     const output = execFileSync(process.execPath, [join(relocated, "bin/flight-rules.mjs"), "doc", "coding-charter"], { cwd: tmpdir(), env: { ...process.env, FLIGHT_RULES_HOME: "" }, encoding: "utf8" });
-    expect(output).toBe(readFileSync(join(relocated, "docs/coding-charter.md"), "utf8") + "\n");
+    const coreCharter = readFileSync(join(relocated, "docs/coding-charter.md"), "utf8");
+    expect(output).toBe(coreCharter.endsWith("\n") ? coreCharter : `${coreCharter}\n`);
     const path = execFileSync(process.execPath, [join(relocated, "bin/flight-rules.mjs"), "doc", "coding-charter", "--path"], { env: { ...process.env, FLIGHT_RULES_HOME: "" }, encoding: "utf8" });
     expect(path.trim()).toBe(join(relocated, "docs/coding-charter.md"));
     const charterPaths = execFileSync(process.execPath, [join(relocated, "bin/flight-rules.mjs"), "charter", "src/example.ts", "--path"], { cwd: tmpdir(), env: { ...process.env, FLIGHT_RULES_HOME: "" }, encoding: "utf8" });

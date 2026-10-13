@@ -36,6 +36,6 @@ export type {
 export { JsonReviewCodec } from "./review-codec.js";
 export type { ReviewCodec } from "./review-codec.js";
 export { FileReviewPolicy, ReviewPolicyError } from "./review-policy.js";
-export type { ReviewPolicy, RepositoryReviewContext } from "./review-policy.js";
+export type { ReviewPolicy, LoadedReviewPolicy, RepositoryReviewContext } from "./review-policy.js";
 export { GitHubReviewVerifier, GhReviewGitHubApi } from "./github-review-verifier.js";
 export type { ReviewGitHubApi, GitHubReviewVerifierProps } from "./github-review-verifier.js";
