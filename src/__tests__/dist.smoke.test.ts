@@ -115,6 +115,32 @@ describe("built library smoke test", () => {
     expect(JSON.parse(output)).toEqual({ policy: true, full: true, transport: true });
   });
 
+  it("keeps Deep Agents optional and loads it only through the isolated SDK entry", () => {
+    const output = execFileSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `
+      import { DeepAgentsWorkerRuntime } from '@good-ground-collective/flight-rules/sdk/deepagents'
+      console.log(JSON.stringify({ runtime: typeof DeepAgentsWorkerRuntime }))
+    `,
+      ],
+      { cwd: root, encoding: "utf8" },
+    );
+    expect(JSON.parse(output)).toEqual({ runtime: "function" });
+    for (const entry of ["index.js", "sdk.js", "review.js"]) {
+      const bundle = readFileSync(new URL(entry, dist), "utf8");
+      expect(bundle).not.toMatch(/from ["'](?:deepagents|langchain|@langchain\/)/);
+    }
+    expect(readFileSync(new URL("sdk-deepagents.js", dist), "utf8")).toMatch(
+      /from ["']deepagents["']/,
+    );
+    expect(readFileSync(new URL("sdk/deepagents/index.d.ts", dist), "utf8")).toContain(
+      "DeepAgentsWorkerRuntime",
+    );
+  });
+
   it("loads canonical resources from relocated Claude and Codex installations", async () => {
     for (const host of ["claude", "codex"]) {
       const fileInstructionCatalog = new FileInstructionCatalog({
@@ -144,6 +170,10 @@ describe("built library smoke test", () => {
       "./package.json": "./package.json",
       "./review": { types: "./dist/code-review/index.d.ts", import: "./dist/review.js" },
       "./sdk": { types: "./dist/sdk/index.d.ts", import: "./dist/sdk.js" },
+      "./sdk/deepagents": {
+        types: "./dist/sdk/deepagents/index.d.ts",
+        import: "./dist/sdk-deepagents.js",
+      },
       "./review/schema": "./contracts/code-review/review.v1.schema.json",
       "./review/transport-schema": "./contracts/code-review/review.v1.transport.schema.json",
     });

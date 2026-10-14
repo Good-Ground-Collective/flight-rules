@@ -80,6 +80,15 @@ await esbuild.build({
 });
 
 await esbuild.build({
+  entryPoints: [fileURLToPath(new URL("../src/sdk/deepagents/index.ts", import.meta.url))],
+  bundle: true,
+  platform: "node",
+  format: "esm",
+  packages: "external",
+  outfile: fileURLToPath(new URL("../dist/sdk-deepagents.js", import.meta.url)),
+});
+
+await esbuild.build({
   entryPoints: [fileURLToPath(new URL("../src/code-review/index.ts", import.meta.url))],
   bundle: true,
   platform: "node",
