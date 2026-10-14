@@ -12,6 +12,7 @@ import {
   type OperationDescriptor,
   type OperationRegistry,
 } from "../operations/operation-registry.js";
+import { ReviewOperationsLaunchPropsSchema } from "../operations/review-operations.js";
 import { DefaultFlightRules } from "../flight-rules/flight-rules.js";
 import { configScopes } from "../shared/config-store.js";
 import {
@@ -31,6 +32,11 @@ const McpLaunchPropsSchema = z.strictObject({
     .array(z.enum(["read", "write", "network", "process"]))
     .default(["read", "process", "network"]),
   allowedConfigScopes: z.array(z.enum(configScopes)).default([]),
+  ...ReviewOperationsLaunchPropsSchema.pick({
+    trustedRef: true,
+    owners: true,
+    requireMapping: true,
+  }).shape,
 });
 
 export type McpLaunchProps = z.input<typeof McpLaunchPropsSchema>;
@@ -266,7 +272,14 @@ export class FlightRulesMcpServer implements McpProtocolServerFactory {
       ...core
         .gitConfigOperations({ scopes: this.props.allowedConfigScopes, roots: [cwd] })
         .operations(),
-      ...core.reviewOperations({ cwd }).operations(),
+      ...core
+        .reviewOperations({
+          cwd,
+          trustedRef: this.props.trustedRef,
+          owners: this.props.owners,
+          requireMapping: this.props.requireMapping,
+        })
+        .operations(),
     ];
   }
 

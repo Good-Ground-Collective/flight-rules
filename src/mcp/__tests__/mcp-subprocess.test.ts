@@ -1,6 +1,8 @@
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
+  chmodSync,
   cpSync,
   existsSync,
   mkdirSync,
@@ -54,13 +56,14 @@ const connect = async (
   args: string[] = [],
   mode: "auto" | "legacy" = "auto",
   executable = binary,
+  environmentOverrides: Record<string, string> = {},
 ): Promise<{ client: Client; transport: StdioClientTransport; stderr: string[] }> => {
   const stderr: string[] = [];
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [executable, "mcp", ...args],
     cwd,
-    env: isolatedEnvironment(configPath),
+    env: { ...isolatedEnvironment(configPath), ...environmentOverrides },
     stderr: "pipe",
   });
   transport.stderr?.on("data", (chunk: Buffer) => stderr.push(chunk.toString("utf8")));
@@ -87,6 +90,15 @@ describe("MCP stdio subprocess", () => {
       const toolNames = tools.map((tool) => tool.name);
       expect(toolNames).toContain("branch-name");
       expect(toolNames).not.toContain("ticket-get");
+
+      const unconfiguredReview = await client.callTool({
+        name: "review-context",
+        arguments: { contextPath: "CODE-REVIEW.md" },
+      });
+      expect(unconfiguredReview.structuredContent).toMatchObject({
+        status: "error",
+        error: { name: "MissingTrustedReviewRefError" },
+      });
 
       const safe = await client.callTool({
         name: "branch-name",
@@ -181,6 +193,167 @@ describe("MCP stdio subprocess", () => {
       await client.close();
       expect(transport.pid).toBeNull();
     }
+  });
+
+  it("uses host-pinned review context and owner mapping without accepting request authority", async () => {
+    const cwd = fixture();
+    execFileSync("git", ["init", "-q"], { cwd });
+    writeFileSync(join(cwd, "CODE-REVIEW.md"), "Pinned review guidance.\n");
+    execFileSync("git", ["add", "CODE-REVIEW.md"], { cwd });
+    execFileSync(
+      "git",
+      ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "trusted"],
+      { cwd },
+    );
+    const trustedRef = execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd,
+      encoding: "utf8",
+    }).trim();
+    writeFileSync(join(cwd, "CODE-REVIEW.md"), "Untrusted working tree edit.\n");
+
+    const ownersFile = join(cwd, "review-owners.json");
+    writeFileSync(ownersFile, JSON.stringify({ "security owner": ["trusted-owner"] }));
+    const bin = join(cwd, "fake-bin");
+    mkdirSync(bin);
+    const gh = join(bin, "gh");
+    writeFileSync(
+      gh,
+      `#!/usr/bin/env node
+const endpoint = process.argv[3];
+const responses = {
+  "/repos/acme/project/pulls/7": { head: { sha: "${trustedRef}" }, user: { id: 10 } },
+  "/repos/acme/project/issues/comments/33": {
+    id: 33,
+    user: { id: 20, login: "trusted-owner", type: "User" },
+    issue_url: "https://api.github.com/repos/acme/project/issues/7",
+    body: "Approved by the owner.",
+  },
+};
+if (!(endpoint in responses)) process.exit(2);
+process.stdout.write(JSON.stringify(responses[endpoint]));
+`,
+    );
+    chmodSync(gh, 0o755);
+    const { client, transport } = await connect(
+      cwd,
+      join(cwd, "flight-rules.yml"),
+      ["--review-ref", trustedRef, "--review-owners-file", ownersFile, "--require-review-mapping"],
+      "auto",
+      binary,
+      { PATH: `${bin}:${process.env.PATH ?? ""}` },
+    );
+
+    try {
+      const context = await client.callTool({
+        name: "review-context",
+        arguments: { contextPath: "CODE-REVIEW.md" },
+      });
+      expect(context.structuredContent).toMatchObject({
+        status: "success",
+        data: {
+          trustedRef,
+          sources: [{ path: "CODE-REVIEW.md", contents: "Pinned review guidance.\n" }],
+        },
+      });
+
+      const decisionRecord = {
+        v: 1,
+        schema_revision: 1,
+        finding: {
+          id: "f-0000000001",
+          path: "src/example.ts",
+          line: 1,
+          label: "issue",
+          type: "decide",
+          blocking: true,
+          severity: "major",
+          subject: "Keep the policy explicit.",
+          discussion: "A human owner must approve this choice.",
+          details: "Use the configured owner mapping.",
+          resolved_when: "The owner confirms the decision.",
+          decision_owner: "security owner",
+          decision_options: [
+            { id: "allow", description: "Allow the change." },
+            { id: "deny", description: "Keep the restriction." },
+          ],
+        },
+        status: "open",
+        evidence: [],
+      };
+      const review = {
+        contract_version: 1,
+        schema_revision: 1,
+        head_sha: trustedRef,
+        review_complete: true,
+        summary: "The owner approved the decision.",
+        outcome: "APPROVED",
+        outcome_reason: "All blocking decisions are resolved.",
+        remaining_risk: "No known remaining risk.",
+        findings: [],
+        prior_findings: [
+          {
+            id: "f-0000000001",
+            status: "resolved",
+            reason: "The configured owner approved.",
+            evidence: [
+              {
+                kind: "github_comment",
+                comment_id: 33,
+                url: "https://github.com/acme/project/pull/7#issuecomment-33",
+              },
+            ],
+            decision: { comment_id: 33, author_id: 20, option_id: "allow" },
+          },
+        ],
+      };
+      const planInput = { number: 7, repo: "acme/project", review, records: [decisionRecord] };
+      const plan = await client.callTool({ name: "review-plan", arguments: planInput });
+      expect(plan.structuredContent).toMatchObject({
+        status: "success",
+        data: {
+          outcome: "APPROVED",
+          records: [{ status: "resolved", finding: { decision_owner: "security owner" } }],
+        },
+      });
+
+      const changedAuthority = await client.callTool({
+        name: "review-plan",
+        arguments: { ...planInput, owners: { "security owner": ["attacker"] } },
+      });
+      expect(changedAuthority.isError).toBe(true);
+
+      const changedRef = await client.callTool({
+        name: "review-context",
+        arguments: { contextPath: "CODE-REVIEW.md", trustedRef: "b".repeat(40) },
+      });
+      expect(changedRef.isError).toBe(true);
+    } finally {
+      await client.close();
+      expect(transport.pid).toBeNull();
+    }
+  });
+
+  it("rejects malformed trusted review launch configuration before starting stdio", () => {
+    const cwd = fixture();
+    const configPath = join(cwd, "flight-rules.yml");
+    const ownersFile = join(cwd, "review-owners.json");
+    writeFileSync(ownersFile, JSON.stringify({ "security owner": "not-an-array" }));
+
+    const invalidRef = spawnSync(
+      process.execPath,
+      [binary, "mcp", "--review-ref", "not-a-full-sha"],
+      { cwd, env: isolatedEnvironment(configPath), encoding: "utf8" },
+    );
+    expect(invalidRef.status).not.toBe(0);
+    expect(invalidRef.stdout).toBe("");
+
+    const invalidOwners = spawnSync(
+      process.execPath,
+      [binary, "mcp", "--review-owners-file", ownersFile],
+      { cwd, env: isolatedEnvironment(configPath), encoding: "utf8" },
+    );
+    expect(invalidOwners.status).not.toBe(0);
+    expect(invalidOwners.stdout).toBe("");
   });
 
   it.each([
