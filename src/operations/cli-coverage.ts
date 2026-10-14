@@ -1,62 +1,156 @@
 import type { Command } from "commander";
 import { z } from "zod";
 import { CliRouteSchema, OperationIdSchema, type CliRoute } from "./operation.schema.js";
+import type { OperationCatalog } from "./operation-registry.js";
 
 const RouteDispositionSchema = z.discriminatedUnion("status", [
-  z.object({ status: z.literal("supported"), route: CliRouteSchema, operationId: OperationIdSchema }),
-  z.object({ status: z.literal("pending-migration"), route: CliRouteSchema, operationId: OperationIdSchema }),
+  z.object({
+    status: z.literal("supported"),
+    route: CliRouteSchema,
+    operationId: OperationIdSchema,
+  }),
+  z.object({
+    status: z.literal("pending-migration"),
+    route: CliRouteSchema,
+    operationId: OperationIdSchema,
+  }),
   z.object({ status: z.literal("excluded"), route: CliRouteSchema, reason: z.string().min(1) }),
 ]);
 const CliRouteCoveragePropsSchema = z.object({ entries: z.array(RouteDispositionSchema) });
 
 export type RouteDisposition = z.infer<typeof RouteDispositionSchema>;
 
+export interface CliRouteCoverage {
+  check(program: Command, catalog: OperationCatalog): CliRoute[];
+  assertComplete(program: Command, catalog: OperationCatalog): void;
+  list(): RouteDisposition[];
+}
+
 export class CliRouteCoverageError extends Error {
   override name = "CliRouteCoverageError";
 }
 
 /** Explicitly records how each executable CLI route is served by the shared core. */
-export class CliRouteCoverage {
+export class ManifestCliRouteCoverage implements CliRouteCoverage {
   private readonly entries: RouteDisposition[];
 
   constructor(props: z.input<typeof CliRouteCoveragePropsSchema>) {
     this.entries = CliRouteCoveragePropsSchema.parse(props).entries;
   }
 
-  check(program: Command): CliRoute[] {
-    const discovered = CliRouteCoverage.discover(program);
+  check(program: Command, catalog: OperationCatalog): CliRoute[] {
+    const discovered = ManifestCliRouteCoverage.discover(program);
     const byPath = new Map<string, RouteDisposition>();
     for (const entry of this.entries) {
-      const key = CliRouteCoverage.routeKey(entry.route.path);
+      const key = ManifestCliRouteCoverage.routeKey(entry.route.path);
       if (byPath.has(key)) throw new CliRouteCoverageError(`Duplicate route disposition: ${key}`);
       byPath.set(key, entry);
     }
 
-    const actual = new Set(discovered.map(route => CliRouteCoverage.routeKey(route.path)));
-    const missing = discovered.filter(route => !byPath.has(CliRouteCoverage.routeKey(route.path))).map(route => CliRouteCoverage.routeKey(route.path));
-    const stale = this.entries.filter(entry => !actual.has(CliRouteCoverage.routeKey(entry.route.path))).map(entry => CliRouteCoverage.routeKey(entry.route.path));
+    const discoveredKeys = discovered.map((route) => ManifestCliRouteCoverage.routeKey(route.path));
+    const actual = new Set(discoveredKeys);
+    if (actual.size !== discoveredKeys.length) {
+      const duplicate = discoveredKeys.find((key, index) => discoveredKeys.indexOf(key) !== index);
+      throw new CliRouteCoverageError(`Duplicate actionable CLI route: ${duplicate ?? "unknown"}`);
+    }
+
+    const missing = discovered
+      .filter((route) => !byPath.has(ManifestCliRouteCoverage.routeKey(route.path)))
+      .map((route) => ManifestCliRouteCoverage.routeKey(route.path));
+    const stale = this.entries
+      .filter((entry) => !actual.has(ManifestCliRouteCoverage.routeKey(entry.route.path)))
+      .map((entry) => ManifestCliRouteCoverage.routeKey(entry.route.path));
     if (missing.length > 0 || stale.length > 0) {
-      throw new CliRouteCoverageError(`CLI route coverage drift; missing: ${missing.join(", ") || "none"}; unknown: ${stale.join(", ") || "none"}`);
+      throw new CliRouteCoverageError(
+        `CLI route coverage drift; missing: ${missing.join(", ") || "none"}; unknown: ${stale.join(", ") || "none"}`,
+      );
     }
 
     for (const route of discovered) {
-      const entry = byPath.get(CliRouteCoverage.routeKey(route.path));
-      if (entry === undefined) throw new CliRouteCoverageError(`Missing disposition: ${CliRouteCoverage.routeKey(route.path)}`);
-      if (!CliRouteCoverage.sameAliases(route.aliases, entry.route.aliases)) {
-        throw new CliRouteCoverageError(`Alias coverage drift: ${CliRouteCoverage.routeKey(route.path)}`);
+      const entry = byPath.get(ManifestCliRouteCoverage.routeKey(route.path));
+      if (entry === undefined)
+        throw new CliRouteCoverageError(
+          `Missing disposition: ${ManifestCliRouteCoverage.routeKey(route.path)}`,
+        );
+      if (!ManifestCliRouteCoverage.sameAliases(route.aliases, entry.route.aliases)) {
+        throw new CliRouteCoverageError(
+          `Alias coverage drift: ${ManifestCliRouteCoverage.routeKey(route.path)}`,
+        );
       }
     }
+
+    this.checkCatalog(catalog.list(), byPath);
     return discovered;
   }
 
-  assertComplete(program: Command): void {
-    this.check(program);
-    const pending = this.entries.filter(entry => entry.status === "pending-migration").map(entry => CliRouteCoverage.routeKey(entry.route.path));
-    if (pending.length > 0) throw new CliRouteCoverageError(`Core operations remain pending migration: ${pending.join(", ")}`);
+  assertComplete(program: Command, catalog: OperationCatalog): void {
+    this.check(program, catalog);
+    const pending = this.entries
+      .filter((entry) => entry.status === "pending-migration")
+      .map((entry) => ManifestCliRouteCoverage.routeKey(entry.route.path));
+    if (pending.length > 0)
+      throw new CliRouteCoverageError(
+        `Core operations remain pending migration: ${pending.join(", ")}`,
+      );
   }
 
   list(): RouteDisposition[] {
-    return this.entries.map(entry => structuredClone(entry));
+    return this.entries.map((entry) => structuredClone(entry));
+  }
+
+  private checkCatalog(
+    operations: ReturnType<OperationCatalog["list"]>,
+    dispositions: Map<string, RouteDisposition>,
+  ): void {
+    const operationIds = new Set<string>();
+    const operationRoutes = new Set<string>();
+
+    for (const operation of operations) {
+      if (operationIds.has(operation.id))
+        throw new CliRouteCoverageError(`Duplicate executable operation id: ${operation.id}`);
+      operationIds.add(operation.id);
+
+      const key = ManifestCliRouteCoverage.routeKey(operation.cli.path);
+      if (operationRoutes.has(key))
+        throw new CliRouteCoverageError(`Duplicate executable operation route: ${key}`);
+      operationRoutes.add(key);
+
+      const disposition = dispositions.get(key);
+      if (disposition?.status !== "supported") {
+        throw new CliRouteCoverageError(
+          `Executable operation ${operation.id} has no supported CLI route: ${key}`,
+        );
+      }
+      if (
+        disposition.operationId !== operation.id ||
+        !ManifestCliRouteCoverage.sameAliases(operation.cli.aliases, disposition.route.aliases)
+      ) {
+        throw new CliRouteCoverageError(`Executable operation mapping mismatch: ${key}`);
+      }
+    }
+
+    for (const disposition of dispositions.values()) {
+      if (disposition.status !== "supported") continue;
+
+      const matchingOperations = operations.filter(
+        (operation) => operation.id === disposition.operationId,
+      );
+      if (matchingOperations.length !== 1) {
+        throw new CliRouteCoverageError(
+          `Supported CLI route ${ManifestCliRouteCoverage.routeKey(disposition.route.path)} must map to exactly one executable operation`,
+        );
+      }
+      const operation = matchingOperations[0];
+      if (
+        operation === undefined ||
+        ManifestCliRouteCoverage.routeKey(operation.cli.path) !==
+          ManifestCliRouteCoverage.routeKey(disposition.route.path)
+      ) {
+        throw new CliRouteCoverageError(
+          `Supported CLI route mapping mismatch: ${ManifestCliRouteCoverage.routeKey(disposition.route.path)}`,
+        );
+      }
+    }
   }
 
   static routeKey(path: string[]): string {
@@ -70,9 +164,10 @@ export class CliRouteCoverage {
   static discover(program: Command): CliRoute[] {
     const routes: CliRoute[] = [];
     const visit = (command: Command, parentPath: string[]): void => {
-      const currentPath = command.name() === program.name() && parentPath.length === 0
-        ? parentPath
-        : [...parentPath, command.name()];
+      const currentPath =
+        command.name() === program.name() && parentPath.length === 0
+          ? parentPath
+          : [...parentPath, command.name()];
       const actionHandler = Object.getOwnPropertyDescriptor(command, "_actionHandler")?.value;
       if (typeof actionHandler === "function") {
         const aliases = typeof command.aliases === "function" ? command.aliases() : [];
@@ -87,37 +182,119 @@ export class CliRouteCoverage {
 }
 
 const pendingRoutes = [
-  "charter", "competencies", "rfc dir", "rfc next-id", "qa instructions", "qa evidence-dir", "qa recipe",
-  "config path", "config show", "config set", "config unset", "check", "ticket get", "ticket transitions",
-  "users get", "tdd get", "tdd create", "epic get", "epic create", "epic edit", "epic plan", "epic review-plan",
-  "epic link-initiative", "initiative get", "initiative create", "initiative edit", "initiative plan", "initiative review-plan",
-  "ticket create", "ticket edit", "ticket block", "ticket unblock", "ticket status", "ticket comment", "ticket label",
-  "git commit", "git checkout", "git push", "commit-message", "branch-name", "pr create", "pr comment", "pr list",
-  "pr request-review", "review schema", "review validate", "review render", "review state", "review context", "review plan",
-  "board post heartbeat", "board post item", "board post activity", "board items", "packet create", "packet new-id",
-  "packet update", "packet get", "packet reviewers",
+  "charter",
+  "competencies",
+  "rfc dir",
+  "rfc next-id",
+  "qa instructions",
+  "qa evidence-dir",
+  "qa recipe",
+  "config path",
+  "config show",
+  "config set",
+  "config unset",
+  "check",
+  "ticket get",
+  "ticket transitions",
+  "users get",
+  "tdd get",
+  "tdd create",
+  "epic get",
+  "epic create",
+  "epic edit",
+  "epic plan",
+  "epic review-plan",
+  "epic link-initiative",
+  "initiative get",
+  "initiative create",
+  "initiative edit",
+  "initiative plan",
+  "initiative review-plan",
+  "ticket create",
+  "ticket edit",
+  "ticket block",
+  "ticket unblock",
+  "ticket status",
+  "ticket comment",
+  "ticket label",
+  "git commit",
+  "git checkout",
+  "git push",
+  "commit-message",
+  "branch-name",
+  "pr create",
+  "pr comment",
+  "pr list",
+  "pr request-review",
+  "review schema",
+  "review validate",
+  "review render",
+  "review state",
+  "review context",
+  "review plan",
+  "board post heartbeat",
+  "board post item",
+  "board post activity",
+  "board items",
+  "packet create",
+  "packet new-id",
+  "packet update",
+  "packet get",
+  "packet reviewers",
 ];
 
 const excludedRoutes = [
-  { path: ["hook", "pre-bash"], aliases: ["guard-commit"], reason: "Consumes Claude hook payloads and governs host shell commands." },
-  { path: ["hook", "board-heartbeat"], aliases: [], reason: "Consumes Claude PostToolUse payloads and runs as a host hook." },
-  { path: ["hook", "agent-dispatch"], aliases: [], reason: "Consumes Claude PreToolUse agent payloads for local session tracking." },
-  { path: ["hook", "agent-stop"], aliases: [], reason: "Consumes Claude SubagentStop payloads and reports host lifecycle events." },
-  { path: ["agents", "status"], aliases: [], reason: "Inspects native Codex registration files on the local host." },
-  { path: ["agents", "install"], aliases: [], reason: "Installs native Codex agent registrations into host-owned directories." },
-  { path: ["board", "login"], aliases: [], reason: "Provisions a machine-local Ariadne credential from interactive input." },
+  {
+    path: ["hook", "pre-bash"],
+    aliases: ["guard-commit"],
+    reason: "Consumes Claude hook payloads and governs host shell commands.",
+  },
+  {
+    path: ["hook", "board-heartbeat"],
+    aliases: [],
+    reason: "Consumes Claude PostToolUse payloads and runs as a host hook.",
+  },
+  {
+    path: ["hook", "agent-dispatch"],
+    aliases: [],
+    reason: "Consumes Claude PreToolUse agent payloads for local session tracking.",
+  },
+  {
+    path: ["hook", "agent-stop"],
+    aliases: [],
+    reason: "Consumes Claude SubagentStop payloads and reports host lifecycle events.",
+  },
+  {
+    path: ["agents", "status"],
+    aliases: [],
+    reason: "Inspects native Codex registration files on the local host.",
+  },
+  {
+    path: ["agents", "install"],
+    aliases: [],
+    reason: "Installs native Codex agent registrations into host-owned directories.",
+  },
+  {
+    path: ["board", "login"],
+    aliases: [],
+    reason: "Provisions a machine-local Ariadne credential from interactive input.",
+  },
   { path: ["board", "logout"], aliases: [], reason: "Removes a machine-local Ariadne credential." },
 ];
 
 /** Inventory of the existing 68 CLI routes; pending entries stay unavailable to operation consumers. */
-export const cliRouteCoverage = new CliRouteCoverage({
+export const cliRouteCoverage: CliRouteCoverage = new ManifestCliRouteCoverage({
   entries: [
     { status: "supported", route: { path: ["doc"], aliases: [] }, operationId: "doc" },
-    ...pendingRoutes.map(path => ({
+    ...pendingRoutes.map((path) => ({
       status: "pending-migration" as const,
       route: { path: path.split(" "), aliases: [] },
       operationId: `cli-${path.replaceAll(" ", "-")}`,
     })),
-    ...excludedRoutes.map(route => ({ status: "excluded" as const, route, reason: route.reason })),
+    ...excludedRoutes.map((route) => ({
+      status: "excluded" as const,
+      route,
+      reason: route.reason,
+    })),
   ],
 });

@@ -46,14 +46,23 @@ import type {
 } from "../orchestration/orchestration.schema.js";
 
 export {
-  OperationRegistry,
+  MapOperationRegistry,
   LaunchOperationAccessPolicy,
   OperationInputError,
   OperationOutputError,
   OperationAccessDeniedError,
   UnknownOperationError,
+  DuplicateOperationIdError,
+  OperationCliError,
 } from "../operations/operation-registry.js";
-export type { OperationDescriptor, OperationAccessPolicy, OperationHandlerResult } from "../operations/operation-registry.js";
+export type {
+  OperationDescriptor,
+  OperationAccessPolicy,
+  OperationHandlerResult,
+  OperationSummary,
+  OperationCatalog,
+  OperationRegistry,
+} from "../operations/operation-registry.js";
 export {
   OperationEffectSchema,
   OperationIdSchema,
@@ -61,10 +70,22 @@ export {
   OperationEnvelopeSchema,
   OperationErrorSchema,
 } from "../operations/operation.schema.js";
-export type { OperationEffect, OperationEnvelope, CliRoute } from "../operations/operation.schema.js";
-export { DocOperation, DocOperationInputSchema, DocOperationOutputSchema } from "../operations/doc-operation.js";
-export { CliRouteCoverage, CliRouteCoverageError, cliRouteCoverage } from "../operations/cli-coverage.js";
-export type { RouteDisposition } from "../operations/cli-coverage.js";
+export type {
+  OperationEffect,
+  OperationEnvelope,
+  CliRoute,
+} from "../operations/operation.schema.js";
+export {
+  DocOperation,
+  DocOperationInputSchema,
+  DocOperationOutputSchema,
+} from "../operations/doc-operation.js";
+export {
+  ManifestCliRouteCoverage,
+  CliRouteCoverageError,
+  cliRouteCoverage,
+} from "../operations/cli-coverage.js";
+export type { RouteDisposition, CliRouteCoverage } from "../operations/cli-coverage.js";
 
 export interface OrderedDispatch<T> {
   index: number;
