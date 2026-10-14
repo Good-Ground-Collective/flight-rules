@@ -210,8 +210,11 @@ describe("shared operations", () => {
       core,
     );
     const registry = new MapOperationRegistry({
-      operations: [new DocOperation({ getResolver: () => core.docs() })],
-      policy: new LaunchOperationAccessPolicy({ allowedEffects: ["read"] }),
+      operations: [
+        new DocOperation({ getResolver: () => core.docs() }),
+        ...core.localOperations().operations(),
+      ],
+      policy: new LaunchOperationAccessPolicy({ allowedEffects: ["read", "process", "network"] }),
     });
     const routes = cliRouteCoverage.check(program, registry);
     expect(routes).toHaveLength(68);
@@ -222,7 +225,19 @@ describe("shared operations", () => {
     expect(() => cliRouteCoverage.assertComplete(program, registry)).toThrow(
       /remain pending migration/,
     );
-    expect(registry.list().map((operation) => operation.id)).toEqual(["doc"]);
+    expect(registry.list().map((operation) => operation.id)).toEqual([
+      "doc",
+      "charter",
+      "competencies",
+      "rfc-dir",
+      "rfc-next-id",
+      "qa-instructions",
+      "qa-evidence-dir",
+      "qa-recipe",
+      "config-path",
+      "config-show",
+      "check",
+    ]);
   });
 
   it("rejects a newly discovered command without an explicit disposition", () => {

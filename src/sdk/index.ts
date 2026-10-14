@@ -81,6 +81,28 @@ export {
   DocOperationOutputSchema,
 } from "../operations/doc-operation.js";
 export {
+  DefaultLocalDiscoveryOperations,
+  QaInstructionsNotFoundError,
+} from "../operations/local-discovery-operations.js";
+export type {
+  LocalWorkflowEvidence,
+  LocalDiscoveryOperations,
+} from "../operations/local-discovery-operations.js";
+export { LocalDiscoveryCli, CharterSelectionError } from "../operations/local-discovery-cli.js";
+export type { LocalDiscoveryCliProps } from "../operations/local-discovery-cli.js";
+export {
+  WorkflowSchema,
+  WorkflowEvidenceSchema,
+  ReadinessOptionsSchema,
+} from "../tasks/readiness/readiness.schema.js";
+export type {
+  Workflow,
+  WorkflowEvidence,
+  ReadinessOptions,
+  ReadinessReport,
+  ReadinessCheck,
+} from "../tasks/readiness/readiness.schema.js";
+export {
   ManifestCliRouteCoverage,
   CliRouteCoverageError,
   cliRouteCoverage,

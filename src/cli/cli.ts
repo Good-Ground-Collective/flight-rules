@@ -2,16 +2,15 @@ import { createFlightRules, type FlightRules } from "../flight-rules/flight-rule
 import { Command } from "commander";
 import { createDocCommand } from "../bundled-docs/commands/doc/command.js";
 import { DocOperation } from "../operations/doc-operation.js";
+import { DefaultLocalDiscoveryOperations } from "../operations/local-discovery-operations.js";
+import { LocalDiscoveryCli } from "../operations/local-discovery-cli.js";
 import {
   LaunchOperationAccessPolicy,
   MapOperationRegistry,
 } from "../operations/operation-registry.js";
-import { createCharterCommand } from "../bundled-docs/commands/charter/command.js";
 import { DocCharterCatalog } from "../bundled-docs/charter-catalog/charter-catalog.js";
-import { GitRepositoryPaths } from "../bundled-docs/charter-catalog/repository-paths.js";
 import { createReviewCommand } from "../code-review/commands/command.js";
 import type { Config } from "../shared/config.js";
-import { createConfigCommand } from "../shared/commands/config/command.js";
 import { createBoardCommand } from "../shared/commands/board/command.js";
 import { createPacketCommand } from "../shared/commands/packet/command.js";
 import { createEpicCommand } from "../tasks/commands/epic/command.js";
@@ -19,10 +18,7 @@ import { createInitiativeCommand } from "../tasks/commands/initiative/command.js
 import { createTicketCommand } from "../tasks/commands/ticket/command.js";
 import { createTddCommand } from "../tasks/commands/tdd/command.js";
 import { createUsersCommand } from "../tasks/commands/users/command.js";
-import { createRfcCommand } from "../tasks/commands/rfc/command.js";
-import { createQaCommand } from "../tasks/commands/qa/command.js";
-import { createCompetenciesCommand } from "../tasks/commands/competencies/command.js";
-import { createCheckCommand } from "../tasks/commands/check/command.js";
+import { GitRepositoryPaths } from "../bundled-docs/charter-catalog/repository-paths.js";
 import { createHookCommand } from "../hooks/commands/hook/command.js";
 import { DetachedHeartbeatSender } from "../hooks/board-heartbeat/board-heartbeat.js";
 import { BoardHookKit, GitBranchReader } from "../hooks/board-heartbeat/board-hook-kit.js";
@@ -59,6 +55,7 @@ export function buildProgram(
     | "boardAgents"
   > = createFlightRules(),
 ): Command {
+  const launchCwd = process.cwd();
   const program = new Command("flight-rules");
   program.version(appVersion);
   program.exitOverride();
@@ -83,8 +80,6 @@ export function buildProgram(
   program.addCommand(createBranchNameCommand());
   program.addCommand(createPrCommand(prHost));
   program.addCommand(createUsersCommand(tracker));
-  program.addCommand(createRfcCommand(config));
-  program.addCommand(createConfigCommand(() => services.configStore()));
   program.addCommand(createAgentsCommand(() => services.installation()));
   const boardHooks = (): BoardHookKit =>
     new BoardHookKit({
@@ -101,13 +96,26 @@ export function buildProgram(
       branch: () => new GitBranchReader(),
     }),
   );
-  program.addCommand(createQaCommand(config, getConfigPath, undefined, () => services.evidence()));
-  program.addCommand(createCompetenciesCommand(config));
   const docOperation = new DocOperation({ getResolver: () => services.docs() });
-  const operationRegistry = new MapOperationRegistry({
-    operations: [docOperation],
-    policy: new LaunchOperationAccessPolicy({ allowedEffects: ["read"] }),
+  const localOperations = new DefaultLocalDiscoveryOperations({
+    cwd: launchCwd,
+    getConfig: config,
+    getConfigStore: () => services.configStore(),
+    getCharters: () => new DocCharterCatalog({ docs: services.docs() }),
+    getRepositoryPaths: () => new GitRepositoryPaths({ cwd: launchCwd }),
+    getEvidence: () => services.evidence(),
+    getReadiness: () => services.readiness(),
+    getProbe: () => services.probe(),
+    getTracker: tracker,
+    getConfigPath,
   });
+  const operationRegistry = new MapOperationRegistry({
+    operations: [docOperation, ...localOperations.operations()],
+    policy: new LaunchOperationAccessPolicy({ allowedEffects: ["read", "process", "network"] }),
+  });
+  new LocalDiscoveryCli({ operations: localOperations, registry: operationRegistry }).addTo(
+    program,
+  );
   program.addCommand(
     createDocCommand({
       getResolver: () => services.docs(),
@@ -115,23 +123,7 @@ export function buildProgram(
       registry: operationRegistry,
     }),
   );
-  program.addCommand(
-    createCharterCommand(
-      () => new DocCharterCatalog({ docs: services.docs() }),
-      () => new GitRepositoryPaths({ cwd: process.cwd() }),
-    ),
-  );
   program.addCommand(createReviewCommand());
-  program.addCommand(
-    createCheckCommand(
-      config,
-      tracker,
-      getConfigPath,
-      () => services.probe(),
-      undefined,
-      () => services.readiness(),
-    ),
-  );
   program.addCommand(
     createBoardCommand(
       () => services.board(),
