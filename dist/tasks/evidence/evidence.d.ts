@@ -1,5 +1,5 @@
-import { z } from 'zod';
-import type { Attachment, TaskTracker } from '../task-tracker/task-tracker.js';
+import { z } from "zod";
+import type { Attachment, TaskTracker } from "../task-tracker/task-tracker.js";
 /**
  * `<path>#<caption>`, where the caption is used only when the file is appended
  * (an in-body reference keeps its own alt text). `#` is legal in a filename, so
@@ -37,6 +37,14 @@ export declare class DuplicateEvidenceNameError extends Error {
     name: string;
     constructor(props: DuplicateEvidenceNameProps);
 }
+export declare class EvidenceUploadFailure extends Error {
+    name: string;
+    readonly attachments: EvidenceAttachment[];
+    constructor(props: {
+        cause: unknown;
+        attachments: EvidenceAttachment[];
+    });
+}
 export interface TrackerEvidenceServiceProps {
     tracker: TaskTracker;
 }
@@ -51,6 +59,11 @@ export declare class TrackerEvidenceService implements EvidenceService {
     private readonly tracker;
     constructor(props: TrackerEvidenceServiceProps);
     attach(input: EvidenceRequest): Promise<AttachedEvidence>;
+    prepareBody(input: {
+        body: string;
+        specs: readonly string[];
+    }): string;
+    private parseSpecs;
     private rejectDuplicateNames;
     private rewriteReferences;
     /**

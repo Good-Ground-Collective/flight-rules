@@ -15772,7 +15772,7 @@ var recursive = /* @__PURE__ */ new WeakMap();
 var NONE = 0;
 var ASSUMED = 1;
 var PROVEN = 2;
-function isRecursive(inst, stack, resolve12) {
+function isRecursive(inst, stack, resolve14) {
   const cached2 = recursive.get(inst);
   if (cached2 !== void 0)
     return cached2 ? PROVEN : NONE;
@@ -15782,7 +15782,7 @@ function isRecursive(inst, stack, resolve12) {
   let result = NONE;
   const check2 = (child) => {
     if (result !== PROVEN && child?._zod) {
-      const answer = isRecursive(child, stack, resolve12);
+      const answer = isRecursive(child, stack, resolve14);
       if (answer > result)
         result = answer;
     }
@@ -15793,7 +15793,7 @@ function isRecursive(inst, stack, resolve12) {
       const desc = Object.getOwnPropertyDescriptor(sh, key);
       if (spread && !desc.enumerable)
         continue;
-      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve12) : NONE;
+      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve14) : NONE;
       if (child > answer)
         answer = child;
     }
@@ -15860,7 +15860,7 @@ function isRecursive(inst, stack, resolve12) {
       break;
     // `$ZodLazy` caches its inner on the def, so a resolved edge is followed exactly
     case "lazy": {
-      const inner = def._cachedInner ?? (resolve12 ? inst._zod.innerType : void 0);
+      const inner = def._cachedInner ?? (resolve14 ? inst._zod.innerType : void 0);
       merge3(inner ? isRecursive(inner, stack, false) : ASSUMED);
       break;
     }
@@ -30474,7 +30474,7 @@ var FileDocResolver = class _FileDocResolver {
 };
 
 // src/flight-rules/flight-rules.ts
-import { resolve as resolve8 } from "node:path";
+import { resolve as resolve9 } from "node:path";
 
 // src/git/git-executor/git-executor.ts
 import { execFile } from "node:child_process";
@@ -30707,7 +30707,11 @@ var pullRequestBuilder = new DefaultPullRequestBuilder();
 
 // src/pr/pull-request-host/gh-pull-request-host.ts
 var GhPullRequestHostPropsSchema = external_exports.object({
-  repo: external_exports.string().regex(/^[^/\s]+\/[^/\s]+$/, 'expected "owner/repo"')
+  repo: external_exports.string().regex(/^[^/\s]+\/[^/\s]+$/, 'expected "owner/repo"'),
+  cwd: external_exports.string().min(1).optional(),
+  env: external_exports.custom(
+    (value) => typeof value === "object" && value !== null && !Array.isArray(value)
+  ).optional()
 });
 var GhPullRequestListSchema = external_exports.array(
   external_exports.object({
@@ -30734,7 +30738,9 @@ var GhPullRequestHost = class {
     this.repo = parsed.repo;
     this.builder = props.builder ?? new DefaultPullRequestBuilder();
     const promisified = promisify2(execFile2);
-    this.execFile = props.execFileFn ?? ((file2, args) => promisified(file2, [...args]));
+    const cwd = parsed.cwd ?? process.cwd();
+    const env = { ...props.env ?? process.env };
+    this.execFile = props.execFileFn ?? ((file2, args) => promisified(file2, [...args], { cwd, env }));
   }
   async createPullRequest(input2, options) {
     const template = PullRequestTemplateSchema.parse(input2);
@@ -31678,7 +31684,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.88.0";
+var appVersion = false ? "0.0.0-dev" : "1.90.0";
 
 // src/shared/ariadne/review-packet.schema.ts
 var packetLimits = {
@@ -36939,6 +36945,25 @@ var CreateInitiativeInputSchema = external_exports.object({
   title: external_exports.string(),
   body: external_exports.string()
 });
+var partialWriteErrorSchema = external_exports.object({
+  name: external_exports.literal("TaskTrackerPartialWriteError"),
+  id: external_exports.string().min(1),
+  message: external_exports.string()
+});
+var TaskTrackerPartialWriteError = class extends Error {
+  name = "TaskTrackerPartialWriteError";
+  id;
+  constructor(props) {
+    super(props.cause instanceof Error ? props.cause.message : String(props.cause), {
+      cause: props.cause
+    });
+    this.id = props.id;
+  }
+  /** Recognizes adapter failures across independently bundled package entry points. */
+  static isPartialWrite(error62) {
+    return error62 instanceof Error && partialWriteErrorSchema.safeParse(error62).success;
+  }
+};
 
 // src/tasks/body-metadata/body-metadata.ts
 var sentinelComment = "<!-- flight-rules:metadata -->";
@@ -37096,8 +37121,16 @@ var GitHubTaskTracker = class {
   async getEpic(id) {
     const issueNumber = parseInt(id, 10);
     const [issueResponse, commentsResponse, subIssuesResponse] = await Promise.all([
-      this.octokit.rest.issues.get({ owner: this.owner, repo: this.repo, issue_number: issueNumber }),
-      this.octokit.rest.issues.listComments({ owner: this.owner, repo: this.repo, issue_number: issueNumber }),
+      this.octokit.rest.issues.get({
+        owner: this.owner,
+        repo: this.repo,
+        issue_number: issueNumber
+      }),
+      this.octokit.rest.issues.listComments({
+        owner: this.owner,
+        repo: this.repo,
+        issue_number: issueNumber
+      }),
       this.octokit.request("GET /repos/{owner}/{repo}/issues/{issue_number}/sub_issues", {
         owner: this.owner,
         repo: this.repo,
@@ -37107,7 +37140,9 @@ var GitHubTaskTracker = class {
     const issue2 = issueResponse.data;
     const body = issue2.body ?? "";
     const metadata = this.bodyMetadata.parse(body);
-    const childNumbers = IssueRefListSchema.parse(subIssuesResponse.data).map((ref) => String(ref.number));
+    const childNumbers = IssueRefListSchema.parse(subIssuesResponse.data).map(
+      (ref) => String(ref.number)
+    );
     const childIssues = await Promise.all(childNumbers.map((n) => this.getTicket(n)));
     let tdd;
     if (metadata.tddId !== void 0) {
@@ -37137,29 +37172,53 @@ var GitHubTaskTracker = class {
       labels: ["ticket", ...input2.labels],
       ...input2.assignee !== void 0 ? { assignee: input2.assignee } : {}
     });
-    if (input2.epicId !== void 0) await this.linkTicketToEpic(String(data.number), input2.epicId);
+    if (input2.epicId !== void 0) {
+      try {
+        await this.linkTicketToEpic(String(data.number), input2.epicId);
+      } catch (cause) {
+        throw new TaskTrackerPartialWriteError({ id: String(data.number), cause });
+      }
+    }
     return this.mapTicket(data, [], [], [], this.bodyMetadata.parse(data.body ?? ""));
   }
   async getTicket(id) {
     const issueNumber = parseInt(id, 10);
     const [issueResponse, commentsResponse, blockedByResponse, blockingResponse] = await Promise.all([
-      this.octokit.rest.issues.get({ owner: this.owner, repo: this.repo, issue_number: issueNumber }),
-      this.octokit.rest.issues.listComments({ owner: this.owner, repo: this.repo, issue_number: issueNumber }),
-      this.octokit.request("GET /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocked_by", {
+      this.octokit.rest.issues.get({
         owner: this.owner,
         repo: this.repo,
         issue_number: issueNumber
       }),
-      this.octokit.request("GET /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocking", {
+      this.octokit.rest.issues.listComments({
         owner: this.owner,
         repo: this.repo,
         issue_number: issueNumber
-      })
+      }),
+      this.octokit.request(
+        "GET /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocked_by",
+        {
+          owner: this.owner,
+          repo: this.repo,
+          issue_number: issueNumber
+        }
+      ),
+      this.octokit.request(
+        "GET /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocking",
+        {
+          owner: this.owner,
+          repo: this.repo,
+          issue_number: issueNumber
+        }
+      )
     ]);
     const body = issueResponse.data.body ?? "";
     const metadata = this.bodyMetadata.parse(body);
-    const blockedBy = IssueRefListSchema.parse(blockedByResponse.data).map((ref) => String(ref.number));
-    const blocking = IssueRefListSchema.parse(blockingResponse.data).map((ref) => String(ref.number));
+    const blockedBy = IssueRefListSchema.parse(blockedByResponse.data).map(
+      (ref) => String(ref.number)
+    );
+    const blocking = IssueRefListSchema.parse(blockingResponse.data).map(
+      (ref) => String(ref.number)
+    );
     return this.mapTicket(issueResponse.data, commentsResponse.data, blockedBy, blocking, metadata);
   }
   async linkTicketToEpic(ticketId, epicId) {
@@ -37181,11 +37240,14 @@ var GitHubTaskTracker = class {
   }
   async getTicketEpicId(ticketId) {
     try {
-      const { data } = await this.octokit.request("GET /repos/{owner}/{repo}/issues/{issue_number}/parent", {
-        owner: this.owner,
-        repo: this.repo,
-        issue_number: parseInt(ticketId, 10)
-      });
+      const { data } = await this.octokit.request(
+        "GET /repos/{owner}/{repo}/issues/{issue_number}/parent",
+        {
+          owner: this.owner,
+          repo: this.repo,
+          issue_number: parseInt(ticketId, 10)
+        }
+      );
       return String(IssueRefSchema.parse(data).number);
     } catch (error62) {
       if (ParentNotFoundSchema.safeParse(error62).success) return null;
@@ -37226,11 +37288,14 @@ var GitHubTaskTracker = class {
       repo: this.repo,
       issue_number: issueNumber
     });
-    const stale = issue2.labels.map((l) => this.labelName(l)).filter(
-      (name) => name.startsWith("status:") && name.toLowerCase() !== label.toLowerCase()
-    );
+    const stale = issue2.labels.map((l) => this.labelName(l)).filter((name) => name.startsWith("status:") && name.toLowerCase() !== label.toLowerCase());
     for (const name of stale) {
-      await this.octokit.rest.issues.removeLabel({ owner: this.owner, repo: this.repo, issue_number: issueNumber, name });
+      await this.octokit.rest.issues.removeLabel({
+        owner: this.owner,
+        repo: this.repo,
+        issue_number: issueNumber,
+        name
+      });
     }
     await this.octokit.rest.issues.addLabels({
       owner: this.owner,
@@ -37297,11 +37362,19 @@ var GitHubTaskTracker = class {
   }
   async updateEpicDescription(epicId, input2) {
     await this.replaceIssueBody(epicId, "epic", input2);
-    return this.getEpic(epicId);
+    try {
+      return await this.getEpic(epicId);
+    } catch (cause) {
+      throw new TaskTrackerPartialWriteError({ id: epicId, cause });
+    }
   }
   async updateTicketDescription(ticketId, input2) {
     await this.replaceIssueBody(ticketId, "ticket", input2);
-    return this.getTicket(ticketId);
+    try {
+      return await this.getTicket(ticketId);
+    } catch (cause) {
+      throw new TaskTrackerPartialWriteError({ id: ticketId, cause });
+    }
   }
   async updateInitiativeDescription(initiativeId, input2) {
     await this.octokit.rest.issues.updateMilestone({
@@ -37311,7 +37384,11 @@ var GitHubTaskTracker = class {
       description: input2.body,
       ...input2.title !== void 0 ? { title: input2.title } : {}
     });
-    return this.getInitiative(initiativeId);
+    try {
+      return await this.getInitiative(initiativeId);
+    } catch (cause) {
+      throw new TaskTrackerPartialWriteError({ id: initiativeId, cause });
+    }
   }
   async updateTddMetadata(tddId, patch) {
     const fetchData = await this.gql(
@@ -37348,7 +37425,9 @@ var GitHubTaskTracker = class {
     );
     const categoryId = repoData.repository.discussionCategory?.id;
     if (categoryId === void 0) {
-      throw new Error(`No "TDDs" discussion category found. Create it in the repo's GitHub Discussions settings.`);
+      throw new Error(
+        `No "TDDs" discussion category found. Create it in the repo's GitHub Discussions settings.`
+      );
     }
     const body = this.bodyMetadata.splice(input2.body, {
       epicId: parseInt(input2.epicId, 10),
@@ -37363,7 +37442,11 @@ var GitHubTaskTracker = class {
       { repositoryId: repoData.repository.id, categoryId, title: input2.title, body }
     );
     const discussion = createData.createDiscussion.discussion;
-    await this.updateEpicMetadata(input2.epicId, { tddId: discussion.number });
+    try {
+      await this.updateEpicMetadata(input2.epicId, { tddId: discussion.number });
+    } catch (cause) {
+      throw new TaskTrackerPartialWriteError({ id: String(discussion.number), cause });
+    }
     return {
       id: String(discussion.number),
       epicId: input2.epicId,
@@ -37410,11 +37493,11 @@ var GitHubTaskTracker = class {
       updatedAt: discussion.updatedAt
     };
   }
-  async addComment(entityId, body) {
+  async addComment(entityId2, body) {
     const { data } = await this.octokit.rest.issues.createComment({
       owner: this.owner,
       repo: this.repo,
-      issue_number: parseInt(entityId, 10),
+      issue_number: parseInt(entityId2, 10),
       body
     });
     return {
@@ -37441,7 +37524,11 @@ var GitHubTaskTracker = class {
     return data.map((member) => ({ accountId: member.login, displayName: member.login }));
   }
   async ping(options) {
-    await this.octokit.rest.repos.get({ owner: this.owner, repo: this.repo, ...options?.signal === void 0 ? {} : { request: { signal: options.signal } } });
+    await this.octokit.rest.repos.get({
+      owner: this.owner,
+      repo: this.repo,
+      ...options?.signal === void 0 ? {} : { request: { signal: options.signal } }
+    });
   }
   async replaceIssueBody(id, role, input2) {
     const issueNumber = parseInt(id, 10);
@@ -37489,10 +37576,11 @@ var GitHubTaskTracker = class {
    * which is why `listTransitions` ignores the ticket id it is handed.
    */
   async statusLabelNames() {
-    const labels = await this.octokit.paginate(
-      this.octokit.rest.issues.listLabelsForRepo,
-      { owner: this.owner, repo: this.repo, per_page: 100 }
-    );
+    const labels = await this.octokit.paginate(this.octokit.rest.issues.listLabelsForRepo, {
+      owner: this.owner,
+      repo: this.repo,
+      per_page: 100
+    });
     return labels.map((label) => this.labelName(label)).filter((name) => name.startsWith("status:"));
   }
   labelName(label) {
@@ -37632,7 +37720,7 @@ var JiraClient = class {
       const retryAfterSeconds = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : defaultRetryAfterSeconds;
       const jitter = 0.7 + Math.random() * 0.6;
       const delayMs = Math.min(retryAfterSeconds * 1e3 * jitter, maxBackoffMs);
-      await new Promise((resolve12) => setTimeout(resolve12, delayMs));
+      await new Promise((resolve14) => setTimeout(resolve14, delayMs));
       return this.fetchWithRetry(url2, init, attempt + 1);
     }
     return res;
@@ -37684,7 +37772,7 @@ var ConfluenceClient = class {
       const retryAfterSeconds = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : defaultRetryAfterSeconds2;
       const jitter = 0.7 + Math.random() * 0.6;
       const delayMs = Math.min(retryAfterSeconds * 1e3 * jitter, maxBackoffMs2);
-      await new Promise((resolve12) => setTimeout(resolve12, delayMs));
+      await new Promise((resolve14) => setTimeout(resolve14, delayMs));
       return this.fetchWithRetry(url2, init, attempt + 1);
     }
     return res;
@@ -40292,10 +40380,10 @@ function resolveAll(constructs2, events, context) {
   const called = [];
   let index2 = -1;
   while (++index2 < constructs2.length) {
-    const resolve12 = constructs2[index2].resolveAll;
-    if (resolve12 && !called.includes(resolve12)) {
-      events = resolve12(events, context);
-      called.push(resolve12);
+    const resolve14 = constructs2[index2].resolveAll;
+    if (resolve14 && !called.includes(resolve14)) {
+      events = resolve14(events, context);
+      called.push(resolve14);
     }
   }
   return events;
@@ -47636,14 +47724,21 @@ var JiraTaskTracker = class {
   jpdProjectVerified = false;
   constructor(config2) {
     this.client = new JiraClient({ host: config2.host, email: config2.email, token: config2.token });
-    this.confluence = new ConfluenceClient({ host: config2.host, email: config2.email, token: config2.token });
+    this.confluence = new ConfluenceClient({
+      host: config2.host,
+      email: config2.email,
+      token: config2.token
+    });
     this.project = config2.project;
     this.jpdProject = config2.jpdProject;
     this.confluenceSpaceKey = config2.confluenceSpaceKey;
   }
   async createEpic(input2) {
     const issuetype = await this.resolveIssueType("Epic");
-    const description = this.metadata.splice(this.bodyFormat.toAdf(input2.body), input2.metadata ?? {});
+    const description = this.metadata.splice(
+      this.bodyFormat.toAdf(input2.body),
+      input2.metadata ?? {}
+    );
     const created = await this.client.request("POST", "/issue", {
       fields: {
         project: { key: this.project },
@@ -47653,10 +47748,16 @@ var JiraTaskTracker = class {
         labels: input2.labels
       }
     });
-    return this.getEpic(created.key);
+    try {
+      return await this.getEpic(created.key);
+    } catch (cause) {
+      throw new TaskTrackerPartialWriteError({ id: created.key, cause });
+    }
   }
   async getEpic(id) {
-    const issue2 = await this.client.request("GET", `/issue/${id}`, void 0, { fields: issueFields });
+    const issue2 = await this.client.request("GET", `/issue/${id}`, void 0, {
+      fields: issueFields
+    });
     const childIssues = await this.searchChildren(issue2.key);
     return {
       id: issue2.key,
@@ -47673,7 +47774,10 @@ var JiraTaskTracker = class {
   }
   async createTicket(input2) {
     const issuetype = await this.resolveIssueType("Story");
-    const description = this.metadata.splice(this.bodyFormat.toAdf(input2.body), input2.metadata ?? {});
+    const description = this.metadata.splice(
+      this.bodyFormat.toAdf(input2.body),
+      input2.metadata ?? {}
+    );
     const created = await this.client.request("POST", "/issue", {
       fields: {
         project: { key: this.project },
@@ -47685,7 +47789,11 @@ var JiraTaskTracker = class {
         ...input2.assignee !== void 0 ? { assignee: { accountId: input2.assignee } } : {}
       }
     });
-    return this.getTicket(created.key);
+    try {
+      return await this.getTicket(created.key);
+    } catch (cause) {
+      throw new TaskTrackerPartialWriteError({ id: created.key, cause });
+    }
   }
   async getTicket(id) {
     const [issue2, blocksLinkType] = await Promise.all([
@@ -47695,12 +47803,16 @@ var JiraTaskTracker = class {
     return this.mapTicket(issue2, blocksLinkType);
   }
   async linkTicketToEpic(ticketId, epicId) {
-    const issue2 = await this.client.request("GET", `/issue/${ticketId}`, void 0, { fields: "parent" });
+    const issue2 = await this.client.request("GET", `/issue/${ticketId}`, void 0, {
+      fields: "parent"
+    });
     if (issue2.fields.parent?.key === epicId) return;
     await this.client.request("PUT", `/issue/${ticketId}`, { fields: { parent: { key: epicId } } });
   }
   async getTicketEpicId(ticketId) {
-    const issue2 = await this.client.request("GET", `/issue/${ticketId}`, void 0, { fields: "parent" });
+    const issue2 = await this.client.request("GET", `/issue/${ticketId}`, void 0, {
+      fields: "parent"
+    });
     return issue2.fields.parent?.key ?? null;
   }
   async blockTicket(ticketId, blockedById) {
@@ -47728,14 +47840,18 @@ var JiraTaskTracker = class {
   }
   async transitionTicket(ticketId, status) {
     const response = await this.fetchTransitions(ticketId);
-    const match = response.transitions.find((transition) => transition.to.name.toLowerCase() === status.toLowerCase());
+    const match = response.transitions.find(
+      (transition) => transition.to.name.toLowerCase() === status.toLowerCase()
+    );
     if (match === void 0) {
       const available = response.transitions.map((transition) => transition.to.name).join(", ");
       throw new Error(
         `No transition to status "${status}" is available for ${ticketId} from its current status (available: ${available})`
       );
     }
-    await this.client.request("POST", `/issue/${ticketId}/transitions`, { transition: { id: match.id } });
+    await this.client.request("POST", `/issue/${ticketId}/transitions`, {
+      transition: { id: match.id }
+    });
   }
   async listTransitions(ticketId) {
     const response = await this.fetchTransitions(ticketId);
@@ -47746,10 +47862,14 @@ var JiraTaskTracker = class {
    * atomic against whatever labels the issue already has — no read first.
    */
   async addLabel(ticketId, label) {
-    await this.client.request("PUT", `/issue/${ticketId}`, { update: { labels: [{ add: label }] } });
+    await this.client.request("PUT", `/issue/${ticketId}`, {
+      update: { labels: [{ add: label }] }
+    });
   }
   async removeLabel(ticketId, label) {
-    await this.client.request("PUT", `/issue/${ticketId}`, { update: { labels: [{ remove: label }] } });
+    await this.client.request("PUT", `/issue/${ticketId}`, {
+      update: { labels: [{ remove: label }] }
+    });
   }
   async updateEpicMetadata(epicId, patch) {
     await this.spliceDescriptionMetadata(epicId, patch);
@@ -47778,17 +47898,29 @@ var JiraTaskTracker = class {
   }
   async updateEpicDescription(epicId, input2) {
     await this.replaceIssueBody(epicId, input2);
-    return this.getEpic(epicId);
+    try {
+      return await this.getEpic(epicId);
+    } catch (cause) {
+      throw new TaskTrackerPartialWriteError({ id: epicId, cause });
+    }
   }
   async updateTicketDescription(ticketId, input2) {
     await this.replaceIssueBody(ticketId, input2);
-    return this.getTicket(ticketId);
+    try {
+      return await this.getTicket(ticketId);
+    } catch (cause) {
+      throw new TaskTrackerPartialWriteError({ id: ticketId, cause });
+    }
   }
   async updateInitiativeDescription(initiativeId, input2) {
     const fields = { description: this.bodyFormat.toAdf(input2.body) };
     if (input2.title !== void 0) fields["summary"] = input2.title;
     await this.client.request("PUT", `/issue/${initiativeId}`, { fields });
-    return this.getInitiative(initiativeId);
+    try {
+      return await this.getInitiative(initiativeId);
+    } catch (cause) {
+      throw new TaskTrackerPartialWriteError({ id: initiativeId, cause });
+    }
   }
   async createInitiative(input2) {
     const projectKey = await this.ensureJpdProject();
@@ -47800,7 +47932,11 @@ var JiraTaskTracker = class {
         description: this.bodyFormat.toAdf(input2.body)
       }
     });
-    return this.getInitiative(created.key);
+    try {
+      return await this.getInitiative(created.key);
+    } catch (cause) {
+      throw new TaskTrackerPartialWriteError({ id: created.key, cause });
+    }
   }
   async getInitiative(id) {
     const idea = await this.client.request("GET", `/issue/${id}`, void 0, {
@@ -47810,7 +47946,9 @@ var JiraTaskTracker = class {
     const epicKeys = this.deliveryLinkedKeys(idea.fields.issuelinks ?? [], deliveryLinkType);
     const epics = await Promise.all(
       epicKeys.map(async (key) => {
-        const epic = await this.client.request("GET", `/issue/${key}`, void 0, { fields: "summary" });
+        const epic = await this.client.request("GET", `/issue/${key}`, void 0, {
+          fields: "summary"
+        });
         return { id: epic.key, title: epic.fields.summary };
       })
     );
@@ -47844,22 +47982,28 @@ var JiraTaskTracker = class {
       title: input2.title,
       body: { representation: "storage", value: input2.body }
     });
-    await this.confluence.request("POST", `/pages/${page.id}/properties`, {
-      key: tddMetadataPropertyKey,
-      value: propertyValue
-    });
-    await this.updateEpicMetadata(input2.epicId, { tddId: Number(page.id) });
+    try {
+      await this.confluence.request("POST", `/pages/${page.id}/properties`, {
+        key: tddMetadataPropertyKey,
+        value: propertyValue
+      });
+      await this.updateEpicMetadata(input2.epicId, { tddId: Number(page.id) });
+    } catch (cause) {
+      throw new TaskTrackerPartialWriteError({ id: page.id, cause });
+    }
     return this.mapTechnicalDesign(page, input2.body, propertyValue);
   }
   async getTechnicalDesign(id) {
     const [page, property] = await Promise.all([
-      this.confluence.request("GET", `/pages/${id}`, void 0, { "body-format": "storage" }),
+      this.confluence.request("GET", `/pages/${id}`, void 0, {
+        "body-format": "storage"
+      }),
       this.tddMetadataProperty(id)
     ]);
     return this.mapTechnicalDesign(page, page.body?.storage?.value ?? "", property?.value ?? {});
   }
-  async addComment(entityId, body) {
-    const comment = await this.client.request("POST", `/issue/${entityId}/comment`, {
+  async addComment(entityId2, body) {
+    const comment = await this.client.request("POST", `/issue/${entityId2}/comment`, {
       body: this.bodyFormat.toAdf(body)
     });
     return {
@@ -47877,21 +48021,30 @@ var JiraTaskTracker = class {
    */
   async addAttachment(ticketId, filePath) {
     const filename = basename2(filePath);
-    const file2 = new File([readFileSync9(filePath)], filename, { type: this.mimeTypes.forFilename(filename) });
+    const file2 = new File([readFileSync9(filePath)], filename, {
+      type: this.mimeTypes.forFilename(filename)
+    });
     const uploaded = JiraUploadedAttachmentsSchema.parse(
       await this.client.upload(`/issue/${ticketId}/attachments`, [file2])
     );
     const attachment = uploaded[0];
     if (attachment === void 0) {
-      throw new Error(`Jira accepted the upload of ${filename} to ${ticketId} but returned no attachment`);
+      throw new Error(
+        `Jira accepted the upload of ${filename} to ${ticketId} but returned no attachment`
+      );
     }
     return this.mapAttachment(attachment, await this.resolveMediaUuid(attachment.id));
   }
   async getUsers() {
-    const users = await this.client.request("GET", "/user/assignable/search", void 0, {
-      project: this.project,
-      maxResults: 100
-    });
+    const users = await this.client.request(
+      "GET",
+      "/user/assignable/search",
+      void 0,
+      {
+        project: this.project,
+        maxResults: 100
+      }
+    );
     return users.map((user) => ({ accountId: user.accountId, displayName: user.displayName }));
   }
   async ping(options) {
@@ -47910,7 +48063,10 @@ var JiraTaskTracker = class {
     return page.issues.map((issue2) => this.mapTicket(issue2, blocksLinkType));
   }
   mapTicket(issue2, blocksLinkType) {
-    const { blockedBy, blocking } = this.blockingLinks(issue2.fields.issuelinks ?? [], blocksLinkType);
+    const { blockedBy, blocking } = this.blockingLinks(
+      issue2.fields.issuelinks ?? [],
+      blocksLinkType
+    );
     return {
       id: issue2.key,
       size: "ticket",
@@ -47957,15 +48113,22 @@ var JiraTaskTracker = class {
     return { blockedBy, blocking };
   }
   async replaceIssueBody(key, input2) {
-    const issue2 = await this.client.request("GET", `/issue/${key}`, void 0, { fields: "description" });
-    const description = this.metadata.splice(this.bodyFormat.toAdf(input2.body), this.parseMetadata(issue2));
+    const issue2 = await this.client.request("GET", `/issue/${key}`, void 0, {
+      fields: "description"
+    });
+    const description = this.metadata.splice(
+      this.bodyFormat.toAdf(input2.body),
+      this.parseMetadata(issue2)
+    );
     const fields = { description };
     if (input2.title !== void 0) fields["summary"] = input2.title;
     if (input2.labels !== void 0) fields["labels"] = input2.labels;
     await this.client.request("PUT", `/issue/${key}`, { fields });
   }
   async spliceDescriptionMetadata(key, patch) {
-    const issue2 = await this.client.request("GET", `/issue/${key}`, void 0, { fields: "description" });
+    const issue2 = await this.client.request("GET", `/issue/${key}`, void 0, {
+      fields: "description"
+    });
     const current = issue2.fields.description ?? this.bodyFormat.toAdf("");
     const next = this.metadata.splice(current, patch);
     await this.client.request("PUT", `/issue/${key}`, { fields: { description: next } });
@@ -48028,11 +48191,16 @@ var JiraTaskTracker = class {
   }
   async resolveBlocksLinkType() {
     if (this.blocksLinkType === void 0) {
-      const response = await this.client.request("GET", "/issueLinkType");
+      const response = await this.client.request(
+        "GET",
+        "/issueLinkType"
+      );
       const match = response.issueLinkTypes.find((type) => type.name.toLowerCase() === "blocks");
       if (match === void 0) {
         const names = response.issueLinkTypes.map((type) => type.name).join(", ");
-        throw new Error(`No "Blocks" issue link type is configured in this Jira instance (found: ${names})`);
+        throw new Error(
+          `No "Blocks" issue link type is configured in this Jira instance (found: ${names})`
+        );
       }
       this.blocksLinkType = match.name;
     }
@@ -48040,8 +48208,13 @@ var JiraTaskTracker = class {
   }
   async resolveDeliveryLinkType() {
     if (this.deliveryLinkType === void 0) {
-      const response = await this.client.request("GET", "/issueLinkType");
-      const match = response.issueLinkTypes.find((type) => type.outward.toLowerCase() === deliveryLinkOutward);
+      const response = await this.client.request(
+        "GET",
+        "/issueLinkType"
+      );
+      const match = response.issueLinkTypes.find(
+        (type) => type.outward.toLowerCase() === deliveryLinkOutward
+      );
       if (match === void 0) {
         const names = response.issueLinkTypes.map((type) => type.name).join(", ");
         throw new Error(
@@ -48089,14 +48262,22 @@ var JiraTaskTracker = class {
   }
   async resolveConfluenceSpaceId() {
     if (this.confluenceSpaceKey === void 0) {
-      throw new Error("No Confluence space is configured; set confluenceSpaceKey to create or fetch technical designs");
+      throw new Error(
+        "No Confluence space is configured; set confluenceSpaceKey to create or fetch technical designs"
+      );
     }
     if (this.confluenceSpaceId === void 0) {
-      const response = await this.confluence.request("GET", "/spaces", void 0, {
-        keys: this.confluenceSpaceKey
-      });
+      const response = await this.confluence.request(
+        "GET",
+        "/spaces",
+        void 0,
+        {
+          keys: this.confluenceSpaceKey
+        }
+      );
       const space = response.results[0];
-      if (space === void 0) throw new Error(`Confluence space "${this.confluenceSpaceKey}" was not found`);
+      if (space === void 0)
+        throw new Error(`Confluence space "${this.confluenceSpaceKey}" was not found`);
       this.confluenceSpaceId = space.id;
     }
     return this.confluenceSpaceId;
@@ -50822,183 +51003,221 @@ var DefaultReviewOperations = class {
   }
 };
 
-// src/flight-rules/flight-rules.ts
-var DefaultFlightRules = class {
-  cwd;
-  env;
-  gitEnv;
-  explicitConfigPath;
-  hostSettings;
-  host;
-  configWritePolicy;
-  untrackedRoot;
-  constructor(props = {}) {
-    const parsed = FlightRulesPropsSchema.parse({
-      ...props,
-      env: props.env === void 0 ? void 0 : { ...props.env }
-    });
-    this.cwd = resolve8(parsed.cwd ?? process.cwd());
-    this.env = props.env ?? process.env;
-    this.gitEnv = { ...props.env ?? process.env };
-    this.explicitConfigPath = parsed.configPath;
-    this.hostSettings = props.hostSettings;
-    this.host = parsed.host;
-    this.configWritePolicy = parsed.configWritePolicy;
-  }
-  configPath() {
-    return this.configStore().filePath();
-  }
-  configStore() {
-    const env = this.explicitConfigPath === void 0 ? this.env : { ...this.env, FLIGHT_RULES_CONFIG: this.explicitConfigPath };
-    const untrackedRoot = this.mainCheckout();
-    return new ConfigStore({
-      cwd: this.cwd,
-      env,
-      host: NativeHostSchema.parse(
-        this.host ?? env["FLIGHT_RULES_HOST"] ?? this.installation().host() ?? "claude"
-      ),
-      ...this.hostSettings !== void 0 ? { hostSettings: this.hostSettings } : {},
-      ...untrackedRoot !== void 0 ? { untrackedRoot } : {}
-    });
-  }
-  installation() {
-    return FileNativeInstallation.fromInstall({
-      moduleUrl: import.meta.url,
-      cwd: this.cwd,
-      env: this.env
-    });
-  }
-  /** Looked up once per instance. */
-  mainCheckout() {
-    this.untrackedRoot ??= { value: new WorktreeLocator().mainCheckoutFor(this.cwd) };
-    return this.untrackedRoot.value;
-  }
-  evidence() {
-    return new EvidenceLocation({ cwd: this.cwd, mainCheckout: this.mainCheckout() });
-  }
-  config(overrideTracker) {
-    const config2 = this.configStore().load();
-    if (overrideTracker === void 0) return config2;
-    if (overrideTracker !== "github" && overrideTracker !== "jira") {
-      throw new Error(`Invalid --tracker "${overrideTracker}" \u2014 expected "github" or "jira"`);
-    }
-    return { ...config2, tracker: overrideTracker };
-  }
-  tracker(overrideTracker) {
-    const config2 = this.config(overrideTracker);
-    const env = new EnvLoader().load(this.env);
-    if (config2.tracker === "github") {
-      if (env.githubToken === void 0)
-        throw new Error("GITHUB_TOKEN environment variable is required");
-      if (config2.repo === void 0) throw new Error("repo is required when tracker is github");
-      const [owner, repo] = config2.repo.split("/");
-      if (owner === void 0 || repo === void 0) {
-        throw new Error(`Invalid repo format "${config2.repo}" \u2014 expected "owner/repo"`);
-      }
-      return new GitHubTaskTracker({ token: env.githubToken, owner, repo });
-    }
-    if (env.jiraToken === void 0) {
-      throw new Error(
-        "JIRA_TOKEN (or JIRA_API_TOKEN / JIRA_API_KEY) environment variable is required"
-      );
-    }
-    const email3 = env.jiraEmail ?? config2.jiraEmail;
-    if (email3 === void 0)
-      throw new Error("JIRA_EMAIL environment variable or jiraEmail config is required");
-    const host = env.jiraHost ?? config2.jiraHost;
-    if (host === void 0)
-      throw new Error("JIRA_HOST environment variable or jiraHost config is required");
-    if (config2.jiraProject === void 0)
-      throw new Error("jiraProject is required when tracker is jira");
-    return new JiraTaskTracker({
-      token: env.jiraToken,
-      host,
-      email: email3,
-      project: config2.jiraProject,
-      ...config2.jpdProject !== void 0 ? { jpdProject: config2.jpdProject } : {},
-      ...config2.confluenceSpaceKey !== void 0 ? { confluenceSpaceKey: config2.confluenceSpaceKey } : {}
-    });
-  }
-  prHost(overrideTracker) {
-    const config2 = this.config(overrideTracker);
-    if (config2.repo === void 0) {
-      throw new Error("repo (owner/repo) is required in config to create pull requests");
-    }
-    return new GhPullRequestHost({ repo: config2.repo });
-  }
-  git() {
-    return new NodeGitExecutor({ cwd: this.cwd, env: this.gitEnv });
-  }
-  gitConfigOperations(policy) {
-    return new DefaultGitConfigOperations({
-      cwd: this.cwd,
-      configStore: this.configStore(),
-      git: this.git(),
-      agentEnv: this.gitEnv["AI_AGENT"],
-      configPolicy: policy ?? this.configWritePolicy
-    });
-  }
-  probe() {
-    return new NodeToolProbe({ cwd: this.cwd, env: this.env });
-  }
-  readiness() {
-    return new NodeRepositoryReadiness({ cwd: this.cwd, env: this.env });
-  }
-  docs() {
-    return FileDocResolver.fromInstall({ moduleUrl: import.meta.url, env: this.env });
-  }
-  localOperations() {
-    return new DefaultLocalDiscoveryOperations({
-      cwd: this.cwd,
-      getConfig: () => this.config(),
-      getConfigStore: () => this.configStore(),
-      getCharters: () => new DocCharterCatalog({ docs: this.docs() }),
-      getRepositoryPaths: () => new GitRepositoryPaths({ cwd: this.cwd }),
-      getEvidence: () => this.evidence(),
-      getReadiness: () => this.readiness(),
-      getProbe: () => this.probe(),
-      getTracker: () => this.tracker(),
-      getConfigPath: () => this.configPath()
-    });
-  }
-  reviewOperations(props = {}) {
-    const launch = ReviewOperationsLaunchPropsSchema.parse(props);
-    return new DefaultReviewOperations({
-      ...launch,
-      cwd: launch.cwd ?? this.cwd,
-      env: this.env
-    });
-  }
-  board() {
-    return new AriadneBoard({
-      readLayers: () => this.configStore().layers(),
-      tokens: this.ariadneTokens(),
-      env: this.env,
-      sessions: this.boardSessions()
-    });
-  }
-  packets() {
-    return new AriadnePackets({
-      readLayers: () => this.configStore().layers(),
-      tokens: this.ariadneTokens()
-    });
-  }
-  ariadneTokens() {
-    return new AriadneTokenStore({ env: this.env });
-  }
-  boardSessions() {
-    return new BoardSessionStore({ env: this.env });
-  }
-  boardAgents() {
-    return new BoardAgentStore({ env: this.env });
+// src/operations/tracker-entity-operations.ts
+import { existsSync as existsSync12, realpathSync as realpathSync6, statSync as statSync5 } from "node:fs";
+import { isAbsolute as isAbsolute4, relative as relative4, resolve as resolve8 } from "node:path";
+
+// src/tasks/evidence/evidence.ts
+import { realpathSync as realpathSync5 } from "node:fs";
+import { basename as basename3 } from "node:path/posix";
+var mediaReference = /(!?)\[([^\]]*)\]\(\s*<?([^\s()<>]+)>?(?:\s+"[^"]*")?\s*\)/g;
+var absoluteTarget = /^[a-zA-Z][a-zA-Z0-9+.-]*:|^\/\/|^#/;
+var localPrefix = /^(?:\.\/)+/;
+var fenceRun2 = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+var AttachmentSpecSchema = external_exports.string().min(1).transform((spec) => {
+  const hash2 = spec.lastIndexOf("#");
+  const path3 = hash2 > 0 ? spec.slice(0, hash2) : spec;
+  const caption = hash2 > 0 ? spec.slice(hash2 + 1).trim() : "";
+  return { path: path3, caption: caption.length > 0 ? caption : basename3(path3) };
+});
+var DuplicateEvidenceNameError = class extends Error {
+  name = "DuplicateEvidenceNameError";
+  constructor(props) {
+    super(`Two attachments share the filename "${props.filename}": ${props.paths.join(", ")}`);
   }
 };
-function createFlightRules(props = {}) {
-  return new DefaultFlightRules(props);
-}
+var EvidenceUploadFailure = class extends Error {
+  name = "EvidenceUploadFailure";
+  attachments;
+  constructor(props) {
+    super(
+      props.attachments.length === 0 && props.cause instanceof Error ? props.cause.message : "One or more attachments could not be uploaded",
+      { cause: props.cause }
+    );
+    this.attachments = props.attachments;
+  }
+};
+var TrackerEvidenceService = class {
+  tracker;
+  constructor(props) {
+    this.tracker = props.tracker;
+  }
+  async attach(input2) {
+    const specs = this.parseSpecs(input2.specs);
+    const attachments = [];
+    for (const spec of specs) {
+      try {
+        const uploaded = await this.tracker.addAttachment(input2.ticketId, spec.path);
+        attachments.push({
+          ...uploaded,
+          path: spec.path,
+          caption: spec.caption,
+          referenced: false
+        });
+      } catch (cause) {
+        throw new EvidenceUploadFailure({ cause, attachments });
+      }
+    }
+    const byName = /* @__PURE__ */ new Map();
+    for (const attachment of attachments) byName.set(basename3(attachment.path), attachment);
+    const rewritten = this.rewriteReferences(input2.body, byName);
+    return { body: this.appendUnreferenced(rewritten, attachments), attachments };
+  }
+  prepareBody(input2) {
+    const specs = this.parseSpecs(input2.specs);
+    const attachments = specs.map((spec) => ({
+      id: "pending",
+      filename: basename3(spec.path),
+      mimeType: "application/octet-stream",
+      path: spec.path,
+      caption: spec.caption,
+      referenced: false
+    }));
+    const byName = /* @__PURE__ */ new Map();
+    for (const attachment of attachments) byName.set(basename3(attachment.path), attachment);
+    const rewritten = this.rewriteReferences(input2.body, byName);
+    return this.appendUnreferenced(rewritten, attachments);
+  }
+  parseSpecs(specs) {
+    const parsed = specs.map((spec) => AttachmentSpecSchema.parse(spec));
+    this.rejectDuplicateNames(parsed);
+    return parsed;
+  }
+  rejectDuplicateNames(specs) {
+    const paths = /* @__PURE__ */ new Map();
+    for (const spec of specs) {
+      const name = basename3(spec.path);
+      paths.set(name, [...paths.get(name) ?? [], spec.path]);
+    }
+    for (const [filename, group] of paths) {
+      if (group.length > 1) throw new DuplicateEvidenceNameError({ filename, paths: group });
+    }
+  }
+  rewriteReferences(body, byName) {
+    let fence;
+    return body.split("\n").map((line) => {
+      if (fence === void 0) {
+        const opened = this.openingFence(line);
+        if (opened !== void 0) {
+          fence = opened;
+          return line;
+        }
+        return this.rewriteLine(line, byName);
+      }
+      if (this.closesFence(line, fence)) fence = void 0;
+      return line;
+    }).join("\n");
+  }
+  /**
+   * A line opens a fence when it is a run of >=3 backticks or tildes; a backtick
+   * fence's info string may not itself contain a backtick, which keeps inline
+   * code from being read as a fence.
+   */
+  openingFence(line) {
+    const match = fenceRun2.exec(line);
+    if (match === null) return void 0;
+    const run3 = match[1];
+    const rest = match[2];
+    if (run3 === void 0 || rest === void 0) return void 0;
+    if (run3.charAt(0) === "`" && rest.includes("`")) return void 0;
+    return { char: run3.charAt(0), length: run3.length };
+  }
+  /**
+   * A line closes an open fence only when it is a run of the SAME character, at
+   * least as long as the opening run, with nothing but whitespace after it.
+   */
+  closesFence(line, fence) {
+    const match = fenceRun2.exec(line);
+    if (match === null) return false;
+    const run3 = match[1];
+    const rest = match[2];
+    if (run3 === void 0 || rest === void 0) return false;
+    return run3.charAt(0) === fence.char && run3.length >= fence.length && rest.trim().length === 0;
+  }
+  rewriteLine(line, byName) {
+    let result = "";
+    let last = 0;
+    mediaReference.lastIndex = 0;
+    for (let match = mediaReference.exec(line); match !== null; match = mediaReference.exec(line)) {
+      const whole = match[0];
+      const bang = match[1];
+      const label = match[2];
+      const target = match[3];
+      result += line.slice(last, match.index);
+      const attachment = bang !== void 0 && label !== void 0 && target !== void 0 ? this.resolve(target, byName) : void 0;
+      if (attachment === void 0 || bang === void 0 || label === void 0) {
+        result += whole;
+      } else {
+        attachment.referenced = true;
+        result += `${bang}[${label}](attachment:${attachment.filename})`;
+      }
+      last = match.index + whole.length;
+    }
+    return result + line.slice(last);
+  }
+  resolve(target, byName) {
+    if (absoluteTarget.test(target)) return void 0;
+    if (target.startsWith("/") || /^[a-zA-Z]:[\\/]/.test(target)) {
+      try {
+        const realTarget = realpathSync5(target);
+        return [...byName.values()].find((attachment) => {
+          try {
+            return realpathSync5(attachment.path) === realTarget;
+          } catch {
+            return false;
+          }
+        });
+      } catch {
+        return void 0;
+      }
+    }
+    return byName.get(basename3(target.replace(localPrefix, "")));
+  }
+  appendUnreferenced(body, attachments) {
+    let result = body;
+    for (const attachment of attachments) {
+      if (!attachment.referenced)
+        result += `
 
-// src/cli/cli.ts
-import { parse as parse7 } from "node:path";
+![${attachment.caption}](attachment:${attachment.filename})`;
+    }
+    return result;
+  }
+};
+
+// src/tasks/portable-context/portable-context.ts
+var tokenStart = String.raw`(?:^|(?<=[\s(\[<{"'\x60=,:;|]))`;
+var localReferencePatterns = [
+  /file:\/\/\S*/g,
+  new RegExp(`${tokenStart}/(?:Users|home)/[^\\s/)\\]>"'\\x60]+\\S*`, "g"),
+  new RegExp(`${tokenStart}~/\\S*`, "g"),
+  /\b[A-Za-z]:\\Users\\\S*/g
+];
+var trailingPunctuation = /[`.,;:!?)\]>"']+$/;
+var maxReported = 5;
+var RegexPortableContextGuard = class {
+  find(body) {
+    return body.split("\n").flatMap(
+      (text7, index2) => localReferencePatterns.flatMap(
+        (pattern) => [...text7.matchAll(pattern)].map((m) => ({ line: index2 + 1, match: m[0].replace(trailingPunctuation, "") }))
+      )
+    );
+  }
+  assertPortable(body, opts = {}) {
+    if (opts.allowLocalPaths === true) return;
+    const found = this.find(body);
+    if (found.length === 0) return;
+    const listed = found.slice(0, maxReported).map((ref) => `  line ${ref.line}: ${ref.match}`).join("\n");
+    const more = found.length > maxReported ? `
+  \u2026and ${found.length - maxReported} more` : "";
+    throw new Error(
+      `body references files on this machine, which nobody else can open:
+${listed}${more}
+A tracker body must stand on its own for an engineer on a fresh clone. Inline the content, link a published artifact (\`flight-rules tdd create\`, a tracker issue, or a file on the default branch by URL), or use a repo-relative path for code that exists on the default branch. Pass --allow-local-paths only when the path is the subject of the work, not a pointer to context.`
+    );
+  }
+};
+var portableContextGuard = new RegexPortableContextGuard();
 
 // src/operations/operation.schema.ts
 var OperationEffectSchema = external_exports.enum(["read", "write", "network", "process"]);
@@ -51066,10 +51285,12 @@ var OperationCliError = class extends Error {
   name = "OperationCliError";
   operationId;
   operationErrorName;
+  partialData;
   constructor(props) {
     super(props.message);
     this.operationId = props.operationId;
     this.operationErrorName = props.errorName;
+    this.partialData = props.partialData;
   }
 };
 var MapOperationRegistry = class {
@@ -51152,784 +51373,6 @@ var MapOperationRegistry = class {
         }
       });
     }
-  }
-};
-
-// src/operations/doc-operation.ts
-var DocOperationInputSchema = external_exports.object({ id: DocIdSchema });
-var DocOperationOutputSchema = external_exports.object({ id: DocIdSchema, path: external_exports.string().min(1), contents: external_exports.string() });
-var DocOperationPropsSchema = external_exports.object({
-  getResolver: external_exports.custom((value) => typeof value === "function")
-});
-var DocOperation = class {
-  id = "doc";
-  description = "Read a bundled flight-rules document by its document ID.";
-  inputSchema = DocOperationInputSchema;
-  outputSchema = DocOperationOutputSchema;
-  effects = ["read"];
-  cli = { path: ["doc"], aliases: [] };
-  getResolver;
-  constructor(props) {
-    this.getResolver = DocOperationPropsSchema.parse(props).getResolver;
-  }
-  handler({ id }) {
-    return this.getResolver().resolve(id);
-  }
-};
-
-// src/bundled-docs/commands/doc/command.ts
-function createDocCommand(props) {
-  const doc = new Command("doc");
-  const operation = props.operation ?? new DocOperation({ getResolver: props.getResolver });
-  const registry2 = props.registry ?? new MapOperationRegistry({
-    operations: [operation],
-    policy: new LaunchOperationAccessPolicy({ allowedEffects: ["read"] })
-  });
-  doc.exitOverride().argument("<id>", "doc id, the basename of a file in docs/ without .md").option("--path", "print the absolute path instead of the contents").action(async (id, opts) => {
-    if (!DocIdSchema.safeParse(id).success) {
-      throw new InvalidDocIdError(
-        "Invalid doc id \u2014 use lowercase letters, digits, and single hyphens"
-      );
-    }
-    const result = await registry2.invoke(operation.id, { id });
-    if (result.status !== "success") {
-      const error62 = result.error;
-      throw new OperationCliError({
-        operationId: operation.id,
-        errorName: error62.name,
-        message: error62.message
-      });
-    }
-    const output2 = operation.outputSchema.parse(result.data);
-    process.stdout.write(
-      opts.path ? `${output2.path}
-` : output2.contents.endsWith("\n") ? output2.contents : `${output2.contents}
-`
-    );
-  });
-  return doc;
-}
-
-// src/operations/local-discovery-cli.ts
-import { readFileSync as readFileSync13 } from "node:fs";
-import { text as text4 } from "node:stream/consumers";
-
-// src/tasks/commands/check/command.ts
-var ReadinessFailedError = class extends Error {
-  name = "ReadinessFailedError";
-};
-
-// src/operations/local-discovery-cli.ts
-var RuntimeFailureReportSchema = external_exports.object({
-  tracker: external_exports.null(),
-  repo: external_exports.null(),
-  checks: external_exports.array(
-    external_exports.object({
-      name: external_exports.string(),
-      ok: external_exports.boolean(),
-      required: external_exports.boolean(),
-      code: external_exports.string(),
-      detail: external_exports.string(),
-      remedy: external_exports.string()
-    })
-  ),
-  ok: external_exports.literal(false),
-  scope: external_exports.literal("workflow")
-});
-var CharterResultSchema = external_exports.object({
-  charters: external_exports.array(
-    external_exports.object({ path: external_exports.string(), contents: external_exports.string(), language: external_exports.string().nullable() })
-  ),
-  unmatched: external_exports.boolean()
-});
-var ConfigPathResultSchema = external_exports.object({ path: external_exports.string() });
-var RfcIdResultSchema = external_exports.object({ id: external_exports.string() });
-var CompetenciesResultSchema = external_exports.array(external_exports.string());
-var ConfigInspectionResultSchema = external_exports.object({
-  host: external_exports.string(),
-  valid: external_exports.boolean(),
-  values: external_exports.record(external_exports.string(), external_exports.unknown()),
-  sources: external_exports.record(external_exports.string(), external_exports.unknown()),
-  layers: external_exports.array(external_exports.unknown()),
-  error: external_exports.string().optional()
-});
-var ReadinessResultSchema = external_exports.object({
-  tracker: external_exports.string().nullable(),
-  repo: external_exports.string().nullable().optional(),
-  checks: external_exports.array(external_exports.unknown()),
-  ok: external_exports.boolean(),
-  workflow: WorkflowSchema.optional(),
-  scope: external_exports.enum(["environment", "workflow"])
-});
-var LocalDiscoveryCliPropsSchema = external_exports.object({
-  registry: external_exports.custom(
-    (value) => typeof value === "object" && value !== null && "invoke" in value
-  ),
-  readStdin: external_exports.custom((value) => typeof value === "function").optional()
-});
-var CommanderLocalDiscoveryCli = class {
-  registry;
-  readStdin;
-  constructor(props) {
-    const parsed = LocalDiscoveryCliPropsSchema.parse(props);
-    this.registry = parsed.registry;
-    this.readStdin = parsed.readStdin ?? (() => text4(process.stdin));
-  }
-  addTo(program2) {
-    this.addCharter(program2);
-    this.addCompetencies(program2);
-    this.addRfc(program2);
-    this.addQa(program2);
-    this.addConfig(program2);
-    this.addCheck(program2);
-  }
-  addCharter(program2) {
-    program2.command("charter").description("print the core coding charter and language charters for selected files").argument("[paths...]").option("--stdin").option("--diff <base>").option("--repo").option("--path").exitOverride().action(
-      async (paths, opts) => {
-        const selectedSources = [
-          paths.length > 0,
-          opts.stdin === true,
-          opts.diff !== void 0,
-          opts.repo === true
-        ];
-        if (selectedSources.filter(Boolean).length > 1)
-          throw new CharterSelectionError("Choose one of: paths, --stdin, --diff <base>, --repo");
-        const selectedPaths = opts.stdin ? (await this.readStdin()).split("\n") : paths;
-        const input2 = {
-          ...opts.stdin || paths.length > 0 ? { paths: selectedPaths } : {},
-          ...opts.diff === void 0 ? {} : { diff: opts.diff },
-          repository: opts.repo ?? false,
-          pathOutput: opts.path ?? false
-        };
-        const result = await this.invoke("charter", input2, CharterResultSchema);
-        if (result.unmatched)
-          process.stderr.write(
-            "No language charter matched these files; printing the core charter only.\n"
-          );
-        const output2 = opts.path ? result.charters.map((charter) => `${charter.path}
-`).join("") : result.charters.map(
-          (charter) => charter.contents.endsWith("\n") ? charter.contents : `${charter.contents}
-`
-        ).join("\n");
-        process.stdout.write(output2);
-      }
-    );
-  }
-  addCompetencies(program2) {
-    program2.command("competencies").exitOverride().action(async () => {
-      process.stdout.write(
-        `${JSON.stringify(await this.invoke("competencies", {}, CompetenciesResultSchema))}
-`
-      );
-    });
-  }
-  addRfc(program2) {
-    const rfc = program2.command("rfc");
-    rfc.command("dir").exitOverride().action(async () => {
-      process.stdout.write(
-        `${(await this.invoke("rfc-dir", {}, ConfigPathResultSchema)).path}
-`
-      );
-    });
-    rfc.command("next-id").exitOverride().action(async () => {
-      process.stdout.write(`${(await this.invoke("rfc-next-id", {}, RfcIdResultSchema)).id}
-`);
-    });
-  }
-  addQa(program2) {
-    const qa = program2.command("qa");
-    qa.command("instructions").description("print the QA instructions that apply to a directory, nearest first, as JSON").option("--from <dir>").exitOverride().action(async (opts) => {
-      process.stdout.write(
-        `${JSON.stringify(await this.invoke("qa-instructions", opts.from === void 0 ? {} : { from: opts.from }, external_exports.object({ found: external_exports.boolean(), sources: external_exports.array(external_exports.unknown()) })))}
-`
-      );
-    });
-    qa.command("evidence-dir").description(
-      "print where QA evidence for a ticket is written, and whether git ignores it, as JSON"
-    ).argument("<ticket>").exitOverride().action(async (ticket) => {
-      process.stdout.write(
-        `${JSON.stringify(await this.invoke("qa-evidence-dir", { ticket }, external_exports.object({ path: external_exports.string(), gitignored: external_exports.boolean().nullable() })))}
-`
-      );
-    });
-    qa.command("recipe").description(
-      "deprecated: print the path of the nearest QA instructions; use `qa instructions`"
-    ).exitOverride().action(async () => {
-      const result = await this.invoke("qa-recipe", {}, ConfigPathResultSchema);
-      process.stderr.write(
-        "`flight-rules qa recipe` is deprecated; use `flight-rules qa instructions`\n"
-      );
-      process.stdout.write(`${result.path}
-`);
-    });
-  }
-  addConfig(program2) {
-    const config2 = program2.command("config");
-    config2.command("path").description("print the resolved config file path, whether or not it exists").exitOverride().action(async () => {
-      process.stdout.write(
-        `${(await this.invoke("config-path", {}, ConfigPathResultSchema)).path}
-`
-      );
-    });
-    config2.command("show").description(
-      "print the merged config, which file each value came from, and whether it is valid"
-    ).exitOverride().action(async () => {
-      process.stdout.write(
-        `${JSON.stringify(await this.invoke("config-show", {}, ConfigInspectionResultSchema))}
-`
-      );
-    });
-    const scopeHelp = "where to write: user, project, local, or file; config show reports the selected host and exact paths (override with FLIGHT_RULES_HOST=claude|codex)";
-    config2.command("set").description("write one config value; array keys take several values").argument("<key>").argument("<values...>").addOption(new Option("--scope <scope>", scopeHelp).choices(configScopes)).exitOverride().action(async (key, values, options) => {
-      const result = await this.invoke(
-        "config-set",
-        { key, values, ...options.scope === void 0 ? {} : { scope: options.scope } },
-        external_exports.object({
-          key: external_exports.string(),
-          scope: external_exports.enum(configScopes),
-          path: external_exports.string(),
-          warning: external_exports.string().optional()
-        })
-      );
-      process.stdout.write(`${JSON.stringify(result)}
-`);
-    });
-    config2.command("unset").description("remove one config value from a scope").argument("<key>").addOption(new Option("--scope <scope>", scopeHelp).choices(configScopes)).exitOverride().action(async (key, options) => {
-      const result = await this.invoke(
-        "config-unset",
-        { key, ...options.scope === void 0 ? {} : { scope: options.scope } },
-        external_exports.object({ key: external_exports.string(), scope: external_exports.enum(configScopes), path: external_exports.string() })
-      );
-      process.stdout.write(`${JSON.stringify(result)}
-`);
-    });
-  }
-  addCheck(program2) {
-    program2.command("check").addOption(
-      new Option(
-        "--workflow <name>",
-        "check readiness for this workflow before its first mutation"
-      ).choices(WorkflowSchema.options)
-    ).option(
-      "--runtime-file <path>",
-      "JSON containing current caller/worker capability observations; requires --workflow"
-    ).exitOverride().action(async (options) => {
-      let evidence;
-      try {
-        evidence = options.runtimeFile === void 0 ? void 0 : JSON.parse(readFileSync13(options.runtimeFile, "utf8"));
-      } catch {
-        this.writeRuntimeFailure(
-          "Cannot read a JSON runtime evidence file",
-          "Supply a readable evidence file; see flight-rules doc workflow-preflight."
-        );
-        throw new ReadinessFailedError("flight-rules check failed \u2014 see report above");
-      }
-      const parsed = ReadinessOptionsSchema.safeParse({ workflow: options.workflow, evidence });
-      if (!parsed.success) {
-        this.writeRuntimeFailure(
-          "Invalid workflow runtime evidence",
-          "Supply evidence matching WorkflowEvidenceSchema with a --workflow selection."
-        );
-        throw new ReadinessFailedError("flight-rules check failed \u2014 see report above");
-      }
-      const report = await this.invoke("check", parsed.data, ReadinessResultSchema);
-      process.stdout.write(`${JSON.stringify(report)}
-`);
-      if (!report.ok)
-        throw new ReadinessFailedError("flight-rules check failed \u2014 see report above");
-    });
-  }
-  writeRuntimeFailure(detail, remedy) {
-    const report = RuntimeFailureReportSchema.parse({
-      tracker: null,
-      repo: null,
-      checks: [
-        { name: "runtime", ok: false, required: true, code: "INVALID_CONTEXT", detail, remedy }
-      ],
-      ok: false,
-      scope: "workflow"
-    });
-    process.stdout.write(`${JSON.stringify(report)}
-`);
-  }
-  async invoke(id, input2, outputSchema) {
-    const result = await this.registry.invoke(id, input2);
-    if (result.status !== "success")
-      throw new OperationCliError({
-        operationId: id,
-        errorName: result.status === "error" ? result.error.name : result.error.name,
-        message: result.error.message
-      });
-    return outputSchema.parse(result.data);
-  }
-};
-var CharterSelectionError = class extends Error {
-  name = "CharterSelectionError";
-};
-
-// src/code-review/commands/command.ts
-import { readFileSync as readFileSync14 } from "node:fs";
-var ReviewCommandPropsSchema = external_exports.object({
-  registry: external_exports.custom(
-    (value) => Boolean(value && typeof value === "object" && "invoke" in value)
-  ),
-  defaultCwd: external_exports.string().min(1),
-  createTrustedRegistry: external_exports.custom(
-    (value) => typeof value === "function"
-  )
-});
-var CommanderReviewCommand = class {
-  registry;
-  defaultCwd;
-  createTrustedRegistry;
-  constructor(props) {
-    const parsed = ReviewCommandPropsSchema.parse(props);
-    this.registry = parsed.registry;
-    this.defaultCwd = parsed.defaultCwd;
-    this.createTrustedRegistry = parsed.createTrustedRegistry;
-  }
-  create() {
-    const review = new Command("review").description(
-      "shared autonomous review contract, policy and evidence-checked plans"
-    );
-    review.command("schema").option("--transport", "print the model-facing superset instead of the full schema").action(async (opts) => {
-      const schema = await this.invoke("review-schema", { transport: opts.transport ?? false });
-      process.stdout.write(JSON.stringify(schema, null, 2) + "\n");
-    });
-    review.command("validate").argument("<file>", "structured reviewer result").action(async (file2) => {
-      const result = await this.invoke("review-validate", {
-        review: JSON.parse(readFileSync14(file2, "utf8"))
-      });
-      process.stdout.write(JSON.stringify(result) + "\n");
-    });
-    review.command("render").argument("<plan>", "evidence-checked plan JSON").action(async (file2) => {
-      const plan = external_exports.looseObject({
-        review: external_exports.json(),
-        records: external_exports.array(external_exports.json()),
-        outcome: external_exports.string(),
-        problems: external_exports.array(external_exports.string())
-      }).parse(JSON.parse(readFileSync14(file2, "utf8")));
-      const result = await this.invoke("review-render", {
-        review: plan.review,
-        records: plan.records,
-        outcome: plan.outcome,
-        problems: plan.problems
-      });
-      process.stdout.write(JSON.stringify(result) + "\n");
-    });
-    review.command("state").argument("<file>", "index with actual persisted artifact IDs").action(async (file2) => {
-      const result = await this.invoke("review-state", {
-        state: JSON.parse(readFileSync14(file2, "utf8"))
-      });
-      process.stdout.write(`${external_exports.string().parse(result)}
-`);
-    });
-    review.command("context").requiredOption("--ref <sha>", "pinned trusted default-branch commit").option("--path <path>", "repo review-context file", "CODE-REVIEW.md").option("--cwd <directory>", "trusted repository checkout", this.defaultCwd).action(async (opts) => {
-      const registry2 = this.createTrustedRegistry({ cwd: opts.cwd, trustedRef: opts.ref });
-      const result = await this.invokeWithRegistry(registry2, "review-context", {
-        contextPath: opts.path
-      });
-      process.stdout.write(JSON.stringify(result) + "\n");
-    });
-    review.command("plan").argument("<number>").requiredOption("--repo <repo>", "owner/name").requiredOption("--file <path>", "structured reviewer result").requiredOption(
-      "--records-file <path>",
-      "trusted prior records from GitHub; [] for a first review"
-    ).option("--owners-file <path>", "trusted role-to-login authority mapping").option("--require-mapping", "reject independent-writer fallback").action(
-      async (number4, opts) => {
-        const input2 = {
-          number: external_exports.coerce.number().int().positive().parse(number4),
-          repo: opts.repo,
-          review: JSON.parse(readFileSync14(opts.file, "utf8")),
-          records: JSON.parse(readFileSync14(opts.recordsFile, "utf8"))
-        };
-        const owners = opts.ownersFile === void 0 ? {} : external_exports.record(external_exports.string(), external_exports.array(external_exports.string().min(1))).parse(JSON.parse(readFileSync14(opts.ownersFile, "utf8")));
-        const registry2 = this.createTrustedRegistry({
-          owners,
-          requireMapping: opts.requireMapping ?? false
-        });
-        const result = await this.invokeWithRegistry(registry2, "review-plan", input2);
-        process.stdout.write(JSON.stringify(result) + "\n");
-      }
-    );
-    return review;
-  }
-  async invoke(id, input2) {
-    return this.invokeWithRegistry(this.registry, id, input2);
-  }
-  async invokeWithRegistry(registry2, id, input2) {
-    const result = await registry2.invoke(id, input2);
-    if (result.status === "error")
-      throw new OperationCliError({
-        operationId: id,
-        errorName: result.error.name,
-        message: result.error.message
-      });
-    if (result.status === "partial")
-      throw new OperationCliError({
-        operationId: id,
-        errorName: result.error.name,
-        message: result.error.message
-      });
-    return result.data;
-  }
-};
-function createReviewCommand(props) {
-  return new CommanderReviewCommand(props).create();
-}
-
-// src/shared/commands/board/command.ts
-import { createInterface } from "node:readline";
-import { text as text5 } from "node:stream/consumers";
-import { Writable } from "node:stream";
-
-// src/shared/collect.ts
-function collect(value, previous3) {
-  return [...previous3, value];
-}
-
-// src/shared/commands/board/command.ts
-var HiddenPrompt = class {
-  async read(label) {
-    if (process.stdin.isTTY !== true) return text5(process.stdin);
-    process.stderr.write(label);
-    const muted = new Writable({ write: (_chunk, _encoding, done) => done() });
-    const prompt = createInterface({ input: process.stdin, output: muted, terminal: true });
-    try {
-      return await new Promise((resolve12) => prompt.once("line", resolve12));
-    } finally {
-      prompt.close();
-      process.stderr.write("\n");
-    }
-  }
-};
-var ticketHelp = "Jira issue key";
-var sessionHelp = "session id; defaults to <$CLAUDE_CODE_SESSION_ID>-<TICKET>, the row the heartbeat hook keeps alive for that ticket";
-var itemsSessionHelp = "session id; defaults to <$CLAUDE_CODE_SESSION_ID>-<TICKET> with --ticket, else $CLAUDE_CODE_SESSION_ID";
-var skillHelp = "the skill reporting, e.g. flight-rules:execute-work";
-var bootstrapSkillHelp = `${skillHelp}; names the skill on a session this post has to create`;
-var strictHelp = "exit 1 when the post fails, and post even without a token so a missing one fails with 401";
-function createBoardCommand(getBoard, getTokens = () => new AriadneTokenStore(), readSecret = () => new HiddenPrompt().read("Ariadne agent token: ")) {
-  const board = new Command("board").description("report this run to Ariadne's Agents page (opt-in; silent unless an Ariadne token is set)").addHelpText(
-    "after",
-    [
-      "",
-      "Token: $ARIADNE_AGENT_TOKEN, then $ARIADNE_TOKEN, then the file `board login` saves.",
-      "There is no fallback to the ariadne CLI's Keychain session, so each machine needs its",
-      "own agent token from Ariadne \u203A Settings \u203A Connections.",
-      "Config: ariadne.url (https; http only for localhost) and ariadne.enabled, read only from",
-      "user or local scope; project settings and the config file cannot set them.",
-      "Not configured or disabled: prints nothing, exits 0. A failure is one stderr line and",
-      "exit 0; --strict makes it exit 1. `board items` is read-only; answer items in Ariadne."
-    ].join("\n")
-  );
-  board.exitOverride();
-  const withReportOptions = (command, jsonHelp, session = sessionHelp) => command.option("--session <id>", session).option("--strict", strictHelp).option("--json", jsonHelp).exitOverride();
-  const finish = (outcome, opts, print, loud = opts.strict === true) => {
-    if (loud) for (const notice of outcome.notices ?? []) process.stderr.write(`flight-rules board: ${notice}
-`);
-    if (outcome.status === "skipped") return;
-    if (outcome.status === "failed") {
-      if (opts.strict === true) throw new Error(`flight-rules board: ${outcome.message}`);
-      process.stderr.write(`flight-rules board: ${outcome.message}
-`);
-      return;
-    }
-    print(outcome.value);
-  };
-  const printJson = (opts) => (value) => {
-    if (opts.json === true) process.stdout.write(JSON.stringify(value) + "\n");
-  };
-  const describeItem = (item) => {
-    const answer = item.chosenOption !== null ? ` -> ${item.chosenOption}` : item.options.length > 0 ? ` [${item.options.join(" | ")}]` : "";
-    return `${item.status}	${item.kind}	${item.ticket ?? "-"}	${item.id}	${item.title}${answer}`;
-  };
-  const post = new Command("post").description("send a heartbeat, an item that needs a person, or an activity line");
-  post.exitOverride();
-  withReportOptions(
-    post.command("heartbeat").description("create or update this session: ticket, step and state").requiredOption("--ticket <key>", ticketHelp).requiredOption("--step <step>", "one line up to 60 characters: implement, verify 2/3, pr, qa").addOption(new Option("--state <state>", "how the run is going").choices(agentStates).makeOptionMandatory()).option("--branch <branch>", "the branch as git prints it").option("--repo <repo>", "owner/name").option("--skill <skill>", skillHelp).option("--detail <line>", "one line up to 500 characters"),
-    "print the API response {session} as JSON"
-  ).action(async (opts) => {
-    const outcome = await getBoard().heartbeat(
-      {
-        session: opts.session,
-        ticket: opts.ticket,
-        step: opts.step,
-        state: opts.state,
-        branch: opts.branch,
-        repo: opts.repo,
-        skill: opts.skill,
-        detail: opts.detail
-      },
-      { strict: opts.strict === true }
-    );
-    finish(outcome, opts, printJson(opts));
-  });
-  withReportOptions(
-    post.command("item").description("ask a person for something: a question, blocker, testable or wave gate, with up to 6 options").addOption(new Option("--kind <kind>", "what the person is asked for").choices(agentItemKinds).makeOptionMandatory()).requiredOption("--ticket <key>", ticketHelp).requiredOption("--title <text>", "one line up to 200 characters").option("--detail <text>", "up to 2,000 characters; line breaks allowed").option("--option <label>", "an answer the person can choose (repeatable, up to 6)", collect, []).option("--id <id>", "client id; reposting the same id returns the stored item and its chosenOption").option("--skill <skill>", bootstrapSkillHelp),
-    "print the API response {item, created} as JSON, including any chosenOption"
-  ).action(async (opts) => {
-    const outcome = await getBoard().item(
-      {
-        session: opts.session,
-        kind: opts.kind,
-        ticket: opts.ticket,
-        title: opts.title,
-        detail: opts.detail,
-        ...opts.option.length > 0 ? { options: opts.option } : {},
-        id: opts.id
-      },
-      { strict: opts.strict === true, skill: opts.skill }
-    );
-    finish(outcome, opts, printJson(opts));
-  });
-  withReportOptions(
-    post.command("activity").description("add one line to the session's activity stream").requiredOption("--ticket <key>", ticketHelp).requiredOption("--text <line>", "one line up to 500 characters").addOption(new Option("--level <level>", "defaults to info").choices(agentActivityLevels)).option("--id <id>", "client id; reposting the same id stores nothing new").option("--skill <skill>", bootstrapSkillHelp),
-    "print the API response {activity, created} as JSON"
-  ).action(async (opts) => {
-    const outcome = await getBoard().activity(
-      { session: opts.session, ticket: opts.ticket, text: opts.text, level: opts.level, id: opts.id },
-      { strict: opts.strict === true, skill: opts.skill }
-    );
-    finish(outcome, opts, printJson(opts));
-  });
-  board.addCommand(post);
-  withReportOptions(
-    board.command("items").description("list a session's items, open and resolved, with any chosen option").option("--ticket <key>", "the Jira key the items were posted on; picks the same default session as the post"),
-    "print {items} as JSON",
-    itemsSessionHelp
-  ).action(async (opts) => {
-    const outcome = await getBoard().items(opts.session, { strict: opts.strict === true }, opts.ticket);
-    finish(
-      outcome,
-      opts,
-      ({ items }) => {
-        if (opts.json === true) {
-          process.stdout.write(JSON.stringify({ items }) + "\n");
-          return;
-        }
-        process.stdout.write(items.map((item) => describeItem(item) + "\n").join(""));
-      },
-      true
-    );
-  });
-  board.command("login").description(
-    "save this machine's Ariadne agent token (each machine needs its own, from Ariadne \u203A Settings \u203A Connections), read from stdin or a hidden prompt, with mode 0600"
-  ).exitOverride().action(async () => {
-    const tokens = getTokens();
-    const path3 = tokens.save(await readSecret());
-    const shadowedBy = tokens.shadowingEnv();
-    process.stdout.write(
-      JSON.stringify({
-        saved: path3,
-        ...shadowedBy !== void 0 ? { warning: `$${shadowedBy} is set and takes precedence over the saved token` } : {}
-      }) + "\n"
-    );
-  });
-  board.command("logout").description("delete the agent token saved by `board login`").exitOverride().action(() => {
-    const tokens = getTokens();
-    process.stdout.write(JSON.stringify({ removed: tokens.remove(), path: tokens.path() }) + "\n");
-  });
-  return board;
-}
-
-// src/shared/commands/packet/command.ts
-import { readFileSync as readFileSync15, writeFileSync as writeFileSync7 } from "node:fs";
-
-// src/shared/decimal-integer.ts
-var DecimalIntegerParser = class {
-  /** A pull request number or similar count that starts at 1. */
-  positive(value) {
-    return this.parse(value, /^[1-9][0-9]*$/, "must be a positive whole number written in decimal digits");
-  }
-  /** A revision, which starts at 0. */
-  nonNegative(value) {
-    return this.parse(value, /^(0|[1-9][0-9]*)$/, "must be a whole number from 0 written in decimal digits");
-  }
-  parse(value, pattern, message) {
-    const parsed = Number(value);
-    if (!pattern.test(value) || !Number.isSafeInteger(parsed)) throw new InvalidArgumentError(message);
-    return parsed;
-  }
-};
-var decimalIntegers = new DecimalIntegerParser();
-
-// src/shared/commands/packet/command.ts
-var serverOwnedFields = /* @__PURE__ */ new Set(["id", "authorId", "status", "revision", "createdAt", "updatedAt"]);
-var ReviewerEntrySchema = external_exports.union([
-  external_exports.string(),
-  external_exports.looseObject({ github: external_exports.looseObject({ login: external_exports.string() }) }).transform((reviewer) => reviewer.github.login)
-]);
-var UpdateFileSchema = external_exports.looseObject({ id: external_exports.string().optional(), revision: external_exports.number().int().optional(), reviewers: external_exports.array(ReviewerEntrySchema).optional() }).transform((file2) => ({
-  id: file2.id,
-  revision: file2.revision,
-  packet: {
-    ...Object.fromEntries(Object.entries(file2).filter(([key]) => !serverOwnedFields.has(key))),
-    ...file2.reviewers !== void 0 ? { reviewers: file2.reviewers } : {}
-  }
-}));
-var PacketIdWriteError = class extends Error {
-  name = "PacketIdWriteError";
-};
-var JsonObjectSchema = external_exports.record(external_exports.string(), external_exports.unknown());
-var PacketFile = class {
-  constructor(path3) {
-    this.path = path3;
-  }
-  path;
-  /** The file's JSON exactly as written; strict validation happens before anything is sent. */
-  read() {
-    let text7;
-    try {
-      text7 = readFileSync15(this.path, "utf8");
-    } catch (err) {
-      throw new Error(`cannot read ${this.path}: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
-    }
-    try {
-      return JSON.parse(text7);
-    } catch (err) {
-      throw new Error(`${this.path} is not valid JSON: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
-    }
-  }
-  /** Runs after the packet is stored, so a failure says so and names the id the file still needs. */
-  writeId(file2, id) {
-    try {
-      writeFileSync7(this.path, JSON.stringify({ ...file2, id }, null, 2) + "\n");
-    } catch (err) {
-      throw new PacketIdWriteError(
-        `packet ${id} was published, but its id could not be written to ${this.path}: ${err instanceof Error ? err.message : String(err)}; add "id": "${id}" to the file before re-running, or a re-run publishes a second packet`,
-        { cause: err }
-      );
-    }
-  }
-  readForUpdate() {
-    const parsed = UpdateFileSchema.safeParse(this.read());
-    if (parsed.success) return parsed.data;
-    throw new Error(
-      `${this.path} must hold one packet object: ${parsed.error.issues.map((issue2) => `${issue2.path.join(".") || "file"}: ${issue2.message}`).join("; ")}`
-    );
-  }
-};
-var PacketCommandFactory = class {
-  create(getPackets) {
-    const packet = new Command("packet").description("publish and revise a Review Packet in Ariadne, as its author").addHelpText(
-      "after",
-      [
-        "",
-        "Token: $ARIADNE_AGENT_TOKEN, then $ARIADNE_TOKEN, then the file `board login` saves.",
-        "Config: ariadne.url (https; http only for localhost), read only from user or local scope.",
-        "A packet carries titles, annotations and anchors (path and line) only; code and diffs",
-        "are rejected locally, as is over-long text. Every failure exits 1 with a next step.",
-        "See docs/review-packets.md."
-      ].join("\n")
-    );
-    packet.exitOverride();
-    const print = (value) => {
-      process.stdout.write(JSON.stringify(value) + "\n");
-    };
-    packet.command("create").description(
-      "publish a packet from a JSON file; prints the stored packet. An id is generated from the title when the file has none, and the published id is written back into the file so a re-run replays instead of creating a second packet"
-    ).requiredOption("--file <path>", "the packet JSON").exitOverride().action(async (opts) => {
-      const packetFile = new PacketFile(opts.file);
-      const input2 = packetFile.read();
-      const published = await getPackets().create(input2);
-      print(published);
-      const written = JsonObjectSchema.safeParse(input2);
-      if (written.success && written.data.id !== published.id) packetFile.writeId(written.data, published.id);
-    });
-    packet.command("new-id").description('print {"id": "<slug>-<8 hex>"}: a globally unique packet id to write into the packet file once and reuse for every retry').requiredOption("--title <title>", "the packet title").exitOverride().action((opts) => {
-      print({ id: packetIdGenerator.generate(opts.title) });
-    });
-    packet.command("update").description("revise a packet from a JSON file; a stale revision fails with 409 revision_conflict").argument("<id>", "the packet id").requiredOption("--file <path>", "the packet JSON; `packet get` output works, and its revision is used").option(
-      "--expected-revision <n>",
-      "the revision you read, in decimal digits; defaults to the file's `revision`",
-      (value) => decimalIntegers.nonNegative(value)
-    ).exitOverride().action(async (id, opts) => {
-      const file2 = new PacketFile(opts.file).readForUpdate();
-      if (file2.id !== void 0 && file2.id !== id) {
-        throw new Error(`${opts.file} holds packet ${file2.id} but the command names ${id}; nothing was sent`);
-      }
-      const expectedRevision = opts.expectedRevision ?? file2.revision;
-      if (expectedRevision === void 0 || !Number.isInteger(expectedRevision) || expectedRevision < 0) {
-        throw new Error(
-          "no expected revision: pass --expected-revision <n>, or use a file with a numeric `revision` such as `flight-rules packet get` output; nothing was sent"
-        );
-      }
-      print(await getPackets().update(id, { packet: file2.packet, expectedRevision }));
-    });
-    packet.command("get").description("print a packet, including its revision").argument("<id>", "the packet id").exitOverride().action(async (id) => {
-      print(await getPackets().get(id));
-    });
-    packet.command("reviewers").description("list the Ariadne members you can name as reviewers: {id, name, github: {id, login}}").exitOverride().action(async () => {
-      print(await getPackets().reviewers());
-    });
-    return packet;
-  }
-};
-var createPacketCommand = (getPackets) => new PacketCommandFactory().create(getPackets);
-
-// src/tasks/commands/resolve-body.ts
-import { readFileSync as readFileSync16 } from "node:fs";
-function resolveBody(opts) {
-  if (opts.bodyFile !== void 0) return readFileSync16(opts.bodyFile, "utf8");
-  if (opts.body !== void 0) return opts.body;
-  throw new Error("one of --body or --body-file is required");
-}
-
-// src/tasks/portable-context/portable-context.ts
-var tokenStart = String.raw`(?:^|(?<=[\s(\[<{"'\x60=,:;|]))`;
-var localReferencePatterns = [
-  /file:\/\/\S*/g,
-  new RegExp(`${tokenStart}/(?:Users|home)/[^\\s/)\\]>"'\\x60]+\\S*`, "g"),
-  new RegExp(`${tokenStart}~/\\S*`, "g"),
-  /\b[A-Za-z]:\\Users\\\S*/g
-];
-var trailingPunctuation = /[`.,;:!?)\]>"']+$/;
-var maxReported = 5;
-var RegexPortableContextGuard = class {
-  find(body) {
-    return body.split("\n").flatMap(
-      (text7, index2) => localReferencePatterns.flatMap(
-        (pattern) => [...text7.matchAll(pattern)].map((m) => ({ line: index2 + 1, match: m[0].replace(trailingPunctuation, "") }))
-      )
-    );
-  }
-  assertPortable(body, opts = {}) {
-    if (opts.allowLocalPaths === true) return;
-    const found = this.find(body);
-    if (found.length === 0) return;
-    const listed = found.slice(0, maxReported).map((ref) => `  line ${ref.line}: ${ref.match}`).join("\n");
-    const more = found.length > maxReported ? `
-  \u2026and ${found.length - maxReported} more` : "";
-    throw new Error(
-      `body references files on this machine, which nobody else can open:
-${listed}${more}
-A tracker body must stand on its own for an engineer on a fresh clone. Inline the content, link a published artifact (\`flight-rules tdd create\`, a tracker issue, or a file on the default branch by URL), or use a repo-relative path for code that exists on the default branch. Pass --allow-local-paths only when the path is the subject of the work, not a pointer to context.`
-    );
-  }
-};
-var portableContextGuard = new RegexPortableContextGuard();
-
-// src/operations/command-operation-client.ts
-var CommandOperationClientPropsSchema = external_exports.object({
-  registry: external_exports.custom(
-    (value) => typeof value === "object" && value !== null && "invoke" in value
-  )
-});
-var RegistryCommandOperationClient = class {
-  registry;
-  constructor(props) {
-    this.registry = CommandOperationClientPropsSchema.parse(props).registry;
-  }
-  async invoke(id, input2, outputSchema) {
-    const result = await this.registry.invoke(id, input2);
-    if (result.status !== "success") {
-      throw new OperationCliError({
-        operationId: id,
-        errorName: result.error.name,
-        message: result.error.message
-      });
-    }
-    return outputSchema.parse(result.data);
   }
 };
 
@@ -52687,23 +52130,1298 @@ var PullRequestHostUnavailableError = class extends Error {
   name = "PullRequestHostUnavailableError";
 };
 
+// src/operations/tracker-entity-operations.ts
+var labelListSchema = external_exports.array(external_exports.string()).transform((labels) => [...new Set(labels.map((label) => label.trim()).filter(Boolean))]);
+var labelsSchema = labelListSchema.default([]);
+var createEpicInput = external_exports.object({
+  ...CreateEpicInputSchema.shape,
+  labels: labelsSchema,
+  allowLocalPaths: external_exports.boolean().default(false)
+}).strict();
+var updateEpicInput = external_exports.object({
+  ...UpdateEpicInputSchema.shape,
+  labels: labelListSchema.optional(),
+  allowLocalPaths: external_exports.boolean().default(false)
+}).strict();
+var createInitiativeInput = CreateInitiativeInputSchema.extend({
+  allowLocalPaths: external_exports.boolean().default(false)
+}).strict();
+var updateInitiativeInput = UpdateInitiativeInputSchema.extend({
+  allowLocalPaths: external_exports.boolean().default(false)
+}).strict();
+var createTicketInput = external_exports.object({
+  ...CreateTicketInputSchema.shape,
+  labels: labelsSchema,
+  allowLocalPaths: external_exports.boolean().default(false)
+}).strict();
+var updateTicketInput = external_exports.object({
+  ...UpdateTicketInputSchema.shape,
+  labels: labelListSchema.optional(),
+  allowLocalPaths: external_exports.boolean().default(false),
+  attach: external_exports.array(external_exports.string().min(1)).default([])
+}).strict();
+var createTddInput = CreateTechnicalDesignInputSchema.extend({
+  allowLocalPaths: external_exports.boolean().default(false)
+}).strict();
+var entityId = external_exports.string().min(1);
+var linkInput = external_exports.object({ epicId: entityId, initiativeId: entityId }).strict();
+var partialTicketEdit = external_exports.object({
+  id: entityId,
+  attachments: external_exports.array(AttachmentSchema),
+  body: external_exports.string()
+});
+var ticketEditResult = external_exports.union([TicketSchema, partialTicketEdit]);
+var partialTicketCreate = external_exports.object({ id: entityId, title: external_exports.string() });
+var ticketCreateResult = external_exports.union([TicketSchema, partialTicketCreate]);
+var partialEntityWrite = external_exports.object({
+  id: entityId,
+  title: external_exports.string().optional(),
+  body: external_exports.string().optional()
+});
+var partialTddCreate = external_exports.object({ id: entityId, epicId: entityId, body: external_exports.string() });
+var propsSchema2 = external_exports.object({
+  getTracker: external_exports.custom((value) => typeof value === "function"),
+  getPrHost: external_exports.custom((value) => typeof value === "function").optional(),
+  getConfig: external_exports.custom((value) => typeof value === "function").optional(),
+  cwd: external_exports.string().min(1),
+  trustedRoots: external_exports.array(external_exports.string().min(1)).default([])
+});
+var DefaultTrackerEntityOperations = class {
+  props;
+  roots;
+  constructor(props) {
+    this.props = propsSchema2.parse(props);
+    const roots = this.props.trustedRoots.length === 0 ? [this.props.cwd] : this.props.trustedRoots;
+    this.roots = [...new Set(roots.map((root) => realpathSync6(root)))];
+  }
+  operations() {
+    return [
+      ...new DefaultTrackerReadOperations({
+        getTracker: this.props.getTracker,
+        ...this.props.getPrHost === void 0 ? {} : { getPrHost: this.props.getPrHost },
+        ...this.props.getConfig === void 0 ? {} : { getConfig: this.props.getConfig }
+      }).operations(),
+      this.descriptor(
+        "epic-create",
+        "Create an epic with portable context and labels.",
+        ["write", "network"],
+        ["epic", "create"],
+        createEpicInput,
+        external_exports.union([EpicSchema, partialEntityWrite]),
+        (input2) => this.createEpic(input2)
+      ),
+      this.descriptor(
+        "epic-edit",
+        "Update an epic description, title, or labels.",
+        ["write", "network"],
+        ["epic", "edit"],
+        external_exports.object({ id: entityId, ...updateEpicInput.shape }).strict(),
+        external_exports.union([EpicSchema, partialEntityWrite]),
+        ({ id, ...input2 }) => this.editEpic(id, input2)
+      ),
+      this.descriptor(
+        "epic-link-initiative",
+        "Link an epic to an initiative.",
+        ["write", "network"],
+        ["epic", "link-initiative"],
+        linkInput,
+        external_exports.object({ epicId: entityId, initiativeId: entityId }),
+        async ({ epicId, initiativeId }) => {
+          await this.props.getTracker().linkEpicToInitiative(epicId, initiativeId);
+          return { epicId, initiativeId };
+        }
+      ),
+      this.descriptor(
+        "initiative-create",
+        "Create an initiative with portable context.",
+        ["write", "network"],
+        ["initiative", "create"],
+        createInitiativeInput,
+        external_exports.union([InitiativeSchema, partialEntityWrite]),
+        (input2) => this.createInitiative(input2)
+      ),
+      this.descriptor(
+        "initiative-edit",
+        "Update an initiative description or title.",
+        ["write", "network"],
+        ["initiative", "edit"],
+        external_exports.object({ id: entityId, ...updateInitiativeInput.shape }).strict(),
+        external_exports.union([InitiativeSchema, partialEntityWrite]),
+        ({ id, ...input2 }) => this.editInitiative(id, input2)
+      ),
+      this.descriptor(
+        "ticket-create",
+        "Create a ticket with its parent, labels, and assignee.",
+        ["write", "network"],
+        ["ticket", "create"],
+        createTicketInput,
+        ticketCreateResult,
+        (input2) => this.createTicket(input2)
+      ),
+      this.descriptor(
+        "ticket-edit",
+        "Update a ticket and attach local evidence files.",
+        ["write", "network"],
+        ["ticket", "edit"],
+        external_exports.object({ id: entityId, ...updateTicketInput.shape }).strict(),
+        ticketEditResult,
+        ({ id, ...input2 }) => this.editTicket(id, input2)
+      ),
+      this.descriptor(
+        "tdd-create",
+        "Create a technical design under its parent epic.",
+        ["write", "network"],
+        ["tdd", "create"],
+        createTddInput,
+        external_exports.union([TechnicalDesignSchema, partialTddCreate]),
+        (input2) => this.createTdd(input2)
+      )
+    ];
+  }
+  registry(policy) {
+    return new MapOperationRegistry({
+      operations: this.operations(),
+      policy: policy ?? new LaunchOperationAccessPolicy({ allowedEffects: ["read", "network", "process"] })
+    });
+  }
+  descriptor(id, description, effects, path3, inputSchema, outputSchema, handler2) {
+    return {
+      id,
+      description,
+      effects,
+      cli: { path: path3, aliases: [] },
+      inputSchema,
+      outputSchema,
+      handler: handler2
+    };
+  }
+  async createEpic(input2) {
+    this.assertPortable(input2.body, input2.allowLocalPaths);
+    const fields = CreateEpicInputSchema.parse(input2);
+    try {
+      return await this.props.getTracker().createEpic(fields);
+    } catch (error62) {
+      if (!TaskTrackerPartialWriteError.isPartialWrite(error62)) throw error62;
+      return {
+        status: "partial",
+        data: { id: error62.id, title: fields.title, body: fields.body },
+        error: { name: error62.name, message: error62.message }
+      };
+    }
+  }
+  async editEpic(id, input2) {
+    this.assertPortable(input2.body, input2.allowLocalPaths);
+    const fields = UpdateEpicInputSchema.parse(input2);
+    try {
+      return await this.props.getTracker().updateEpicDescription(id, fields);
+    } catch (error62) {
+      if (!TaskTrackerPartialWriteError.isPartialWrite(error62)) throw error62;
+      return {
+        status: "partial",
+        data: {
+          id,
+          ...fields.title === void 0 ? {} : { title: fields.title },
+          body: fields.body
+        },
+        error: { name: error62.name, message: error62.message }
+      };
+    }
+  }
+  async createInitiative(input2) {
+    this.assertPortable(input2.body, input2.allowLocalPaths);
+    const fields = CreateInitiativeInputSchema.parse(input2);
+    try {
+      return await this.props.getTracker().createInitiative(fields);
+    } catch (error62) {
+      if (!TaskTrackerPartialWriteError.isPartialWrite(error62)) throw error62;
+      return {
+        status: "partial",
+        data: { id: error62.id, title: fields.title, body: fields.body },
+        error: { name: error62.name, message: error62.message }
+      };
+    }
+  }
+  async editInitiative(id, input2) {
+    this.assertPortable(input2.body, input2.allowLocalPaths);
+    const fields = UpdateInitiativeInputSchema.parse(input2);
+    try {
+      return await this.props.getTracker().updateInitiativeDescription(id, fields);
+    } catch (error62) {
+      if (!TaskTrackerPartialWriteError.isPartialWrite(error62)) throw error62;
+      return {
+        status: "partial",
+        data: {
+          id,
+          ...fields.title === void 0 ? {} : { title: fields.title },
+          body: fields.body
+        },
+        error: { name: error62.name, message: error62.message }
+      };
+    }
+  }
+  async createTicket(input2) {
+    this.assertPortable(input2.body, input2.allowLocalPaths);
+    const fields = CreateTicketInputSchema.parse(input2);
+    try {
+      return await this.props.getTracker().createTicket(fields);
+    } catch (error62) {
+      if (!TaskTrackerPartialWriteError.isPartialWrite(error62)) throw error62;
+      return {
+        status: "partial",
+        data: { id: error62.id, title: fields.title },
+        error: { name: error62.name, message: error62.message }
+      };
+    }
+  }
+  async editTicket(id, input2) {
+    const specs = input2.attach;
+    const safeSpecs = specs.map((spec) => {
+      const parsed = AttachmentSpecSchema.parse(spec);
+      return `${this.trustedFilePath(parsed.path)}#${parsed.caption}`;
+    });
+    const tracker = this.props.getTracker();
+    const evidence = new TrackerEvidenceService({ tracker });
+    let body = input2.body;
+    let attachments = [];
+    if (safeSpecs.length > 0) {
+      body = evidence.prepareBody({ body, specs: safeSpecs });
+      this.assertPortable(body, input2.allowLocalPaths);
+      try {
+        const result = await evidence.attach({
+          ticketId: id,
+          body: input2.body,
+          specs: safeSpecs
+        });
+        body = result.body;
+        attachments = result.attachments;
+      } catch (error62) {
+        if (!(error62 instanceof EvidenceUploadFailure) || error62.attachments.length === 0) {
+          if (error62 instanceof EvidenceUploadFailure) throw error62.cause;
+          throw error62;
+        }
+        return {
+          status: "partial",
+          data: { id, attachments: error62.attachments, body: input2.body },
+          error: {
+            name: error62.cause instanceof Error ? error62.cause.name : "Error",
+            message: error62.cause instanceof Error ? error62.cause.message : String(error62.cause)
+          }
+        };
+      }
+    } else {
+      this.assertPortable(body, input2.allowLocalPaths);
+    }
+    try {
+      const fields = UpdateTicketInputSchema.parse(input2);
+      return await tracker.updateTicketDescription(id, { ...fields, body });
+    } catch (error62) {
+      if (attachments.length === 0 && !TaskTrackerPartialWriteError.isPartialWrite(error62))
+        throw error62;
+      return {
+        status: "partial",
+        data: { id, attachments, body },
+        error: {
+          name: error62 instanceof Error ? error62.name : "Error",
+          message: error62 instanceof Error ? error62.message : String(error62)
+        }
+      };
+    }
+  }
+  async createTdd(input2) {
+    this.assertPortable(input2.body, input2.allowLocalPaths);
+    const fields = CreateTechnicalDesignInputSchema.parse(input2);
+    try {
+      return await this.props.getTracker().createTechnicalDesign(fields);
+    } catch (error62) {
+      if (!TaskTrackerPartialWriteError.isPartialWrite(error62)) throw error62;
+      return {
+        status: "partial",
+        data: { id: error62.id, epicId: fields.epicId, body: fields.body },
+        error: { name: error62.name, message: error62.message }
+      };
+    }
+  }
+  assertPortable(body, allowLocalPaths = false) {
+    portableContextGuard.assertPortable(body, { allowLocalPaths });
+  }
+  trustedFilePath(path3) {
+    const absolute = isAbsolute4(path3) ? path3 : resolve8(this.props.cwd, path3);
+    if (!existsSync12(absolute)) throw new Error(`Attachment file does not exist: ${path3}`);
+    const realPath = realpathSync6(absolute);
+    const stat = statSync5(realPath);
+    const contained = this.roots.some((root) => {
+      const fromRoot = relative4(root, realPath);
+      return fromRoot === "" || !fromRoot.startsWith("..") && !isAbsolute4(fromRoot);
+    });
+    if (!contained || !stat.isFile())
+      throw new Error(`Attachment file is outside trusted roots: ${path3}`);
+    return realPath;
+  }
+};
+
+// src/flight-rules/flight-rules.ts
+var DefaultFlightRules = class {
+  cwd;
+  env;
+  launchEnv;
+  gitEnv;
+  explicitConfigPath;
+  hostSettings;
+  host;
+  configWritePolicy;
+  untrackedRoot;
+  constructor(props = {}) {
+    const parsed = FlightRulesPropsSchema.parse({
+      ...props,
+      env: props.env === void 0 ? void 0 : { ...props.env }
+    });
+    this.cwd = resolve9(parsed.cwd ?? process.cwd());
+    this.env = props.env ?? process.env;
+    this.launchEnv = { ...props.env ?? process.env };
+    this.gitEnv = { ...props.env ?? process.env };
+    this.explicitConfigPath = parsed.configPath;
+    this.hostSettings = props.hostSettings;
+    this.host = parsed.host;
+    this.configWritePolicy = parsed.configWritePolicy;
+  }
+  configPath() {
+    return this.configStore().filePath();
+  }
+  configStore() {
+    const env = this.explicitConfigPath === void 0 ? this.env : { ...this.env, FLIGHT_RULES_CONFIG: this.explicitConfigPath };
+    const untrackedRoot = this.mainCheckout();
+    return new ConfigStore({
+      cwd: this.cwd,
+      env,
+      host: NativeHostSchema.parse(
+        this.host ?? env["FLIGHT_RULES_HOST"] ?? this.installation().host() ?? "claude"
+      ),
+      ...this.hostSettings !== void 0 ? { hostSettings: this.hostSettings } : {},
+      ...untrackedRoot !== void 0 ? { untrackedRoot } : {}
+    });
+  }
+  installation() {
+    return FileNativeInstallation.fromInstall({
+      moduleUrl: import.meta.url,
+      cwd: this.cwd,
+      env: this.env
+    });
+  }
+  /** Looked up once per instance. */
+  mainCheckout() {
+    this.untrackedRoot ??= { value: new WorktreeLocator().mainCheckoutFor(this.cwd) };
+    return this.untrackedRoot.value;
+  }
+  evidence() {
+    return new EvidenceLocation({ cwd: this.cwd, mainCheckout: this.mainCheckout() });
+  }
+  config(overrideTracker) {
+    const config2 = this.configStore().load();
+    if (overrideTracker === void 0) return config2;
+    if (overrideTracker !== "github" && overrideTracker !== "jira") {
+      throw new Error(`Invalid --tracker "${overrideTracker}" \u2014 expected "github" or "jira"`);
+    }
+    return { ...config2, tracker: overrideTracker };
+  }
+  tracker(overrideTracker) {
+    const config2 = this.config(overrideTracker);
+    const env = new EnvLoader().load(this.env);
+    if (config2.tracker === "github") {
+      if (env.githubToken === void 0)
+        throw new Error("GITHUB_TOKEN environment variable is required");
+      if (config2.repo === void 0) throw new Error("repo is required when tracker is github");
+      const [owner, repo] = config2.repo.split("/");
+      if (owner === void 0 || repo === void 0) {
+        throw new Error(`Invalid repo format "${config2.repo}" \u2014 expected "owner/repo"`);
+      }
+      return new GitHubTaskTracker({ token: env.githubToken, owner, repo });
+    }
+    if (env.jiraToken === void 0) {
+      throw new Error(
+        "JIRA_TOKEN (or JIRA_API_TOKEN / JIRA_API_KEY) environment variable is required"
+      );
+    }
+    const email3 = env.jiraEmail ?? config2.jiraEmail;
+    if (email3 === void 0)
+      throw new Error("JIRA_EMAIL environment variable or jiraEmail config is required");
+    const host = env.jiraHost ?? config2.jiraHost;
+    if (host === void 0)
+      throw new Error("JIRA_HOST environment variable or jiraHost config is required");
+    if (config2.jiraProject === void 0)
+      throw new Error("jiraProject is required when tracker is jira");
+    return new JiraTaskTracker({
+      token: env.jiraToken,
+      host,
+      email: email3,
+      project: config2.jiraProject,
+      ...config2.jpdProject !== void 0 ? { jpdProject: config2.jpdProject } : {},
+      ...config2.confluenceSpaceKey !== void 0 ? { confluenceSpaceKey: config2.confluenceSpaceKey } : {}
+    });
+  }
+  prHost(overrideTracker) {
+    const config2 = this.config(overrideTracker);
+    if (config2.repo === void 0) {
+      throw new Error("repo (owner/repo) is required in config to create pull requests");
+    }
+    return new GhPullRequestHost({ repo: config2.repo, cwd: this.cwd, env: this.launchEnv });
+  }
+  git() {
+    return new NodeGitExecutor({ cwd: this.cwd, env: this.gitEnv });
+  }
+  gitConfigOperations(policy) {
+    return new DefaultGitConfigOperations({
+      cwd: this.cwd,
+      configStore: this.configStore(),
+      git: this.git(),
+      agentEnv: this.gitEnv["AI_AGENT"],
+      configPolicy: policy ?? this.configWritePolicy
+    });
+  }
+  probe() {
+    return new NodeToolProbe({ cwd: this.cwd, env: this.env });
+  }
+  readiness() {
+    return new NodeRepositoryReadiness({ cwd: this.cwd, env: this.env });
+  }
+  docs() {
+    return FileDocResolver.fromInstall({ moduleUrl: import.meta.url, env: this.env });
+  }
+  localOperations() {
+    return new DefaultLocalDiscoveryOperations({
+      cwd: this.cwd,
+      getConfig: () => this.config(),
+      getConfigStore: () => this.configStore(),
+      getCharters: () => new DocCharterCatalog({ docs: this.docs() }),
+      getRepositoryPaths: () => new GitRepositoryPaths({ cwd: this.cwd }),
+      getEvidence: () => this.evidence(),
+      getReadiness: () => this.readiness(),
+      getProbe: () => this.probe(),
+      getTracker: () => this.tracker(),
+      getConfigPath: () => this.configPath()
+    });
+  }
+  reviewOperations(props = {}) {
+    const launch = ReviewOperationsLaunchPropsSchema.parse(props);
+    return new DefaultReviewOperations({
+      ...launch,
+      cwd: launch.cwd ?? this.cwd,
+      env: this.env
+    });
+  }
+  trackerEntityOperations() {
+    return new DefaultTrackerEntityOperations({
+      getTracker: () => this.tracker(),
+      getPrHost: () => this.prHost(),
+      getConfig: () => this.config(),
+      cwd: this.cwd
+    });
+  }
+  board() {
+    return new AriadneBoard({
+      readLayers: () => this.configStore().layers(),
+      tokens: this.ariadneTokens(),
+      env: this.env,
+      sessions: this.boardSessions()
+    });
+  }
+  packets() {
+    return new AriadnePackets({
+      readLayers: () => this.configStore().layers(),
+      tokens: this.ariadneTokens()
+    });
+  }
+  ariadneTokens() {
+    return new AriadneTokenStore({ env: this.env });
+  }
+  boardSessions() {
+    return new BoardSessionStore({ env: this.env });
+  }
+  boardAgents() {
+    return new BoardAgentStore({ env: this.env });
+  }
+};
+function createFlightRules(props = {}) {
+  return new DefaultFlightRules(props);
+}
+
+// src/cli/cli.ts
+import { parse as parse7 } from "node:path";
+
+// src/operations/doc-operation.ts
+var DocOperationInputSchema = external_exports.object({ id: DocIdSchema });
+var DocOperationOutputSchema = external_exports.object({ id: DocIdSchema, path: external_exports.string().min(1), contents: external_exports.string() });
+var DocOperationPropsSchema = external_exports.object({
+  getResolver: external_exports.custom((value) => typeof value === "function")
+});
+var DocOperation = class {
+  id = "doc";
+  description = "Read a bundled flight-rules document by its document ID.";
+  inputSchema = DocOperationInputSchema;
+  outputSchema = DocOperationOutputSchema;
+  effects = ["read"];
+  cli = { path: ["doc"], aliases: [] };
+  getResolver;
+  constructor(props) {
+    this.getResolver = DocOperationPropsSchema.parse(props).getResolver;
+  }
+  handler({ id }) {
+    return this.getResolver().resolve(id);
+  }
+};
+
+// src/bundled-docs/commands/doc/command.ts
+function createDocCommand(props) {
+  const doc = new Command("doc");
+  const operation = props.operation ?? new DocOperation({ getResolver: props.getResolver });
+  const registry2 = props.registry ?? new MapOperationRegistry({
+    operations: [operation],
+    policy: new LaunchOperationAccessPolicy({ allowedEffects: ["read"] })
+  });
+  doc.exitOverride().argument("<id>", "doc id, the basename of a file in docs/ without .md").option("--path", "print the absolute path instead of the contents").action(async (id, opts) => {
+    if (!DocIdSchema.safeParse(id).success) {
+      throw new InvalidDocIdError(
+        "Invalid doc id \u2014 use lowercase letters, digits, and single hyphens"
+      );
+    }
+    const result = await registry2.invoke(operation.id, { id });
+    if (result.status !== "success") {
+      const error62 = result.error;
+      throw new OperationCliError({
+        operationId: operation.id,
+        errorName: error62.name,
+        message: error62.message
+      });
+    }
+    const output2 = operation.outputSchema.parse(result.data);
+    process.stdout.write(
+      opts.path ? `${output2.path}
+` : output2.contents.endsWith("\n") ? output2.contents : `${output2.contents}
+`
+    );
+  });
+  return doc;
+}
+
+// src/operations/local-discovery-cli.ts
+import { readFileSync as readFileSync13 } from "node:fs";
+import { text as text4 } from "node:stream/consumers";
+
+// src/tasks/commands/check/command.ts
+var ReadinessFailedError = class extends Error {
+  name = "ReadinessFailedError";
+};
+
+// src/operations/local-discovery-cli.ts
+var RuntimeFailureReportSchema = external_exports.object({
+  tracker: external_exports.null(),
+  repo: external_exports.null(),
+  checks: external_exports.array(
+    external_exports.object({
+      name: external_exports.string(),
+      ok: external_exports.boolean(),
+      required: external_exports.boolean(),
+      code: external_exports.string(),
+      detail: external_exports.string(),
+      remedy: external_exports.string()
+    })
+  ),
+  ok: external_exports.literal(false),
+  scope: external_exports.literal("workflow")
+});
+var CharterResultSchema = external_exports.object({
+  charters: external_exports.array(
+    external_exports.object({ path: external_exports.string(), contents: external_exports.string(), language: external_exports.string().nullable() })
+  ),
+  unmatched: external_exports.boolean()
+});
+var ConfigPathResultSchema = external_exports.object({ path: external_exports.string() });
+var RfcIdResultSchema = external_exports.object({ id: external_exports.string() });
+var CompetenciesResultSchema = external_exports.array(external_exports.string());
+var ConfigInspectionResultSchema = external_exports.object({
+  host: external_exports.string(),
+  valid: external_exports.boolean(),
+  values: external_exports.record(external_exports.string(), external_exports.unknown()),
+  sources: external_exports.record(external_exports.string(), external_exports.unknown()),
+  layers: external_exports.array(external_exports.unknown()),
+  error: external_exports.string().optional()
+});
+var ReadinessResultSchema = external_exports.object({
+  tracker: external_exports.string().nullable(),
+  repo: external_exports.string().nullable().optional(),
+  checks: external_exports.array(external_exports.unknown()),
+  ok: external_exports.boolean(),
+  workflow: WorkflowSchema.optional(),
+  scope: external_exports.enum(["environment", "workflow"])
+});
+var LocalDiscoveryCliPropsSchema = external_exports.object({
+  registry: external_exports.custom(
+    (value) => typeof value === "object" && value !== null && "invoke" in value
+  ),
+  readStdin: external_exports.custom((value) => typeof value === "function").optional()
+});
+var CommanderLocalDiscoveryCli = class {
+  registry;
+  readStdin;
+  constructor(props) {
+    const parsed = LocalDiscoveryCliPropsSchema.parse(props);
+    this.registry = parsed.registry;
+    this.readStdin = parsed.readStdin ?? (() => text4(process.stdin));
+  }
+  addTo(program2) {
+    this.addCharter(program2);
+    this.addCompetencies(program2);
+    this.addRfc(program2);
+    this.addQa(program2);
+    this.addConfig(program2);
+    this.addCheck(program2);
+  }
+  addCharter(program2) {
+    program2.command("charter").description("print the core coding charter and language charters for selected files").argument("[paths...]").option("--stdin").option("--diff <base>").option("--repo").option("--path").exitOverride().action(
+      async (paths, opts) => {
+        const selectedSources = [
+          paths.length > 0,
+          opts.stdin === true,
+          opts.diff !== void 0,
+          opts.repo === true
+        ];
+        if (selectedSources.filter(Boolean).length > 1)
+          throw new CharterSelectionError("Choose one of: paths, --stdin, --diff <base>, --repo");
+        const selectedPaths = opts.stdin ? (await this.readStdin()).split("\n") : paths;
+        const input2 = {
+          ...opts.stdin || paths.length > 0 ? { paths: selectedPaths } : {},
+          ...opts.diff === void 0 ? {} : { diff: opts.diff },
+          repository: opts.repo ?? false,
+          pathOutput: opts.path ?? false
+        };
+        const result = await this.invoke("charter", input2, CharterResultSchema);
+        if (result.unmatched)
+          process.stderr.write(
+            "No language charter matched these files; printing the core charter only.\n"
+          );
+        const output2 = opts.path ? result.charters.map((charter) => `${charter.path}
+`).join("") : result.charters.map(
+          (charter) => charter.contents.endsWith("\n") ? charter.contents : `${charter.contents}
+`
+        ).join("\n");
+        process.stdout.write(output2);
+      }
+    );
+  }
+  addCompetencies(program2) {
+    program2.command("competencies").exitOverride().action(async () => {
+      process.stdout.write(
+        `${JSON.stringify(await this.invoke("competencies", {}, CompetenciesResultSchema))}
+`
+      );
+    });
+  }
+  addRfc(program2) {
+    const rfc = program2.command("rfc");
+    rfc.command("dir").exitOverride().action(async () => {
+      process.stdout.write(
+        `${(await this.invoke("rfc-dir", {}, ConfigPathResultSchema)).path}
+`
+      );
+    });
+    rfc.command("next-id").exitOverride().action(async () => {
+      process.stdout.write(`${(await this.invoke("rfc-next-id", {}, RfcIdResultSchema)).id}
+`);
+    });
+  }
+  addQa(program2) {
+    const qa = program2.command("qa");
+    qa.command("instructions").description("print the QA instructions that apply to a directory, nearest first, as JSON").option("--from <dir>").exitOverride().action(async (opts) => {
+      process.stdout.write(
+        `${JSON.stringify(await this.invoke("qa-instructions", opts.from === void 0 ? {} : { from: opts.from }, external_exports.object({ found: external_exports.boolean(), sources: external_exports.array(external_exports.unknown()) })))}
+`
+      );
+    });
+    qa.command("evidence-dir").description(
+      "print where QA evidence for a ticket is written, and whether git ignores it, as JSON"
+    ).argument("<ticket>").exitOverride().action(async (ticket) => {
+      process.stdout.write(
+        `${JSON.stringify(await this.invoke("qa-evidence-dir", { ticket }, external_exports.object({ path: external_exports.string(), gitignored: external_exports.boolean().nullable() })))}
+`
+      );
+    });
+    qa.command("recipe").description(
+      "deprecated: print the path of the nearest QA instructions; use `qa instructions`"
+    ).exitOverride().action(async () => {
+      const result = await this.invoke("qa-recipe", {}, ConfigPathResultSchema);
+      process.stderr.write(
+        "`flight-rules qa recipe` is deprecated; use `flight-rules qa instructions`\n"
+      );
+      process.stdout.write(`${result.path}
+`);
+    });
+  }
+  addConfig(program2) {
+    const config2 = program2.command("config");
+    config2.command("path").description("print the resolved config file path, whether or not it exists").exitOverride().action(async () => {
+      process.stdout.write(
+        `${(await this.invoke("config-path", {}, ConfigPathResultSchema)).path}
+`
+      );
+    });
+    config2.command("show").description(
+      "print the merged config, which file each value came from, and whether it is valid"
+    ).exitOverride().action(async () => {
+      process.stdout.write(
+        `${JSON.stringify(await this.invoke("config-show", {}, ConfigInspectionResultSchema))}
+`
+      );
+    });
+    const scopeHelp = "where to write: user, project, local, or file; config show reports the selected host and exact paths (override with FLIGHT_RULES_HOST=claude|codex)";
+    config2.command("set").description("write one config value; array keys take several values").argument("<key>").argument("<values...>").addOption(new Option("--scope <scope>", scopeHelp).choices(configScopes)).exitOverride().action(async (key, values, options) => {
+      const result = await this.invoke(
+        "config-set",
+        { key, values, ...options.scope === void 0 ? {} : { scope: options.scope } },
+        external_exports.object({
+          key: external_exports.string(),
+          scope: external_exports.enum(configScopes),
+          path: external_exports.string(),
+          warning: external_exports.string().optional()
+        })
+      );
+      process.stdout.write(`${JSON.stringify(result)}
+`);
+    });
+    config2.command("unset").description("remove one config value from a scope").argument("<key>").addOption(new Option("--scope <scope>", scopeHelp).choices(configScopes)).exitOverride().action(async (key, options) => {
+      const result = await this.invoke(
+        "config-unset",
+        { key, ...options.scope === void 0 ? {} : { scope: options.scope } },
+        external_exports.object({ key: external_exports.string(), scope: external_exports.enum(configScopes), path: external_exports.string() })
+      );
+      process.stdout.write(`${JSON.stringify(result)}
+`);
+    });
+  }
+  addCheck(program2) {
+    program2.command("check").addOption(
+      new Option(
+        "--workflow <name>",
+        "check readiness for this workflow before its first mutation"
+      ).choices(WorkflowSchema.options)
+    ).option(
+      "--runtime-file <path>",
+      "JSON containing current caller/worker capability observations; requires --workflow"
+    ).exitOverride().action(async (options) => {
+      let evidence;
+      try {
+        evidence = options.runtimeFile === void 0 ? void 0 : JSON.parse(readFileSync13(options.runtimeFile, "utf8"));
+      } catch {
+        this.writeRuntimeFailure(
+          "Cannot read a JSON runtime evidence file",
+          "Supply a readable evidence file; see flight-rules doc workflow-preflight."
+        );
+        throw new ReadinessFailedError("flight-rules check failed \u2014 see report above");
+      }
+      const parsed = ReadinessOptionsSchema.safeParse({ workflow: options.workflow, evidence });
+      if (!parsed.success) {
+        this.writeRuntimeFailure(
+          "Invalid workflow runtime evidence",
+          "Supply evidence matching WorkflowEvidenceSchema with a --workflow selection."
+        );
+        throw new ReadinessFailedError("flight-rules check failed \u2014 see report above");
+      }
+      const report = await this.invoke("check", parsed.data, ReadinessResultSchema);
+      process.stdout.write(`${JSON.stringify(report)}
+`);
+      if (!report.ok)
+        throw new ReadinessFailedError("flight-rules check failed \u2014 see report above");
+    });
+  }
+  writeRuntimeFailure(detail, remedy) {
+    const report = RuntimeFailureReportSchema.parse({
+      tracker: null,
+      repo: null,
+      checks: [
+        { name: "runtime", ok: false, required: true, code: "INVALID_CONTEXT", detail, remedy }
+      ],
+      ok: false,
+      scope: "workflow"
+    });
+    process.stdout.write(`${JSON.stringify(report)}
+`);
+  }
+  async invoke(id, input2, outputSchema) {
+    const result = await this.registry.invoke(id, input2);
+    if (result.status !== "success")
+      throw new OperationCliError({
+        operationId: id,
+        errorName: result.status === "error" ? result.error.name : result.error.name,
+        message: result.error.message
+      });
+    return outputSchema.parse(result.data);
+  }
+};
+var CharterSelectionError = class extends Error {
+  name = "CharterSelectionError";
+};
+
+// src/code-review/commands/command.ts
+import { readFileSync as readFileSync14 } from "node:fs";
+var ReviewCommandPropsSchema = external_exports.object({
+  registry: external_exports.custom(
+    (value) => Boolean(value && typeof value === "object" && "invoke" in value)
+  ),
+  defaultCwd: external_exports.string().min(1),
+  createTrustedRegistry: external_exports.custom(
+    (value) => typeof value === "function"
+  )
+});
+var CommanderReviewCommand = class {
+  registry;
+  defaultCwd;
+  createTrustedRegistry;
+  constructor(props) {
+    const parsed = ReviewCommandPropsSchema.parse(props);
+    this.registry = parsed.registry;
+    this.defaultCwd = parsed.defaultCwd;
+    this.createTrustedRegistry = parsed.createTrustedRegistry;
+  }
+  create() {
+    const review = new Command("review").description(
+      "shared autonomous review contract, policy and evidence-checked plans"
+    );
+    review.command("schema").option("--transport", "print the model-facing superset instead of the full schema").action(async (opts) => {
+      const schema = await this.invoke("review-schema", { transport: opts.transport ?? false });
+      process.stdout.write(JSON.stringify(schema, null, 2) + "\n");
+    });
+    review.command("validate").argument("<file>", "structured reviewer result").action(async (file2) => {
+      const result = await this.invoke("review-validate", {
+        review: JSON.parse(readFileSync14(file2, "utf8"))
+      });
+      process.stdout.write(JSON.stringify(result) + "\n");
+    });
+    review.command("render").argument("<plan>", "evidence-checked plan JSON").action(async (file2) => {
+      const plan = external_exports.looseObject({
+        review: external_exports.json(),
+        records: external_exports.array(external_exports.json()),
+        outcome: external_exports.string(),
+        problems: external_exports.array(external_exports.string())
+      }).parse(JSON.parse(readFileSync14(file2, "utf8")));
+      const result = await this.invoke("review-render", {
+        review: plan.review,
+        records: plan.records,
+        outcome: plan.outcome,
+        problems: plan.problems
+      });
+      process.stdout.write(JSON.stringify(result) + "\n");
+    });
+    review.command("state").argument("<file>", "index with actual persisted artifact IDs").action(async (file2) => {
+      const result = await this.invoke("review-state", {
+        state: JSON.parse(readFileSync14(file2, "utf8"))
+      });
+      process.stdout.write(`${external_exports.string().parse(result)}
+`);
+    });
+    review.command("context").requiredOption("--ref <sha>", "pinned trusted default-branch commit").option("--path <path>", "repo review-context file", "CODE-REVIEW.md").option("--cwd <directory>", "trusted repository checkout", this.defaultCwd).action(async (opts) => {
+      const registry2 = this.createTrustedRegistry({ cwd: opts.cwd, trustedRef: opts.ref });
+      const result = await this.invokeWithRegistry(registry2, "review-context", {
+        contextPath: opts.path
+      });
+      process.stdout.write(JSON.stringify(result) + "\n");
+    });
+    review.command("plan").argument("<number>").requiredOption("--repo <repo>", "owner/name").requiredOption("--file <path>", "structured reviewer result").requiredOption(
+      "--records-file <path>",
+      "trusted prior records from GitHub; [] for a first review"
+    ).option("--owners-file <path>", "trusted role-to-login authority mapping").option("--require-mapping", "reject independent-writer fallback").action(
+      async (number4, opts) => {
+        const input2 = {
+          number: external_exports.coerce.number().int().positive().parse(number4),
+          repo: opts.repo,
+          review: JSON.parse(readFileSync14(opts.file, "utf8")),
+          records: JSON.parse(readFileSync14(opts.recordsFile, "utf8"))
+        };
+        const owners = opts.ownersFile === void 0 ? {} : external_exports.record(external_exports.string(), external_exports.array(external_exports.string().min(1))).parse(JSON.parse(readFileSync14(opts.ownersFile, "utf8")));
+        const registry2 = this.createTrustedRegistry({
+          owners,
+          requireMapping: opts.requireMapping ?? false
+        });
+        const result = await this.invokeWithRegistry(registry2, "review-plan", input2);
+        process.stdout.write(JSON.stringify(result) + "\n");
+      }
+    );
+    return review;
+  }
+  async invoke(id, input2) {
+    return this.invokeWithRegistry(this.registry, id, input2);
+  }
+  async invokeWithRegistry(registry2, id, input2) {
+    const result = await registry2.invoke(id, input2);
+    if (result.status === "error")
+      throw new OperationCliError({
+        operationId: id,
+        errorName: result.error.name,
+        message: result.error.message
+      });
+    if (result.status === "partial")
+      throw new OperationCliError({
+        operationId: id,
+        errorName: result.error.name,
+        message: result.error.message
+      });
+    return result.data;
+  }
+};
+function createReviewCommand(props) {
+  return new CommanderReviewCommand(props).create();
+}
+
+// src/shared/commands/board/command.ts
+import { createInterface } from "node:readline";
+import { text as text5 } from "node:stream/consumers";
+import { Writable } from "node:stream";
+
+// src/shared/collect.ts
+function collect(value, previous3) {
+  return [...previous3, value];
+}
+
+// src/shared/commands/board/command.ts
+var HiddenPrompt = class {
+  async read(label) {
+    if (process.stdin.isTTY !== true) return text5(process.stdin);
+    process.stderr.write(label);
+    const muted = new Writable({ write: (_chunk, _encoding, done) => done() });
+    const prompt = createInterface({ input: process.stdin, output: muted, terminal: true });
+    try {
+      return await new Promise((resolve14) => prompt.once("line", resolve14));
+    } finally {
+      prompt.close();
+      process.stderr.write("\n");
+    }
+  }
+};
+var ticketHelp = "Jira issue key";
+var sessionHelp = "session id; defaults to <$CLAUDE_CODE_SESSION_ID>-<TICKET>, the row the heartbeat hook keeps alive for that ticket";
+var itemsSessionHelp = "session id; defaults to <$CLAUDE_CODE_SESSION_ID>-<TICKET> with --ticket, else $CLAUDE_CODE_SESSION_ID";
+var skillHelp = "the skill reporting, e.g. flight-rules:execute-work";
+var bootstrapSkillHelp = `${skillHelp}; names the skill on a session this post has to create`;
+var strictHelp = "exit 1 when the post fails, and post even without a token so a missing one fails with 401";
+function createBoardCommand(getBoard, getTokens = () => new AriadneTokenStore(), readSecret = () => new HiddenPrompt().read("Ariadne agent token: ")) {
+  const board = new Command("board").description("report this run to Ariadne's Agents page (opt-in; silent unless an Ariadne token is set)").addHelpText(
+    "after",
+    [
+      "",
+      "Token: $ARIADNE_AGENT_TOKEN, then $ARIADNE_TOKEN, then the file `board login` saves.",
+      "There is no fallback to the ariadne CLI's Keychain session, so each machine needs its",
+      "own agent token from Ariadne \u203A Settings \u203A Connections.",
+      "Config: ariadne.url (https; http only for localhost) and ariadne.enabled, read only from",
+      "user or local scope; project settings and the config file cannot set them.",
+      "Not configured or disabled: prints nothing, exits 0. A failure is one stderr line and",
+      "exit 0; --strict makes it exit 1. `board items` is read-only; answer items in Ariadne."
+    ].join("\n")
+  );
+  board.exitOverride();
+  const withReportOptions = (command, jsonHelp, session = sessionHelp) => command.option("--session <id>", session).option("--strict", strictHelp).option("--json", jsonHelp).exitOverride();
+  const finish = (outcome, opts, print, loud = opts.strict === true) => {
+    if (loud) for (const notice of outcome.notices ?? []) process.stderr.write(`flight-rules board: ${notice}
+`);
+    if (outcome.status === "skipped") return;
+    if (outcome.status === "failed") {
+      if (opts.strict === true) throw new Error(`flight-rules board: ${outcome.message}`);
+      process.stderr.write(`flight-rules board: ${outcome.message}
+`);
+      return;
+    }
+    print(outcome.value);
+  };
+  const printJson = (opts) => (value) => {
+    if (opts.json === true) process.stdout.write(JSON.stringify(value) + "\n");
+  };
+  const describeItem = (item) => {
+    const answer = item.chosenOption !== null ? ` -> ${item.chosenOption}` : item.options.length > 0 ? ` [${item.options.join(" | ")}]` : "";
+    return `${item.status}	${item.kind}	${item.ticket ?? "-"}	${item.id}	${item.title}${answer}`;
+  };
+  const post = new Command("post").description("send a heartbeat, an item that needs a person, or an activity line");
+  post.exitOverride();
+  withReportOptions(
+    post.command("heartbeat").description("create or update this session: ticket, step and state").requiredOption("--ticket <key>", ticketHelp).requiredOption("--step <step>", "one line up to 60 characters: implement, verify 2/3, pr, qa").addOption(new Option("--state <state>", "how the run is going").choices(agentStates).makeOptionMandatory()).option("--branch <branch>", "the branch as git prints it").option("--repo <repo>", "owner/name").option("--skill <skill>", skillHelp).option("--detail <line>", "one line up to 500 characters"),
+    "print the API response {session} as JSON"
+  ).action(async (opts) => {
+    const outcome = await getBoard().heartbeat(
+      {
+        session: opts.session,
+        ticket: opts.ticket,
+        step: opts.step,
+        state: opts.state,
+        branch: opts.branch,
+        repo: opts.repo,
+        skill: opts.skill,
+        detail: opts.detail
+      },
+      { strict: opts.strict === true }
+    );
+    finish(outcome, opts, printJson(opts));
+  });
+  withReportOptions(
+    post.command("item").description("ask a person for something: a question, blocker, testable or wave gate, with up to 6 options").addOption(new Option("--kind <kind>", "what the person is asked for").choices(agentItemKinds).makeOptionMandatory()).requiredOption("--ticket <key>", ticketHelp).requiredOption("--title <text>", "one line up to 200 characters").option("--detail <text>", "up to 2,000 characters; line breaks allowed").option("--option <label>", "an answer the person can choose (repeatable, up to 6)", collect, []).option("--id <id>", "client id; reposting the same id returns the stored item and its chosenOption").option("--skill <skill>", bootstrapSkillHelp),
+    "print the API response {item, created} as JSON, including any chosenOption"
+  ).action(async (opts) => {
+    const outcome = await getBoard().item(
+      {
+        session: opts.session,
+        kind: opts.kind,
+        ticket: opts.ticket,
+        title: opts.title,
+        detail: opts.detail,
+        ...opts.option.length > 0 ? { options: opts.option } : {},
+        id: opts.id
+      },
+      { strict: opts.strict === true, skill: opts.skill }
+    );
+    finish(outcome, opts, printJson(opts));
+  });
+  withReportOptions(
+    post.command("activity").description("add one line to the session's activity stream").requiredOption("--ticket <key>", ticketHelp).requiredOption("--text <line>", "one line up to 500 characters").addOption(new Option("--level <level>", "defaults to info").choices(agentActivityLevels)).option("--id <id>", "client id; reposting the same id stores nothing new").option("--skill <skill>", bootstrapSkillHelp),
+    "print the API response {activity, created} as JSON"
+  ).action(async (opts) => {
+    const outcome = await getBoard().activity(
+      { session: opts.session, ticket: opts.ticket, text: opts.text, level: opts.level, id: opts.id },
+      { strict: opts.strict === true, skill: opts.skill }
+    );
+    finish(outcome, opts, printJson(opts));
+  });
+  board.addCommand(post);
+  withReportOptions(
+    board.command("items").description("list a session's items, open and resolved, with any chosen option").option("--ticket <key>", "the Jira key the items were posted on; picks the same default session as the post"),
+    "print {items} as JSON",
+    itemsSessionHelp
+  ).action(async (opts) => {
+    const outcome = await getBoard().items(opts.session, { strict: opts.strict === true }, opts.ticket);
+    finish(
+      outcome,
+      opts,
+      ({ items }) => {
+        if (opts.json === true) {
+          process.stdout.write(JSON.stringify({ items }) + "\n");
+          return;
+        }
+        process.stdout.write(items.map((item) => describeItem(item) + "\n").join(""));
+      },
+      true
+    );
+  });
+  board.command("login").description(
+    "save this machine's Ariadne agent token (each machine needs its own, from Ariadne \u203A Settings \u203A Connections), read from stdin or a hidden prompt, with mode 0600"
+  ).exitOverride().action(async () => {
+    const tokens = getTokens();
+    const path3 = tokens.save(await readSecret());
+    const shadowedBy = tokens.shadowingEnv();
+    process.stdout.write(
+      JSON.stringify({
+        saved: path3,
+        ...shadowedBy !== void 0 ? { warning: `$${shadowedBy} is set and takes precedence over the saved token` } : {}
+      }) + "\n"
+    );
+  });
+  board.command("logout").description("delete the agent token saved by `board login`").exitOverride().action(() => {
+    const tokens = getTokens();
+    process.stdout.write(JSON.stringify({ removed: tokens.remove(), path: tokens.path() }) + "\n");
+  });
+  return board;
+}
+
+// src/shared/commands/packet/command.ts
+import { readFileSync as readFileSync15, writeFileSync as writeFileSync7 } from "node:fs";
+
+// src/shared/decimal-integer.ts
+var DecimalIntegerParser = class {
+  /** A pull request number or similar count that starts at 1. */
+  positive(value) {
+    return this.parse(value, /^[1-9][0-9]*$/, "must be a positive whole number written in decimal digits");
+  }
+  /** A revision, which starts at 0. */
+  nonNegative(value) {
+    return this.parse(value, /^(0|[1-9][0-9]*)$/, "must be a whole number from 0 written in decimal digits");
+  }
+  parse(value, pattern, message) {
+    const parsed = Number(value);
+    if (!pattern.test(value) || !Number.isSafeInteger(parsed)) throw new InvalidArgumentError(message);
+    return parsed;
+  }
+};
+var decimalIntegers = new DecimalIntegerParser();
+
+// src/shared/commands/packet/command.ts
+var serverOwnedFields = /* @__PURE__ */ new Set(["id", "authorId", "status", "revision", "createdAt", "updatedAt"]);
+var ReviewerEntrySchema = external_exports.union([
+  external_exports.string(),
+  external_exports.looseObject({ github: external_exports.looseObject({ login: external_exports.string() }) }).transform((reviewer) => reviewer.github.login)
+]);
+var UpdateFileSchema = external_exports.looseObject({ id: external_exports.string().optional(), revision: external_exports.number().int().optional(), reviewers: external_exports.array(ReviewerEntrySchema).optional() }).transform((file2) => ({
+  id: file2.id,
+  revision: file2.revision,
+  packet: {
+    ...Object.fromEntries(Object.entries(file2).filter(([key]) => !serverOwnedFields.has(key))),
+    ...file2.reviewers !== void 0 ? { reviewers: file2.reviewers } : {}
+  }
+}));
+var PacketIdWriteError = class extends Error {
+  name = "PacketIdWriteError";
+};
+var JsonObjectSchema = external_exports.record(external_exports.string(), external_exports.unknown());
+var PacketFile = class {
+  constructor(path3) {
+    this.path = path3;
+  }
+  path;
+  /** The file's JSON exactly as written; strict validation happens before anything is sent. */
+  read() {
+    let text7;
+    try {
+      text7 = readFileSync15(this.path, "utf8");
+    } catch (err) {
+      throw new Error(`cannot read ${this.path}: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
+    }
+    try {
+      return JSON.parse(text7);
+    } catch (err) {
+      throw new Error(`${this.path} is not valid JSON: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
+    }
+  }
+  /** Runs after the packet is stored, so a failure says so and names the id the file still needs. */
+  writeId(file2, id) {
+    try {
+      writeFileSync7(this.path, JSON.stringify({ ...file2, id }, null, 2) + "\n");
+    } catch (err) {
+      throw new PacketIdWriteError(
+        `packet ${id} was published, but its id could not be written to ${this.path}: ${err instanceof Error ? err.message : String(err)}; add "id": "${id}" to the file before re-running, or a re-run publishes a second packet`,
+        { cause: err }
+      );
+    }
+  }
+  readForUpdate() {
+    const parsed = UpdateFileSchema.safeParse(this.read());
+    if (parsed.success) return parsed.data;
+    throw new Error(
+      `${this.path} must hold one packet object: ${parsed.error.issues.map((issue2) => `${issue2.path.join(".") || "file"}: ${issue2.message}`).join("; ")}`
+    );
+  }
+};
+var PacketCommandFactory = class {
+  create(getPackets) {
+    const packet = new Command("packet").description("publish and revise a Review Packet in Ariadne, as its author").addHelpText(
+      "after",
+      [
+        "",
+        "Token: $ARIADNE_AGENT_TOKEN, then $ARIADNE_TOKEN, then the file `board login` saves.",
+        "Config: ariadne.url (https; http only for localhost), read only from user or local scope.",
+        "A packet carries titles, annotations and anchors (path and line) only; code and diffs",
+        "are rejected locally, as is over-long text. Every failure exits 1 with a next step.",
+        "See docs/review-packets.md."
+      ].join("\n")
+    );
+    packet.exitOverride();
+    const print = (value) => {
+      process.stdout.write(JSON.stringify(value) + "\n");
+    };
+    packet.command("create").description(
+      "publish a packet from a JSON file; prints the stored packet. An id is generated from the title when the file has none, and the published id is written back into the file so a re-run replays instead of creating a second packet"
+    ).requiredOption("--file <path>", "the packet JSON").exitOverride().action(async (opts) => {
+      const packetFile = new PacketFile(opts.file);
+      const input2 = packetFile.read();
+      const published = await getPackets().create(input2);
+      print(published);
+      const written = JsonObjectSchema.safeParse(input2);
+      if (written.success && written.data.id !== published.id) packetFile.writeId(written.data, published.id);
+    });
+    packet.command("new-id").description('print {"id": "<slug>-<8 hex>"}: a globally unique packet id to write into the packet file once and reuse for every retry').requiredOption("--title <title>", "the packet title").exitOverride().action((opts) => {
+      print({ id: packetIdGenerator.generate(opts.title) });
+    });
+    packet.command("update").description("revise a packet from a JSON file; a stale revision fails with 409 revision_conflict").argument("<id>", "the packet id").requiredOption("--file <path>", "the packet JSON; `packet get` output works, and its revision is used").option(
+      "--expected-revision <n>",
+      "the revision you read, in decimal digits; defaults to the file's `revision`",
+      (value) => decimalIntegers.nonNegative(value)
+    ).exitOverride().action(async (id, opts) => {
+      const file2 = new PacketFile(opts.file).readForUpdate();
+      if (file2.id !== void 0 && file2.id !== id) {
+        throw new Error(`${opts.file} holds packet ${file2.id} but the command names ${id}; nothing was sent`);
+      }
+      const expectedRevision = opts.expectedRevision ?? file2.revision;
+      if (expectedRevision === void 0 || !Number.isInteger(expectedRevision) || expectedRevision < 0) {
+        throw new Error(
+          "no expected revision: pass --expected-revision <n>, or use a file with a numeric `revision` such as `flight-rules packet get` output; nothing was sent"
+        );
+      }
+      print(await getPackets().update(id, { packet: file2.packet, expectedRevision }));
+    });
+    packet.command("get").description("print a packet, including its revision").argument("<id>", "the packet id").exitOverride().action(async (id) => {
+      print(await getPackets().get(id));
+    });
+    packet.command("reviewers").description("list the Ariadne members you can name as reviewers: {id, name, github: {id, login}}").exitOverride().action(async () => {
+      print(await getPackets().reviewers());
+    });
+    return packet;
+  }
+};
+var createPacketCommand = (getPackets) => new PacketCommandFactory().create(getPackets);
+
+// src/tasks/commands/resolve-body.ts
+import { readFileSync as readFileSync16 } from "node:fs";
+function resolveBody(opts) {
+  if (opts.bodyFile !== void 0) return readFileSync16(opts.bodyFile, "utf8");
+  if (opts.body !== void 0) return opts.body;
+  throw new Error("one of --body or --body-file is required");
+}
+
+// src/operations/command-operation-client.ts
+var CommandOperationClientPropsSchema = external_exports.object({
+  registry: external_exports.custom(
+    (value) => typeof value === "object" && value !== null && "invoke" in value
+  )
+});
+var RegistryCommandOperationClient = class {
+  registry;
+  constructor(props) {
+    this.registry = CommandOperationClientPropsSchema.parse(props).registry;
+  }
+  async invoke(id, input2, outputSchema) {
+    const result = await this.registry.invoke(id, input2);
+    if (result.status !== "success") {
+      throw new OperationCliError({
+        operationId: id,
+        errorName: result.error.name,
+        message: result.error.message,
+        ...result.status === "partial" ? { partialData: result.data } : {}
+      });
+    }
+    return outputSchema.parse(result.data);
+  }
+};
+
 // src/tasks/commands/epic/command.ts
 function createEpicCommand(getTracker, getPrHost, getConfig = () => ({}), registry2) {
   const epic = new Command("epic");
   const operations = new RegistryCommandOperationClient({
-    registry: registry2 ?? new DefaultTrackerReadOperations({ getTracker, getPrHost, getConfig }).registry()
+    registry: registry2 ?? new DefaultTrackerEntityOperations({
+      getTracker,
+      getPrHost,
+      getConfig,
+      cwd: process.cwd()
+    }).registry(
+      new LaunchOperationAccessPolicy({
+        allowedEffects: ["read", "write", "network", "process"]
+      })
+    )
   });
   epic.command("create").exitOverride().requiredOption("--title <title>", "epic title").option("--body <body>", "epic body (or use --body-file)").option("--body-file <path>", "read the epic body from a file").option("--labels <labels>", "comma-separated labels").option(
     "--allow-local-paths",
     "accept machine-local paths in the body (see docs/layered-body-format.md)"
   ).action(async (opts) => {
     const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
-    portableContextGuard.assertPortable(body, { allowLocalPaths: opts.allowLocalPaths });
-    const result = await getTracker().createEpic({
-      title: opts.title,
-      body,
-      labels: opts.labels !== void 0 ? opts.labels.split(",") : []
-    });
+    const result = await operations.invoke(
+      "epic-create",
+      {
+        title: opts.title,
+        body,
+        labels: opts.labels !== void 0 ? opts.labels.split(",") : [],
+        allowLocalPaths: opts.allowLocalPaths ?? false
+      },
+      external_exports.unknown()
+    );
     process.stdout.write(JSON.stringify(result) + "\n");
   });
   epic.command("edit").exitOverride().argument("<id>", "epic id").option("--body <body>", "new epic body (or use --body-file)").option("--body-file <path>", "read the new epic body from a file").option("--title <title>", "new epic title (unchanged if omitted)").option("--labels <labels>", "comma-separated labels replacing existing free-form labels").option(
@@ -52711,12 +53429,17 @@ function createEpicCommand(getTracker, getPrHost, getConfig = () => ({}), regist
     "accept machine-local paths in the body (see docs/layered-body-format.md)"
   ).action(async (id, opts) => {
     const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
-    portableContextGuard.assertPortable(body, { allowLocalPaths: opts.allowLocalPaths });
-    const result = await getTracker().updateEpicDescription(id, {
-      body,
-      ...opts.title !== void 0 ? { title: opts.title } : {},
-      ...opts.labels !== void 0 ? { labels: opts.labels.split(",") } : {}
-    });
+    const result = await operations.invoke(
+      "epic-edit",
+      {
+        id,
+        body,
+        ...opts.title !== void 0 ? { title: opts.title } : {},
+        ...opts.labels !== void 0 ? { labels: opts.labels.split(",") } : {},
+        allowLocalPaths: opts.allowLocalPaths ?? false
+      },
+      external_exports.unknown()
+    );
     process.stdout.write(JSON.stringify(result) + "\n");
   });
   epic.command("get").exitOverride().argument("<id>", "epic id").action(async (id) => {
@@ -52757,7 +53480,11 @@ function createEpicCommand(getTracker, getPrHost, getConfig = () => ({}), regist
     }
   });
   epic.command("link-initiative").exitOverride().argument("<epicId>", "epic id").requiredOption("--initiative <id>", "initiative (milestone) id").action(async (epicId, opts) => {
-    await getTracker().linkEpicToInitiative(epicId, opts.initiative);
+    await operations.invoke(
+      "epic-link-initiative",
+      { epicId, initiativeId: opts.initiative },
+      external_exports.unknown()
+    );
   });
   return epic;
 }
@@ -52766,18 +53493,31 @@ function createEpicCommand(getTracker, getPrHost, getConfig = () => ({}), regist
 function createInitiativeCommand(getTracker, getPrHost, getConfig = () => ({}), registry2) {
   const initiative = new Command("initiative");
   const operations = new RegistryCommandOperationClient({
-    registry: registry2 ?? new DefaultTrackerReadOperations({ getTracker, getPrHost, getConfig }).registry()
+    registry: registry2 ?? new DefaultTrackerEntityOperations({
+      getTracker,
+      getPrHost,
+      getConfig,
+      cwd: process.cwd()
+    }).registry(
+      new LaunchOperationAccessPolicy({
+        allowedEffects: ["read", "write", "network", "process"]
+      })
+    )
   });
   initiative.command("create").exitOverride().requiredOption("--title <title>", "initiative title").option("--body <body>", "initiative body (or use --body-file)").option("--body-file <path>", "read the initiative body from a file").option(
     "--allow-local-paths",
     "accept machine-local paths in the body (see docs/layered-body-format.md)"
   ).action(async (opts) => {
     const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
-    portableContextGuard.assertPortable(body, { allowLocalPaths: opts.allowLocalPaths });
-    const result = await getTracker().createInitiative({
-      title: opts.title,
-      body
-    });
+    const result = await operations.invoke(
+      "initiative-create",
+      {
+        title: opts.title,
+        body,
+        allowLocalPaths: opts.allowLocalPaths ?? false
+      },
+      external_exports.unknown()
+    );
     process.stdout.write(JSON.stringify(result) + "\n");
   });
   initiative.command("edit").exitOverride().argument("<id>", "initiative id").option("--body <body>", "new initiative body (or use --body-file)").option("--body-file <path>", "read the new initiative body from a file").option("--title <title>", "new initiative title (unchanged if omitted)").option(
@@ -52785,11 +53525,16 @@ function createInitiativeCommand(getTracker, getPrHost, getConfig = () => ({}), 
     "accept machine-local paths in the body (see docs/layered-body-format.md)"
   ).action(async (id, opts) => {
     const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
-    portableContextGuard.assertPortable(body, { allowLocalPaths: opts.allowLocalPaths });
-    const result = await getTracker().updateInitiativeDescription(id, {
-      body,
-      ...opts.title !== void 0 ? { title: opts.title } : {}
-    });
+    const result = await operations.invoke(
+      "initiative-edit",
+      {
+        id,
+        body,
+        ...opts.title !== void 0 ? { title: opts.title } : {},
+        allowLocalPaths: opts.allowLocalPaths ?? false
+      },
+      external_exports.unknown()
+    );
     process.stdout.write(JSON.stringify(result) + "\n");
   });
   initiative.command("get").exitOverride().argument("<id>", "initiative id").action(async (id) => {
@@ -52840,169 +53585,52 @@ function createInitiativeCommand(getTracker, getPrHost, getConfig = () => ({}), 
   return initiative;
 }
 
-// src/tasks/evidence/evidence.ts
-import { basename as basename3 } from "node:path/posix";
-var mediaReference = /(!?)\[([^\]]*)\]\(\s*<?([^\s()<>]+)>?(?:\s+"[^"]*")?\s*\)/g;
-var absoluteTarget = /^[a-zA-Z][a-zA-Z0-9+.-]*:|^\/\/|^#/;
-var localPrefix = /^(?:\.\/)+/;
-var fenceRun2 = /^ {0,3}(`{3,}|~{3,})(.*)$/;
-var AttachmentSpecSchema = external_exports.string().min(1).transform((spec) => {
-  const hash2 = spec.lastIndexOf("#");
-  const path3 = hash2 > 0 ? spec.slice(0, hash2) : spec;
-  const caption = hash2 > 0 ? spec.slice(hash2 + 1).trim() : "";
-  return { path: path3, caption: caption.length > 0 ? caption : basename3(path3) };
-});
-var DuplicateEvidenceNameError = class extends Error {
-  name = "DuplicateEvidenceNameError";
-  constructor(props) {
-    super(`Two attachments share the filename "${props.filename}": ${props.paths.join(", ")}`);
-  }
-};
-var TrackerEvidenceService = class {
-  tracker;
-  constructor(props) {
-    this.tracker = props.tracker;
-  }
-  async attach(input2) {
-    const specs = input2.specs.map((spec) => AttachmentSpecSchema.parse(spec));
-    this.rejectDuplicateNames(specs);
-    const attachments = await Promise.all(
-      specs.map(async (spec) => {
-        const uploaded = await this.tracker.addAttachment(input2.ticketId, spec.path);
-        return { ...uploaded, path: spec.path, caption: spec.caption, referenced: false };
-      })
-    );
-    const byName = /* @__PURE__ */ new Map();
-    for (const attachment of attachments) byName.set(basename3(attachment.path), attachment);
-    const rewritten = this.rewriteReferences(input2.body, byName);
-    return { body: this.appendUnreferenced(rewritten, attachments), attachments };
-  }
-  rejectDuplicateNames(specs) {
-    const paths = /* @__PURE__ */ new Map();
-    for (const spec of specs) {
-      const name = basename3(spec.path);
-      paths.set(name, [...paths.get(name) ?? [], spec.path]);
-    }
-    for (const [filename, group] of paths) {
-      if (group.length > 1) throw new DuplicateEvidenceNameError({ filename, paths: group });
-    }
-  }
-  rewriteReferences(body, byName) {
-    let fence;
-    return body.split("\n").map((line) => {
-      if (fence === void 0) {
-        const opened = this.openingFence(line);
-        if (opened !== void 0) {
-          fence = opened;
-          return line;
-        }
-        return this.rewriteLine(line, byName);
-      }
-      if (this.closesFence(line, fence)) fence = void 0;
-      return line;
-    }).join("\n");
-  }
-  /**
-   * A line opens a fence when it is a run of >=3 backticks or tildes; a backtick
-   * fence's info string may not itself contain a backtick, which keeps inline
-   * code from being read as a fence.
-   */
-  openingFence(line) {
-    const match = fenceRun2.exec(line);
-    if (match === null) return void 0;
-    const run3 = match[1];
-    const rest = match[2];
-    if (run3 === void 0 || rest === void 0) return void 0;
-    if (run3.charAt(0) === "`" && rest.includes("`")) return void 0;
-    return { char: run3.charAt(0), length: run3.length };
-  }
-  /**
-   * A line closes an open fence only when it is a run of the SAME character, at
-   * least as long as the opening run, with nothing but whitespace after it.
-   */
-  closesFence(line, fence) {
-    const match = fenceRun2.exec(line);
-    if (match === null) return false;
-    const run3 = match[1];
-    const rest = match[2];
-    if (run3 === void 0 || rest === void 0) return false;
-    return run3.charAt(0) === fence.char && run3.length >= fence.length && rest.trim().length === 0;
-  }
-  rewriteLine(line, byName) {
-    let result = "";
-    let last = 0;
-    mediaReference.lastIndex = 0;
-    for (let match = mediaReference.exec(line); match !== null; match = mediaReference.exec(line)) {
-      const whole = match[0];
-      const bang = match[1];
-      const label = match[2];
-      const target = match[3];
-      result += line.slice(last, match.index);
-      const attachment = bang !== void 0 && label !== void 0 && target !== void 0 ? this.resolve(target, byName) : void 0;
-      if (attachment === void 0 || bang === void 0 || label === void 0) {
-        result += whole;
-      } else {
-        attachment.referenced = true;
-        result += `${bang}[${label}](attachment:${attachment.filename})`;
-      }
-      last = match.index + whole.length;
-    }
-    return result + line.slice(last);
-  }
-  resolve(target, byName) {
-    if (absoluteTarget.test(target)) return void 0;
-    return byName.get(basename3(target.replace(localPrefix, "")));
-  }
-  appendUnreferenced(body, attachments) {
-    let result = body;
-    for (const attachment of attachments) {
-      if (!attachment.referenced) result += `
-
-![${attachment.caption}](attachment:${attachment.filename})`;
-    }
-    return result;
-  }
-};
-
 // src/tasks/commands/ticket/command.ts
 function createTicketCommand(getTracker, registry2) {
   const ticket = new Command("ticket");
   const operations = new RegistryCommandOperationClient({
-    registry: registry2 ?? new DefaultTrackerReadOperations({ getTracker }).registry()
+    registry: registry2 ?? new DefaultTrackerEntityOperations({ getTracker, cwd: process.cwd() }).registry(
+      new LaunchOperationAccessPolicy({
+        allowedEffects: ["read", "write", "network", "process"]
+      })
+    )
   });
   ticket.command("create").exitOverride().requiredOption("--title <title>", "ticket title").option("--body <body>", "ticket body (or use --body-file)").option("--body-file <path>", "read the ticket body from a file").option("--epic-id <id>", "parent epic id; omit to create a standalone ticket").option("--labels <labels>", "comma-separated labels").option("--assignee <user>", "assignee login").option(
     "--allow-local-paths",
     "accept machine-local paths in the body (see docs/layered-body-format.md)"
   ).action(async (opts) => {
     const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
-    portableContextGuard.assertPortable(body, { allowLocalPaths: opts.allowLocalPaths });
-    const input2 = {
-      title: opts.title,
-      body,
-      labels: opts.labels !== void 0 ? opts.labels.split(",") : [],
-      ...opts.epicId !== void 0 ? { epicId: opts.epicId } : {},
-      ...opts.assignee !== void 0 ? { assignee: opts.assignee } : {}
-    };
-    const result = await getTracker().createTicket(input2);
+    const result = await operations.invoke(
+      "ticket-create",
+      {
+        title: opts.title,
+        body,
+        labels: opts.labels !== void 0 ? opts.labels.split(",") : [],
+        ...opts.epicId !== void 0 ? { epicId: opts.epicId } : {},
+        ...opts.assignee !== void 0 ? { assignee: opts.assignee } : {},
+        allowLocalPaths: opts.allowLocalPaths ?? false
+      },
+      external_exports.unknown()
+    );
     process.stdout.write(JSON.stringify(result) + "\n");
   });
   ticket.command("edit").exitOverride().argument("<id>", "ticket id").option("--body <body>", "new ticket body (or use --body-file)").option("--body-file <path>", "read the new ticket body from a file").option("--title <title>", "new ticket title (unchanged if omitted)").option("--labels <labels>", "comma-separated labels replacing existing free-form labels").option("--attach <spec>", "file to attach, as <path>#<caption> (repeatable)", collect, []).option(
     "--allow-local-paths",
     "accept machine-local paths in the body (see docs/layered-body-format.md)"
   ).action(async (id, opts) => {
-    const tracker = getTracker();
-    const raw = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
-    const body = opts.attach.length === 0 ? raw : (await new TrackerEvidenceService({ tracker }).attach({
-      ticketId: id,
-      body: raw,
-      specs: opts.attach
-    })).body;
-    portableContextGuard.assertPortable(body, { allowLocalPaths: opts.allowLocalPaths });
-    const result = await tracker.updateTicketDescription(id, {
-      body,
-      ...opts.title !== void 0 ? { title: opts.title } : {},
-      ...opts.labels !== void 0 ? { labels: opts.labels.split(",") } : {}
-    });
+    const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
+    const result = await operations.invoke(
+      "ticket-edit",
+      {
+        id,
+        body,
+        ...opts.title !== void 0 ? { title: opts.title } : {},
+        ...opts.labels !== void 0 ? { labels: opts.labels.split(",") } : {},
+        attach: opts.attach,
+        allowLocalPaths: opts.allowLocalPaths ?? false
+      },
+      external_exports.unknown()
+    );
     process.stdout.write(JSON.stringify(result) + "\n");
   });
   ticket.command("get").exitOverride().argument("<id>", "ticket id").option("--section <name>", "extract a single body section (e.g. acceptance-criteria)").action(async (id, opts) => {
@@ -53063,19 +53691,27 @@ function createTicketCommand(getTracker, registry2) {
 function createTddCommand(getTracker, registry2) {
   const tdd = new Command("tdd");
   const operations = new RegistryCommandOperationClient({
-    registry: registry2 ?? new DefaultTrackerReadOperations({ getTracker }).registry()
+    registry: registry2 ?? new DefaultTrackerEntityOperations({ getTracker, cwd: process.cwd() }).registry(
+      new LaunchOperationAccessPolicy({
+        allowedEffects: ["read", "write", "network", "process"]
+      })
+    )
   });
   tdd.command("create").exitOverride().requiredOption("--title <title>", "tdd title").option("--body <body>", "tdd body (or use --body-file)").option("--body-file <path>", "read the tdd body from a file").requiredOption("--epic-id <id>", "parent epic id").option(
     "--allow-local-paths",
     "accept machine-local paths in the body (see docs/layered-body-format.md)"
   ).action(async (opts) => {
     const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
-    portableContextGuard.assertPortable(body, { allowLocalPaths: opts.allowLocalPaths });
-    const result = await getTracker().createTechnicalDesign({
-      title: opts.title,
-      body,
-      epicId: opts.epicId
-    });
+    const result = await operations.invoke(
+      "tdd-create",
+      {
+        title: opts.title,
+        body,
+        epicId: opts.epicId,
+        allowLocalPaths: opts.allowLocalPaths ?? false
+      },
+      external_exports.unknown()
+    );
     process.stdout.write(JSON.stringify(result) + "\n");
   });
   tdd.command("get").exitOverride().argument("<id>", "tdd id").action(async (id) => {
@@ -53410,7 +54046,7 @@ import { execFileSync as execFileSync4 } from "node:child_process";
 
 // src/hooks/board-heartbeat/agent-ticket-resolver.ts
 import { createHash as createHash3 } from "node:crypto";
-import { closeSync, existsSync as existsSync12, openSync, readFileSync as readFileSync17, readSync } from "node:fs";
+import { closeSync, existsSync as existsSync13, openSync, readFileSync as readFileSync17, readSync } from "node:fs";
 import { basename as basename5, dirname as dirname14, join as join15 } from "node:path";
 var SubagentMetaSchema = external_exports.looseObject({
   agentType: external_exports.string().optional(),
@@ -53501,7 +54137,7 @@ var AgentTicketResolver = class {
     return join15(dirname14(transcript), basename5(transcript, ".jsonl"), "subagents");
   }
   readMeta(path3) {
-    if (!existsSync12(path3)) return void 0;
+    if (!existsSync13(path3)) return void 0;
     try {
       const parsed = SubagentMetaSchema.safeParse(JSON.parse(readFileSync17(path3, "utf-8")));
       return parsed.success ? parsed.data : void 0;
@@ -53510,7 +54146,7 @@ var AgentTicketResolver = class {
     }
   }
   firstUserMessage(path3) {
-    if (!existsSync12(path3)) return void 0;
+    if (!existsSync13(path3)) return void 0;
     let head;
     try {
       const fd = openSync(path3, "r");
@@ -53588,7 +54224,7 @@ var GitBranchReader = class {
 
 // src/hooks/commit-guard/commit-guard.ts
 import { readFileSync as readFileSync18 } from "node:fs";
-import { isAbsolute as isAbsolute4, resolve as resolve9 } from "node:path";
+import { isAbsolute as isAbsolute5, resolve as resolve10 } from "node:path";
 var PreToolUseInputSchema = external_exports.looseObject({
   tool_name: external_exports.string().optional(),
   tool_input: external_exports.looseObject({ command: external_exports.string().optional() }).optional(),
@@ -53678,9 +54314,9 @@ var CommitGuard = class {
   }
   isCliMessage(file2, cwd) {
     const unquoted = file2.replace(/^["']|["']$/g, "");
-    if (unquoted === "-" || !isAbsolute4(unquoted) && cwd === void 0) return false;
+    if (unquoted === "-" || !isAbsolute5(unquoted) && cwd === void 0) return false;
     try {
-      const contents = readFileSync18(isAbsolute4(unquoted) ? unquoted : resolve9(cwd ?? "", unquoted), "utf8");
+      const contents = readFileSync18(isAbsolute5(unquoted) ? unquoted : resolve10(cwd ?? "", unquoted), "utf8");
       return /^Flight-Rules-Version: /m.test(contents);
     } catch {
       return false;
@@ -53911,45 +54547,76 @@ function createBranchNameCommand(registry2) {
 }
 
 // src/pr/commands/pr/command.ts
-function createPrCommand(getHost) {
-  const pr = new Command("pr");
-  pr.command("create").exitOverride().requiredOption("--type <type>", "conventional commit type").requiredOption("--scope <scope>", "conventional commit scope").requiredOption("--description <description>", "PR title description").requiredOption("--why <why>", 'the "Why Was It Changed" prose section').requiredOption("--what <what>", 'a "What Was Changed" bullet (repeatable, 1-5)', collect, []).requiredOption("--base <base>", "base branch to merge into").requiredOption("--head <head>", "head branch to merge from").option("--ots <markdown>", 'the "OTS Materials" block (raw markdown/JSON)').option("--ticket-id <id>", "tracker ticket id").option("--ticket-url <url>", "tracker ticket url").option("--reviewer <reviewer>", "reviewer to request (repeatable)", collect, []).option("--label <label>", "label to apply (repeatable)", collect, []).option("--attach <spec>", "file to attach, as <path>#<caption> (repeatable)", collect, []).action(async (opts) => {
-    const template = PullRequestTemplateSchema.parse({
-      type: opts.type,
-      scope: opts.scope,
-      description: opts.description,
-      whatWasChanged: opts.what,
-      whyWasItChanged: opts.why,
-      baseBranch: opts.base,
-      headBranch: opts.head,
-      ...opts.ots !== void 0 ? { otsMaterials: opts.ots } : {},
-      ...opts.ticketId !== void 0 ? { ticketId: opts.ticketId } : {},
-      ...opts.ticketUrl !== void 0 ? { ticketUrl: opts.ticketUrl } : {},
-      reviewers: opts.reviewer,
-      labels: opts.label
+var propsSchema3 = external_exports.strictObject({
+  registry: external_exports.custom(
+    (value) => typeof value === "object" && value !== null && "invoke" in value
+  )
+});
+var CommanderPrCommand = class {
+  registry;
+  constructor(props) {
+    this.registry = propsSchema3.parse(props).registry;
+  }
+  create() {
+    const pr = new Command("pr");
+    pr.command("create").exitOverride().requiredOption("--type <type>", "conventional commit type").requiredOption("--scope <scope>", "conventional commit scope").requiredOption("--description <description>", "PR title description").requiredOption("--why <why>", 'the "Why Was It Changed" prose section').requiredOption("--what <what>", 'a "What Was Changed" bullet (repeatable, 1-5)', collect, []).requiredOption("--base <base>", "base branch to merge into").requiredOption("--head <head>", "head branch to merge from").option("--ots <markdown>", 'the "OTS Materials" block (raw markdown/JSON)').option("--ticket-id <id>", "tracker ticket id").option("--ticket-url <url>", "tracker ticket url").option("--reviewer <reviewer>", "reviewer to request (repeatable)", collect, []).option("--label <label>", "label to apply (repeatable)", collect, []).option("--attach <spec>", "file to attach, as <path>#<caption> (repeatable)", collect, []).action(async (opts, command) => {
+      await this.invokeAndPrint("pr-create", {
+        type: opts.type,
+        scope: opts.scope,
+        description: opts.description,
+        why: opts.why,
+        what: opts.what,
+        ...opts.ots === void 0 ? {} : { ots: opts.ots },
+        base: opts.base,
+        head: opts.head,
+        ...opts.ticketId === void 0 ? {} : { ticketId: opts.ticketId },
+        ...opts.ticketUrl === void 0 ? {} : { ticketUrl: opts.ticketUrl },
+        reviewer: opts.reviewer,
+        label: opts.label,
+        attach: opts.attach
+      }, command);
     });
-    const created = await getHost().createPullRequest(template, { attach: opts.attach });
-    process.stdout.write(JSON.stringify(created) + "\n");
-  });
-  pr.command("comment").exitOverride().argument("<number>", "pull request number", (value) => decimalIntegers.positive(value)).option("--body <body>", "comment body (or use --body-file)").option("--body-file <path>", "read the comment body from a file").option("--attach <spec>", "file to attach, as <path>#<caption> (repeatable)", collect, []).action(async (number4, opts) => {
-    const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
-    const result = await getHost().commentOnPullRequest(number4, body, { attach: opts.attach });
-    process.stdout.write(JSON.stringify(result) + "\n");
-  });
-  pr.command("list").exitOverride().option("--ticket <id>", "ticket id (repeatable, required)", collect, []).action(async (opts, command) => {
-    if (opts.ticket.length === 0) command.error("pr list needs at least one --ticket <id>");
-    const matches = await getHost().listOpenPullRequestsForTickets(opts.ticket);
-    process.stdout.write(JSON.stringify(matches) + "\n");
-  });
-  pr.command("request-review").exitOverride().argument("<number>", "pull request number", (value) => decimalIntegers.positive(value)).option("--reviewer <login>", "reviewer to request (repeatable, required)", collect, []).action(async (number4, opts, command) => {
-    if (opts.reviewer.length === 0) command.error("pr request-review needs at least one --reviewer <login>");
-    const result = await getHost().requestReviewers(number4, opts.reviewer);
-    process.stdout.write(JSON.stringify(result) + "\n");
-    if (result.failed.length > 0) {
-      throw new Error(`reviewer request failed for: ${result.failed.map((f) => f.login).join(", ")}`);
+    pr.command("comment").exitOverride().argument("<number>", "pull request number", (value) => decimalIntegers.positive(value)).option("--body <body>", "comment body (or use --body-file)").option("--body-file <path>", "read the comment body from a file").option("--attach <spec>", "file to attach, as <path>#<caption> (repeatable)", collect, []).action(async (number4, opts, command) => {
+      const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
+      await this.invokeAndPrint("pr-comment", { number: number4, body, attach: opts.attach }, command);
+    });
+    pr.command("list").exitOverride().option("--ticket <id>", "ticket id (repeatable, required)", collect, []).action(async (opts, command) => {
+      await this.invokeAndPrint("pr-list", { ticket: opts.ticket }, command);
+    });
+    pr.command("request-review").exitOverride().argument("<number>", "pull request number", (value) => decimalIntegers.positive(value)).option("--reviewer <login>", "reviewer to request (repeatable, required)", collect, []).action(async (number4, opts, command) => {
+      await this.invokeAndPrint("pr-request-review", { number: number4, reviewer: opts.reviewer }, command);
+    });
+    return pr;
+  }
+  async invokeAndPrint(id, input2, command) {
+    let envelope;
+    try {
+      envelope = await this.registry.invoke(id, input2);
+    } catch (error62) {
+      if (error62 instanceof OperationInputError) command.error(error62.message);
+      throw error62;
     }
-  });
-  return pr;
+    if (envelope.status === "error") {
+      if (envelope.error.name === "OperationInputError") command.error(envelope.error.message);
+      throw new OperationCliError({
+        operationId: id,
+        errorName: envelope.error.name,
+        message: envelope.error.message
+      });
+    }
+    process.stdout.write(`${JSON.stringify(envelope.data)}
+`);
+    if (envelope.status === "partial") {
+      throw new OperationCliError({
+        operationId: id,
+        errorName: envelope.error.name,
+        message: envelope.error.message
+      });
+    }
+  }
+};
+function createPrCommand(registry2) {
+  return new CommanderPrCommand({ registry: registry2 }).create();
 }
 
 // src/plugins/commands/agents/command.ts
@@ -54098,23 +54765,11 @@ var ManifestCliRouteCoverage = class _ManifestCliRouteCoverage {
   }
 };
 var pendingRoutes = [
-  "tdd create",
-  "epic create",
-  "epic edit",
-  "epic link-initiative",
-  "initiative create",
-  "initiative edit",
-  "ticket create",
-  "ticket edit",
   "ticket block",
   "ticket unblock",
   "ticket status",
   "ticket comment",
   "ticket label",
-  "pr create",
-  "pr comment",
-  "pr list",
-  "pr request-review",
   "board post heartbeat",
   "board post item",
   "board post activity",
@@ -54172,6 +54827,14 @@ var cliRouteCoverage = new ManifestCliRouteCoverage({
   entries: [
     { status: "supported", route: { path: ["doc"], aliases: [] }, operationId: "doc" },
     ...[
+      ["tdd create", "tdd-create"],
+      ["epic create", "epic-create"],
+      ["epic edit", "epic-edit"],
+      ["epic link-initiative", "epic-link-initiative"],
+      ["initiative create", "initiative-create"],
+      ["initiative edit", "initiative-edit"],
+      ["ticket create", "ticket-create"],
+      ["ticket edit", "ticket-edit"],
       ["ticket get", "ticket-get"],
       ["ticket transitions", "ticket-transitions"],
       ["users get", "users-get"],
@@ -54204,7 +54867,11 @@ var cliRouteCoverage = new ManifestCliRouteCoverage({
       ["review render", "review-render"],
       ["review state", "review-state"],
       ["review context", "review-context"],
-      ["review plan", "review-plan"]
+      ["review plan", "review-plan"],
+      ["pr create", "pr-create"],
+      ["pr comment", "pr-comment"],
+      ["pr list", "pr-list"],
+      ["pr request-review", "pr-request-review"]
     ].map(([path3, operationId]) => ({
       status: "supported",
       route: { path: (path3 ?? "").split(" "), aliases: [] },
@@ -58649,14 +59316,14 @@ function inputRequiredRoundsExceededMessage(method, maxRounds) {
   return `Multi-round-trip request '${method}' still required input after ${maxRounds} rounds (inputRequired.maxRounds)`;
 }
 function sleep(ms, signal) {
-  return new Promise((resolve12, reject) => {
+  return new Promise((resolve14, reject) => {
     if (signal?.aborted) {
       reject(signal.reason instanceof SdkError ? signal.reason : new SdkError(SdkErrorCode.RequestTimeout, String(signal.reason)));
       return;
     }
     const timer = setTimeout(() => {
       signal?.removeEventListener("abort", onAbort);
-      resolve12();
+      resolve14();
     }, ms);
     const onAbort = () => {
       clearTimeout(timer);
@@ -59455,7 +60122,7 @@ var Protocol = class {
     const flowStartedAt = Date.now();
     let onAbort;
     let cleanupMessageId;
-    return new Promise((resolve12, reject) => {
+    return new Promise((resolve14, reject) => {
       const earlyReject = (error62) => {
         reject(error62);
       };
@@ -59524,7 +60191,7 @@ var Protocol = class {
         }
         if (decoded.kind === "invalid") return reject(decoded.error);
         if (decoded.kind === "input_required") {
-          if (options?.allowInputRequired === true) return resolve12(manualInputRequiredValue(decoded));
+          if (options?.allowInputRequired === true) return resolve14(manualInputRequiredValue(decoded));
           const flow3 = {
             codec: codec2,
             request: request2,
@@ -59536,11 +60203,11 @@ var Protocol = class {
               params
             }, resultSchema, legOptions)
           };
-          return resolve12(this._resolveNonCompleteResult(decoded, flow3));
+          return resolve14(this._resolveNonCompleteResult(decoded, flow3));
         }
         const result = decoded.result;
         validateStandardSchema(resultSchema, result).then((parseResult) => {
-          if (parseResult.success) resolve12(parseResult.data);
+          if (parseResult.success) resolve14(parseResult.data);
           else reject(new SdkError(SdkErrorCode.InvalidResult, `Invalid result for ${request2.method}: ${parseResult.error}`));
         }, reject);
       });
@@ -62456,7 +63123,7 @@ var require_compile = /* @__PURE__ */ __commonJSMin(((exports) => {
     ref = (0, resolve_1.resolveUrl)(this.opts.uriResolver, baseId, ref);
     const schOrFunc = root.refs[ref];
     if (schOrFunc) return schOrFunc;
-    let _sch = resolve12.call(this, root, ref);
+    let _sch = resolve14.call(this, root, ref);
     if (_sch === void 0) {
       const schema = (_a3 = root.localRefs) === null || _a3 === void 0 ? void 0 : _a3[ref];
       const { schemaId } = this.opts;
@@ -62482,7 +63149,7 @@ var require_compile = /* @__PURE__ */ __commonJSMin(((exports) => {
   function sameSchemaEnv(s1, s2) {
     return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
   }
-  function resolve12(root, ref) {
+  function resolve14(root, ref) {
     let sch;
     while (typeof (sch = this.refs[ref]) == "string") ref = sch;
     return sch || this.schemas[ref] || resolveSchema.call(this, root, ref);
@@ -62932,47 +63599,47 @@ var require_fast_uri = /* @__PURE__ */ __commonJSMin(((exports, module) => {
     else if (typeof uri === "object") uri = parse8(serialize(uri, options), options);
     return uri;
   }
-  function resolve12(baseURI, relativeURI, options) {
+  function resolve14(baseURI, relativeURI, options) {
     const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
     const resolved = resolveComponent(parse8(baseURI, schemelessOptions), parse8(relativeURI, schemelessOptions), schemelessOptions, true);
     schemelessOptions.skipEscape = true;
     return serialize(resolved, schemelessOptions);
   }
-  function resolveComponent(base, relative6, options, skipNormalization) {
+  function resolveComponent(base, relative8, options, skipNormalization) {
     const target = {};
     if (!skipNormalization) {
       base = parse8(serialize(base, options), options);
-      relative6 = parse8(serialize(relative6, options), options);
+      relative8 = parse8(serialize(relative8, options), options);
     }
     options = options || {};
-    if (!options.tolerant && relative6.scheme) {
-      target.scheme = relative6.scheme;
-      target.userinfo = relative6.userinfo;
-      target.host = relative6.host;
-      target.port = relative6.port;
-      target.path = removeDotSegments(relative6.path || "");
-      target.query = relative6.query;
+    if (!options.tolerant && relative8.scheme) {
+      target.scheme = relative8.scheme;
+      target.userinfo = relative8.userinfo;
+      target.host = relative8.host;
+      target.port = relative8.port;
+      target.path = removeDotSegments(relative8.path || "");
+      target.query = relative8.query;
     } else {
-      if (relative6.userinfo !== void 0 || relative6.host !== void 0 || relative6.port !== void 0) {
-        target.userinfo = relative6.userinfo;
-        target.host = relative6.host;
-        target.port = relative6.port;
-        target.path = removeDotSegments(relative6.path || "");
-        target.query = relative6.query;
+      if (relative8.userinfo !== void 0 || relative8.host !== void 0 || relative8.port !== void 0) {
+        target.userinfo = relative8.userinfo;
+        target.host = relative8.host;
+        target.port = relative8.port;
+        target.path = removeDotSegments(relative8.path || "");
+        target.query = relative8.query;
       } else {
-        if (!relative6.path) {
+        if (!relative8.path) {
           target.path = base.path;
-          if (relative6.query !== void 0) target.query = relative6.query;
+          if (relative8.query !== void 0) target.query = relative8.query;
           else target.query = base.query;
         } else {
-          if (relative6.path[0] === "/") target.path = removeDotSegments(relative6.path);
+          if (relative8.path[0] === "/") target.path = removeDotSegments(relative8.path);
           else {
-            if ((base.userinfo !== void 0 || base.host !== void 0 || base.port !== void 0) && !base.path) target.path = "/" + relative6.path;
-            else if (!base.path) target.path = relative6.path;
-            else target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative6.path;
+            if ((base.userinfo !== void 0 || base.host !== void 0 || base.port !== void 0) && !base.path) target.path = "/" + relative8.path;
+            else if (!base.path) target.path = relative8.path;
+            else target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative8.path;
             target.path = removeDotSegments(target.path);
           }
-          target.query = relative6.query;
+          target.query = relative8.query;
         }
         target.userinfo = base.userinfo;
         target.host = base.host;
@@ -62980,7 +63647,7 @@ var require_fast_uri = /* @__PURE__ */ __commonJSMin(((exports, module) => {
       }
       target.scheme = base.scheme;
     }
-    target.fragment = relative6.fragment;
+    target.fragment = relative8.fragment;
     return target;
   }
   function equal(uriA, uriB, options) {
@@ -63106,7 +63773,7 @@ var require_fast_uri = /* @__PURE__ */ __commonJSMin(((exports, module) => {
   const fastUri = {
     SCHEMES,
     normalize,
-    resolve: resolve12,
+    resolve: resolve14,
     resolveComponent,
     equal,
     serialize,
@@ -64605,8 +65272,8 @@ var require_additionalProperties = /* @__PURE__ */ __commonJSMin(((exports) => {
       function isAdditional(key) {
         let definedProp;
         if (props.length > 8) {
-          const propsSchema2 = (0, util_1.schemaRefOrVal)(it, parentSchema.properties, "properties");
-          definedProp = (0, code_1.isOwnProperty)(gen, propsSchema2, key);
+          const propsSchema5 = (0, util_1.schemaRefOrVal)(it, parentSchema.properties, "properties");
+          definedProp = (0, code_1.isOwnProperty)(gen, propsSchema5, key);
         } else if (props.length) definedProp = (0, codegen_1.or)(...props.map((p) => (0, codegen_1._)`${key} === ${p}`));
         else definedProp = codegen_1.nil;
         if (patProps.length) definedProp = (0, codegen_1.or)(definedProp, ...patProps.map((p) => (0, codegen_1._)`${(0, code_1.usePattern)(cxt, p)}.test(${key})`));
@@ -68568,7 +69235,7 @@ var StdioServerTransport = class {
   }
   send(message) {
     if (this._closed) return Promise.reject(/* @__PURE__ */ new Error("StdioServerTransport is closed"));
-    return new Promise((resolve12, reject) => {
+    return new Promise((resolve14, reject) => {
       const json2 = serializeMessage(message);
       let settled = false;
       const onError = (error62) => {
@@ -68583,14 +69250,14 @@ var StdioServerTransport = class {
         settled = true;
         this._stdout.off("error", onError);
         this._stdout.off("drain", onDrain);
-        resolve12();
+        resolve14();
       };
       this._stdout.once("error", onError);
       if (this._stdout.write(json2)) {
         if (settled) return;
         settled = true;
         this._stdout.off("error", onError);
-        resolve12();
+        resolve14();
       } else if (!settled) this._stdout.once("drain", onDrain);
     });
   }
@@ -68644,14 +69311,14 @@ var StdioConnectionChannel = class {
   */
   async whenRequestsAnswered(timeoutMs) {
     if (this._closed || this._pendingRequests.size === 0) return true;
-    return await new Promise((resolve12) => {
+    return await new Promise((resolve14) => {
       const waiter = () => {
         clearTimeout(timer);
-        resolve12(true);
+        resolve14(true);
       };
       const timer = setTimeout(() => {
         this._drainWaiters = this._drainWaiters.filter((pending) => pending !== waiter);
-        resolve12(false);
+        resolve14(false);
       }, timeoutMs);
       this._drainWaiters.push(waiter);
     });
@@ -68993,15 +69660,161 @@ function toError(value) {
 }
 
 // src/mcp/mcp-server.ts
-import { existsSync as existsSync14, readFileSync as readFileSync23, realpathSync as realpathSync6, statSync as statSync6 } from "node:fs";
-import { dirname as dirname16, isAbsolute as isAbsolute6, relative as relative5, resolve as resolve11, sep as sep6 } from "node:path";
+import { existsSync as existsSync15, readFileSync as readFileSync23, realpathSync as realpathSync9, statSync as statSync8 } from "node:fs";
+import { dirname as dirname16, isAbsolute as isAbsolute8, relative as relative7, resolve as resolve13, sep as sep6 } from "node:path";
 
 // node_modules/@modelcontextprotocol/server/dist/index.mjs
 var DEFAULT_MAX_REQUEST_BODY_SIZE = 4 * 1024 * 1024;
 
+// src/operations/pr-operations.ts
+import { realpathSync as realpathSync7, statSync as statSync6 } from "node:fs";
+import { isAbsolute as isAbsolute6, relative as relative5, resolve as resolve11 } from "node:path";
+var propsSchema4 = external_exports.strictObject({
+  cwd: external_exports.string().min(1),
+  getHost: external_exports.custom((value) => typeof value === "function")
+});
+var createInput = external_exports.strictObject({
+  type: SemanticTypeSchema,
+  scope: external_exports.string().min(1),
+  description: external_exports.string().min(1),
+  why: external_exports.string().min(1),
+  what: external_exports.array(external_exports.string().min(1).max(256)).min(1).max(5),
+  ots: external_exports.string().min(1).optional(),
+  base: external_exports.string().min(1),
+  head: external_exports.string().min(1),
+  ticketId: external_exports.string().min(1).optional(),
+  ticketUrl: external_exports.url().optional(),
+  reviewer: external_exports.array(external_exports.string()).default([]),
+  label: external_exports.array(external_exports.string()).default([]),
+  attach: external_exports.array(external_exports.string()).default([])
+});
+var commentInput = external_exports.strictObject({
+  number: external_exports.number().int().positive(),
+  body: external_exports.string(),
+  attach: external_exports.array(external_exports.string()).default([])
+});
+var listInput = external_exports.strictObject({ ticket: external_exports.array(external_exports.string().min(1)).min(1) });
+var reviewInput2 = external_exports.strictObject({
+  number: external_exports.number().int().positive(),
+  reviewer: external_exports.array(external_exports.string().min(1)).min(1)
+});
+var createdSchema = external_exports.object({ number: external_exports.number().int().positive(), url: external_exports.string().url() });
+var commentResultSchema = external_exports.object({ url: external_exports.string() });
+var openPullRequestSchema = external_exports.object({
+  ticket: external_exports.string(),
+  number: external_exports.number(),
+  url: external_exports.string(),
+  headRefName: external_exports.string(),
+  baseRefName: external_exports.string(),
+  title: external_exports.string()
+});
+var reviewerResultSchema = external_exports.object({
+  number: external_exports.number().int().positive(),
+  requested: external_exports.array(external_exports.string()),
+  failed: external_exports.array(external_exports.object({ login: external_exports.string(), error: external_exports.string() }))
+});
+var PullRequestAttachmentPathError = class extends Error {
+  name = "PullRequestAttachmentPathError";
+};
+var DefaultPrOperations = class {
+  cwd;
+  launchRoot;
+  launchDevice;
+  launchInode;
+  getHost;
+  constructor(props) {
+    const parsed = propsSchema4.parse(props);
+    this.cwd = resolve11(parsed.cwd);
+    this.launchRoot = realpathSync7(this.cwd);
+    const launchStat = statSync6(this.launchRoot);
+    this.launchDevice = launchStat.dev;
+    this.launchInode = launchStat.ino;
+    this.getHost = parsed.getHost;
+  }
+  operations() {
+    const effects = ["write", "network", "process"];
+    return [
+      this.descriptor("pr-create", "Create a pull request from the validated PR template.", ["write", "network", "process"], ["pr", "create"], createInput, createdSchema, async (input2) => {
+        const template = PullRequestTemplateSchema.parse({
+          type: input2.type,
+          scope: input2.scope,
+          description: input2.description,
+          whyWasItChanged: input2.why,
+          whatWasChanged: input2.what,
+          baseBranch: input2.base,
+          headBranch: input2.head,
+          ...input2.ots === void 0 ? {} : { otsMaterials: input2.ots },
+          ...input2.ticketId === void 0 ? {} : { ticketId: input2.ticketId },
+          ...input2.ticketUrl === void 0 ? {} : { ticketUrl: input2.ticketUrl },
+          reviewers: input2.reviewer,
+          labels: input2.label
+        });
+        this.validateAttachments(input2.attach);
+        return this.getHost().createPullRequest(template, { attach: input2.attach });
+      }),
+      this.descriptor("pr-comment", "Post a comment on a pull request.", effects, ["pr", "comment"], commentInput, commentResultSchema, (input2) => {
+        this.validateAttachments(input2.attach);
+        return this.getHost().commentOnPullRequest(input2.number, input2.body, { attach: input2.attach });
+      }),
+      this.descriptor("pr-list", "List open pull requests matched to ticket identifiers.", ["read", "network", "process"], ["pr", "list"], listInput, external_exports.array(openPullRequestSchema), (input2) => this.getHost().listOpenPullRequestsForTickets(input2.ticket)),
+      this.descriptor("pr-request-review", "Request reviewers for a pull request and preserve each outcome.", effects, ["pr", "request-review"], reviewInput2, reviewerResultSchema, async (input2) => {
+        const result = await this.getHost().requestReviewers(input2.number, input2.reviewer);
+        if (result.failed.length > 0) {
+          return {
+            status: "partial",
+            data: result,
+            error: {
+              name: "ReviewerRequestPartialFailure",
+              message: `reviewer request failed for: ${result.failed.map(({ login }) => login).join(", ")}`
+            }
+          };
+        }
+        return result;
+      })
+    ];
+  }
+  descriptor(id, description, effects, path3, inputSchema, outputSchema, handler2) {
+    return { id, description, effects, cli: { path: path3, aliases: [] }, inputSchema, outputSchema, handler: handler2 };
+  }
+  validateAttachments(specs) {
+    this.requireOriginalLaunchDirectory();
+    for (const spec of specs) {
+      const split = spec.indexOf("#");
+      const pathname = split < 0 ? spec : spec.slice(0, split);
+      if (pathname.length === 0 || split >= 0 && spec.slice(split + 1).length === 0) {
+        throw new PullRequestAttachmentPathError(`Invalid attachment spec: ${spec}`);
+      }
+      const candidate = isAbsolute6(pathname) ? pathname : resolve11(this.cwd, pathname);
+      let canonical;
+      try {
+        canonical = realpathSync7(candidate);
+        if (!statSync6(canonical).isFile()) throw new Error("not a file");
+      } catch {
+        throw new PullRequestAttachmentPathError(`Attachment is not a readable file: ${pathname}`);
+      }
+      const fromRoot = relative5(this.launchRoot, canonical);
+      if (fromRoot === ".." || fromRoot.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || isAbsolute6(fromRoot)) {
+        throw new PullRequestAttachmentPathError(`Attachment must be inside the launch checkout: ${pathname}`);
+      }
+    }
+  }
+  requireOriginalLaunchDirectory() {
+    try {
+      const directory = statSync6(this.cwd);
+      if (realpathSync7(this.cwd) !== this.launchRoot || directory.dev !== this.launchDevice || directory.ino !== this.launchInode) {
+        throw new Error("replaced");
+      }
+    } catch {
+      throw new PullRequestAttachmentPathError(
+        `The launch checkout was moved or replaced: ${this.cwd}`
+      );
+    }
+  }
+};
+
 // src/sdk/instruction-catalog-core.ts
-import { existsSync as existsSync13, readFileSync as readFileSync22, readdirSync as readdirSync6, realpathSync as realpathSync5, statSync as statSync5 } from "node:fs";
-import { basename as basename7, dirname as dirname15, isAbsolute as isAbsolute5, join as join18, relative as relative4, resolve as resolve10, sep as sep5 } from "node:path";
+import { existsSync as existsSync14, readFileSync as readFileSync22, readdirSync as readdirSync6, realpathSync as realpathSync8, statSync as statSync7 } from "node:fs";
+import { basename as basename7, dirname as dirname15, isAbsolute as isAbsolute7, join as join18, relative as relative6, resolve as resolve12, sep as sep5 } from "node:path";
 import { fileURLToPath as fileURLToPath4 } from "node:url";
 
 // src/agents/agent-registry/agent-registry.ts
@@ -69098,7 +69911,7 @@ var FileInstructionCatalog = class {
     const parsed = CatalogPropsSchema.parse({ ...props, env: { ...props.env } });
     const override = parsed.env["FLIGHT_RULES_HOME"]?.trim();
     const moduleDirectory = dirname15(fileURLToPath4(parsed.moduleUrl));
-    const home = override || resolve10(moduleDirectory, basename7(moduleDirectory) === "sdk" ? "../.." : "..");
+    const home = override || resolve12(moduleDirectory, basename7(moduleDirectory) === "sdk" ? "../.." : "..");
     this.skillDir = this.findResourceDirectory(home, ["skills"]);
     this.agentDir = this.findResourceDirectory(home, [
       "bin/resources/agents",
@@ -69111,7 +69924,7 @@ var FileInstructionCatalog = class {
     );
   }
   listSkills() {
-    return readdirSync6(this.skillDir, { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile() && entry.name === "SKILL.md").map((entry) => relative4(this.skillDir, join18(entry.parentPath, entry.name)).split(sep5)[0]).filter((name) => name !== void 0).sort();
+    return readdirSync6(this.skillDir, { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile() && entry.name === "SKILL.md").map((entry) => relative6(this.skillDir, join18(entry.parentPath, entry.name)).split(sep5)[0]).filter((name) => name !== void 0).sort();
   }
   loadSkill(name) {
     const parsed = ResourceNameSchema.safeParse(name);
@@ -69134,18 +69947,18 @@ var FileInstructionCatalog = class {
     return agent;
   }
   findResourceDirectory(home, candidates) {
-    if (!existsSync13(home) || !statSync5(home).isDirectory()) {
+    if (!existsSync14(home) || !statSync7(home).isDirectory()) {
       throw new InstructionsUnavailableError(
         `The flight-rules installation directory is unavailable: ${home}`
       );
     }
-    const installationRoot = realpathSync5(home);
+    const installationRoot = realpathSync8(home);
     for (const candidate of candidates) {
-      const path3 = resolve10(installationRoot, candidate);
-      if (!existsSync13(path3) || !statSync5(path3).isDirectory()) continue;
-      const realPath = realpathSync5(path3);
-      const relativePath = relative4(installationRoot, realPath);
-      if (relativePath === ".." || relativePath.startsWith(`..${sep5}`) || isAbsolute5(relativePath)) {
+      const path3 = resolve12(installationRoot, candidate);
+      if (!existsSync14(path3) || !statSync7(path3).isDirectory()) continue;
+      const realPath = realpathSync8(path3);
+      const relativePath = relative6(installationRoot, realPath);
+      if (relativePath === ".." || relativePath.startsWith(`..${sep5}`) || isAbsolute7(relativePath)) {
         throw new UnsafeInstructionPathError(
           `Instruction directory escapes its installation home: ${path3}`
         );
@@ -69155,11 +69968,11 @@ var FileInstructionCatalog = class {
     throw new InstructionsUnavailableError(`Canonical resources are unavailable under ${home}`);
   }
   safePath(path3, root) {
-    if (!isAbsolute5(path3) || !existsSync13(path3) || !statSync5(path3).isFile())
+    if (!isAbsolute7(path3) || !existsSync14(path3) || !statSync7(path3).isFile())
       throw new UnknownInstructionError(`Unknown instruction resource: ${path3}`);
-    const realPath = realpathSync5(path3);
-    const relativePath = relative4(root, realPath);
-    if (relativePath === ".." || relativePath.startsWith(`..${sep5}`) || isAbsolute5(relativePath)) {
+    const realPath = realpathSync8(path3);
+    const relativePath = relative6(root, realPath);
+    if (relativePath === ".." || relativePath.startsWith(`..${sep5}`) || isAbsolute7(relativePath)) {
       throw new UnsafeInstructionPathError(
         `Instruction resource escapes its installation directory: ${path3}`
       );
@@ -69193,31 +70006,31 @@ var LaunchBoundQaFileSystem = class {
   root;
   constructor(props) {
     const parsed = LaunchBoundQaFileSystemPropsSchema.parse(props);
-    this.root = realpathSync6(parsed.root);
+    this.root = realpathSync9(parsed.root);
   }
   exists(path3) {
     if (!this.isInsideLaunch(path3)) return false;
-    return existsSync14(path3);
+    return existsSync15(path3);
   }
   isFile(path3) {
     this.requireInsideLaunch(path3);
-    return existsSync14(path3) && statSync6(path3).isFile();
+    return existsSync15(path3) && statSync8(path3).isFile();
   }
   readFile(path3) {
     this.requireInsideLaunch(path3);
     return readFileSync23(path3, "utf8");
   }
   isInsideLaunch(path3) {
-    const absolute = resolve11(path3);
+    const absolute = resolve13(path3);
     let existing = absolute;
-    while (!existsSync14(existing)) {
+    while (!existsSync15(existing)) {
       const parent = dirname16(existing);
       if (parent === existing) return false;
       existing = parent;
     }
-    const realPath = realpathSync6(existing);
-    const relativePath = relative5(this.root, realPath);
-    return relativePath === "" || relativePath !== ".." && !relativePath.startsWith(`..${sep6}`) && !isAbsolute6(relativePath);
+    const realPath = realpathSync9(existing);
+    const relativePath = relative7(this.root, realPath);
+    return relativePath === "" || relativePath !== ".." && !relativePath.startsWith(`..${sep6}`) && !isAbsolute8(relativePath);
   }
   requireInsideLaunch(path3) {
     if (!this.isInsideLaunch(path3)) {
@@ -69238,8 +70051,8 @@ var FlightRulesMcpServer = class {
   instructions;
   constructor(props) {
     this.props = McpLaunchPropsSchema.parse(props);
-    this.cwd = realpathSync6(this.props.cwd);
-    const directory = statSync6(this.cwd);
+    this.cwd = realpathSync9(this.props.cwd);
+    const directory = statSync8(this.cwd);
     this.launchDevice = directory.dev;
     this.launchInode = directory.ino;
     this.qaFileSystem = new LaunchBoundQaFileSystem({ root: this.cwd });
@@ -69383,6 +70196,7 @@ var FlightRulesMcpServer = class {
         getPrHost: () => core.prHost(),
         getConfig: () => core.config()
       }).operations(),
+      ...new DefaultPrOperations({ cwd, getHost: () => core.prHost() }).operations(),
       ...core.gitConfigOperations({ scopes: this.props.allowedConfigScopes, roots: [cwd] }).operations(),
       ...core.reviewOperations({
         cwd,
@@ -69399,8 +70213,8 @@ var FlightRulesMcpServer = class {
   }
   /** Pathnames can be reused after a rename; the launch grant belongs to the original directory. */
   requireOriginalLaunchCheckout() {
-    const directory = existsSync14(this.cwd) ? statSync6(this.cwd) : void 0;
-    if (directory === void 0 || realpathSync6(this.cwd) !== this.cwd || directory.dev !== this.launchDevice || directory.ino !== this.launchInode) {
+    const directory = existsSync15(this.cwd) ? statSync8(this.cwd) : void 0;
+    if (directory === void 0 || realpathSync9(this.cwd) !== this.cwd || directory.dev !== this.launchDevice || directory.ino !== this.launchInode) {
       throw new LaunchCheckoutChangedError(
         `The launch checkout was moved or replaced: ${this.cwd}`
       );
@@ -69412,11 +70226,11 @@ var FlightRulesMcpServer = class {
     if (!parsedInput.success) return;
     const from = parsedInput.data.from;
     if (typeof from !== "string") return;
-    const candidate = isAbsolute6(from) ? from : resolve11(this.cwd, from);
-    if (!existsSync14(candidate)) throw new Error(`QA instructions path does not exist: ${from}`);
-    const realPath = realpathSync6(candidate);
-    const relativePath = relative5(this.cwd, realPath);
-    if (relativePath === ".." || relativePath.startsWith(`..${sep6}`) || isAbsolute6(relativePath)) {
+    const candidate = isAbsolute8(from) ? from : resolve13(this.cwd, from);
+    if (!existsSync15(candidate)) throw new Error(`QA instructions path does not exist: ${from}`);
+    const realPath = realpathSync9(candidate);
+    const relativePath = relative7(this.cwd, realPath);
+    if (relativePath === ".." || relativePath.startsWith(`..${sep6}`) || isAbsolute8(relativePath)) {
       throw new UnsafeQaInstructionsPathError(
         `QA instructions path escapes the launch checkout: ${from}`
       );
@@ -69492,7 +70306,6 @@ function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = () => cr
   const tracker = () => getTracker(overrideTracker);
   const config2 = () => getConfig(overrideTracker);
   const prHost = () => getPrHost(overrideTracker);
-  program2.addCommand(createPrCommand(prHost));
   program2.addCommand(createAgentsCommand(() => services.installation()));
   const boardHooks = () => new BoardHookKit({
     sessions: services.boardSessions(),
@@ -69533,16 +70346,19 @@ function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = () => cr
         roots: [parse7(launchCwd).root]
       })).operations(),
       ...new DefaultReviewOperations({ cwd: launchCwd }).operations(),
-      ...new DefaultTrackerReadOperations({
+      ...new DefaultTrackerEntityOperations({
         getTracker: tracker,
         getPrHost: prHost,
-        getConfig: config2
-      }).operations()
+        getConfig: config2,
+        cwd: launchCwd
+      }).operations(),
+      ...new DefaultPrOperations({ cwd: launchCwd, getHost: prHost }).operations()
     ],
     policy: new LaunchOperationAccessPolicy({
       allowedEffects: ["read", "write", "process", "network"]
     })
   });
+  program2.addCommand(createPrCommand(operationRegistry));
   program2.addCommand(createEpicCommand(tracker, prHost, config2, operationRegistry));
   program2.addCommand(createInitiativeCommand(tracker, prHost, config2, operationRegistry));
   program2.addCommand(createTicketCommand(tracker, operationRegistry));

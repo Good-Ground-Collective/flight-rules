@@ -182,10 +182,6 @@ export class ManifestCliRouteCoverage implements CliRouteCoverage {
 }
 
 const pendingRoutes = [
-  "pr create",
-  "pr comment",
-  "pr list",
-  "pr request-review",
   "board post heartbeat",
   "board post item",
   "board post activity",
@@ -293,6 +289,10 @@ export const cliRouteCoverage: CliRouteCoverage = new ManifestCliRouteCoverage({
       ["review state", "review-state"],
       ["review context", "review-context"],
       ["review plan", "review-plan"],
+      ["pr create", "pr-create"],
+      ["pr comment", "pr-comment"],
+      ["pr list", "pr-list"],
+      ["pr request-review", "pr-request-review"],
     ].map(([path, operationId]) => ({
       status: "supported" as const,
       route: { path: (path ?? "").split(" "), aliases: [] },

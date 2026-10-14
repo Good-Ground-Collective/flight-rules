@@ -1,4 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { readFile } from 'node:fs/promises'
+import { dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { CommanderError } from 'commander'
 import type {
   CreatedPullRequest,
@@ -8,6 +11,9 @@ import type {
   ReviewerRequestResult,
 } from '../../../pull-request-host/pull-request-host.js'
 import { createPrCommand } from '../command.js'
+import { GhPullRequestHost } from '../../../pull-request-host/gh-pull-request-host.js'
+import { DefaultPrOperations } from '../../../../operations/pr-operations.js'
+import { LaunchOperationAccessPolicy, MapOperationRegistry } from '../../../../operations/operation-registry.js'
 
 const makeMockHost = (
   created: CreatedPullRequest = { number: 7, url: 'https://github.com/o/r/pull/7' },
@@ -20,8 +26,14 @@ const makeMockHost = (
   requestReviewers: vi.fn().mockResolvedValue({ number: 7, requested: [], failed: [] }),
 })
 
+const testCwd = dirname(fileURLToPath(import.meta.url))
+const registryFor = (host: PullRequestHost, allowedEffects: Array<'read' | 'write' | 'network' | 'process'> = ['read', 'write', 'network', 'process']) =>
+  new MapOperationRegistry({
+    operations: new DefaultPrOperations({ cwd: testCwd, getHost: () => host }).operations(),
+    policy: new LaunchOperationAccessPolicy({ allowedEffects }),
+  })
 const run = (host: PullRequestHost, args: string[]) =>
-  createPrCommand(() => host).parseAsync(args, { from: 'user' })
+  createPrCommand(registryFor(host)).parseAsync(args, { from: 'user' })
 
 const baseArgs = [
   'create',
@@ -33,6 +45,141 @@ const baseArgs = [
   '--base', 'main',
   '--head', 'feat/KAN-31-pr-create-command',
 ]
+
+const processFixture = (stdout: string, failedReviewer?: string) => {
+  const calls: [string, readonly string[]][] = []
+  const bodies: Buffer[] = []
+  const execFileFn = vi.fn(async (file: string, args: readonly string[]) => {
+    calls.push([file, [...args]])
+    const bodyIndex = args.indexOf('--body-file')
+    if (bodyIndex !== -1) {
+      const path = args[bodyIndex + 1]
+      if (path === undefined) throw new Error('Missing body file path')
+      bodies.push(await readFile(path))
+    }
+    if (failedReviewer !== undefined && args.at(-1) === failedReviewer) {
+      throw Object.assign(new Error('Reviewer request failed'), { stderr: 'not a collaborator\nmore details' })
+    }
+    return { stdout, stderr: '' }
+  })
+  const host = new GhPullRequestHost({ repo: 'o/r', cwd: testCwd, execFileFn })
+  return { host, calls, bodies }
+}
+
+const invokeTransport = (
+  transport: 'commander' | 'shared',
+  host: PullRequestHost,
+  args: string[],
+  id: string,
+  input: unknown,
+) => {
+  const registry = registryFor(host)
+  return transport === 'commander'
+    ? createPrCommand(registry).parseAsync(args, { from: 'user' })
+    : registry.invoke(id, input)
+}
+
+describe.each(['commander', 'shared'] as const)('PR process parity through %s', (transport) => {
+  beforeEach(() => vi.spyOn(process.stdout, 'write').mockImplementation(() => true))
+  afterEach(() => vi.restoreAllMocks())
+
+  it('preserves the complete create argv and exact UTF-8 template body with repeated options', async () => {
+    const { host, calls, bodies } = processFixture('https://github.com/o/r/pull/7\n')
+    const what = ['Preserve café and trailing spaces.  ', 'Keep `literal` $text.'] as const
+    const why = 'Reason one.\r\n  Reason two.  \n'
+    const ots = '```json\r\n{"label":"café"}\r\n```'
+    const attach = ['./fixtures/before.png#Before café', './fixtures/after.png#After'] as const
+    await invokeTransport(transport, host, [
+      ...baseArgs.slice(0, 7),
+      '--why', why, '--what', what[0], '--what', what[1],
+      '--base', 'main', '--head', 'feat/KAN-31-pr-create-command',
+      '--ots', ots, '--ticket-id', 'KAN-31', '--ticket-url', 'https://example.com/KAN-31',
+      '--label', 'wave-1', '--label', 'wave-2',
+      '--attach', attach[0], '--attach', attach[1],
+      '--reviewer', 'alice', '--reviewer', 'carol',
+    ], 'pr-create', {
+      type: 'feat', scope: 'KAN-31', description: 'add pr create', why, what,
+      base: 'main', head: 'feat/KAN-31-pr-create-command', ots,
+      ticketId: 'KAN-31', ticketUrl: 'https://example.com/KAN-31',
+      reviewer: ['alice', 'carol'], label: ['wave-1', 'wave-2'], attach,
+    })
+
+    expect(calls).toEqual([
+      ['gh', [
+        'pr', 'create', '--repo', 'o/r', '--base', 'main',
+        '--head', 'feat/KAN-31-pr-create-command', '--title', 'feat(KAN-31): add pr create',
+        '--body-file', expect.stringMatching(/[/\\]body\.md$/),
+        '--label', 'wave-1', '--label', 'wave-2',
+        '--attach', './fixtures/before.png#Before café', '--attach', './fixtures/after.png#After',
+      ]],
+      ['gh', ['pr', 'edit', 'https://github.com/o/r/pull/7', '--add-reviewer', 'alice']],
+      ['gh', ['pr', 'edit', 'https://github.com/o/r/pull/7', '--add-reviewer', 'carol']],
+    ])
+    expect(bodies).toEqual([Buffer.from(
+      '## What Was Changed\n\n- Preserve café and trailing spaces.  \n- Keep `literal` $text.\n\n' +
+      '## Why Was It Changed\n\nReason one.\r\n  Reason two.  \n\n\n' +
+      '## OTS Materials\n\n<details><summary>Click to expand</summary>\n\n' +
+      '```json\r\n{"label":"café"}\r\n```\n\n</details>\n\n' +
+      '## Ticket Link\n\n- [KAN-31](https://example.com/KAN-31)', 'utf8',
+    )])
+  })
+
+  it('preserves the complete comment argv and exact body bytes with repeated attachments', async () => {
+    const { host, calls, bodies } = processFixture('https://github.com/o/r/pull/42#issuecomment-1\n')
+    const body = 'café\r\n  `literal` $text  \n\n'
+    const attach = ['./fixtures/clip.webm#Clip', './fixtures/after.png#After'] as const
+    await invokeTransport(transport, host, [
+      'comment', '42', '--body', body,
+      '--attach', attach[0], '--attach', attach[1],
+    ], 'pr-comment', { number: 42, body, attach })
+
+    expect(calls).toEqual([['gh', [
+      'pr', 'comment', '42', '--repo', 'o/r',
+      '--body-file', expect.stringMatching(/[/\\]body\.md$/),
+      '--attach', './fixtures/clip.webm#Clip', '--attach', './fixtures/after.png#After',
+    ]]])
+    expect(bodies).toEqual([Buffer.from(body, 'utf8')])
+  })
+
+  it('preserves the complete list argv for repeated ticket IDs', async () => {
+    const { host, calls, bodies } = processFixture('[]')
+    await invokeTransport(transport, host, ['list', '--ticket', 'KAN-31', '--ticket', 'KAN-32'],
+      'pr-list', { ticket: ['KAN-31', 'KAN-32'] })
+
+    expect(calls).toEqual([['gh', [
+      'pr', 'list', '--repo', 'o/r', '--state', 'open', '--limit', '200',
+      '--json', 'number,url,headRefName,baseRefName,title',
+    ]]])
+    expect(bodies).toEqual([])
+  })
+
+  it('preserves every reviewer argv and partial outcome without retrying a failed write', async () => {
+    const { host, calls, bodies } = processFixture('', 'bob')
+    const invocation = invokeTransport(transport, host, [
+      'request-review', '7', '--reviewer', 'alice', '--reviewer', 'bob', '--reviewer', 'carol',
+    ], 'pr-request-review', { number: 7, reviewer: ['alice', 'bob', 'carol'] })
+    const result = {
+      number: 7, requested: ['alice', 'carol'],
+      failed: [{ login: 'bob', error: 'not a collaborator' }],
+    }
+    if (transport === 'commander') {
+      await expect(invocation).rejects.toThrow('reviewer request failed for: bob')
+      expect(process.stdout.write).toHaveBeenCalledWith(JSON.stringify(result) + '\n')
+    } else {
+      await expect(invocation).resolves.toEqual({
+        status: 'partial', data: result,
+        error: { name: 'ReviewerRequestPartialFailure', message: 'reviewer request failed for: bob' },
+      })
+    }
+
+    expect(calls).toEqual([
+      ['gh', ['pr', 'edit', '7', '--repo', 'o/r', '--add-reviewer', 'alice']],
+      ['gh', ['pr', 'edit', '7', '--repo', 'o/r', '--add-reviewer', 'bob']],
+      ['gh', ['pr', 'edit', '7', '--repo', 'o/r', '--add-reviewer', 'carol']],
+    ])
+    expect(bodies).toEqual([])
+  })
+})
 
 describe('pr create command', () => {
   beforeEach(() => vi.clearAllMocks())
@@ -73,9 +220,9 @@ describe('pr create command', () => {
   it('passes repeated --attach specs through to the host', async () => {
     const host = makeMockHost()
     const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
-    await run(host, [...baseArgs, '--attach', './before.png#Before', '--attach', './after.png#After'])
+    await run(host, [...baseArgs, '--attach', './fixtures/before.png#Before', '--attach', './fixtures/after.png#After'])
     expect(vi.mocked(host.createPullRequest)).toHaveBeenCalledWith(expect.anything(), {
-      attach: ['./before.png#Before', './after.png#After'],
+      attach: ['./fixtures/before.png#Before', './fixtures/after.png#After'],
     })
     output.mockRestore()
   })
@@ -112,8 +259,8 @@ describe('pr comment command', () => {
   it('passes repeated --attach specs through to the host', async () => {
     const host = makeMockHost()
     const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
-    await run(host, ['comment', '42', '--body', 'see clip', '--attach', './clip.webm'])
-    expect(vi.mocked(host.commentOnPullRequest)).toHaveBeenCalledWith(42, 'see clip', { attach: ['./clip.webm'] })
+    await run(host, ['comment', '42', '--body', 'see clip', '--attach', './fixtures/clip.webm#Clip'])
+    expect(vi.mocked(host.commentOnPullRequest)).toHaveBeenCalledWith(42, 'see clip', { attach: ['./fixtures/clip.webm#Clip'] })
     output.mockRestore()
   })
 
