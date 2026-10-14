@@ -81,6 +81,7 @@ export interface FlightRules {
 export class DefaultFlightRules implements FlightRules {
   private readonly cwd: string;
   private readonly env: Record<string, string | undefined>;
+  private readonly launchEnv: Record<string, string | undefined>;
   private readonly gitEnv: Record<string, string | undefined>;
   private readonly explicitConfigPath: string | undefined;
   private readonly hostSettings: HostSettingsSource | undefined;
@@ -96,6 +97,8 @@ export class DefaultFlightRules implements FlightRules {
     this.cwd = resolve(parsed.cwd ?? process.cwd());
     // Keep the validated input reference: Zod clones records, hiding later environment changes.
     this.env = props.env ?? process.env;
+    // Subprocess hosts use launch-time values while config discovery keeps the live environment.
+    this.launchEnv = { ...(props.env ?? process.env) };
     this.gitEnv = { ...(props.env ?? process.env) };
     this.explicitConfigPath = parsed.configPath;
     this.hostSettings = props.hostSettings;
@@ -204,7 +207,7 @@ export class DefaultFlightRules implements FlightRules {
     }
 
     // gh authenticates itself from its own keyring or GH_TOKEN/GITHUB_TOKEN.
-    return new GhPullRequestHost({ repo: config.repo });
+    return new GhPullRequestHost({ repo: config.repo, cwd: this.cwd, env: this.launchEnv });
   }
 
   git(): GitExecutor {
