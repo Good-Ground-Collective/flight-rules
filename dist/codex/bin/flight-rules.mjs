@@ -31653,7 +31653,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.81.0";
+var appVersion = false ? "0.0.0-dev" : "1.82.0";
 
 // src/shared/ariadne/review-packet.schema.ts
 var packetLimits = {
@@ -49113,17 +49113,212 @@ function createFlightRules(props = {}) {
   return new DefaultFlightRules(props);
 }
 
-// src/bundled-docs/commands/doc/command.ts
-function createDocCommand(getResolver) {
-  const doc = new Command("doc");
-  doc.exitOverride().argument("<id>", "doc id, the basename of a file in docs/ without .md").option("--path", "print the absolute path instead of the contents").action((id, opts) => {
-    if (!DocIdSchema.safeParse(id).success) {
-      throw new InvalidDocIdError("Invalid doc id \u2014 use lowercase letters, digits, and single hyphens");
+// src/operations/operation.schema.ts
+var OperationEffectSchema = external_exports.enum(["read", "write", "network", "process"]);
+var OperationIdSchema2 = external_exports.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
+var CliRouteSchema = external_exports.object({
+  path: external_exports.array(external_exports.string().min(1)).min(1),
+  aliases: external_exports.array(external_exports.string().min(1)).default([])
+});
+var OperationErrorSchema = external_exports.object({
+  name: external_exports.string().min(1),
+  message: external_exports.string()
+});
+var OperationEnvelopeSchema = external_exports.discriminatedUnion("status", [
+  external_exports.object({ status: external_exports.literal("success"), data: external_exports.unknown() }),
+  external_exports.object({ status: external_exports.literal("error"), error: OperationErrorSchema }),
+  external_exports.object({ status: external_exports.literal("partial"), data: external_exports.unknown(), error: OperationErrorSchema })
+]);
+
+// src/operations/operation-registry.ts
+var OperationDescriptorSchema = external_exports.object({
+  id: OperationIdSchema2,
+  description: external_exports.string().min(1),
+  inputSchema: external_exports.custom((value) => value instanceof external_exports.ZodType),
+  outputSchema: external_exports.custom((value) => value instanceof external_exports.ZodType),
+  effects: external_exports.array(OperationEffectSchema),
+  cli: CliRouteSchema,
+  handler: external_exports.custom((value) => typeof value === "function")
+});
+var OperationRegistryPropsSchema = external_exports.object({
+  operations: external_exports.array(external_exports.custom()),
+  policy: external_exports.custom().optional()
+});
+var AccessPolicyPropsSchema = external_exports.object({
+  allowedOperationIds: external_exports.array(OperationIdSchema2).default([]),
+  allowedEffects: external_exports.array(OperationEffectSchema).default([])
+});
+var LaunchOperationAccessPolicy = class {
+  operationIds;
+  effects;
+  constructor(props = {}) {
+    const grants = AccessPolicyPropsSchema.parse(props);
+    this.operationIds = new Set(grants.allowedOperationIds);
+    this.effects = new Set(grants.allowedEffects);
+  }
+  allows(operation) {
+    return this.operationIds.has(operation.id) || operation.effects.every((effect) => this.effects.has(effect));
+  }
+};
+var OperationInputError = class extends Error {
+  name = "OperationInputError";
+};
+var OperationOutputError = class extends Error {
+  name = "OperationOutputError";
+};
+var UnknownOperationError = class extends Error {
+  name = "UnknownOperationError";
+};
+var DuplicateOperationIdError = class extends Error {
+  name = "DuplicateOperationIdError";
+  constructor(operationId) {
+    super(`Duplicate operation id: ${operationId}`);
+  }
+};
+var OperationCliError = class extends Error {
+  name = "OperationCliError";
+  operationId;
+  operationErrorName;
+  constructor(props) {
+    super(props.message);
+    this.operationId = props.operationId;
+    this.operationErrorName = props.errorName;
+  }
+};
+var MapOperationRegistry = class {
+  operations;
+  policy;
+  constructor(props) {
+    const parsed = OperationRegistryPropsSchema.parse(props);
+    this.policy = parsed.policy ?? new LaunchOperationAccessPolicy();
+    this.operations = /* @__PURE__ */ new Map();
+    for (const descriptor of parsed.operations) {
+      const valid = OperationDescriptorSchema.parse(descriptor);
+      if (this.operations.has(valid.id)) throw new DuplicateOperationIdError(valid.id);
+      const registered = Object.freeze({
+        id: valid.id,
+        description: valid.description,
+        inputSchema: valid.inputSchema,
+        outputSchema: valid.outputSchema,
+        effects: Object.freeze([...valid.effects]),
+        cli: Object.freeze({
+          path: [...valid.cli.path],
+          aliases: [...valid.cli.aliases]
+        }),
+        handler: descriptor.handler.bind(descriptor)
+      });
+      this.operations.set(registered.id, registered);
     }
-    const resolved = getResolver().resolve(id);
-    process.stdout.write(opts.path ? `${resolved.path}
-` : resolved.contents.endsWith("\n") ? resolved.contents : `${resolved.contents}
-`);
+  }
+  list() {
+    return [...this.operations.values()].map(({ id, description, effects, cli }) => ({
+      id,
+      description,
+      effects: [...effects],
+      cli: { path: [...cli.path], aliases: [...cli.aliases] }
+    }));
+  }
+  async invoke(id, input2) {
+    const operation = this.operations.get(id);
+    if (operation === void 0) throw new UnknownOperationError(`Unknown operation: ${id}`);
+    const parsedInput = operation.inputSchema.safeParse(input2);
+    if (!parsedInput.success)
+      throw new OperationInputError(`Invalid input for ${id}: ${parsedInput.error.message}`);
+    if (!this.policy.allows(operation)) {
+      return OperationEnvelopeSchema.parse({
+        status: "error",
+        error: {
+          name: "OperationAccessDeniedError",
+          message: `Access denied for operation: ${id}`
+        }
+      });
+    }
+    try {
+      const output2 = await operation.handler(parsedInput.data);
+      const partial2 = external_exports.object({
+        status: external_exports.literal("partial"),
+        data: external_exports.unknown(),
+        error: external_exports.object({ name: external_exports.string().min(1), message: external_exports.string() })
+      }).safeParse(output2);
+      if (partial2.success) {
+        const parsedPartial = operation.outputSchema.safeParse(partial2.data.data);
+        if (!parsedPartial.success)
+          throw new OperationOutputError(
+            `Invalid partial output for ${id}: ${parsedPartial.error.message}`
+          );
+        return OperationEnvelopeSchema.parse({
+          status: "partial",
+          data: parsedPartial.data,
+          error: partial2.data.error
+        });
+      }
+      const parsedOutput = operation.outputSchema.safeParse(output2);
+      if (!parsedOutput.success)
+        throw new OperationOutputError(`Invalid output for ${id}: ${parsedOutput.error.message}`);
+      return OperationEnvelopeSchema.parse({ status: "success", data: parsedOutput.data });
+    } catch (error62) {
+      return OperationEnvelopeSchema.parse({
+        status: "error",
+        error: {
+          name: error62 instanceof Error ? error62.name : "Error",
+          message: error62 instanceof Error ? error62.message : String(error62)
+        }
+      });
+    }
+  }
+};
+
+// src/operations/doc-operation.ts
+var DocOperationInputSchema = external_exports.object({ id: DocIdSchema });
+var DocOperationOutputSchema = external_exports.object({ id: DocIdSchema, path: external_exports.string().min(1), contents: external_exports.string() });
+var DocOperationPropsSchema = external_exports.object({
+  getResolver: external_exports.custom((value) => typeof value === "function")
+});
+var DocOperation = class {
+  id = "doc";
+  description = "Read a bundled flight-rules document by its document ID.";
+  inputSchema = DocOperationInputSchema;
+  outputSchema = DocOperationOutputSchema;
+  effects = ["read"];
+  cli = { path: ["doc"], aliases: [] };
+  getResolver;
+  constructor(props) {
+    this.getResolver = DocOperationPropsSchema.parse(props).getResolver;
+  }
+  handler({ id }) {
+    return this.getResolver().resolve(id);
+  }
+};
+
+// src/bundled-docs/commands/doc/command.ts
+function createDocCommand(props) {
+  const doc = new Command("doc");
+  const operation = props.operation ?? new DocOperation({ getResolver: props.getResolver });
+  const registry2 = props.registry ?? new MapOperationRegistry({
+    operations: [operation],
+    policy: new LaunchOperationAccessPolicy({ allowedEffects: ["read"] })
+  });
+  doc.exitOverride().argument("<id>", "doc id, the basename of a file in docs/ without .md").option("--path", "print the absolute path instead of the contents").action(async (id, opts) => {
+    if (!DocIdSchema.safeParse(id).success) {
+      throw new InvalidDocIdError(
+        "Invalid doc id \u2014 use lowercase letters, digits, and single hyphens"
+      );
+    }
+    const result = await registry2.invoke(operation.id, { id });
+    if (result.status !== "success") {
+      const error62 = result.error;
+      throw new OperationCliError({
+        operationId: operation.id,
+        errorName: error62.name,
+        message: error62.message
+      });
+    }
+    const output2 = operation.outputSchema.parse(result.data);
+    process.stdout.write(
+      opts.path ? `${output2.path}
+` : output2.contents.endsWith("\n") ? output2.contents : `${output2.contents}
+`
+    );
   });
   return doc;
 }
@@ -52523,6 +52718,251 @@ function createAgentsCommand(getInstallation) {
   return command;
 }
 
+// src/operations/cli-coverage.ts
+var RouteDispositionSchema = external_exports.discriminatedUnion("status", [
+  external_exports.object({
+    status: external_exports.literal("supported"),
+    route: CliRouteSchema,
+    operationId: OperationIdSchema2
+  }),
+  external_exports.object({
+    status: external_exports.literal("pending-migration"),
+    route: CliRouteSchema,
+    operationId: OperationIdSchema2
+  }),
+  external_exports.object({ status: external_exports.literal("excluded"), route: CliRouteSchema, reason: external_exports.string().min(1) })
+]);
+var CliRouteCoveragePropsSchema = external_exports.object({ entries: external_exports.array(RouteDispositionSchema) });
+var CliRouteCoverageError = class extends Error {
+  name = "CliRouteCoverageError";
+};
+var ManifestCliRouteCoverage = class _ManifestCliRouteCoverage {
+  entries;
+  constructor(props) {
+    this.entries = CliRouteCoveragePropsSchema.parse(props).entries;
+  }
+  check(program2, catalog) {
+    const discovered = _ManifestCliRouteCoverage.discover(program2);
+    const byPath = /* @__PURE__ */ new Map();
+    for (const entry of this.entries) {
+      const key = _ManifestCliRouteCoverage.routeKey(entry.route.path);
+      if (byPath.has(key)) throw new CliRouteCoverageError(`Duplicate route disposition: ${key}`);
+      byPath.set(key, entry);
+    }
+    const discoveredKeys = discovered.map((route) => _ManifestCliRouteCoverage.routeKey(route.path));
+    const actual = new Set(discoveredKeys);
+    if (actual.size !== discoveredKeys.length) {
+      const duplicate = discoveredKeys.find((key, index2) => discoveredKeys.indexOf(key) !== index2);
+      throw new CliRouteCoverageError(`Duplicate actionable CLI route: ${duplicate ?? "unknown"}`);
+    }
+    const missing = discovered.filter((route) => !byPath.has(_ManifestCliRouteCoverage.routeKey(route.path))).map((route) => _ManifestCliRouteCoverage.routeKey(route.path));
+    const stale = this.entries.filter((entry) => !actual.has(_ManifestCliRouteCoverage.routeKey(entry.route.path))).map((entry) => _ManifestCliRouteCoverage.routeKey(entry.route.path));
+    if (missing.length > 0 || stale.length > 0) {
+      throw new CliRouteCoverageError(
+        `CLI route coverage drift; missing: ${missing.join(", ") || "none"}; unknown: ${stale.join(", ") || "none"}`
+      );
+    }
+    for (const route of discovered) {
+      const entry = byPath.get(_ManifestCliRouteCoverage.routeKey(route.path));
+      if (entry === void 0)
+        throw new CliRouteCoverageError(
+          `Missing disposition: ${_ManifestCliRouteCoverage.routeKey(route.path)}`
+        );
+      if (!_ManifestCliRouteCoverage.sameAliases(route.aliases, entry.route.aliases)) {
+        throw new CliRouteCoverageError(
+          `Alias coverage drift: ${_ManifestCliRouteCoverage.routeKey(route.path)}`
+        );
+      }
+    }
+    this.checkCatalog(catalog.list(), byPath);
+    return discovered;
+  }
+  assertComplete(program2, catalog) {
+    this.check(program2, catalog);
+    const pending = this.entries.filter((entry) => entry.status === "pending-migration").map((entry) => _ManifestCliRouteCoverage.routeKey(entry.route.path));
+    if (pending.length > 0)
+      throw new CliRouteCoverageError(
+        `Core operations remain pending migration: ${pending.join(", ")}`
+      );
+  }
+  list() {
+    return this.entries.map((entry) => structuredClone(entry));
+  }
+  checkCatalog(operations, dispositions) {
+    const operationIds = /* @__PURE__ */ new Set();
+    const operationRoutes = /* @__PURE__ */ new Set();
+    for (const operation of operations) {
+      if (operationIds.has(operation.id))
+        throw new CliRouteCoverageError(`Duplicate executable operation id: ${operation.id}`);
+      operationIds.add(operation.id);
+      const key = _ManifestCliRouteCoverage.routeKey(operation.cli.path);
+      if (operationRoutes.has(key))
+        throw new CliRouteCoverageError(`Duplicate executable operation route: ${key}`);
+      operationRoutes.add(key);
+      const disposition = dispositions.get(key);
+      if (disposition?.status !== "supported") {
+        throw new CliRouteCoverageError(
+          `Executable operation ${operation.id} has no supported CLI route: ${key}`
+        );
+      }
+      if (disposition.operationId !== operation.id || !_ManifestCliRouteCoverage.sameAliases(operation.cli.aliases, disposition.route.aliases)) {
+        throw new CliRouteCoverageError(`Executable operation mapping mismatch: ${key}`);
+      }
+    }
+    for (const disposition of dispositions.values()) {
+      if (disposition.status !== "supported") continue;
+      const matchingOperations = operations.filter(
+        (operation2) => operation2.id === disposition.operationId
+      );
+      if (matchingOperations.length !== 1) {
+        throw new CliRouteCoverageError(
+          `Supported CLI route ${_ManifestCliRouteCoverage.routeKey(disposition.route.path)} must map to exactly one executable operation`
+        );
+      }
+      const operation = matchingOperations[0];
+      if (operation === void 0 || _ManifestCliRouteCoverage.routeKey(operation.cli.path) !== _ManifestCliRouteCoverage.routeKey(disposition.route.path)) {
+        throw new CliRouteCoverageError(
+          `Supported CLI route mapping mismatch: ${_ManifestCliRouteCoverage.routeKey(disposition.route.path)}`
+        );
+      }
+    }
+  }
+  static routeKey(path3) {
+    return path3.join(" ");
+  }
+  static sameAliases(left, right) {
+    return left.slice().sort().join("\0") === right.slice().sort().join("\0");
+  }
+  static discover(program2) {
+    const routes = [];
+    const visit2 = (command, parentPath) => {
+      const currentPath = command.name() === program2.name() && parentPath.length === 0 ? parentPath : [...parentPath, command.name()];
+      const actionHandler = Object.getOwnPropertyDescriptor(command, "_actionHandler")?.value;
+      if (typeof actionHandler === "function") {
+        const aliases = typeof command.aliases === "function" ? command.aliases() : [];
+        routes.push({ path: currentPath, aliases: [...aliases] });
+      }
+      for (const child of command.commands) visit2(child, currentPath);
+    };
+    visit2(program2, []);
+    return routes;
+  }
+};
+var pendingRoutes = [
+  "charter",
+  "competencies",
+  "rfc dir",
+  "rfc next-id",
+  "qa instructions",
+  "qa evidence-dir",
+  "qa recipe",
+  "config path",
+  "config show",
+  "config set",
+  "config unset",
+  "check",
+  "ticket get",
+  "ticket transitions",
+  "users get",
+  "tdd get",
+  "tdd create",
+  "epic get",
+  "epic create",
+  "epic edit",
+  "epic plan",
+  "epic review-plan",
+  "epic link-initiative",
+  "initiative get",
+  "initiative create",
+  "initiative edit",
+  "initiative plan",
+  "initiative review-plan",
+  "ticket create",
+  "ticket edit",
+  "ticket block",
+  "ticket unblock",
+  "ticket status",
+  "ticket comment",
+  "ticket label",
+  "git commit",
+  "git checkout",
+  "git push",
+  "commit-message",
+  "branch-name",
+  "pr create",
+  "pr comment",
+  "pr list",
+  "pr request-review",
+  "review schema",
+  "review validate",
+  "review render",
+  "review state",
+  "review context",
+  "review plan",
+  "board post heartbeat",
+  "board post item",
+  "board post activity",
+  "board items",
+  "packet create",
+  "packet new-id",
+  "packet update",
+  "packet get",
+  "packet reviewers"
+];
+var excludedRoutes = [
+  {
+    path: ["hook", "pre-bash"],
+    aliases: ["guard-commit"],
+    reason: "Consumes Claude hook payloads and governs host shell commands."
+  },
+  {
+    path: ["hook", "board-heartbeat"],
+    aliases: [],
+    reason: "Consumes Claude PostToolUse payloads and runs as a host hook."
+  },
+  {
+    path: ["hook", "agent-dispatch"],
+    aliases: [],
+    reason: "Consumes Claude PreToolUse agent payloads for local session tracking."
+  },
+  {
+    path: ["hook", "agent-stop"],
+    aliases: [],
+    reason: "Consumes Claude SubagentStop payloads and reports host lifecycle events."
+  },
+  {
+    path: ["agents", "status"],
+    aliases: [],
+    reason: "Inspects native Codex registration files on the local host."
+  },
+  {
+    path: ["agents", "install"],
+    aliases: [],
+    reason: "Installs native Codex agent registrations into host-owned directories."
+  },
+  {
+    path: ["board", "login"],
+    aliases: [],
+    reason: "Provisions a machine-local Ariadne credential from interactive input."
+  },
+  { path: ["board", "logout"], aliases: [], reason: "Removes a machine-local Ariadne credential." }
+];
+var cliRouteCoverage = new ManifestCliRouteCoverage({
+  entries: [
+    { status: "supported", route: { path: ["doc"], aliases: [] }, operationId: "doc" },
+    ...pendingRoutes.map((path3) => ({
+      status: "pending-migration",
+      route: { path: path3.split(" "), aliases: [] },
+      operationId: `cli-${path3.replaceAll(" ", "-")}`
+    })),
+    ...excludedRoutes.map((route) => ({
+      status: "excluded",
+      route,
+      reason: route.reason
+    }))
+  ]
+});
+
 // src/cli/cli.ts
 function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = () => createFlightRules().configPath(), services = createFlightRules()) {
   const program2 = new Command("flight-rules");
@@ -52565,7 +53005,18 @@ function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = () => cr
   );
   program2.addCommand(createQaCommand(config2, getConfigPath, void 0, () => services.evidence()));
   program2.addCommand(createCompetenciesCommand(config2));
-  program2.addCommand(createDocCommand(() => services.docs()));
+  const docOperation = new DocOperation({ getResolver: () => services.docs() });
+  const operationRegistry = new MapOperationRegistry({
+    operations: [docOperation],
+    policy: new LaunchOperationAccessPolicy({ allowedEffects: ["read"] })
+  });
+  program2.addCommand(
+    createDocCommand({
+      getResolver: () => services.docs(),
+      operation: docOperation,
+      registry: operationRegistry
+    })
+  );
   program2.addCommand(
     createCharterCommand(
       () => new DocCharterCatalog({ docs: services.docs() }),
@@ -52573,7 +53024,16 @@ function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = () => cr
     )
   );
   program2.addCommand(createReviewCommand());
-  program2.addCommand(createCheckCommand(config2, tracker, getConfigPath, () => services.probe(), void 0, () => services.readiness()));
+  program2.addCommand(
+    createCheckCommand(
+      config2,
+      tracker,
+      getConfigPath,
+      () => services.probe(),
+      void 0,
+      () => services.readiness()
+    )
+  );
   program2.addCommand(
     createBoardCommand(
       () => services.board(),
@@ -52581,6 +53041,7 @@ function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = () => cr
     )
   );
   program2.addCommand(createPacketCommand(() => services.packets()));
+  cliRouteCoverage.check(program2, operationRegistry);
   return program2;
 }
 async function run2(argv, flightRules = createFlightRules()) {
