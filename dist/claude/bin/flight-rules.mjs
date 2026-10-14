@@ -4001,10 +4001,10 @@ var require_resolve_block_map = __commonJS({
       let offset = bm.offset;
       let commentEnd = null;
       for (const collItem of bm.items) {
-        const { start, key, sep: sep4, value } = collItem;
+        const { start, key, sep: sep5, value } = collItem;
         const keyProps = resolveProps.resolveProps(start, {
           indicator: "explicit-key-ind",
-          next: key ?? sep4?.[0],
+          next: key ?? sep5?.[0],
           offset,
           onError,
           parentIndent: bm.indent,
@@ -4018,7 +4018,7 @@ var require_resolve_block_map = __commonJS({
             else if ("indent" in key && key.indent !== bm.indent)
               onError(offset, "BAD_INDENT", startColMsg);
           }
-          if (!keyProps.anchor && !keyProps.tag && !sep4) {
+          if (!keyProps.anchor && !keyProps.tag && !sep5) {
             commentEnd = keyProps.end;
             if (keyProps.comment) {
               if (map2.comment)
@@ -4042,7 +4042,7 @@ var require_resolve_block_map = __commonJS({
         ctx.atKey = false;
         if (utilMapIncludes.mapIncludes(ctx, map2.items, keyNode))
           onError(keyStart, "DUPLICATE_KEY", "Map keys must be unique");
-        const valueProps = resolveProps.resolveProps(sep4 ?? [], {
+        const valueProps = resolveProps.resolveProps(sep5 ?? [], {
           indicator: "map-value-ind",
           next: value,
           offset: keyNode.range[2],
@@ -4058,7 +4058,7 @@ var require_resolve_block_map = __commonJS({
             if (ctx.options.strict && keyProps.start < valueProps.found.offset - 1024)
               onError(keyNode.range, "KEY_OVER_1024_CHARS", "The : indicator must be at most 1024 chars after the start of an implicit block mapping key");
           }
-          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : composeEmptyNode(ctx, offset, sep4, null, valueProps, onError);
+          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : composeEmptyNode(ctx, offset, sep5, null, valueProps, onError);
           if (ctx.schema.compat)
             utilFlowIndentCheck.flowIndentCheck(bm.indent, value, onError);
           offset = valueNode.range[2];
@@ -4149,7 +4149,7 @@ var require_resolve_end = __commonJS({
       let comment = "";
       if (end) {
         let hasSpace = false;
-        let sep4 = "";
+        let sep5 = "";
         for (const token of end) {
           const { source, type } = token;
           switch (type) {
@@ -4163,13 +4163,13 @@ var require_resolve_end = __commonJS({
               if (!comment)
                 comment = cb;
               else
-                comment += sep4 + cb;
-              sep4 = "";
+                comment += sep5 + cb;
+              sep5 = "";
               break;
             }
             case "newline":
               if (comment)
-                sep4 += source;
+                sep5 += source;
               hasSpace = true;
               break;
             default:
@@ -4212,18 +4212,18 @@ var require_resolve_flow_collection = __commonJS({
       let offset = fc.offset + fc.start.source.length;
       for (let i = 0; i < fc.items.length; ++i) {
         const collItem = fc.items[i];
-        const { start, key, sep: sep4, value } = collItem;
+        const { start, key, sep: sep5, value } = collItem;
         const props = resolveProps.resolveProps(start, {
           flow: fcName,
           indicator: "explicit-key-ind",
-          next: key ?? sep4?.[0],
+          next: key ?? sep5?.[0],
           offset,
           onError,
           parentIndent: fc.indent,
           startOnNewline: false
         });
         if (!props.found) {
-          if (!props.anchor && !props.tag && !sep4 && !value) {
+          if (!props.anchor && !props.tag && !sep5 && !value) {
             if (i === 0 && props.comma)
               onError(props.comma, "UNEXPECTED_TOKEN", `Unexpected , in ${fcName}`);
             else if (i < fc.items.length - 1)
@@ -4277,8 +4277,8 @@ var require_resolve_flow_collection = __commonJS({
             }
           }
         }
-        if (!isMap && !sep4 && !props.found) {
-          const valueNode = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, sep4, null, props, onError);
+        if (!isMap && !sep5 && !props.found) {
+          const valueNode = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, sep5, null, props, onError);
           coll.items.push(valueNode);
           offset = valueNode.range[2];
           if (isBlock(value))
@@ -4290,7 +4290,7 @@ var require_resolve_flow_collection = __commonJS({
           if (isBlock(key))
             onError(keyNode.range, "BLOCK_IN_FLOW", blockMsg);
           ctx.atKey = false;
-          const valueProps = resolveProps.resolveProps(sep4 ?? [], {
+          const valueProps = resolveProps.resolveProps(sep5 ?? [], {
             flow: fcName,
             indicator: "map-value-ind",
             next: value,
@@ -4301,8 +4301,8 @@ var require_resolve_flow_collection = __commonJS({
           });
           if (valueProps.found) {
             if (!isMap && !props.found && ctx.options.strict) {
-              if (sep4)
-                for (const st of sep4) {
+              if (sep5)
+                for (const st of sep5) {
                   if (st === valueProps.found)
                     break;
                   if (st.type === "newline") {
@@ -4319,7 +4319,7 @@ var require_resolve_flow_collection = __commonJS({
             else
               onError(valueProps.start, "MISSING_CHAR", `Missing , or : between ${fcName} items`);
           }
-          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : valueProps.found ? composeEmptyNode(ctx, valueProps.end, sep4, null, valueProps, onError) : null;
+          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : valueProps.found ? composeEmptyNode(ctx, valueProps.end, sep5, null, valueProps, onError) : null;
           if (valueNode) {
             if (isBlock(value))
               onError(valueNode.range, "BLOCK_IN_FLOW", blockMsg);
@@ -4499,7 +4499,7 @@ var require_resolve_block_scalar = __commonJS({
           chompStart = i + 1;
       }
       let value = "";
-      let sep4 = "";
+      let sep5 = "";
       let prevMoreIndented = false;
       for (let i = 0; i < contentStart; ++i)
         value += lines[i][0].slice(trimIndent) + "\n";
@@ -4516,24 +4516,24 @@ var require_resolve_block_scalar = __commonJS({
           indent2 = "";
         }
         if (type === Scalar.Scalar.BLOCK_LITERAL) {
-          value += sep4 + indent2.slice(trimIndent) + content3;
-          sep4 = "\n";
+          value += sep5 + indent2.slice(trimIndent) + content3;
+          sep5 = "\n";
         } else if (indent2.length > trimIndent || content3[0] === "	") {
-          if (sep4 === " ")
-            sep4 = "\n";
-          else if (!prevMoreIndented && sep4 === "\n")
-            sep4 = "\n\n";
-          value += sep4 + indent2.slice(trimIndent) + content3;
-          sep4 = "\n";
+          if (sep5 === " ")
+            sep5 = "\n";
+          else if (!prevMoreIndented && sep5 === "\n")
+            sep5 = "\n\n";
+          value += sep5 + indent2.slice(trimIndent) + content3;
+          sep5 = "\n";
           prevMoreIndented = true;
         } else if (content3 === "") {
-          if (sep4 === "\n")
+          if (sep5 === "\n")
             value += "\n";
           else
-            sep4 = "\n";
+            sep5 = "\n";
         } else {
-          value += sep4 + content3;
-          sep4 = " ";
+          value += sep5 + content3;
+          sep5 = " ";
           prevMoreIndented = false;
         }
       }
@@ -4715,25 +4715,25 @@ var require_resolve_flow_scalar = __commonJS({
       if (!match)
         return source;
       let res = match[1];
-      let sep4 = " ";
+      let sep5 = " ";
       let pos = first.lastIndex;
       line.lastIndex = pos;
       while (match = line.exec(source)) {
         if (match[1] === "") {
-          if (sep4 === "\n")
-            res += sep4;
+          if (sep5 === "\n")
+            res += sep5;
           else
-            sep4 = "\n";
+            sep5 = "\n";
         } else {
-          res += sep4 + match[1];
-          sep4 = " ";
+          res += sep5 + match[1];
+          sep5 = " ";
         }
         pos = line.lastIndex;
       }
       const last = /[ \t]*(.*)/sy;
       last.lastIndex = pos;
       match = last.exec(source);
-      return res + sep4 + (match?.[1] ?? "");
+      return res + sep5 + (match?.[1] ?? "");
     }
     function doubleQuotedValue(source, onError) {
       let res = "";
@@ -5543,14 +5543,14 @@ var require_cst_stringify = __commonJS({
         }
       }
     }
-    function stringifyItem({ start, key, sep: sep4, value }) {
+    function stringifyItem({ start, key, sep: sep5, value }) {
       let res = "";
       for (const st of start)
         res += st.source;
       if (key)
         res += stringifyToken(key);
-      if (sep4)
-        for (const st of sep4)
+      if (sep5)
+        for (const st of sep5)
           res += st.source;
       if (value)
         res += stringifyToken(value);
@@ -6717,18 +6717,18 @@ var require_parser = __commonJS({
         if (this.type === "map-value-ind") {
           const prev = getPrevProps(this.peek(2));
           const start = getFirstKeyStartProps(prev);
-          let sep4;
+          let sep5;
           if (scalar.end) {
-            sep4 = scalar.end;
-            sep4.push(this.sourceToken);
+            sep5 = scalar.end;
+            sep5.push(this.sourceToken);
             delete scalar.end;
           } else
-            sep4 = [this.sourceToken];
+            sep5 = [this.sourceToken];
           const map2 = {
             type: "block-map",
             offset: scalar.offset,
             indent: scalar.indent,
-            items: [{ start, key: scalar, sep: sep4 }]
+            items: [{ start, key: scalar, sep: sep5 }]
           };
           this.onKeyLine = true;
           this.stack[this.stack.length - 1] = map2;
@@ -6881,15 +6881,15 @@ var require_parser = __commonJS({
                 } else if (isFlowToken(it.key) && !includesToken(it.sep, "newline")) {
                   const start2 = getFirstKeyStartProps(it.start);
                   const key = it.key;
-                  const sep4 = it.sep;
-                  sep4.push(this.sourceToken);
+                  const sep5 = it.sep;
+                  sep5.push(this.sourceToken);
                   delete it.key;
                   delete it.sep;
                   this.stack.push({
                     type: "block-map",
                     offset: this.offset,
                     indent: this.indent,
-                    items: [{ start: start2, key, sep: sep4 }]
+                    items: [{ start: start2, key, sep: sep5 }]
                   });
                 } else if (start.length > 0) {
                   it.sep = it.sep.concat(start, this.sourceToken);
@@ -7083,13 +7083,13 @@ var require_parser = __commonJS({
             const prev = getPrevProps(parent);
             const start = getFirstKeyStartProps(prev);
             fixFlowSeqItems(fc);
-            const sep4 = fc.end.splice(1, fc.end.length);
-            sep4.push(this.sourceToken);
+            const sep5 = fc.end.splice(1, fc.end.length);
+            sep5.push(this.sourceToken);
             const map2 = {
               type: "block-map",
               offset: fc.offset,
               indent: fc.indent,
-              items: [{ start, key: fc, sep: sep4 }]
+              items: [{ start, key: fc, sep: sep5 }]
             };
             this.onKeyLine = true;
             this.stack[this.stack.length - 1] = map2;
@@ -7267,7 +7267,7 @@ var require_public_api = __commonJS({
       }
       return doc;
     }
-    function parse6(src, reviver, options) {
+    function parse8(src, reviver, options) {
       let _reviver = void 0;
       if (typeof reviver === "function") {
         _reviver = reviver;
@@ -7308,7 +7308,7 @@ var require_public_api = __commonJS({
         return value.toString(options);
       return new Document.Document(value, _replacer, options).toString(options);
     }
-    exports.parse = parse6;
+    exports.parse = parse8;
     exports.parseAllDocuments = parseAllDocuments;
     exports.parseDocument = parseDocument;
     exports.stringify = stringify;
@@ -12588,18 +12588,18 @@ var validateAsync = async (schema, value, _ctx) => {
   return result.issues.length === 0;
 };
 var _encode = (_Err) => {
-  const parse6 = _parse(_Err);
+  const parse8 = _parse(_Err);
   const fn = (schema, value, _ctx, _params) => {
     const ctx = _ctx ? { ..._ctx, direction: "backward" } : { direction: "backward" };
-    return parse6(schema, value, ctx, finalizeParams(fn, _params));
+    return parse8(schema, value, ctx, finalizeParams(fn, _params));
   };
   return fn;
 };
 var encode = /* @__PURE__ */ _encode($ZodRealError);
 var _decode = (_Err) => {
-  const parse6 = _parse(_Err);
+  const parse8 = _parse(_Err);
   const fn = (schema, value, _ctx, _params) => {
-    return parse6(schema, value, _ctx, finalizeParams(fn, _params));
+    return parse8(schema, value, _ctx, finalizeParams(fn, _params));
   };
   return fn;
 };
@@ -15772,7 +15772,7 @@ var recursive = /* @__PURE__ */ new WeakMap();
 var NONE = 0;
 var ASSUMED = 1;
 var PROVEN = 2;
-function isRecursive(inst, stack, resolve8) {
+function isRecursive(inst, stack, resolve10) {
   const cached2 = recursive.get(inst);
   if (cached2 !== void 0)
     return cached2 ? PROVEN : NONE;
@@ -15782,7 +15782,7 @@ function isRecursive(inst, stack, resolve8) {
   let result = NONE;
   const check2 = (child) => {
     if (result !== PROVEN && child?._zod) {
-      const answer = isRecursive(child, stack, resolve8);
+      const answer = isRecursive(child, stack, resolve10);
       if (answer > result)
         result = answer;
     }
@@ -15793,7 +15793,7 @@ function isRecursive(inst, stack, resolve8) {
       const desc = Object.getOwnPropertyDescriptor(sh, key);
       if (spread && !desc.enumerable)
         continue;
-      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve8) : NONE;
+      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve10) : NONE;
       if (child > answer)
         answer = child;
     }
@@ -15860,7 +15860,7 @@ function isRecursive(inst, stack, resolve8) {
       break;
     // `$ZodLazy` caches its inner on the def, so a resolved edge is followed exactly
     case "lazy": {
-      const inner = def._cachedInner ?? (resolve8 ? inst._zod.innerType : void 0);
+      const inner = def._cachedInner ?? (resolve10 ? inst._zod.innerType : void 0);
       merge3(inner ? isRecursive(inner, stack, false) : ASSUMED);
       break;
     }
@@ -30473,6 +30473,9 @@ var FileDocResolver = class _FileDocResolver {
   }
 };
 
+// src/flight-rules/flight-rules.ts
+import { resolve as resolve8 } from "node:path";
+
 // src/git/git-executor/git-executor.ts
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -30512,6 +30515,11 @@ var BranchNamer = class {
 var branchNamer = new BranchNamer();
 
 // src/git/git-executor/git-executor.ts
+var NodeGitExecutorPropsSchema = external_exports.object({
+  cwd: external_exports.string().min(1).optional(),
+  env: external_exports.record(external_exports.string(), external_exports.string().optional()).default(() => ({ ...process.env })),
+  execFile: external_exports.custom((value) => typeof value === "function").optional()
+});
 var PushSpecSchema = external_exports.object({
   // A detached HEAD makes `rev-parse --abbrev-ref` yield the literal "HEAD", which would push a ref rather than a branch.
   branch: external_exports.string().min(1, "branch is required").refine((branch) => branch !== "HEAD", {
@@ -30523,43 +30531,51 @@ var PushSpecSchema = external_exports.object({
 });
 var NodeGitExecutor = class {
   execFile;
-  constructor(execFileFn) {
+  cwd;
+  env;
+  constructor(props = {}) {
+    const parsed = NodeGitExecutorPropsSchema.parse(props);
     const promisified = promisify(execFile);
-    this.execFile = execFileFn ?? ((file2, args) => promisified(file2, [...args]));
+    this.cwd = parsed.cwd ?? process.cwd();
+    this.env = { ...parsed.env };
+    this.execFile = parsed.execFile ?? (async (file2, args, options) => {
+      const result = await promisified(file2, [...args], { ...options, encoding: "utf8" });
+      return { stdout: result.stdout, stderr: result.stderr };
+    });
   }
   async stage(files) {
     if (files.length === 0) return;
-    await this.execFile("git", ["add", "--", ...files]);
+    await this.run(["add", "--", ...files]);
   }
   async commit(message, files) {
     if (files !== void 0 && files.length > 0) {
-      await this.execFile("git", ["commit", "--cleanup=whitespace", "--only", "-m", message, "--", ...files]);
+      await this.run(["commit", "--cleanup=whitespace", "--only", "-m", message, "--", ...files]);
       return;
     }
-    await this.execFile("git", ["commit", "--cleanup=whitespace", "-m", message]);
+    await this.run(["commit", "--cleanup=whitespace", "-m", message]);
   }
   async getCommitSha() {
-    const { stdout } = await this.execFile("git", ["rev-parse", "HEAD"]);
+    const { stdout } = await this.run(["rev-parse", "HEAD"]);
     return stdout.trim();
   }
   async checkout(spec, from) {
     const branch = branchNamer.name(spec);
     const args = ["checkout", "-b", branch];
     if (from !== void 0) args.push(from);
-    await this.execFile("git", args);
+    await this.run(args);
     return branch;
   }
   async startBranch(spec, from) {
     const branch = branchNamer.name(spec);
     const current = await this.getCurrentBranch();
     if (await this.isDisposableWorktreeBranch(current, from)) {
-      await this.execFile("git", ["branch", "-m", branch]);
+      await this.run(["branch", "-m", branch]);
       return { branch, renamedFrom: current };
     }
     return { branch: await this.checkout(spec, from), renamedFrom: null };
   }
   async getCurrentBranch() {
-    const { stdout } = await this.execFile("git", ["rev-parse", "--abbrev-ref", "HEAD"]);
+    const { stdout } = await this.run(["rev-parse", "--abbrev-ref", "HEAD"]);
     return stdout.trim();
   }
   async push(spec) {
@@ -30567,16 +30583,22 @@ var NodeGitExecutor = class {
     const args = ["push"];
     if (parsed.setUpstream) args.push("--set-upstream");
     args.push(parsed.remote, parsed.branch);
-    await this.execFile("git", args);
+    await this.run(args);
   }
   async isDisposableWorktreeBranch(current, from) {
     if (current === "HEAD") return false;
-    const { stdout: dirs } = await this.execFile("git", ["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"]);
+    const { stdout: dirs } = await this.run([
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-dir",
+      "--git-common-dir"
+    ]);
     const [gitDir, commonDir] = dirs.trim().split("\n");
     if (gitDir === void 0 || gitDir === commonDir) return false;
-    if (await this.succeeds(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"])) return false;
+    if (await this.succeeds(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]))
+      return false;
     if (current === await this.defaultBranch()) return false;
-    const { stdout: unique } = await this.execFile("git", [
+    const { stdout: unique } = await this.run([
       "rev-list",
       "--count",
       "HEAD",
@@ -30588,14 +30610,14 @@ var NodeGitExecutor = class {
     if (unique.trim() !== "0") return false;
     if (from === void 0) return true;
     const [{ stdout: head }, { stdout: base }] = await Promise.all([
-      this.execFile("git", ["rev-parse", "HEAD"]),
-      this.execFile("git", ["rev-parse", `${from}^{commit}`])
+      this.run(["rev-parse", "HEAD"]),
+      this.run(["rev-parse", `${from}^{commit}`])
     ]);
     return head.trim() === base.trim();
   }
   async defaultBranch() {
     try {
-      const { stdout } = await this.execFile("git", ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]);
+      const { stdout } = await this.run(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]);
       return stdout.trim().replace(/^origin\//, "");
     } catch {
       return void 0;
@@ -30603,11 +30625,14 @@ var NodeGitExecutor = class {
   }
   async succeeds(args) {
     try {
-      await this.execFile("git", args);
+      await this.run(args);
       return true;
     } catch {
       return false;
     }
+  }
+  run(args) {
+    return this.execFile("git", args, { cwd: this.cwd, env: this.env });
   }
 };
 
@@ -31653,7 +31678,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.85.0";
+var appVersion = false ? "0.0.0-dev" : "1.86.0";
 
 // src/shared/ariadne/review-packet.schema.ts
 var packetLimits = {
@@ -37607,7 +37632,7 @@ var JiraClient = class {
       const retryAfterSeconds = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : defaultRetryAfterSeconds;
       const jitter = 0.7 + Math.random() * 0.6;
       const delayMs = Math.min(retryAfterSeconds * 1e3 * jitter, maxBackoffMs);
-      await new Promise((resolve8) => setTimeout(resolve8, delayMs));
+      await new Promise((resolve10) => setTimeout(resolve10, delayMs));
       return this.fetchWithRetry(url2, init, attempt + 1);
     }
     return res;
@@ -37659,7 +37684,7 @@ var ConfluenceClient = class {
       const retryAfterSeconds = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : defaultRetryAfterSeconds2;
       const jitter = 0.7 + Math.random() * 0.6;
       const delayMs = Math.min(retryAfterSeconds * 1e3 * jitter, maxBackoffMs2);
-      await new Promise((resolve8) => setTimeout(resolve8, delayMs));
+      await new Promise((resolve10) => setTimeout(resolve10, delayMs));
       return this.fetchWithRetry(url2, init, attempt + 1);
     }
     return res;
@@ -40267,10 +40292,10 @@ function resolveAll(constructs2, events, context) {
   const called = [];
   let index2 = -1;
   while (++index2 < constructs2.length) {
-    const resolve8 = constructs2[index2].resolveAll;
-    if (resolve8 && !called.includes(resolve8)) {
-      events = resolve8(events, context);
-      called.push(resolve8);
+    const resolve10 = constructs2[index2].resolveAll;
+    if (resolve10 && !called.includes(resolve10)) {
+      events = resolve10(events, context);
+      called.push(resolve10);
     }
   }
   return events;
@@ -48980,28 +49005,383 @@ var NodeRepositoryReadiness = class {
   }
 };
 
+// src/operations/git-config-operations.ts
+import { existsSync as existsSync10, lstatSync as lstatSync2, realpathSync as realpathSync3 } from "node:fs";
+import { dirname as dirname11, isAbsolute as isAbsolute3, join as join12, parse as parse6, relative as relative2, resolve as resolve5, sep as sep4 } from "node:path";
+
+// src/git/commit-message-builder/commit-message-builder.ts
+import { readFileSync as readFileSync10 } from "node:fs";
+import { dirname as dirname10, join as join11 } from "node:path";
+
+// src/shared/attribution-stripper/attribution-stripper.ts
+var trailerText = String.raw`(?:Co-Authored-By:[^\n"']*(?:Claude|anthropic\.com)[^\n"']*|Claude-Session:[^\n"']*|https://claude\.ai/code/session_[A-Za-z0-9_-]+)`;
+var lineEnd = String.raw`(?=["']?[ \t]*(?:\r?\n|$))`;
+var closingBlock = new RegExp(
+  String.raw`(?:\r?\n[ \t]*)+${trailerText}(?:\r?\n[ \t]*${trailerText})*(?=["'](?:\s|$)|$)`,
+  "gi"
+);
+var attributionLine = new RegExp(String.raw`(?:^|\r?\n)[ \t]*${trailerText}${lineEnd}`, "gi");
+var messageCommand = /(^|[\s;&|(])(?:git\b[^\n;&|]*\bcommit\b|gh\s+pr\s+(?:create|edit)\b|flight-rules\s+(?:git\s+commit|pr\s+create)\b)/;
+var AttributionStripper = class {
+  strip(text7) {
+    const stripped = text7.replace(closingBlock, "").replace(attributionLine, "");
+    if (stripped === text7) return text7;
+    return stripped.replace(/\n{3,}/g, "\n\n");
+  }
+  /** The command with attribution removed, or undefined when it writes no message or carries none. */
+  stripCommand(command) {
+    if (!messageCommand.test(command)) return void 0;
+    const stripped = this.strip(command);
+    return stripped === command ? void 0 : stripped;
+  }
+  /** True when a single trailer line, such as one `--footer` value, is Claude attribution. */
+  isAttribution(line) {
+    return this.strip(`
+${line.trim()}`) === "";
+  }
+};
+
+// src/git/commit-message-builder/commit-message.schema.ts
+var CommitMessageInputSchema = external_exports.object({
+  type: SemanticTypeSchema,
+  // Bare issue numbers make one-character scopes legitimate; 32 clears a 10-character tracker key plus a six-digit number.
+  scope: external_exports.string().min(1).max(32),
+  description: external_exports.string().min(2).max(50),
+  body: external_exports.string().optional(),
+  model: external_exports.string().max(72).optional(),
+  footers: external_exports.array(external_exports.string().regex(/^[a-zA-Z0-9-]+(: |=).*$/)).default([])
+});
+var CommitMessageHeaderSchema = external_exports.preprocess(
+  (arg) => {
+    return external_exports.string({ error: "Git Commit headers should be 72 characters or less" }).max(72).parse(arg);
+  },
+  external_exports.templateLiteral([SemanticTypeSchema, "(", external_exports.string(), "): ", external_exports.string()])
+);
+var CommitMessageBuilderPropsSchema = external_exports.object({
+  binPath: external_exports.string().min(1),
+  agentEnv: external_exports.string().optional()
+});
+
+// src/git/commit-message-builder/commit-message-builder.ts
+var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
+  pluginVersion;
+  harnessVersion;
+  stripper = new AttributionStripper();
+  constructor(props) {
+    const parsed = CommitMessageBuilderPropsSchema.parse(props);
+    this.pluginVersion = _DefaultCommitMessageBuilder.readPluginVersion(parsed.binPath);
+    this.harnessVersion = _DefaultCommitMessageBuilder.parseHarnessVersion(parsed.agentEnv);
+  }
+  build(input2) {
+    const sections = [];
+    const headerValidation = CommitMessageHeaderSchema.safeParse(
+      `${input2.type}(${input2.scope}): ${input2.description}`
+    );
+    if (!headerValidation.success) throw headerValidation.error;
+    sections.push(`${headerValidation.data}
+`);
+    const body = input2.body === void 0 ? void 0 : this.stripper.strip(input2.body).trim();
+    if (body !== void 0 && body !== "") {
+      sections.push(`${body}
+`);
+    }
+    const trailers = [];
+    if (input2.footers) trailers.push(...input2.footers.filter((footer) => !this.stripper.isAttribution(footer)));
+    trailers.push(
+      `Flight-Rules-Version: ${this.pluginVersion}`,
+      ...this.harnessVersion !== void 0 ? [`Harness-Version: ${this.harnessVersion}`] : [],
+      ...input2.model !== void 0 ? [`Model-Used: ${input2.model}`] : []
+    );
+    sections.push(trailers.join("\n"));
+    return sections.join("\n");
+  }
+  static readPluginVersion(binPath) {
+    try {
+      const pkgPath = join11(dirname10(binPath), "..", "package.json");
+      const parsed = JSON.parse(readFileSync10(pkgPath, "utf-8"));
+      if (typeof parsed === "object" && parsed !== null && "version" in parsed && typeof parsed.version === "string") {
+        return parsed.version;
+      }
+      return "unknown";
+    } catch {
+      return "unknown";
+    }
+  }
+  static parseHarnessVersion(agentEnv) {
+    if (!agentEnv) return void 0;
+    const match = /^(.+)_(\d+-\d+-\d+)_agent$/.exec(agentEnv);
+    if (match?.[1] === void 0 || match?.[2] === void 0) return void 0;
+    return `${match[1]}@${match[2].replace(/-/g, ".")}`;
+  }
+};
+
+// src/operations/git-config-operations.ts
+var ConfigScopeSchema = external_exports.enum(configScopes);
+var ConfigSetInputSchema = external_exports.object({
+  key: external_exports.string().min(1),
+  values: external_exports.array(external_exports.string()).min(1),
+  scope: ConfigScopeSchema.optional()
+}).strict();
+var ConfigUnsetInputSchema = external_exports.object({ key: external_exports.string().min(1), scope: ConfigScopeSchema.optional() }).strict();
+var GitCommitInputSchema = CommitMessageInputSchema.extend({
+  files: external_exports.array(external_exports.string()).default([])
+}).strict();
+var GitCheckoutInputSchema = external_exports.object({
+  type: external_exports.string().min(1),
+  scope: external_exports.string().min(1),
+  description: external_exports.string().optional(),
+  from: external_exports.string().optional()
+}).strict();
+var GitPushInputSchema = external_exports.object({ remote: external_exports.string().min(1).default("origin"), setUpstream: external_exports.boolean().default(true) }).strict();
+var CommitMessageOutputSchema = external_exports.object({ message: external_exports.string() });
+var BranchNameInputSchema = external_exports.object({ type: external_exports.string().min(1), scope: external_exports.string().min(1), description: external_exports.string().optional() }).strict();
+var ConfigOperationPolicySchema = external_exports.object({
+  scopes: external_exports.array(ConfigScopeSchema).default(["project", "local"]),
+  roots: external_exports.array(external_exports.string().min(1)).default([])
+}).strict();
+var GitConfigOperationsPropsSchema = external_exports.object({
+  cwd: external_exports.string().min(1),
+  configStore: external_exports.custom((value) => typeof value === "object" && value !== null),
+  git: external_exports.custom((value) => typeof value === "object" && value !== null),
+  configPolicy: ConfigOperationPolicySchema.default({ scopes: ["project", "local"], roots: [] }),
+  binPath: external_exports.string().default(process.argv[1] ?? ""),
+  agentEnv: external_exports.string().optional()
+});
+var LaunchConfigOperationDeniedError = class extends Error {
+  name = "LaunchConfigOperationDeniedError";
+};
+var DefaultGitConfigOperations = class {
+  props;
+  allowedScopes;
+  allowedRoots;
+  constructor(props) {
+    this.props = GitConfigOperationsPropsSchema.parse(props);
+    this.allowedScopes = new Set(this.props.configPolicy.scopes);
+    const roots = this.props.configPolicy.roots.length === 0 ? [this.props.cwd] : this.props.configPolicy.roots;
+    this.allowedRoots = [...new Set(roots.map((root) => realpathSync3(root)))];
+  }
+  operations() {
+    return [
+      this.descriptor(
+        "config-set",
+        "Set a value in an allowed configuration scope.",
+        ["write", "process"],
+        ["config", "set"],
+        ConfigSetInputSchema,
+        external_exports.object({
+          key: external_exports.string(),
+          scope: ConfigScopeSchema,
+          path: external_exports.string(),
+          warning: external_exports.string().optional()
+        }),
+        (input2) => this.setConfig(input2)
+      ),
+      this.descriptor(
+        "config-unset",
+        "Remove a value from an allowed configuration scope.",
+        ["write", "process"],
+        ["config", "unset"],
+        ConfigUnsetInputSchema,
+        external_exports.object({ key: external_exports.string(), scope: ConfigScopeSchema, path: external_exports.string() }),
+        (input2) => this.unsetConfig(input2)
+      ),
+      this.descriptor(
+        "git-commit",
+        "Create a conventional commit in the launch checkout.",
+        ["write", "process"],
+        ["git", "commit"],
+        GitCommitInputSchema,
+        external_exports.object({ sha: external_exports.string(), message: external_exports.string() }),
+        (input2) => this.commit(input2)
+      ),
+      this.descriptor(
+        "git-checkout",
+        "Start a conventional branch in the launch checkout.",
+        ["write", "process"],
+        ["git", "checkout"],
+        GitCheckoutInputSchema,
+        external_exports.object({
+          branch: external_exports.string(),
+          from: external_exports.string().nullable(),
+          renamedFrom: external_exports.string().nullable()
+        }),
+        (input2) => this.checkout(input2)
+      ),
+      this.descriptor(
+        "git-push",
+        "Push the current branch from the launch checkout.",
+        ["write", "network", "process"],
+        ["git", "push"],
+        GitPushInputSchema,
+        external_exports.object({ branch: external_exports.string(), remote: external_exports.string(), setUpstream: external_exports.boolean() }),
+        (input2) => this.push(input2)
+      ),
+      this.descriptor(
+        "commit-message",
+        "Build the conventional commit message without writing a file.",
+        ["read", "process"],
+        ["commit-message"],
+        CommitMessageInputSchema,
+        CommitMessageOutputSchema,
+        (input2) => ({ message: this.message(input2) })
+      ),
+      this.descriptor(
+        "branch-name",
+        "Build the conventional branch name without changing git state.",
+        ["read", "process"],
+        ["branch-name"],
+        BranchNameInputSchema,
+        external_exports.object({ branch: external_exports.string() }),
+        (input2) => ({
+          branch: branchNamer.name({
+            type: input2.type,
+            scope: input2.scope,
+            ...input2.description === void 0 ? {} : { description: input2.description }
+          })
+        })
+      )
+    ];
+  }
+  descriptor(id, description, effects, path3, inputSchema, outputSchema, handler2) {
+    return {
+      id,
+      description,
+      effects,
+      cli: { path: path3, aliases: [] },
+      inputSchema,
+      outputSchema,
+      handler: handler2
+    };
+  }
+  setConfig(input2) {
+    const scope = input2.scope ?? this.props.configStore.defaultScopeFor(input2.key);
+    const path3 = this.authorizeConfigWrite(scope);
+    this.props.configStore.set(input2.key, input2.values, scope);
+    const shadowedBy = this.props.configStore.shadowingScope(input2.key, scope);
+    return {
+      key: input2.key,
+      scope,
+      path: path3,
+      ...shadowedBy === void 0 ? {} : {
+        warning: `${input2.key} is also set in ${shadowedBy} scope (${this.props.configStore.pathFor(shadowedBy)}), which takes precedence`
+      }
+    };
+  }
+  unsetConfig(input2) {
+    const scope = input2.scope ?? this.props.configStore.defaultScopeFor(input2.key);
+    const path3 = this.authorizeConfigWrite(scope);
+    this.props.configStore.unset(input2.key, scope);
+    return { key: input2.key, scope, path: path3 };
+  }
+  authorizeConfigWrite(scope) {
+    if (!this.allowedScopes.has(scope))
+      throw new LaunchConfigOperationDeniedError(
+        `Configuration scope "${scope}" is not allowed by launch policy`
+      );
+    const path3 = this.props.configStore.pathFor(scope);
+    const absolutePath = isAbsolute3(path3) ? path3 : resolve5(this.props.cwd, path3);
+    this.rejectDanglingSymlinks(absolutePath);
+    let existingPath = existsSync10(absolutePath) ? absolutePath : dirname11(absolutePath);
+    while (!existsSync10(existingPath)) {
+      const parent = dirname11(existingPath);
+      if (parent === existingPath)
+        throw new LaunchConfigOperationDeniedError(
+          `Configuration path has no existing parent: ${path3}`
+        );
+      existingPath = parent;
+    }
+    const resolvedExistingPath = realpathSync3(existingPath);
+    const target = existsSync10(absolutePath) ? resolvedExistingPath : resolve5(resolvedExistingPath, relative2(existingPath, absolutePath));
+    if (!this.allowedRoots.some((root) => {
+      const rel = relative2(root, target);
+      return rel === "" || !rel.startsWith("..") && !isAbsolute3(rel);
+    }))
+      throw new LaunchConfigOperationDeniedError(
+        `Configuration path escapes launch roots: ${path3}`
+      );
+    return path3;
+  }
+  rejectDanglingSymlinks(path3) {
+    const root = parse6(path3).root;
+    let current = root;
+    for (const part of path3.slice(root.length).split(sep4).filter(Boolean)) {
+      current = join12(current, part);
+      try {
+        if (!lstatSync2(current).isSymbolicLink()) continue;
+      } catch {
+        break;
+      }
+      try {
+        realpathSync3(current);
+      } catch {
+        throw new LaunchConfigOperationDeniedError(
+          `Configuration path contains an unresolved symlink: ${path3}`
+        );
+      }
+    }
+  }
+  async commit(input2) {
+    const message = this.message(input2);
+    await this.props.git.stage(input2.files);
+    await this.props.git.commit(message, input2.files);
+    return { sha: await this.props.git.getCommitSha(), message };
+  }
+  async checkout(input2) {
+    const result = await this.props.git.startBranch(
+      {
+        type: input2.type,
+        scope: input2.scope,
+        ...input2.description === void 0 ? {} : { description: input2.description }
+      },
+      input2.from
+    );
+    return { branch: result.branch, from: input2.from ?? null, renamedFrom: result.renamedFrom };
+  }
+  async push(input2) {
+    const spec = {
+      branch: await this.props.git.getCurrentBranch(),
+      remote: input2.remote,
+      setUpstream: input2.setUpstream
+    };
+    await this.props.git.push(spec);
+    return spec;
+  }
+  message(input2) {
+    return new DefaultCommitMessageBuilder({
+      binPath: this.props.binPath,
+      agentEnv: this.props.agentEnv
+    }).build(input2);
+  }
+};
+
 // src/flight-rules/flight-rules.schema.ts
 var FlightRulesPropsSchema = external_exports.object({
   cwd: external_exports.string().optional().describe("Directory used for config discovery; defaults to process.cwd()"),
   env: external_exports.record(external_exports.string(), external_exports.string().optional()).optional().describe("Live environment record; defaults to process.env"),
   configPath: external_exports.string().optional().describe("Explicit config file, taking precedence over FLIGHT_RULES_CONFIG and discovery"),
-  host: NativeHostSchema.optional().describe("Explicit configuration host; otherwise FLIGHT_RULES_HOST, the native package host, or Claude for compatibility")
+  host: NativeHostSchema.optional().describe(
+    "Explicit configuration host; otherwise FLIGHT_RULES_HOST, the native package host, or Claude for compatibility"
+  ),
+  configWritePolicy: external_exports.object({
+    scopes: external_exports.array(ConfigScopeSchema).optional(),
+    roots: external_exports.array(external_exports.string().min(1)).optional()
+  }).strict().optional()
 });
 
 // src/operations/local-discovery-operations.ts
 import { readdirSync as readdirSync4 } from "node:fs";
-import { resolve as resolve6 } from "node:path";
+import { resolve as resolve7 } from "node:path";
 
 // src/tasks/qa-instructions/qa-instructions.ts
-import { existsSync as existsSync10, readFileSync as readFileSync10, statSync as statSync4 } from "node:fs";
-import { dirname as dirname10, join as join11, resolve as resolve5 } from "node:path";
+import { existsSync as existsSync11, readFileSync as readFileSync11, statSync as statSync4 } from "node:fs";
+import { dirname as dirname12, join as join13, resolve as resolve6 } from "node:path";
 var atxHeading = /^ {0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$/;
 var fenceRun = /^ {0,3}(`{3,}|~{3,})/;
 var legacyHint = 'Legacy QA recipe in use. Move its content into a QA.md at the repo root (or a "QA" section of AGENTS.md); see docs/qa-instructions.md.';
 var nodeFileSystem = {
-  isFile: (path3) => existsSync10(path3) && statSync4(path3).isFile(),
-  exists: (path3) => existsSync10(path3),
-  readFile: (path3) => readFileSync10(path3, "utf8")
+  isFile: (path3) => existsSync11(path3) && statSync4(path3).isFile(),
+  exists: (path3) => existsSync11(path3),
+  readFile: (path3) => readFileSync11(path3, "utf8")
 };
 var QaInstructionsFinder = class {
   fs;
@@ -49050,26 +49430,26 @@ var QaInstructionsFinder = class {
   }
   /** The start directory and each parent up to the repository root; only the start when no root is found. */
   levels(from) {
-    const absolute = resolve5(from);
-    const start = this.fs.isFile(absolute) ? dirname10(absolute) : absolute;
+    const absolute = resolve6(from);
+    const start = this.fs.isFile(absolute) ? dirname12(absolute) : absolute;
     const levels = [];
     let current = start;
     for (; ; ) {
       levels.push(current);
-      if (this.fs.exists(join11(current, ".git"))) return levels;
-      const parent = dirname10(current);
+      if (this.fs.exists(join13(current, ".git"))) return levels;
+      const parent = dirname12(current);
       if (parent === current) return [start];
       current = parent;
     }
   }
   sourceAt(dir) {
-    const agentsMd = join11(dir, "AGENTS.md");
+    const agentsMd = join13(dir, "AGENTS.md");
     if (this.fs.isFile(agentsMd)) {
       const section = this.extractQaSection(this.fs.readFile(agentsMd));
       if (section !== void 0)
         return { path: agentsMd, kind: "agents-md-section", dir, content: section };
     }
-    return this.fileSource(join11(dir, "QA.md"), "qa-md", dir) ?? this.fileSource(join11(dir, ".agents", "QA.md"), "agents-dir-qa-md", dir);
+    return this.fileSource(join13(dir, "QA.md"), "qa-md", dir) ?? this.fileSource(join13(dir, ".agents", "QA.md"), "agents-dir-qa-md", dir);
   }
   fileSource(path3, kind, dir) {
     if (!this.fs.isFile(path3)) return void 0;
@@ -49078,7 +49458,7 @@ var QaInstructionsFinder = class {
   }
   legacySource(path3) {
     if (path3 === void 0) return void 0;
-    const source = this.fileSource(path3, "legacy-recipe", dirname10(path3));
+    const source = this.fileSource(path3, "legacy-recipe", dirname12(path3));
     return source === void 0 ? void 0 : { ...source, legacy: true, hint: legacyHint };
   }
 };
@@ -49311,7 +49691,7 @@ var DefaultLocalDiscoveryOperations = class {
         "qaRecipe is set to a blank value \u2014 remove the key and move the recipe into a QA.md (see docs/qa-instructions.md)"
       );
     return (this.props.getQaFinder?.() ?? new QaInstructionsFinder()).discover({
-      from: input2.from === void 0 ? this.props.cwd : resolve6(this.props.cwd, input2.from),
+      from: input2.from === void 0 ? this.props.cwd : resolve7(this.props.cwd, input2.from),
       ...config2 === void 0 ? {} : { legacyRecipePath: getQaRecipePath(config2, this.props.getConfigPath()) }
     });
   }
@@ -49453,8 +49833,8 @@ var RepositoryPathsError = class extends Error {
 
 // src/code-review/review-policy.ts
 import { execFileSync as execFileSync3 } from "node:child_process";
-import { readFileSync as readFileSync11, realpathSync as realpathSync3 } from "node:fs";
-import { dirname as dirname11, join as join12, relative as relative2 } from "node:path";
+import { readFileSync as readFileSync12, realpathSync as realpathSync4 } from "node:fs";
+import { dirname as dirname13, join as join14, relative as relative3 } from "node:path";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
 
 // src/code-review/review.schema.ts
@@ -49691,17 +50071,17 @@ var FileReviewPolicy = class {
   env;
   constructor(props = {}) {
     const parsed = ReviewPolicyPropsSchema.parse(props);
-    this.home = parsed.home ?? join12(dirname11(fileURLToPath3(import.meta.url)), "..");
+    this.home = parsed.home ?? join14(dirname13(fileURLToPath3(import.meta.url)), "..");
     this.env = props.env ?? process.env;
   }
   load(input2 = {}) {
     const { paths } = LoadPolicyPropsSchema.parse(input2);
-    const docs = realpathSync3(join12(this.home, "docs"));
+    const docs = realpathSync4(join14(this.home, "docs"));
     const read = (id) => {
-      const path3 = realpathSync3(join12(docs, `${id}.md`));
-      if (relative2(docs, path3).startsWith(".."))
+      const path3 = realpathSync4(join14(docs, `${id}.md`));
+      if (relative3(docs, path3).startsWith(".."))
         throw new ReviewPolicyError("review policy path leaves the installed docs directory");
-      return readFileSync11(path3, "utf8");
+      return readFileSync12(path3, "utf8");
     };
     const catalog = new DocCharterCatalog({ docs: new FileDocResolver({ docsDir: docs }) });
     const charters = (paths === void 0 ? catalog.all() : catalog.select(paths)).map(
@@ -50446,20 +50826,24 @@ var DefaultReviewOperations = class {
 var DefaultFlightRules = class {
   cwd;
   env;
+  gitEnv;
   explicitConfigPath;
   hostSettings;
   host;
+  configWritePolicy;
   untrackedRoot;
   constructor(props = {}) {
     const parsed = FlightRulesPropsSchema.parse({
       ...props,
       env: props.env === void 0 ? void 0 : { ...props.env }
     });
-    this.cwd = parsed.cwd ?? process.cwd();
+    this.cwd = resolve8(parsed.cwd ?? process.cwd());
     this.env = props.env ?? process.env;
+    this.gitEnv = { ...props.env ?? process.env };
     this.explicitConfigPath = parsed.configPath;
     this.hostSettings = props.hostSettings;
     this.host = parsed.host;
+    this.configWritePolicy = parsed.configWritePolicy;
   }
   configPath() {
     return this.configStore().filePath();
@@ -50543,7 +50927,16 @@ var DefaultFlightRules = class {
     return new GhPullRequestHost({ repo: config2.repo });
   }
   git() {
-    return new NodeGitExecutor();
+    return new NodeGitExecutor({ cwd: this.cwd, env: this.gitEnv });
+  }
+  gitConfigOperations(policy) {
+    return new DefaultGitConfigOperations({
+      cwd: this.cwd,
+      configStore: this.configStore(),
+      git: this.git(),
+      agentEnv: this.gitEnv["AI_AGENT"],
+      configPolicy: policy ?? this.configWritePolicy
+    });
   }
   probe() {
     return new NodeToolProbe({ cwd: this.cwd, env: this.env });
@@ -50603,6 +50996,9 @@ var DefaultFlightRules = class {
 function createFlightRules(props = {}) {
   return new DefaultFlightRules(props);
 }
+
+// src/cli/cli.ts
+import { parse as parse7 } from "node:path";
 
 // src/operations/operation.schema.ts
 var OperationEffectSchema = external_exports.enum(["read", "write", "network", "process"]);
@@ -50815,7 +51211,7 @@ function createDocCommand(props) {
 }
 
 // src/operations/local-discovery-cli.ts
-import { readFileSync as readFileSync12 } from "node:fs";
+import { readFileSync as readFileSync13 } from "node:fs";
 import { text as text4 } from "node:stream/consumers";
 
 // src/tasks/commands/check/command.ts
@@ -50866,21 +51262,16 @@ var ReadinessResultSchema = external_exports.object({
   scope: external_exports.enum(["environment", "workflow"])
 });
 var LocalDiscoveryCliPropsSchema = external_exports.object({
-  operations: external_exports.custom(
-    (value) => typeof value === "object" && value !== null && "operations" in value && typeof value.operations === "function" && "configStore" in value && typeof value.configStore === "function"
-  ),
   registry: external_exports.custom(
     (value) => typeof value === "object" && value !== null && "invoke" in value
   ),
   readStdin: external_exports.custom((value) => typeof value === "function").optional()
 });
 var CommanderLocalDiscoveryCli = class {
-  operations;
   registry;
   readStdin;
   constructor(props) {
     const parsed = LocalDiscoveryCliPropsSchema.parse(props);
-    this.operations = parsed.operations;
     this.registry = parsed.registry;
     this.readStdin = parsed.readStdin ?? (() => text4(process.stdin));
   }
@@ -50989,21 +51380,27 @@ var CommanderLocalDiscoveryCli = class {
       );
     });
     const scopeHelp = "where to write: user, project, local, or file; config show reports the selected host and exact paths (override with FLIGHT_RULES_HOST=claude|codex)";
-    config2.command("set").description("write one config value; array keys take several values").argument("<key>").argument("<values...>").addOption(new Option("--scope <scope>", scopeHelp).choices(configScopes)).exitOverride().action((key, values, options) => {
-      const store = this.operations.configStore();
-      const scope = options.scope ?? store.defaultScopeFor(key);
-      store.set(key, values, scope);
-      const shadowedBy = store.shadowingScope(key, scope);
-      process.stdout.write(
-        `${JSON.stringify({ key, scope, path: store.pathFor(scope), ...shadowedBy === void 0 ? {} : { warning: `${key} is also set in ${shadowedBy} scope (${store.pathFor(shadowedBy)}), which takes precedence` } })}
-`
+    config2.command("set").description("write one config value; array keys take several values").argument("<key>").argument("<values...>").addOption(new Option("--scope <scope>", scopeHelp).choices(configScopes)).exitOverride().action(async (key, values, options) => {
+      const result = await this.invoke(
+        "config-set",
+        { key, values, ...options.scope === void 0 ? {} : { scope: options.scope } },
+        external_exports.object({
+          key: external_exports.string(),
+          scope: external_exports.enum(configScopes),
+          path: external_exports.string(),
+          warning: external_exports.string().optional()
+        })
       );
+      process.stdout.write(`${JSON.stringify(result)}
+`);
     });
-    config2.command("unset").description("remove one config value from a scope").argument("<key>").addOption(new Option("--scope <scope>", scopeHelp).choices(configScopes)).exitOverride().action((key, options) => {
-      const store = this.operations.configStore();
-      const scope = options.scope ?? store.defaultScopeFor(key);
-      store.unset(key, scope);
-      process.stdout.write(`${JSON.stringify({ key, scope, path: store.pathFor(scope) })}
+    config2.command("unset").description("remove one config value from a scope").argument("<key>").addOption(new Option("--scope <scope>", scopeHelp).choices(configScopes)).exitOverride().action(async (key, options) => {
+      const result = await this.invoke(
+        "config-unset",
+        { key, ...options.scope === void 0 ? {} : { scope: options.scope } },
+        external_exports.object({ key: external_exports.string(), scope: external_exports.enum(configScopes), path: external_exports.string() })
+      );
+      process.stdout.write(`${JSON.stringify(result)}
 `);
     });
   }
@@ -51019,7 +51416,7 @@ var CommanderLocalDiscoveryCli = class {
     ).exitOverride().action(async (options) => {
       let evidence;
       try {
-        evidence = options.runtimeFile === void 0 ? void 0 : JSON.parse(readFileSync12(options.runtimeFile, "utf8"));
+        evidence = options.runtimeFile === void 0 ? void 0 : JSON.parse(readFileSync13(options.runtimeFile, "utf8"));
       } catch {
         this.writeRuntimeFailure(
           "Cannot read a JSON runtime evidence file",
@@ -51071,7 +51468,7 @@ var CharterSelectionError = class extends Error {
 };
 
 // src/code-review/commands/command.ts
-import { readFileSync as readFileSync13 } from "node:fs";
+import { readFileSync as readFileSync14 } from "node:fs";
 var ReviewCommandPropsSchema = external_exports.object({
   registry: external_exports.custom(
     (value) => Boolean(value && typeof value === "object" && "invoke" in value)
@@ -51101,7 +51498,7 @@ var CommanderReviewCommand = class {
     });
     review.command("validate").argument("<file>", "structured reviewer result").action(async (file2) => {
       const result = await this.invoke("review-validate", {
-        review: JSON.parse(readFileSync13(file2, "utf8"))
+        review: JSON.parse(readFileSync14(file2, "utf8"))
       });
       process.stdout.write(JSON.stringify(result) + "\n");
     });
@@ -51111,7 +51508,7 @@ var CommanderReviewCommand = class {
         records: external_exports.array(external_exports.json()),
         outcome: external_exports.string(),
         problems: external_exports.array(external_exports.string())
-      }).parse(JSON.parse(readFileSync13(file2, "utf8")));
+      }).parse(JSON.parse(readFileSync14(file2, "utf8")));
       const result = await this.invoke("review-render", {
         review: plan.review,
         records: plan.records,
@@ -51122,7 +51519,7 @@ var CommanderReviewCommand = class {
     });
     review.command("state").argument("<file>", "index with actual persisted artifact IDs").action(async (file2) => {
       const result = await this.invoke("review-state", {
-        state: JSON.parse(readFileSync13(file2, "utf8"))
+        state: JSON.parse(readFileSync14(file2, "utf8"))
       });
       process.stdout.write(`${external_exports.string().parse(result)}
 `);
@@ -51142,10 +51539,10 @@ var CommanderReviewCommand = class {
         const input2 = {
           number: external_exports.coerce.number().int().positive().parse(number4),
           repo: opts.repo,
-          review: JSON.parse(readFileSync13(opts.file, "utf8")),
-          records: JSON.parse(readFileSync13(opts.recordsFile, "utf8"))
+          review: JSON.parse(readFileSync14(opts.file, "utf8")),
+          records: JSON.parse(readFileSync14(opts.recordsFile, "utf8"))
         };
-        const owners = opts.ownersFile === void 0 ? {} : external_exports.record(external_exports.string(), external_exports.array(external_exports.string().min(1))).parse(JSON.parse(readFileSync13(opts.ownersFile, "utf8")));
+        const owners = opts.ownersFile === void 0 ? {} : external_exports.record(external_exports.string(), external_exports.array(external_exports.string().min(1))).parse(JSON.parse(readFileSync14(opts.ownersFile, "utf8")));
         const registry2 = this.createTrustedRegistry({
           owners,
           requireMapping: opts.requireMapping ?? false
@@ -51198,7 +51595,7 @@ var HiddenPrompt = class {
     const muted = new Writable({ write: (_chunk, _encoding, done) => done() });
     const prompt = createInterface({ input: process.stdin, output: muted, terminal: true });
     try {
-      return await new Promise((resolve8) => prompt.once("line", resolve8));
+      return await new Promise((resolve10) => prompt.once("line", resolve10));
     } finally {
       prompt.close();
       process.stderr.write("\n");
@@ -51336,7 +51733,7 @@ function createBoardCommand(getBoard, getTokens = () => new AriadneTokenStore(),
 }
 
 // src/shared/commands/packet/command.ts
-import { readFileSync as readFileSync14, writeFileSync as writeFileSync7 } from "node:fs";
+import { readFileSync as readFileSync15, writeFileSync as writeFileSync7 } from "node:fs";
 
 // src/shared/decimal-integer.ts
 var DecimalIntegerParser = class {
@@ -51383,7 +51780,7 @@ var PacketFile = class {
   read() {
     let text7;
     try {
-      text7 = readFileSync14(this.path, "utf8");
+      text7 = readFileSync15(this.path, "utf8");
     } catch (err) {
       throw new Error(`cannot read ${this.path}: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
     }
@@ -51471,9 +51868,9 @@ var PacketCommandFactory = class {
 var createPacketCommand = (getPackets) => new PacketCommandFactory().create(getPackets);
 
 // src/tasks/commands/resolve-body.ts
-import { readFileSync as readFileSync15 } from "node:fs";
+import { readFileSync as readFileSync16 } from "node:fs";
 function resolveBody(opts) {
-  if (opts.bodyFile !== void 0) return readFileSync15(opts.bodyFile, "utf8");
+  if (opts.bodyFile !== void 0) return readFileSync16(opts.bodyFile, "utf8");
   if (opts.body !== void 0) return opts.body;
   throw new Error("one of --body or --body-file is required");
 }
@@ -52702,8 +53099,8 @@ import { execFileSync as execFileSync4 } from "node:child_process";
 
 // src/hooks/board-heartbeat/agent-ticket-resolver.ts
 import { createHash as createHash3 } from "node:crypto";
-import { closeSync, existsSync as existsSync11, openSync, readFileSync as readFileSync16, readSync } from "node:fs";
-import { basename as basename5, dirname as dirname12, join as join13 } from "node:path";
+import { closeSync, existsSync as existsSync12, openSync, readFileSync as readFileSync17, readSync } from "node:fs";
+import { basename as basename5, dirname as dirname14, join as join15 } from "node:path";
 var SubagentMetaSchema = external_exports.looseObject({
   agentType: external_exports.string().optional(),
   description: external_exports.string().optional(),
@@ -52731,8 +53128,8 @@ var AgentTicketResolver = class {
     if (cached2 !== void 0) return cached2;
     const dir = this.subagentsDir(location);
     if (dir === void 0) return void 0;
-    const meta3 = this.readMeta(join13(dir, `agent-${location.agentId}.meta.json`));
-    const resolved = meta3 !== void 0 ? this.fromMeta(location, meta3) : this.fromTranscript(location, join13(dir, `agent-${location.agentId}.jsonl`));
+    const meta3 = this.readMeta(join15(dir, `agent-${location.agentId}.meta.json`));
+    const resolved = meta3 !== void 0 ? this.fromMeta(location, meta3) : this.fromTranscript(location, join15(dir, `agent-${location.agentId}.jsonl`));
     if (resolved !== void 0) this.agents.recordAgent(location.agentId, resolved);
     return resolved;
   }
@@ -52786,23 +53183,23 @@ var AgentTicketResolver = class {
   }
   subagentsDir(location) {
     if (location.agentTranscriptPath !== void 0 && location.agentTranscriptPath !== "") {
-      return dirname12(location.agentTranscriptPath);
+      return dirname14(location.agentTranscriptPath);
     }
     const transcript = location.transcriptPath;
     if (transcript === void 0 || !transcript.endsWith(".jsonl")) return void 0;
-    return join13(dirname12(transcript), basename5(transcript, ".jsonl"), "subagents");
+    return join15(dirname14(transcript), basename5(transcript, ".jsonl"), "subagents");
   }
   readMeta(path3) {
-    if (!existsSync11(path3)) return void 0;
+    if (!existsSync12(path3)) return void 0;
     try {
-      const parsed = SubagentMetaSchema.safeParse(JSON.parse(readFileSync16(path3, "utf-8")));
+      const parsed = SubagentMetaSchema.safeParse(JSON.parse(readFileSync17(path3, "utf-8")));
       return parsed.success ? parsed.data : void 0;
     } catch {
       return void 0;
     }
   }
   firstUserMessage(path3) {
-    if (!existsSync11(path3)) return void 0;
+    if (!existsSync12(path3)) return void 0;
     let head;
     try {
       const fd = openSync(path3, "r");
@@ -52878,37 +53275,9 @@ var GitBranchReader = class {
   }
 };
 
-// src/shared/attribution-stripper/attribution-stripper.ts
-var trailerText = String.raw`(?:Co-Authored-By:[^\n"']*(?:Claude|anthropic\.com)[^\n"']*|Claude-Session:[^\n"']*|https://claude\.ai/code/session_[A-Za-z0-9_-]+)`;
-var lineEnd = String.raw`(?=["']?[ \t]*(?:\r?\n|$))`;
-var closingBlock = new RegExp(
-  String.raw`(?:\r?\n[ \t]*)+${trailerText}(?:\r?\n[ \t]*${trailerText})*(?=["'](?:\s|$)|$)`,
-  "gi"
-);
-var attributionLine = new RegExp(String.raw`(?:^|\r?\n)[ \t]*${trailerText}${lineEnd}`, "gi");
-var messageCommand = /(^|[\s;&|(])(?:git\b[^\n;&|]*\bcommit\b|gh\s+pr\s+(?:create|edit)\b|flight-rules\s+(?:git\s+commit|pr\s+create)\b)/;
-var AttributionStripper = class {
-  strip(text7) {
-    const stripped = text7.replace(closingBlock, "").replace(attributionLine, "");
-    if (stripped === text7) return text7;
-    return stripped.replace(/\n{3,}/g, "\n\n");
-  }
-  /** The command with attribution removed, or undefined when it writes no message or carries none. */
-  stripCommand(command) {
-    if (!messageCommand.test(command)) return void 0;
-    const stripped = this.strip(command);
-    return stripped === command ? void 0 : stripped;
-  }
-  /** True when a single trailer line, such as one `--footer` value, is Claude attribution. */
-  isAttribution(line) {
-    return this.strip(`
-${line.trim()}`) === "";
-  }
-};
-
 // src/hooks/commit-guard/commit-guard.ts
-import { readFileSync as readFileSync17 } from "node:fs";
-import { isAbsolute as isAbsolute3, resolve as resolve7 } from "node:path";
+import { readFileSync as readFileSync18 } from "node:fs";
+import { isAbsolute as isAbsolute4, resolve as resolve9 } from "node:path";
 var PreToolUseInputSchema = external_exports.looseObject({
   tool_name: external_exports.string().optional(),
   tool_input: external_exports.looseObject({ command: external_exports.string().optional() }).optional(),
@@ -52998,9 +53367,9 @@ var CommitGuard = class {
   }
   isCliMessage(file2, cwd) {
     const unquoted = file2.replace(/^["']|["']$/g, "");
-    if (unquoted === "-" || !isAbsolute3(unquoted) && cwd === void 0) return false;
+    if (unquoted === "-" || !isAbsolute4(unquoted) && cwd === void 0) return false;
     try {
-      const contents = readFileSync17(isAbsolute3(unquoted) ? unquoted : resolve7(cwd ?? "", unquoted), "utf8");
+      const contents = readFileSync18(isAbsolute4(unquoted) ? unquoted : resolve9(cwd ?? "", unquoted), "utf8");
       return /^Flight-Rules-Version: /m.test(contents);
     } catch {
       return false;
@@ -53123,81 +53492,27 @@ function createHookCommand(getHandler = () => new PreBashHook(), readStdin = () 
 // src/git/commands/commit/command.ts
 import { readFileSync as readFileSync19 } from "node:fs";
 
-// src/git/commit-message-builder/commit-message-builder.ts
-import { readFileSync as readFileSync18 } from "node:fs";
-import { dirname as dirname13, join as join14 } from "node:path";
-
-// src/git/commit-message-builder/commit-message.schema.ts
-var CommitMessageInputSchema = external_exports.object({
-  type: SemanticTypeSchema,
-  // Bare issue numbers make one-character scopes legitimate; 32 clears a 10-character tracker key plus a six-digit number.
-  scope: external_exports.string().min(1).max(32),
-  description: external_exports.string().min(2).max(50),
-  body: external_exports.string().optional(),
-  model: external_exports.string().max(72).optional(),
-  footers: external_exports.array(external_exports.string().regex(/^[a-zA-Z0-9-]+(: |=).*$/)).default([])
+// src/operations/command-operation-client.ts
+var CommandOperationClientPropsSchema = external_exports.object({
+  registry: external_exports.custom(
+    (value) => typeof value === "object" && value !== null && "invoke" in value
+  )
 });
-var CommitMessageHeaderSchema = external_exports.preprocess(
-  (arg) => {
-    return external_exports.string({ error: "Git Commit headers should be 72 characters or less" }).max(72).parse(arg);
-  },
-  external_exports.templateLiteral([SemanticTypeSchema, "(", external_exports.string(), "): ", external_exports.string()])
-);
-var CommitMessageBuilderPropsSchema = external_exports.object({
-  binPath: external_exports.string().min(1),
-  agentEnv: external_exports.string().optional()
-});
-
-// src/git/commit-message-builder/commit-message-builder.ts
-var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
-  pluginVersion;
-  harnessVersion;
-  stripper = new AttributionStripper();
+var RegistryCommandOperationClient = class {
+  registry;
   constructor(props) {
-    const parsed = CommitMessageBuilderPropsSchema.parse(props);
-    this.pluginVersion = _DefaultCommitMessageBuilder.readPluginVersion(parsed.binPath);
-    this.harnessVersion = _DefaultCommitMessageBuilder.parseHarnessVersion(parsed.agentEnv);
+    this.registry = CommandOperationClientPropsSchema.parse(props).registry;
   }
-  build(input2) {
-    const sections = [];
-    const headerValidation = CommitMessageHeaderSchema.safeParse(
-      `${input2.type}(${input2.scope}): ${input2.description}`
-    );
-    if (!headerValidation.success) throw headerValidation.error;
-    sections.push(`${headerValidation.data}
-`);
-    const body = input2.body === void 0 ? void 0 : this.stripper.strip(input2.body).trim();
-    if (body !== void 0 && body !== "") {
-      sections.push(`${body}
-`);
+  async invoke(id, input2, outputSchema) {
+    const result = await this.registry.invoke(id, input2);
+    if (result.status !== "success") {
+      throw new OperationCliError({
+        operationId: id,
+        errorName: result.error.name,
+        message: result.error.message
+      });
     }
-    const trailers = [];
-    if (input2.footers) trailers.push(...input2.footers.filter((footer) => !this.stripper.isAttribution(footer)));
-    trailers.push(
-      `Flight-Rules-Version: ${this.pluginVersion}`,
-      ...this.harnessVersion !== void 0 ? [`Harness-Version: ${this.harnessVersion}`] : [],
-      ...input2.model !== void 0 ? [`Model-Used: ${input2.model}`] : []
-    );
-    sections.push(trailers.join("\n"));
-    return sections.join("\n");
-  }
-  static readPluginVersion(binPath) {
-    try {
-      const pkgPath = join14(dirname13(binPath), "..", "package.json");
-      const parsed = JSON.parse(readFileSync18(pkgPath, "utf-8"));
-      if (typeof parsed === "object" && parsed !== null && "version" in parsed && typeof parsed.version === "string") {
-        return parsed.version;
-      }
-      return "unknown";
-    } catch {
-      return "unknown";
-    }
-  }
-  static parseHarnessVersion(agentEnv) {
-    if (!agentEnv) return void 0;
-    const match = /^(.+)_(\d+-\d+-\d+)_agent$/.exec(agentEnv);
-    if (match?.[1] === void 0 || match?.[2] === void 0) return void 0;
-    return `${match[1]}@${match[2].replace(/-/g, ".")}`;
+    return outputSchema.parse(result.data);
   }
 };
 
@@ -53205,55 +53520,54 @@ var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
 function collect2(value, previous3) {
   return [...previous3, value];
 }
-function createGitCommand(getExecutor) {
+function createGitCommand(registry2) {
   const git = new Command("git");
+  const operations = new RegistryCommandOperationClient({ registry: registry2 });
   git.command("commit").exitOverride().requiredOption("--type <type>", "conventional commit type").requiredOption("--scope <scope>", "conventional commit scope").requiredOption("--description <description>", "commit description").option(
     "--file <file>",
     "file to stage (repeatable); scopes the commit to exactly these paths. Omitting it commits the whole index",
     collect2,
     []
   ).option("--body <body>", "commit body (or use --body-file)").option("--body-file <path>", "read the commit body from a file; wins over --body").option("--footer <footer>", "commit footer (repeatable)", collect2, []).option("--model <model>", "model identifier").action(async (opts) => {
-    const builder = new DefaultCommitMessageBuilder({
-      binPath: process.argv[1] ?? "",
-      agentEnv: process.env["AI_AGENT"]
-    });
-    const commitMessagePartsValidation = CommitMessageInputSchema.safeParse({
-      type: opts.type,
-      scope: opts.scope,
-      description: opts.description,
-      body: opts.bodyFile !== void 0 ? readFileSync19(opts.bodyFile, "utf8") : opts.body,
-      footers: opts.footer,
-      model: opts.model ?? void 0
-    });
-    if (!commitMessagePartsValidation.success) throw commitMessagePartsValidation.error;
-    const message = builder.build(commitMessagePartsValidation.data);
-    const executor = getExecutor();
-    await executor.stage(opts.file);
-    await executor.commit(message, opts.file);
-    const sha = await executor.getCommitSha();
-    process.stdout.write(JSON.stringify({ sha, message }) + "\n");
-  });
-  git.command("checkout").exitOverride().requiredOption("--type <type>", `branch type (${semanticTypes.join(" | ")})`).requiredOption("--scope <scope>", "ticket number / scope").option("--description <description>", "short readable slug").option("--from <base>", "existing branch to base the new branch on (for stacking)").action(async (opts) => {
-    const executor = getExecutor();
-    const { branch, renamedFrom } = await executor.startBranch(
+    const result = await operations.invoke(
+      "git-commit",
       {
         type: opts.type,
         scope: opts.scope,
-        ...opts.description !== void 0 ? { description: opts.description } : {}
+        description: opts.description,
+        body: opts.bodyFile !== void 0 ? readFileSync19(opts.bodyFile, "utf8") : opts.body,
+        footers: opts.footer,
+        model: opts.model,
+        files: opts.file
       },
-      opts.from
+      external_exports.object({ sha: external_exports.string(), message: external_exports.string() })
     );
-    process.stdout.write(JSON.stringify({ branch, from: opts.from ?? null, renamedFrom }) + "\n");
+    process.stdout.write(JSON.stringify(result) + "\n");
+  });
+  git.command("checkout").exitOverride().requiredOption("--type <type>", `branch type (${semanticTypes.join(" | ")})`).requiredOption("--scope <scope>", "ticket number / scope").option("--description <description>", "short readable slug").option("--from <base>", "existing branch to base the new branch on (for stacking)").action(async (opts) => {
+    const result = await operations.invoke(
+      "git-checkout",
+      {
+        type: opts.type,
+        scope: opts.scope,
+        ...opts.description === void 0 ? {} : { description: opts.description },
+        ...opts.from === void 0 ? {} : { from: opts.from }
+      },
+      external_exports.object({
+        branch: external_exports.string(),
+        from: external_exports.string().nullable(),
+        renamedFrom: external_exports.string().nullable()
+      })
+    );
+    process.stdout.write(JSON.stringify(result) + "\n");
   });
   git.command("push").exitOverride().option("--remote <remote>", "remote to push to", "origin").option("--no-set-upstream", "do not set the upstream tracking ref").action(async (opts) => {
-    const executor = getExecutor();
-    const spec = {
-      branch: await executor.getCurrentBranch(),
-      remote: opts.remote,
-      setUpstream: opts.setUpstream
-    };
-    await executor.push(spec);
-    process.stdout.write(JSON.stringify(spec) + "\n");
+    const result = await operations.invoke(
+      "git-push",
+      { remote: opts.remote, setUpstream: opts.setUpstream },
+      external_exports.object({ branch: external_exports.string(), remote: external_exports.string(), setUpstream: external_exports.boolean() })
+    );
+    process.stdout.write(JSON.stringify(result) + "\n");
   });
   return git;
 }
@@ -53261,34 +53575,52 @@ function createGitCommand(getExecutor) {
 // src/git/commands/message/command.ts
 import { mkdtempSync, readFileSync as readFileSync20, writeFileSync as writeFileSync8 } from "node:fs";
 import { tmpdir as tmpdir2 } from "node:os";
-import { join as join15 } from "node:path";
-function createCommitMessageCommand() {
-  return new Command("commit-message").description("write the conventional commit message `flight-rules git commit` would use to a file, without committing").exitOverride().requiredOption("--type <type>", "conventional commit type").requiredOption("--scope <scope>", "conventional commit scope").requiredOption("--description <description>", "commit description").option("--body <body>", "commit body (or use --body-file)").option("--body-file <path>", "read the commit body from a file; wins over --body").option("--footer <footer>", "commit footer (repeatable)", (value, previous3) => [...previous3, value], []).option("--model <model>", "model identifier").option("--out <path>", "where to write the message; defaults to a new file in the temp directory").action((opts) => {
-    const input2 = CommitMessageInputSchema.parse({
-      type: opts.type,
-      scope: opts.scope,
-      description: opts.description,
-      body: opts.bodyFile !== void 0 ? readFileSync20(opts.bodyFile, "utf8") : opts.body,
-      footers: opts.footer,
-      model: opts.model
-    });
-    const message = new DefaultCommitMessageBuilder({
-      binPath: process.argv[1] ?? "",
-      agentEnv: process.env["AI_AGENT"]
-    }).build(input2);
-    const path3 = opts.out ?? join15(mkdtempSync(join15(tmpdir2(), "flight-rules-commit-")), "message.txt");
+import { join as join16 } from "node:path";
+function createCommitMessageCommand(registry2) {
+  const operations = new RegistryCommandOperationClient({ registry: registry2 });
+  return new Command("commit-message").description(
+    "write the conventional commit message `flight-rules git commit` would use to a file, without committing"
+  ).exitOverride().requiredOption("--type <type>", "conventional commit type").requiredOption("--scope <scope>", "conventional commit scope").requiredOption("--description <description>", "commit description").option("--body <body>", "commit body (or use --body-file)").option("--body-file <path>", "read the commit body from a file; wins over --body").option(
+    "--footer <footer>",
+    "commit footer (repeatable)",
+    (value, previous3) => [...previous3, value],
+    []
+  ).option("--model <model>", "model identifier").option(
+    "--out <path>",
+    "where to write the message; defaults to a new file in the temp directory"
+  ).action(async (opts) => {
+    const { message } = await operations.invoke(
+      "commit-message",
+      {
+        type: opts.type,
+        scope: opts.scope,
+        description: opts.description,
+        body: opts.bodyFile !== void 0 ? readFileSync20(opts.bodyFile, "utf8") : opts.body,
+        footers: opts.footer,
+        model: opts.model
+      },
+      external_exports.object({ message: external_exports.string() })
+    );
+    const path3 = opts.out ?? join16(mkdtempSync(join16(tmpdir2(), "flight-rules-commit-")), "message.txt");
     writeFileSync8(path3, `${message}
 `);
     process.stdout.write(JSON.stringify({ path: path3, message }) + "\n");
   });
 }
-function createBranchNameCommand() {
-  return new Command("branch-name").description("print the conventional branch name `flight-rules git checkout` would create, without running git").exitOverride().requiredOption("--type <type>", `branch type (${semanticTypes.join(" | ")})`).requiredOption("--scope <scope>", "ticket number / scope").option("--description <description>", "short readable slug").action((opts) => {
-    const branch = branchNamer.name({
-      type: opts.type,
-      scope: opts.scope,
-      ...opts.description !== void 0 ? { description: opts.description } : {}
-    });
+function createBranchNameCommand(registry2) {
+  const operations = new RegistryCommandOperationClient({ registry: registry2 });
+  return new Command("branch-name").description(
+    "print the conventional branch name `flight-rules git checkout` would create, without running git"
+  ).exitOverride().requiredOption("--type <type>", `branch type (${semanticTypes.join(" | ")})`).requiredOption("--scope <scope>", "ticket number / scope").option("--description <description>", "short readable slug").action(async (opts) => {
+    const { branch } = await operations.invoke(
+      "branch-name",
+      {
+        type: opts.type,
+        scope: opts.scope,
+        ...opts.description === void 0 ? {} : { description: opts.description }
+      },
+      external_exports.object({ branch: external_exports.string() })
+    );
     process.stdout.write(JSON.stringify({ branch }) + "\n");
   });
 }
@@ -53481,8 +53813,6 @@ var ManifestCliRouteCoverage = class _ManifestCliRouteCoverage {
   }
 };
 var pendingRoutes = [
-  "config set",
-  "config unset",
   "ticket get",
   "ticket transitions",
   "users get",
@@ -53506,11 +53836,6 @@ var pendingRoutes = [
   "ticket status",
   "ticket comment",
   "ticket label",
-  "git commit",
-  "git checkout",
-  "git push",
-  "commit-message",
-  "branch-name",
   "pr create",
   "pr comment",
   "pr list",
@@ -53576,6 +53901,13 @@ var cliRouteCoverage = new ManifestCliRouteCoverage({
       ["qa recipe", "qa-recipe"],
       ["config path", "config-path"],
       ["config show", "config-show"],
+      ["config set", "config-set"],
+      ["config unset", "config-unset"],
+      ["git commit", "git-commit"],
+      ["git checkout", "git-checkout"],
+      ["git push", "git-push"],
+      ["commit-message", "commit-message"],
+      ["branch-name", "branch-name"],
       ["check", "check"],
       ["review schema", "review-schema"],
       ["review validate", "review-validate"],
@@ -53620,9 +53952,6 @@ function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = () => cr
   program2.addCommand(createInitiativeCommand(tracker, prHost, config2));
   program2.addCommand(createTicketCommand(tracker));
   program2.addCommand(createTddCommand(tracker));
-  program2.addCommand(createGitCommand(() => services.git()));
-  program2.addCommand(createCommitMessageCommand());
-  program2.addCommand(createBranchNameCommand());
   program2.addCommand(createPrCommand(prHost));
   program2.addCommand(createUsersCommand(tracker));
   program2.addCommand(createAgentsCommand(() => services.installation()));
@@ -53657,12 +53986,23 @@ function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = () => cr
     operations: [
       docOperation,
       ...localOperations.operations(),
+      ...(services.gitConfigOperations?.({
+        scopes: [...configScopes],
+        roots: [parse7(launchCwd).root]
+      }) ?? createFlightRules({ cwd: launchCwd }).gitConfigOperations({
+        scopes: [...configScopes],
+        roots: [parse7(launchCwd).root]
+      })).operations(),
       ...new DefaultReviewOperations({ cwd: launchCwd }).operations()
     ],
-    policy: new LaunchOperationAccessPolicy({ allowedEffects: ["read", "process", "network"] })
+    policy: new LaunchOperationAccessPolicy({
+      allowedEffects: ["read", "write", "process", "network"]
+    })
   });
+  program2.addCommand(createGitCommand(operationRegistry));
+  program2.addCommand(createCommitMessageCommand(operationRegistry));
+  program2.addCommand(createBranchNameCommand(operationRegistry));
   new CommanderLocalDiscoveryCli({
-    operations: localOperations,
     registry: operationRegistry
   }).addTo(program2);
   program2.addCommand(

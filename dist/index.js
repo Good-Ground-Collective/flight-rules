@@ -60,6 +60,9 @@ var FileDocResolver = class _FileDocResolver {
   }
 };
 
+// src/flight-rules/flight-rules.ts
+import { resolve as resolve8 } from "node:path";
+
 // src/git/git-executor/git-executor.ts
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -101,6 +104,11 @@ var BranchNamer = class {
 var branchNamer = new BranchNamer();
 
 // src/git/git-executor/git-executor.ts
+var NodeGitExecutorPropsSchema = z3.object({
+  cwd: z3.string().min(1).optional(),
+  env: z3.record(z3.string(), z3.string().optional()).default(() => ({ ...process.env })),
+  execFile: z3.custom((value) => typeof value === "function").optional()
+});
 var PushSpecSchema = z3.object({
   // A detached HEAD makes `rev-parse --abbrev-ref` yield the literal "HEAD", which would push a ref rather than a branch.
   branch: z3.string().min(1, "branch is required").refine((branch) => branch !== "HEAD", {
@@ -112,43 +120,51 @@ var PushSpecSchema = z3.object({
 });
 var NodeGitExecutor = class {
   execFile;
-  constructor(execFileFn) {
+  cwd;
+  env;
+  constructor(props = {}) {
+    const parsed = NodeGitExecutorPropsSchema.parse(props);
     const promisified = promisify(execFile);
-    this.execFile = execFileFn ?? ((file, args) => promisified(file, [...args]));
+    this.cwd = parsed.cwd ?? process.cwd();
+    this.env = { ...parsed.env };
+    this.execFile = parsed.execFile ?? (async (file, args, options) => {
+      const result = await promisified(file, [...args], { ...options, encoding: "utf8" });
+      return { stdout: result.stdout, stderr: result.stderr };
+    });
   }
   async stage(files) {
     if (files.length === 0) return;
-    await this.execFile("git", ["add", "--", ...files]);
+    await this.run(["add", "--", ...files]);
   }
   async commit(message, files) {
     if (files !== void 0 && files.length > 0) {
-      await this.execFile("git", ["commit", "--cleanup=whitespace", "--only", "-m", message, "--", ...files]);
+      await this.run(["commit", "--cleanup=whitespace", "--only", "-m", message, "--", ...files]);
       return;
     }
-    await this.execFile("git", ["commit", "--cleanup=whitespace", "-m", message]);
+    await this.run(["commit", "--cleanup=whitespace", "-m", message]);
   }
   async getCommitSha() {
-    const { stdout } = await this.execFile("git", ["rev-parse", "HEAD"]);
+    const { stdout } = await this.run(["rev-parse", "HEAD"]);
     return stdout.trim();
   }
   async checkout(spec, from) {
     const branch = branchNamer.name(spec);
     const args = ["checkout", "-b", branch];
     if (from !== void 0) args.push(from);
-    await this.execFile("git", args);
+    await this.run(args);
     return branch;
   }
   async startBranch(spec, from) {
     const branch = branchNamer.name(spec);
     const current = await this.getCurrentBranch();
     if (await this.isDisposableWorktreeBranch(current, from)) {
-      await this.execFile("git", ["branch", "-m", branch]);
+      await this.run(["branch", "-m", branch]);
       return { branch, renamedFrom: current };
     }
     return { branch: await this.checkout(spec, from), renamedFrom: null };
   }
   async getCurrentBranch() {
-    const { stdout } = await this.execFile("git", ["rev-parse", "--abbrev-ref", "HEAD"]);
+    const { stdout } = await this.run(["rev-parse", "--abbrev-ref", "HEAD"]);
     return stdout.trim();
   }
   async push(spec) {
@@ -156,16 +172,22 @@ var NodeGitExecutor = class {
     const args = ["push"];
     if (parsed.setUpstream) args.push("--set-upstream");
     args.push(parsed.remote, parsed.branch);
-    await this.execFile("git", args);
+    await this.run(args);
   }
   async isDisposableWorktreeBranch(current, from) {
     if (current === "HEAD") return false;
-    const { stdout: dirs } = await this.execFile("git", ["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"]);
+    const { stdout: dirs } = await this.run([
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-dir",
+      "--git-common-dir"
+    ]);
     const [gitDir, commonDir] = dirs.trim().split("\n");
     if (gitDir === void 0 || gitDir === commonDir) return false;
-    if (await this.succeeds(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"])) return false;
+    if (await this.succeeds(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]))
+      return false;
     if (current === await this.defaultBranch()) return false;
-    const { stdout: unique } = await this.execFile("git", [
+    const { stdout: unique } = await this.run([
       "rev-list",
       "--count",
       "HEAD",
@@ -177,14 +199,14 @@ var NodeGitExecutor = class {
     if (unique.trim() !== "0") return false;
     if (from === void 0) return true;
     const [{ stdout: head }, { stdout: base }] = await Promise.all([
-      this.execFile("git", ["rev-parse", "HEAD"]),
-      this.execFile("git", ["rev-parse", `${from}^{commit}`])
+      this.run(["rev-parse", "HEAD"]),
+      this.run(["rev-parse", `${from}^{commit}`])
     ]);
     return head.trim() === base.trim();
   }
   async defaultBranch() {
     try {
-      const { stdout } = await this.execFile("git", ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]);
+      const { stdout } = await this.run(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]);
       return stdout.trim().replace(/^origin\//, "");
     } catch {
       return void 0;
@@ -192,11 +214,14 @@ var NodeGitExecutor = class {
   }
   async succeeds(args) {
     try {
-      await this.execFile("git", args);
+      await this.run(args);
       return true;
     } catch {
       return false;
     }
+  }
+  run(args) {
+    return this.execFile("git", args, { cwd: this.cwd, env: this.env });
   }
 };
 
@@ -1257,7 +1282,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.85.0";
+var appVersion = false ? "0.0.0-dev" : "1.86.0";
 
 // src/shared/ariadne/review-packet.schema.ts
 import { z as z14 } from "zod";
@@ -3179,7 +3204,7 @@ var JiraClient = class {
       const retryAfterSeconds = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : defaultRetryAfterSeconds;
       const jitter = 0.7 + Math.random() * 0.6;
       const delayMs = Math.min(retryAfterSeconds * 1e3 * jitter, maxBackoffMs);
-      await new Promise((resolve8) => setTimeout(resolve8, delayMs));
+      await new Promise((resolve10) => setTimeout(resolve10, delayMs));
       return this.fetchWithRetry(url, init, attempt + 1);
     }
     return res;
@@ -3232,7 +3257,7 @@ var ConfluenceClient = class {
       const retryAfterSeconds = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : defaultRetryAfterSeconds2;
       const jitter = 0.7 + Math.random() * 0.6;
       const delayMs = Math.min(retryAfterSeconds * 1e3 * jitter, maxBackoffMs2);
-      await new Promise((resolve8) => setTimeout(resolve8, delayMs));
+      await new Promise((resolve10) => setTimeout(resolve10, delayMs));
       return this.fetchWithRetry(url, init, attempt + 1);
     }
     return res;
@@ -5678,29 +5703,388 @@ var NodeRepositoryReadiness = class {
 };
 
 // src/flight-rules/flight-rules.schema.ts
+import { z as z34 } from "zod";
+
+// src/operations/git-config-operations.ts
+import { existsSync as existsSync10, lstatSync as lstatSync2, realpathSync as realpathSync3 } from "node:fs";
+import { dirname as dirname11, isAbsolute as isAbsolute3, join as join12, parse, relative as relative2, resolve as resolve5, sep as sep3 } from "node:path";
+import { z as z33 } from "zod";
+
+// src/git/commit-message-builder/commit-message-builder.ts
+import { readFileSync as readFileSync10 } from "node:fs";
+import { dirname as dirname10, join as join11 } from "node:path";
+
+// src/shared/attribution-stripper/attribution-stripper.ts
+var trailerText = String.raw`(?:Co-Authored-By:[^\n"']*(?:Claude|anthropic\.com)[^\n"']*|Claude-Session:[^\n"']*|https://claude\.ai/code/session_[A-Za-z0-9_-]+)`;
+var lineEnd = String.raw`(?=["']?[ \t]*(?:\r?\n|$))`;
+var closingBlock = new RegExp(
+  String.raw`(?:\r?\n[ \t]*)+${trailerText}(?:\r?\n[ \t]*${trailerText})*(?=["'](?:\s|$)|$)`,
+  "gi"
+);
+var attributionLine = new RegExp(String.raw`(?:^|\r?\n)[ \t]*${trailerText}${lineEnd}`, "gi");
+var messageCommand = /(^|[\s;&|(])(?:git\b[^\n;&|]*\bcommit\b|gh\s+pr\s+(?:create|edit)\b|flight-rules\s+(?:git\s+commit|pr\s+create)\b)/;
+var AttributionStripper = class {
+  strip(text) {
+    const stripped = text.replace(closingBlock, "").replace(attributionLine, "");
+    if (stripped === text) return text;
+    return stripped.replace(/\n{3,}/g, "\n\n");
+  }
+  /** The command with attribution removed, or undefined when it writes no message or carries none. */
+  stripCommand(command) {
+    if (!messageCommand.test(command)) return void 0;
+    const stripped = this.strip(command);
+    return stripped === command ? void 0 : stripped;
+  }
+  /** True when a single trailer line, such as one `--footer` value, is Claude attribution. */
+  isAttribution(line) {
+    return this.strip(`
+${line.trim()}`) === "";
+  }
+};
+
+// src/git/commit-message-builder/commit-message.schema.ts
 import { z as z32 } from "zod";
-var FlightRulesPropsSchema = z32.object({
-  cwd: z32.string().optional().describe("Directory used for config discovery; defaults to process.cwd()"),
-  env: z32.record(z32.string(), z32.string().optional()).optional().describe("Live environment record; defaults to process.env"),
-  configPath: z32.string().optional().describe("Explicit config file, taking precedence over FLIGHT_RULES_CONFIG and discovery"),
-  host: NativeHostSchema.optional().describe("Explicit configuration host; otherwise FLIGHT_RULES_HOST, the native package host, or Claude for compatibility")
+var CommitMessageInputSchema = z32.object({
+  type: SemanticTypeSchema,
+  // Bare issue numbers make one-character scopes legitimate; 32 clears a 10-character tracker key plus a six-digit number.
+  scope: z32.string().min(1).max(32),
+  description: z32.string().min(2).max(50),
+  body: z32.string().optional(),
+  model: z32.string().max(72).optional(),
+  footers: z32.array(z32.string().regex(/^[a-zA-Z0-9-]+(: |=).*$/)).default([])
+});
+var CommitMessageHeaderSchema = z32.preprocess(
+  (arg) => {
+    return z32.string({ error: "Git Commit headers should be 72 characters or less" }).max(72).parse(arg);
+  },
+  z32.templateLiteral([SemanticTypeSchema, "(", z32.string(), "): ", z32.string()])
+);
+var CommitMessageBuilderPropsSchema = z32.object({
+  binPath: z32.string().min(1),
+  agentEnv: z32.string().optional()
+});
+
+// src/git/commit-message-builder/commit-message-builder.ts
+var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
+  pluginVersion;
+  harnessVersion;
+  stripper = new AttributionStripper();
+  constructor(props) {
+    const parsed = CommitMessageBuilderPropsSchema.parse(props);
+    this.pluginVersion = _DefaultCommitMessageBuilder.readPluginVersion(parsed.binPath);
+    this.harnessVersion = _DefaultCommitMessageBuilder.parseHarnessVersion(parsed.agentEnv);
+  }
+  build(input) {
+    const sections = [];
+    const headerValidation = CommitMessageHeaderSchema.safeParse(
+      `${input.type}(${input.scope}): ${input.description}`
+    );
+    if (!headerValidation.success) throw headerValidation.error;
+    sections.push(`${headerValidation.data}
+`);
+    const body = input.body === void 0 ? void 0 : this.stripper.strip(input.body).trim();
+    if (body !== void 0 && body !== "") {
+      sections.push(`${body}
+`);
+    }
+    const trailers = [];
+    if (input.footers) trailers.push(...input.footers.filter((footer) => !this.stripper.isAttribution(footer)));
+    trailers.push(
+      `Flight-Rules-Version: ${this.pluginVersion}`,
+      ...this.harnessVersion !== void 0 ? [`Harness-Version: ${this.harnessVersion}`] : [],
+      ...input.model !== void 0 ? [`Model-Used: ${input.model}`] : []
+    );
+    sections.push(trailers.join("\n"));
+    return sections.join("\n");
+  }
+  static readPluginVersion(binPath) {
+    try {
+      const pkgPath = join11(dirname10(binPath), "..", "package.json");
+      const parsed = JSON.parse(readFileSync10(pkgPath, "utf-8"));
+      if (typeof parsed === "object" && parsed !== null && "version" in parsed && typeof parsed.version === "string") {
+        return parsed.version;
+      }
+      return "unknown";
+    } catch {
+      return "unknown";
+    }
+  }
+  static parseHarnessVersion(agentEnv) {
+    if (!agentEnv) return void 0;
+    const match = /^(.+)_(\d+-\d+-\d+)_agent$/.exec(agentEnv);
+    if (match?.[1] === void 0 || match?.[2] === void 0) return void 0;
+    return `${match[1]}@${match[2].replace(/-/g, ".")}`;
+  }
+};
+
+// src/operations/git-config-operations.ts
+var ConfigScopeSchema = z33.enum(configScopes);
+var ConfigSetInputSchema = z33.object({
+  key: z33.string().min(1),
+  values: z33.array(z33.string()).min(1),
+  scope: ConfigScopeSchema.optional()
+}).strict();
+var ConfigUnsetInputSchema = z33.object({ key: z33.string().min(1), scope: ConfigScopeSchema.optional() }).strict();
+var GitCommitInputSchema = CommitMessageInputSchema.extend({
+  files: z33.array(z33.string()).default([])
+}).strict();
+var GitCheckoutInputSchema = z33.object({
+  type: z33.string().min(1),
+  scope: z33.string().min(1),
+  description: z33.string().optional(),
+  from: z33.string().optional()
+}).strict();
+var GitPushInputSchema = z33.object({ remote: z33.string().min(1).default("origin"), setUpstream: z33.boolean().default(true) }).strict();
+var CommitMessageOutputSchema = z33.object({ message: z33.string() });
+var BranchNameInputSchema = z33.object({ type: z33.string().min(1), scope: z33.string().min(1), description: z33.string().optional() }).strict();
+var ConfigOperationPolicySchema = z33.object({
+  scopes: z33.array(ConfigScopeSchema).default(["project", "local"]),
+  roots: z33.array(z33.string().min(1)).default([])
+}).strict();
+var GitConfigOperationsPropsSchema = z33.object({
+  cwd: z33.string().min(1),
+  configStore: z33.custom((value) => typeof value === "object" && value !== null),
+  git: z33.custom((value) => typeof value === "object" && value !== null),
+  configPolicy: ConfigOperationPolicySchema.default({ scopes: ["project", "local"], roots: [] }),
+  binPath: z33.string().default(process.argv[1] ?? ""),
+  agentEnv: z33.string().optional()
+});
+var LaunchConfigOperationDeniedError = class extends Error {
+  name = "LaunchConfigOperationDeniedError";
+};
+var DefaultGitConfigOperations = class {
+  props;
+  allowedScopes;
+  allowedRoots;
+  constructor(props) {
+    this.props = GitConfigOperationsPropsSchema.parse(props);
+    this.allowedScopes = new Set(this.props.configPolicy.scopes);
+    const roots = this.props.configPolicy.roots.length === 0 ? [this.props.cwd] : this.props.configPolicy.roots;
+    this.allowedRoots = [...new Set(roots.map((root) => realpathSync3(root)))];
+  }
+  operations() {
+    return [
+      this.descriptor(
+        "config-set",
+        "Set a value in an allowed configuration scope.",
+        ["write", "process"],
+        ["config", "set"],
+        ConfigSetInputSchema,
+        z33.object({
+          key: z33.string(),
+          scope: ConfigScopeSchema,
+          path: z33.string(),
+          warning: z33.string().optional()
+        }),
+        (input) => this.setConfig(input)
+      ),
+      this.descriptor(
+        "config-unset",
+        "Remove a value from an allowed configuration scope.",
+        ["write", "process"],
+        ["config", "unset"],
+        ConfigUnsetInputSchema,
+        z33.object({ key: z33.string(), scope: ConfigScopeSchema, path: z33.string() }),
+        (input) => this.unsetConfig(input)
+      ),
+      this.descriptor(
+        "git-commit",
+        "Create a conventional commit in the launch checkout.",
+        ["write", "process"],
+        ["git", "commit"],
+        GitCommitInputSchema,
+        z33.object({ sha: z33.string(), message: z33.string() }),
+        (input) => this.commit(input)
+      ),
+      this.descriptor(
+        "git-checkout",
+        "Start a conventional branch in the launch checkout.",
+        ["write", "process"],
+        ["git", "checkout"],
+        GitCheckoutInputSchema,
+        z33.object({
+          branch: z33.string(),
+          from: z33.string().nullable(),
+          renamedFrom: z33.string().nullable()
+        }),
+        (input) => this.checkout(input)
+      ),
+      this.descriptor(
+        "git-push",
+        "Push the current branch from the launch checkout.",
+        ["write", "network", "process"],
+        ["git", "push"],
+        GitPushInputSchema,
+        z33.object({ branch: z33.string(), remote: z33.string(), setUpstream: z33.boolean() }),
+        (input) => this.push(input)
+      ),
+      this.descriptor(
+        "commit-message",
+        "Build the conventional commit message without writing a file.",
+        ["read", "process"],
+        ["commit-message"],
+        CommitMessageInputSchema,
+        CommitMessageOutputSchema,
+        (input) => ({ message: this.message(input) })
+      ),
+      this.descriptor(
+        "branch-name",
+        "Build the conventional branch name without changing git state.",
+        ["read", "process"],
+        ["branch-name"],
+        BranchNameInputSchema,
+        z33.object({ branch: z33.string() }),
+        (input) => ({
+          branch: branchNamer.name({
+            type: input.type,
+            scope: input.scope,
+            ...input.description === void 0 ? {} : { description: input.description }
+          })
+        })
+      )
+    ];
+  }
+  descriptor(id, description, effects, path, inputSchema, outputSchema, handler) {
+    return {
+      id,
+      description,
+      effects,
+      cli: { path, aliases: [] },
+      inputSchema,
+      outputSchema,
+      handler
+    };
+  }
+  setConfig(input) {
+    const scope = input.scope ?? this.props.configStore.defaultScopeFor(input.key);
+    const path = this.authorizeConfigWrite(scope);
+    this.props.configStore.set(input.key, input.values, scope);
+    const shadowedBy = this.props.configStore.shadowingScope(input.key, scope);
+    return {
+      key: input.key,
+      scope,
+      path,
+      ...shadowedBy === void 0 ? {} : {
+        warning: `${input.key} is also set in ${shadowedBy} scope (${this.props.configStore.pathFor(shadowedBy)}), which takes precedence`
+      }
+    };
+  }
+  unsetConfig(input) {
+    const scope = input.scope ?? this.props.configStore.defaultScopeFor(input.key);
+    const path = this.authorizeConfigWrite(scope);
+    this.props.configStore.unset(input.key, scope);
+    return { key: input.key, scope, path };
+  }
+  authorizeConfigWrite(scope) {
+    if (!this.allowedScopes.has(scope))
+      throw new LaunchConfigOperationDeniedError(
+        `Configuration scope "${scope}" is not allowed by launch policy`
+      );
+    const path = this.props.configStore.pathFor(scope);
+    const absolutePath = isAbsolute3(path) ? path : resolve5(this.props.cwd, path);
+    this.rejectDanglingSymlinks(absolutePath);
+    let existingPath = existsSync10(absolutePath) ? absolutePath : dirname11(absolutePath);
+    while (!existsSync10(existingPath)) {
+      const parent = dirname11(existingPath);
+      if (parent === existingPath)
+        throw new LaunchConfigOperationDeniedError(
+          `Configuration path has no existing parent: ${path}`
+        );
+      existingPath = parent;
+    }
+    const resolvedExistingPath = realpathSync3(existingPath);
+    const target = existsSync10(absolutePath) ? resolvedExistingPath : resolve5(resolvedExistingPath, relative2(existingPath, absolutePath));
+    if (!this.allowedRoots.some((root) => {
+      const rel = relative2(root, target);
+      return rel === "" || !rel.startsWith("..") && !isAbsolute3(rel);
+    }))
+      throw new LaunchConfigOperationDeniedError(
+        `Configuration path escapes launch roots: ${path}`
+      );
+    return path;
+  }
+  rejectDanglingSymlinks(path) {
+    const root = parse(path).root;
+    let current = root;
+    for (const part of path.slice(root.length).split(sep3).filter(Boolean)) {
+      current = join12(current, part);
+      try {
+        if (!lstatSync2(current).isSymbolicLink()) continue;
+      } catch {
+        break;
+      }
+      try {
+        realpathSync3(current);
+      } catch {
+        throw new LaunchConfigOperationDeniedError(
+          `Configuration path contains an unresolved symlink: ${path}`
+        );
+      }
+    }
+  }
+  async commit(input) {
+    const message = this.message(input);
+    await this.props.git.stage(input.files);
+    await this.props.git.commit(message, input.files);
+    return { sha: await this.props.git.getCommitSha(), message };
+  }
+  async checkout(input) {
+    const result = await this.props.git.startBranch(
+      {
+        type: input.type,
+        scope: input.scope,
+        ...input.description === void 0 ? {} : { description: input.description }
+      },
+      input.from
+    );
+    return { branch: result.branch, from: input.from ?? null, renamedFrom: result.renamedFrom };
+  }
+  async push(input) {
+    const spec = {
+      branch: await this.props.git.getCurrentBranch(),
+      remote: input.remote,
+      setUpstream: input.setUpstream
+    };
+    await this.props.git.push(spec);
+    return spec;
+  }
+  message(input) {
+    return new DefaultCommitMessageBuilder({
+      binPath: this.props.binPath,
+      agentEnv: this.props.agentEnv
+    }).build(input);
+  }
+};
+
+// src/flight-rules/flight-rules.schema.ts
+var FlightRulesPropsSchema = z34.object({
+  cwd: z34.string().optional().describe("Directory used for config discovery; defaults to process.cwd()"),
+  env: z34.record(z34.string(), z34.string().optional()).optional().describe("Live environment record; defaults to process.env"),
+  configPath: z34.string().optional().describe("Explicit config file, taking precedence over FLIGHT_RULES_CONFIG and discovery"),
+  host: NativeHostSchema.optional().describe(
+    "Explicit configuration host; otherwise FLIGHT_RULES_HOST, the native package host, or Claude for compatibility"
+  ),
+  configWritePolicy: z34.object({
+    scopes: z34.array(ConfigScopeSchema).optional(),
+    roots: z34.array(z34.string().min(1)).optional()
+  }).strict().optional()
 });
 
 // src/operations/local-discovery-operations.ts
 import { readdirSync as readdirSync4 } from "node:fs";
-import { resolve as resolve6 } from "node:path";
-import { z as z33 } from "zod";
+import { resolve as resolve7 } from "node:path";
+import { z as z35 } from "zod";
 
 // src/tasks/qa-instructions/qa-instructions.ts
-import { existsSync as existsSync10, readFileSync as readFileSync10, statSync as statSync4 } from "node:fs";
-import { dirname as dirname10, join as join11, resolve as resolve5 } from "node:path";
+import { existsSync as existsSync11, readFileSync as readFileSync11, statSync as statSync4 } from "node:fs";
+import { dirname as dirname12, join as join13, resolve as resolve6 } from "node:path";
 var atxHeading = /^ {0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$/;
 var fenceRun = /^ {0,3}(`{3,}|~{3,})/;
 var legacyHint = 'Legacy QA recipe in use. Move its content into a QA.md at the repo root (or a "QA" section of AGENTS.md); see docs/qa-instructions.md.';
 var nodeFileSystem = {
-  isFile: (path) => existsSync10(path) && statSync4(path).isFile(),
-  exists: (path) => existsSync10(path),
-  readFile: (path) => readFileSync10(path, "utf8")
+  isFile: (path) => existsSync11(path) && statSync4(path).isFile(),
+  exists: (path) => existsSync11(path),
+  readFile: (path) => readFileSync11(path, "utf8")
 };
 var QaInstructionsFinder = class {
   fs;
@@ -5749,26 +6133,26 @@ var QaInstructionsFinder = class {
   }
   /** The start directory and each parent up to the repository root; only the start when no root is found. */
   levels(from) {
-    const absolute = resolve5(from);
-    const start = this.fs.isFile(absolute) ? dirname10(absolute) : absolute;
+    const absolute = resolve6(from);
+    const start = this.fs.isFile(absolute) ? dirname12(absolute) : absolute;
     const levels = [];
     let current = start;
     for (; ; ) {
       levels.push(current);
-      if (this.fs.exists(join11(current, ".git"))) return levels;
-      const parent = dirname10(current);
+      if (this.fs.exists(join13(current, ".git"))) return levels;
+      const parent = dirname12(current);
       if (parent === current) return [start];
       current = parent;
     }
   }
   sourceAt(dir) {
-    const agentsMd = join11(dir, "AGENTS.md");
+    const agentsMd = join13(dir, "AGENTS.md");
     if (this.fs.isFile(agentsMd)) {
       const section = this.extractQaSection(this.fs.readFile(agentsMd));
       if (section !== void 0)
         return { path: agentsMd, kind: "agents-md-section", dir, content: section };
     }
-    return this.fileSource(join11(dir, "QA.md"), "qa-md", dir) ?? this.fileSource(join11(dir, ".agents", "QA.md"), "agents-dir-qa-md", dir);
+    return this.fileSource(join13(dir, "QA.md"), "qa-md", dir) ?? this.fileSource(join13(dir, ".agents", "QA.md"), "agents-dir-qa-md", dir);
   }
   fileSource(path, kind, dir) {
     if (!this.fs.isFile(path)) return void 0;
@@ -5777,87 +6161,87 @@ var QaInstructionsFinder = class {
   }
   legacySource(path) {
     if (path === void 0) return void 0;
-    const source = this.fileSource(path, "legacy-recipe", dirname10(path));
+    const source = this.fileSource(path, "legacy-recipe", dirname12(path));
     return source === void 0 ? void 0 : { ...source, legacy: true, hint: legacyHint };
   }
 };
 
 // src/operations/local-discovery-operations.ts
-var QaSourceSchema = z33.object({
-  path: z33.string(),
-  kind: z33.enum(["agents-md-section", "qa-md", "agents-dir-qa-md", "legacy-recipe"]),
-  dir: z33.string(),
-  content: z33.string(),
-  legacy: z33.literal(true).optional(),
-  hint: z33.string().optional()
+var QaSourceSchema = z35.object({
+  path: z35.string(),
+  kind: z35.enum(["agents-md-section", "qa-md", "agents-dir-qa-md", "legacy-recipe"]),
+  dir: z35.string(),
+  content: z35.string(),
+  legacy: z35.literal(true).optional(),
+  hint: z35.string().optional()
 });
-var QaInstructionsSchema = z33.object({ found: z33.boolean(), sources: z33.array(QaSourceSchema) });
-var ReadinessCheckSchema = z33.object({
-  name: z33.string(),
-  ok: z33.boolean(),
-  detail: z33.string(),
-  required: z33.boolean().optional(),
-  code: z33.string().optional(),
-  remedy: z33.string().optional()
+var QaInstructionsSchema = z35.object({ found: z35.boolean(), sources: z35.array(QaSourceSchema) });
+var ReadinessCheckSchema = z35.object({
+  name: z35.string(),
+  ok: z35.boolean(),
+  detail: z35.string(),
+  required: z35.boolean().optional(),
+  code: z35.string().optional(),
+  remedy: z35.string().optional()
 });
-var ReadinessReportSchema = z33.object({
-  tracker: z33.string().nullable(),
-  repo: z33.string().nullable().optional(),
-  checks: z33.array(ReadinessCheckSchema),
-  ok: z33.boolean(),
+var ReadinessReportSchema = z35.object({
+  tracker: z35.string().nullable(),
+  repo: z35.string().nullable().optional(),
+  checks: z35.array(ReadinessCheckSchema),
+  ok: z35.boolean(),
   workflow: WorkflowSchema.optional(),
-  scope: z33.enum(["environment", "workflow"])
+  scope: z35.enum(["environment", "workflow"])
 });
-var ConfigInspectionSchema = z33.object({
-  host: z33.string(),
-  valid: z33.boolean(),
-  error: z33.string().optional(),
-  values: z33.record(z33.string(), z33.unknown()),
-  sources: z33.record(
-    z33.string(),
-    z33.object({ scope: z33.enum(["user", "project", "local", "file"]), path: z33.string() })
+var ConfigInspectionSchema = z35.object({
+  host: z35.string(),
+  valid: z35.boolean(),
+  error: z35.string().optional(),
+  values: z35.record(z35.string(), z35.unknown()),
+  sources: z35.record(
+    z35.string(),
+    z35.object({ scope: z35.enum(["user", "project", "local", "file"]), path: z35.string() })
   ),
-  layers: z33.array(
-    z33.object({
-      scope: z33.enum(["user", "project", "local", "file"]),
-      path: z33.string(),
-      present: z33.boolean()
+  layers: z35.array(
+    z35.object({
+      scope: z35.enum(["user", "project", "local", "file"]),
+      path: z35.string(),
+      present: z35.boolean()
     })
   )
 });
-var CharterInputSchema = z33.object({
-  paths: z33.array(z33.string()).optional(),
-  diff: z33.string().optional(),
-  repository: z33.boolean().default(false),
-  pathOutput: z33.boolean().default(false)
+var CharterInputSchema = z35.object({
+  paths: z35.array(z35.string()).optional(),
+  diff: z35.string().optional(),
+  repository: z35.boolean().default(false),
+  pathOutput: z35.boolean().default(false)
 }).strict().refine(
   (input) => Number(input.paths !== void 0 && input.paths.length > 0) + Number(input.diff !== void 0) + Number(input.repository) <= 1,
   "Choose one charter selection source"
 );
-var QaInstructionsInputSchema = z33.object({ from: z33.string().optional() }).strict();
-var RfcDirectoryOutputSchema = z33.object({ path: z33.string() });
-var RfcNextIdOutputSchema = z33.object({
-  id: z33.string().regex(/^RFC-\d+$/),
-  directory: z33.string()
+var QaInstructionsInputSchema = z35.object({ from: z35.string().optional() }).strict();
+var RfcDirectoryOutputSchema = z35.object({ path: z35.string() });
+var RfcNextIdOutputSchema = z35.object({
+  id: z35.string().regex(/^RFC-\d+$/),
+  directory: z35.string()
 });
-var QaRecipeOutputSchema = z33.object({ path: z33.string() });
-var EvidenceDirectoryOutputSchema = z33.object({
-  path: z33.string(),
-  gitignored: z33.boolean().nullable()
+var QaRecipeOutputSchema = z35.object({ path: z35.string() });
+var EvidenceDirectoryOutputSchema = z35.object({
+  path: z35.string(),
+  gitignored: z35.boolean().nullable()
 });
 var rfcIdPattern = /^RFC-(\d+)\.md$/;
-var LocalDiscoveryPropsSchema = z33.object({
-  cwd: z33.string().min(1),
-  getConfig: z33.custom((value) => typeof value === "function"),
-  getConfigStore: z33.custom((value) => typeof value === "function"),
-  getCharters: z33.custom((value) => typeof value === "function"),
-  getRepositoryPaths: z33.custom((value) => typeof value === "function"),
-  getEvidence: z33.custom((value) => typeof value === "function"),
-  getReadiness: z33.custom((value) => typeof value === "function"),
-  getProbe: z33.custom((value) => typeof value === "function"),
-  getTracker: z33.custom((value) => typeof value === "function"),
-  getConfigPath: z33.custom((value) => typeof value === "function"),
-  getQaFinder: z33.custom((value) => typeof value === "function").optional()
+var LocalDiscoveryPropsSchema = z35.object({
+  cwd: z35.string().min(1),
+  getConfig: z35.custom((value) => typeof value === "function"),
+  getConfigStore: z35.custom((value) => typeof value === "function"),
+  getCharters: z35.custom((value) => typeof value === "function"),
+  getRepositoryPaths: z35.custom((value) => typeof value === "function"),
+  getEvidence: z35.custom((value) => typeof value === "function"),
+  getReadiness: z35.custom((value) => typeof value === "function"),
+  getProbe: z35.custom((value) => typeof value === "function"),
+  getTracker: z35.custom((value) => typeof value === "function"),
+  getConfigPath: z35.custom((value) => typeof value === "function"),
+  getQaFinder: z35.custom((value) => typeof value === "function").optional()
 });
 var DefaultLocalDiscoveryOperations = class {
   props;
@@ -5872,11 +6256,11 @@ var DefaultLocalDiscoveryOperations = class {
         ["read", "process"],
         ["charter"],
         CharterInputSchema,
-        z33.object({
-          charters: z33.array(
-            z33.object({ path: z33.string(), contents: z33.string(), language: z33.string().nullable() })
+        z35.object({
+          charters: z35.array(
+            z35.object({ path: z35.string(), contents: z35.string(), language: z35.string().nullable() })
           ),
-          unmatched: z33.boolean()
+          unmatched: z35.boolean()
         }),
         (input) => this.charter(input)
       ),
@@ -5885,8 +6269,8 @@ var DefaultLocalDiscoveryOperations = class {
         "Read the configured worker competencies.",
         ["read", "process"],
         ["competencies"],
-        z33.object({}),
-        z33.array(z33.string()),
+        z35.object({}),
+        z35.array(z35.string()),
         () => this.props.getConfig().competencies
       ),
       this.descriptor(
@@ -5894,7 +6278,7 @@ var DefaultLocalDiscoveryOperations = class {
         "Resolve the RFC directory for this checkout.",
         ["read", "process"],
         ["rfc", "dir"],
-        z33.object({}),
+        z35.object({}),
         RfcDirectoryOutputSchema,
         () => ({ path: getRfcDir(this.props.getConfig(), this.props.cwd) })
       ),
@@ -5903,7 +6287,7 @@ var DefaultLocalDiscoveryOperations = class {
         "Find the next RFC number in the configured RFC directory.",
         ["read", "process"],
         ["rfc", "next-id"],
-        z33.object({}),
+        z35.object({}),
         RfcNextIdOutputSchema,
         () => this.nextRfcId()
       ),
@@ -5921,7 +6305,7 @@ var DefaultLocalDiscoveryOperations = class {
         "Resolve the persistent evidence directory for a ticket.",
         ["read", "process"],
         ["qa", "evidence-dir"],
-        z33.object({ ticket: z33.string().min(1) }),
+        z35.object({ ticket: z35.string().min(1) }),
         EvidenceDirectoryOutputSchema,
         (input) => this.props.getEvidence().dirFor(input.ticket)
       ),
@@ -5930,7 +6314,7 @@ var DefaultLocalDiscoveryOperations = class {
         "Resolve the nearest QA instruction path (deprecated CLI route).",
         ["read", "process"],
         ["qa", "recipe"],
-        z33.object({}),
+        z35.object({}),
         QaRecipeOutputSchema,
         () => this.qaRecipe()
       ),
@@ -5939,8 +6323,8 @@ var DefaultLocalDiscoveryOperations = class {
         "Resolve the config file path for this checkout.",
         ["read", "process"],
         ["config", "path"],
-        z33.object({}),
-        z33.object({ path: z33.string() }),
+        z35.object({}),
+        z35.object({ path: z35.string() }),
         () => ({ path: this.props.getConfigStore().filePath() })
       ),
       this.descriptor(
@@ -5948,7 +6332,7 @@ var DefaultLocalDiscoveryOperations = class {
         "Inspect merged configuration and its sources.",
         ["read", "process"],
         ["config", "show"],
-        z33.object({}),
+        z35.object({}),
         ConfigInspectionSchema,
         () => this.props.getConfigStore().inspect()
       ),
@@ -6010,7 +6394,7 @@ var DefaultLocalDiscoveryOperations = class {
         "qaRecipe is set to a blank value \u2014 remove the key and move the recipe into a QA.md (see docs/qa-instructions.md)"
       );
     return (this.props.getQaFinder?.() ?? new QaInstructionsFinder()).discover({
-      from: input.from === void 0 ? this.props.cwd : resolve6(this.props.cwd, input.from),
+      from: input.from === void 0 ? this.props.cwd : resolve7(this.props.cwd, input.from),
       ...config === void 0 ? {} : { legacyRecipePath: getQaRecipePath(config, this.props.getConfigPath()) }
     });
   }
@@ -6051,18 +6435,18 @@ var BlankQaRecipeError = class extends Error {
 // src/bundled-docs/charter-catalog/charter-catalog.ts
 import { matchesGlob } from "node:path";
 import { parse as parseYaml3 } from "yaml";
-import { z as z34 } from "zod";
+import { z as z36 } from "zod";
 var coreCharterId = "coding-charter";
 var languageCharterPrefix = `${coreCharterId}-`;
-var LanguageFrontmatterSchema = z34.strictObject({
-  language: z34.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
-  "applies-to": z34.array(z34.string().min(1)).min(1)
+var LanguageFrontmatterSchema = z36.strictObject({
+  language: z36.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+  "applies-to": z36.array(z36.string().min(1)).min(1)
 }).transform(({ language, "applies-to": appliesTo }) => ({ language, appliesTo }));
-var FrontmatterSchema = z34.string().transform((contents, ctx) => {
+var FrontmatterSchema = z36.string().transform((contents, ctx) => {
   const block = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/.exec(contents)?.[1];
   if (block === void 0) {
     ctx.addIssue({ code: "custom", message: "missing YAML frontmatter" });
-    return z34.NEVER;
+    return z36.NEVER;
   }
   return parseYaml3(block);
 }).pipe(LanguageFrontmatterSchema);
@@ -6088,7 +6472,7 @@ var DocCharterCatalog = class {
   languageCharter(doc) {
     const parsed = FrontmatterSchema.safeParse(doc.contents);
     if (!parsed.success) {
-      throw new CharterFormatError(`Charter "${doc.id}" has invalid frontmatter: ${z34.prettifyError(parsed.error)}`);
+      throw new CharterFormatError(`Charter "${doc.id}" has invalid frontmatter: ${z36.prettifyError(parsed.error)}`);
     }
     const expectedId = `${languageCharterPrefix}${parsed.data.language}`;
     if (doc.id !== expectedId) {
@@ -6109,10 +6493,10 @@ var CharterFormatError = class extends Error {
 // src/bundled-docs/charter-catalog/repository-paths.ts
 import { execFile as execFile5 } from "node:child_process";
 import { promisify as promisify5 } from "node:util";
-import { z as z35 } from "zod";
+import { z as z37 } from "zod";
 var run = promisify5(execFile5);
-var BaseRefSchema = z35.string().regex(/^[^\s-]\S*$/, 'base must be a git ref or commit, and cannot start with "-"');
-var GitRepositoryPathsPropsSchema = z35.object({ cwd: z35.string().min(1) });
+var BaseRefSchema = z37.string().regex(/^[^\s-]\S*$/, 'base must be a git ref or commit, and cannot start with "-"');
+var GitRepositoryPathsPropsSchema = z37.object({ cwd: z37.string().min(1) });
 var GitRepositoryPaths = class {
   cwd;
   constructor(props) {
@@ -6153,28 +6537,28 @@ var RepositoryPathsError = class extends Error {
 };
 
 // src/operations/review-operations.ts
-import { z as z42 } from "zod";
+import { z as z44 } from "zod";
 
 // src/code-review/review-policy.ts
 import { execFileSync as execFileSync3 } from "node:child_process";
-import { readFileSync as readFileSync11, realpathSync as realpathSync3 } from "node:fs";
-import { dirname as dirname11, join as join12, relative as relative2 } from "node:path";
+import { readFileSync as readFileSync12, realpathSync as realpathSync4 } from "node:fs";
+import { dirname as dirname13, join as join14, relative as relative3 } from "node:path";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
-import { z as z37 } from "zod";
+import { z as z39 } from "zod";
 
 // src/code-review/review.schema.ts
-import { z as z36 } from "zod";
+import { z as z38 } from "zod";
 var reviewContractVersion = 1;
 var reviewSchemaRevision = 1;
-var ReviewOutcomeSchema = z36.enum(["APPROVED", "CHANGES_NEEDED", "ESCALATE", "INCOMPLETE"]);
-var FindingIdSchema = z36.string().regex(/^f-[a-f0-9]{10}$/);
-var HeadShaSchema2 = z36.string().regex(/^[a-f0-9]{40}$/);
-var ReviewPathSchema = z36.string().max(400).regex(/^(?!\/)(?!.*\\)(?!.*(?:^|\/)\.{1,2}(?:\/|$))[^\p{Cc}]*$/u);
-var TextSchema = z36.string().min(1).max(16e3);
-var LineTextSchema = z36.string().min(1).max(400).regex(/^[^\r\n]+$/);
-var PositiveIdSchema = z36.number().int().positive().max(Number.MAX_SAFE_INTEGER);
-var HttpsUrlSchema = z36.url().regex(/^https:\/\//);
-var CategorySchema = z36.enum([
+var ReviewOutcomeSchema = z38.enum(["APPROVED", "CHANGES_NEEDED", "ESCALATE", "INCOMPLETE"]);
+var FindingIdSchema = z38.string().regex(/^f-[a-f0-9]{10}$/);
+var HeadShaSchema2 = z38.string().regex(/^[a-f0-9]{40}$/);
+var ReviewPathSchema = z38.string().max(400).regex(/^(?!\/)(?!.*\\)(?!.*(?:^|\/)\.{1,2}(?:\/|$))[^\p{Cc}]*$/u);
+var TextSchema = z38.string().min(1).max(16e3);
+var LineTextSchema = z38.string().min(1).max(400).regex(/^[^\r\n]+$/);
+var PositiveIdSchema = z38.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+var HttpsUrlSchema = z38.url().regex(/^https:\/\//);
+var CategorySchema = z38.enum([
   "security",
   "correctness",
   "data",
@@ -6185,7 +6569,7 @@ var CategorySchema = z36.enum([
   "readability",
   "docs"
 ]);
-var ActionLabelSchema = z36.enum([
+var ActionLabelSchema = z38.enum([
   "issue",
   "todo",
   "suggestion",
@@ -6195,15 +6579,15 @@ var ActionLabelSchema = z36.enum([
   "typo",
   "polish"
 ]);
-var InformationLabelSchema = z36.enum(["praise", "note", "thought"]);
-var SeveritySchema = z36.enum(["critical", "major", "minor", "trivial"]);
-var DecisionOptionsSchema = z36.array(
-  z36.strictObject({ id: z36.string().regex(/^[a-z][a-z0-9-]{0,79}$/), description: TextSchema })
+var InformationLabelSchema = z38.enum(["praise", "note", "thought"]);
+var SeveritySchema = z38.enum(["critical", "major", "minor", "trivial"]);
+var DecisionOptionsSchema = z38.array(
+  z38.strictObject({ id: z38.string().regex(/^[a-z][a-z0-9-]{0,79}$/), description: TextSchema })
 ).min(2);
 var findingFields = {
   path: ReviewPathSchema,
-  line: z36.number().int().nonnegative(),
-  start_line: z36.number().int().positive().optional(),
+  line: z38.number().int().nonnegative(),
+  start_line: z38.number().int().positive().optional(),
   category: CategorySchema.optional(),
   subject: LineTextSchema,
   discussion: TextSchema,
@@ -6212,73 +6596,73 @@ var findingFields = {
 var actionFields = {
   ...findingFields,
   label: ActionLabelSchema,
-  type: z36.enum(["fix", "clarify"]),
-  blocking: z36.boolean(),
+  type: z38.enum(["fix", "clarify"]),
+  blocking: z38.boolean(),
   severity: SeveritySchema,
   details: TextSchema,
   resolved_when: TextSchema
 };
 var decisionFields = {
   ...actionFields,
-  type: z36.literal("decide"),
+  type: z38.literal("decide"),
   decision_owner: LineTextSchema,
   decision_options: DecisionOptionsSchema
 };
 var informationFields = {
   ...findingFields,
   label: InformationLabelSchema,
-  blocking: z36.literal(false),
+  blocking: z38.literal(false),
   details: TextSchema.optional()
 };
-var NewFindingSchema = z36.union([
-  z36.strictObject(actionFields),
-  z36.strictObject(decisionFields),
-  z36.strictObject(informationFields)
+var NewFindingSchema = z38.union([
+  z38.strictObject(actionFields),
+  z38.strictObject(decisionFields),
+  z38.strictObject(informationFields)
 ]);
-var ActionableFindingSchema = z36.union([
-  z36.strictObject({ ...actionFields, id: FindingIdSchema }),
-  z36.strictObject({ ...decisionFields, id: FindingIdSchema })
+var ActionableFindingSchema = z38.union([
+  z38.strictObject({ ...actionFields, id: FindingIdSchema }),
+  z38.strictObject({ ...decisionFields, id: FindingIdSchema })
 ]);
-var StoredFindingSchema = z36.union([
+var StoredFindingSchema = z38.union([
   ...ActionableFindingSchema.options,
-  z36.strictObject({ ...informationFields, id: FindingIdSchema })
+  z38.strictObject({ ...informationFields, id: FindingIdSchema })
 ]);
-var ReviewEvidenceSchema = z36.discriminatedUnion("kind", [
-  z36.strictObject({
-    kind: z36.literal("github_comment"),
+var ReviewEvidenceSchema = z38.discriminatedUnion("kind", [
+  z38.strictObject({
+    kind: z38.literal("github_comment"),
     comment_id: PositiveIdSchema,
     url: HttpsUrlSchema
   }),
-  z36.strictObject({
-    kind: z36.literal("code"),
+  z38.strictObject({
+    kind: z38.literal("code"),
     commit_sha: HeadShaSchema2,
     path: ReviewPathSchema.min(1),
-    line: z36.number().int().positive()
+    line: z38.number().int().positive()
   }),
-  z36.strictObject({ kind: z36.literal("commit"), sha: HeadShaSchema2 }),
-  z36.strictObject({
-    kind: z36.literal("check_run"),
+  z38.strictObject({ kind: z38.literal("commit"), sha: HeadShaSchema2 }),
+  z38.strictObject({
+    kind: z38.literal("check_run"),
     check_run_id: PositiveIdSchema,
     commit_sha: HeadShaSchema2
   }),
-  z36.strictObject({ kind: z36.literal("document"), url: HttpsUrlSchema }),
-  z36.strictObject({
-    kind: z36.literal("verification"),
+  z38.strictObject({ kind: z38.literal("document"), url: HttpsUrlSchema }),
+  z38.strictObject({
+    kind: z38.literal("verification"),
     commit_sha: HeadShaSchema2,
     command: TextSchema,
-    result: z36.literal("passed"),
+    result: z38.literal("passed"),
     report_url: HttpsUrlSchema
   }),
-  z36.strictObject({
-    kind: z36.literal("thread_resolution"),
-    thread_id: z36.string().min(1),
+  z38.strictObject({
+    kind: z38.literal("thread_resolution"),
+    thread_id: z38.string().min(1),
     author_id: PositiveIdSchema
   })
 ]);
-var DecisionAnswerSchema = z36.strictObject({
+var DecisionAnswerSchema = z38.strictObject({
   comment_id: PositiveIdSchema,
   author_id: PositiveIdSchema,
-  option_id: z36.string().min(1)
+  option_id: z38.string().min(1)
 });
 var transitionFields = {
   id: FindingIdSchema,
@@ -6286,81 +6670,81 @@ var transitionFields = {
   reply: TextSchema.optional(),
   decision: DecisionAnswerSchema.optional()
 };
-var PriorFindingSchema = z36.union([
-  z36.strictObject({
+var PriorFindingSchema = z38.union([
+  z38.strictObject({
     ...transitionFields,
-    status: z36.literal("resolved"),
-    evidence: z36.array(ReviewEvidenceSchema).min(1)
+    status: z38.literal("resolved"),
+    evidence: z38.array(ReviewEvidenceSchema).min(1)
   }),
-  z36.strictObject({
+  z38.strictObject({
     ...transitionFields,
-    status: z36.literal("withdrawn"),
-    evidence: z36.array(ReviewEvidenceSchema).min(1),
-    withdrawal_basis: z36.enum(["incorrect", "no_longer_applicable", "dismissed"])
+    status: z38.literal("withdrawn"),
+    evidence: z38.array(ReviewEvidenceSchema).min(1),
+    withdrawal_basis: z38.enum(["incorrect", "no_longer_applicable", "dismissed"])
   }),
-  z36.strictObject({
+  z38.strictObject({
     ...transitionFields,
-    status: z36.literal("still_open"),
-    evidence: z36.array(ReviewEvidenceSchema).optional(),
+    status: z38.literal("still_open"),
+    evidence: z38.array(ReviewEvidenceSchema).optional(),
     updated_finding: ActionableFindingSchema.optional()
   })
 ]);
 var reviewFields = {
-  contract_version: z36.literal(reviewContractVersion),
-  schema_revision: z36.literal(reviewSchemaRevision),
+  contract_version: z38.literal(reviewContractVersion),
+  schema_revision: z38.literal(reviewSchemaRevision),
   head_sha: HeadShaSchema2,
-  review_complete: z36.boolean(),
-  incomplete_reason: z36.string().max(16e3).optional(),
+  review_complete: z38.boolean(),
+  incomplete_reason: z38.string().max(16e3).optional(),
   summary: TextSchema,
   outcome: ReviewOutcomeSchema,
   outcome_reason: TextSchema,
   remaining_risk: TextSchema,
-  extensions: z36.record(z36.string(), z36.json()).optional()
+  extensions: z38.record(z38.string(), z38.json()).optional()
 };
-var ReviewSchema = z36.strictObject({
+var ReviewSchema = z38.strictObject({
   ...reviewFields,
-  findings: z36.array(NewFindingSchema),
-  prior_findings: z36.array(PriorFindingSchema)
+  findings: z38.array(NewFindingSchema),
+  prior_findings: z38.array(PriorFindingSchema)
 });
-var FindingRecordSchema = z36.strictObject({
-  v: z36.literal(reviewContractVersion),
-  schema_revision: z36.literal(reviewSchemaRevision),
+var FindingRecordSchema = z38.strictObject({
+  v: z38.literal(reviewContractVersion),
+  schema_revision: z38.literal(reviewSchemaRevision),
   finding: ActionableFindingSchema,
-  status: z36.enum(["open", "resolved", "withdrawn"]),
-  evidence: z36.array(ReviewEvidenceSchema),
+  status: z38.enum(["open", "resolved", "withdrawn"]),
+  evidence: z38.array(ReviewEvidenceSchema),
   decision: DecisionAnswerSchema.optional()
 });
-var ReviewStateSchema = z36.strictObject({
-  v: z36.literal(reviewContractVersion),
-  schema_revision: z36.literal(reviewSchemaRevision),
+var ReviewStateSchema = z38.strictObject({
+  v: z38.literal(reviewContractVersion),
+  schema_revision: z38.literal(reviewSchemaRevision),
   sha: HeadShaSchema2,
   outcome: ReviewOutcomeSchema,
-  records: z36.array(
-    z36.union([
-      z36.strictObject({
+  records: z38.array(
+    z38.union([
+      z38.strictObject({
         id: FindingIdSchema,
-        status: z36.enum(["open", "resolved", "withdrawn"]),
-        location: z36.union([
-          z36.strictObject({ kind: z36.literal("review_comment"), comment_id: PositiveIdSchema }),
-          z36.strictObject({ kind: z36.literal("review_body"), review_id: PositiveIdSchema })
+        status: z38.enum(["open", "resolved", "withdrawn"]),
+        location: z38.union([
+          z38.strictObject({ kind: z38.literal("review_comment"), comment_id: PositiveIdSchema }),
+          z38.strictObject({ kind: z38.literal("review_body"), review_id: PositiveIdSchema })
         ])
       }),
-      z36.strictObject({
+      z38.strictObject({
         id: FindingIdSchema,
-        status: z36.literal("informational"),
-        fingerprint: z36.string().min(1),
-        finding: z36.strictObject({ ...informationFields, id: FindingIdSchema }).optional()
+        status: z38.literal("informational"),
+        fingerprint: z38.string().min(1),
+        finding: z38.strictObject({ ...informationFields, id: FindingIdSchema }).optional()
       })
     ])
   )
 });
-var TransportReviewSchema = z36.strictObject({
+var TransportReviewSchema = z38.strictObject({
   ...reviewFields,
-  findings: z36.array(
-    z36.strictObject({
+  findings: z38.array(
+    z38.strictObject({
       ...actionFields,
-      type: z36.enum(["fix", "clarify", "decide"]).optional(),
-      label: z36.enum([...ActionLabelSchema.options, ...InformationLabelSchema.options]),
+      type: z38.enum(["fix", "clarify", "decide"]).optional(),
+      label: z38.enum([...ActionLabelSchema.options, ...InformationLabelSchema.options]),
       severity: SeveritySchema.optional(),
       details: TextSchema.optional(),
       resolved_when: TextSchema.optional(),
@@ -6368,27 +6752,27 @@ var TransportReviewSchema = z36.strictObject({
       decision_options: DecisionOptionsSchema.optional()
     })
   ),
-  prior_findings: z36.array(
-    z36.strictObject({
+  prior_findings: z38.array(
+    z38.strictObject({
       ...transitionFields,
-      status: z36.enum(["resolved", "still_open", "withdrawn"]),
-      evidence: z36.array(ReviewEvidenceSchema).optional(),
-      withdrawal_basis: z36.enum(["incorrect", "no_longer_applicable", "dismissed"]).optional(),
+      status: z38.enum(["resolved", "still_open", "withdrawn"]),
+      evidence: z38.array(ReviewEvidenceSchema).optional(),
+      withdrawal_basis: z38.enum(["incorrect", "no_longer_applicable", "dismissed"]).optional(),
       updated_finding: StoredFindingSchema.optional()
     })
   )
 });
 
 // src/code-review/review-policy.ts
-var ReviewPolicyPropsSchema = z37.strictObject({
-  home: z37.string().min(1).optional(),
-  env: z37.custom(
+var ReviewPolicyPropsSchema = z39.strictObject({
+  home: z39.string().min(1).optional(),
+  env: z39.custom(
     (value) => typeof value === "object" && value !== null && !Array.isArray(value)
   ).optional()
 });
-var LoadPolicyPropsSchema = z37.strictObject({ paths: z37.array(z37.string()).optional() });
-var RepositoryContextPropsSchema = z37.strictObject({
-  cwd: z37.string().min(1),
+var LoadPolicyPropsSchema = z39.strictObject({ paths: z39.array(z39.string()).optional() });
+var RepositoryContextPropsSchema = z39.strictObject({
+  cwd: z39.string().min(1),
   trustedRef: HeadShaSchema2,
   contextPath: ReviewPathSchema.min(1).default("CODE-REVIEW.md")
 });
@@ -6397,17 +6781,17 @@ var FileReviewPolicy = class {
   env;
   constructor(props = {}) {
     const parsed = ReviewPolicyPropsSchema.parse(props);
-    this.home = parsed.home ?? join12(dirname11(fileURLToPath3(import.meta.url)), "..");
+    this.home = parsed.home ?? join14(dirname13(fileURLToPath3(import.meta.url)), "..");
     this.env = props.env ?? process.env;
   }
   load(input = {}) {
     const { paths } = LoadPolicyPropsSchema.parse(input);
-    const docs = realpathSync3(join12(this.home, "docs"));
+    const docs = realpathSync4(join14(this.home, "docs"));
     const read = (id) => {
-      const path = realpathSync3(join12(docs, `${id}.md`));
-      if (relative2(docs, path).startsWith(".."))
+      const path = realpathSync4(join14(docs, `${id}.md`));
+      if (relative3(docs, path).startsWith(".."))
         throw new ReviewPolicyError("review policy path leaves the installed docs directory");
-      return readFileSync11(path, "utf8");
+      return readFileSync12(path, "utf8");
     };
     const catalog = new DocCharterCatalog({ docs: new FileDocResolver({ docsDir: docs }) });
     const charters = (paths === void 0 ? catalog.all() : catalog.select(paths)).map(
@@ -6474,10 +6858,10 @@ var ReviewPolicyError = class extends Error {
 // src/code-review/github-review-verifier.ts
 import { execFile as execFile6 } from "node:child_process";
 import { promisify as promisify6 } from "node:util";
-import { z as z38 } from "zod";
-var GhReviewGitHubApiPropsSchema = z38.strictObject({
-  cwd: z38.string().min(1).optional(),
-  env: z38.custom(
+import { z as z40 } from "zod";
+var GhReviewGitHubApiPropsSchema = z40.strictObject({
+  cwd: z40.string().min(1).optional(),
+  env: z40.custom(
     (value) => typeof value === "object" && value !== null && !Array.isArray(value)
   ).optional()
 });
@@ -6513,20 +6897,20 @@ var GhReviewGitHubApi = class {
     return JSON.parse(stdout);
   }
 };
-var GitHubReviewVerifierPropsSchema = z38.strictObject({
-  repo: z38.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
-  prNumber: z38.number().int().positive(),
-  prAuthorId: z38.number().int().positive(),
-  owners: z38.record(z38.string(), z38.array(z38.string().min(1))).default({}),
-  requireMapping: z38.boolean().default(false)
+var GitHubReviewVerifierPropsSchema = z40.strictObject({
+  repo: z40.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
+  prNumber: z40.number().int().positive(),
+  prAuthorId: z40.number().int().positive(),
+  owners: z40.record(z40.string(), z40.array(z40.string().min(1))).default({}),
+  requireMapping: z40.boolean().default(false)
 });
-var UserSchema = z38.looseObject({ id: z38.number(), login: z38.string(), type: z38.string() });
-var CommentSchema2 = z38.looseObject({
-  id: z38.number(),
+var UserSchema = z40.looseObject({ id: z40.number(), login: z40.string(), type: z40.string() });
+var CommentSchema2 = z40.looseObject({
+  id: z40.number(),
   user: UserSchema,
-  issue_url: z38.string().optional(),
-  pull_request_url: z38.string().optional(),
-  body: z38.string()
+  issue_url: z40.string().optional(),
+  pull_request_url: z40.string().optional(),
+  body: z40.string()
 });
 var GitHubReviewVerifier = class {
   props;
@@ -6547,10 +6931,10 @@ var GitHubReviewVerifier = class {
     if (evidence.kind === "commit") return this.reaches(evidence.sha, headSha);
     if (evidence.kind === "check_run") {
       if (evidence.commit_sha !== headSha) return false;
-      const check = z38.looseObject({
-        head_sha: z38.string(),
-        status: z38.string(),
-        conclusion: z38.string().nullable()
+      const check = z40.looseObject({
+        head_sha: z40.string(),
+        status: z40.string(),
+        conclusion: z40.string().nullable()
       }).parse(await this.api.get(`/repos/${this.props.repo}/check-runs/${evidence.check_run_id}`));
       return check.head_sha === headSha && check.status === "completed" && check.conclusion === "success";
     }
@@ -6567,7 +6951,7 @@ var GitHubReviewVerifier = class {
     if (owners !== void 0)
       return owners.some((login) => login.toLowerCase() === comment.user.login.toLowerCase());
     if (this.props.requireMapping || comment.user.id === this.props.prAuthorId) return false;
-    const permission = z38.looseObject({ permission: z38.string() }).parse(
+    const permission = z40.looseObject({ permission: z40.string() }).parse(
       await this.api.get(
         `/repos/${this.props.repo}/collaborators/${encodeURIComponent(comment.user.login)}/permission`
       )
@@ -6577,14 +6961,14 @@ var GitHubReviewVerifier = class {
   async dismissal(evidence) {
     if (evidence.kind !== "thread_resolution" || evidence.author_id === this.props.prAuthorId)
       return false;
-    const result = z38.looseObject({
-      data: z38.looseObject({
-        node: z38.looseObject({
-          isResolved: z38.boolean(),
-          resolvedBy: z38.looseObject({ databaseId: z38.number(), actorType: z38.string() }).nullable(),
-          pullRequest: z38.looseObject({
-            number: z38.number(),
-            repository: z38.looseObject({ nameWithOwner: z38.string() })
+    const result = z40.looseObject({
+      data: z40.looseObject({
+        node: z40.looseObject({
+          isResolved: z40.boolean(),
+          resolvedBy: z40.looseObject({ databaseId: z40.number(), actorType: z40.string() }).nullable(),
+          pullRequest: z40.looseObject({
+            number: z40.number(),
+            repository: z40.looseObject({ nameWithOwner: z40.string() })
           })
         }).nullable()
       })
@@ -6600,12 +6984,12 @@ var GitHubReviewVerifier = class {
   /** True when `sha` is the head or an ancestor of it, so the head contains that commit. */
   async reaches(sha, headSha) {
     if (sha === headSha) return true;
-    const comparison = z38.looseObject({ status: z38.string() }).parse(await this.api.get(`/repos/${this.props.repo}/compare/${sha}...${headSha}`));
+    const comparison = z40.looseObject({ status: z40.string() }).parse(await this.api.get(`/repos/${this.props.repo}/compare/${sha}...${headSha}`));
     return ["ahead", "identical"].includes(comparison.status);
   }
   /** True when `ref` has `path` as a file with at least `line` lines. */
   async hasLine(path, line, ref) {
-    const file = z38.looseObject({ type: z38.string(), encoding: z38.string(), content: z38.string() }).parse(
+    const file = z40.looseObject({ type: z40.string(), encoding: z40.string(), content: z40.string() }).parse(
       await this.api.get(
         `/repos/${this.props.repo}/contents/${path.split("/").map(encodeURIComponent).join("/")}?ref=${ref}`
       )
@@ -6639,10 +7023,10 @@ var GitHubReviewVerifier = class {
 
 // src/code-review/review-planner.ts
 import { randomBytes as randomBytes2 } from "node:crypto";
-import { z as z40 } from "zod";
+import { z as z42 } from "zod";
 
 // src/code-review/review-contract.ts
-import { z as z39 } from "zod";
+import { z as z41 } from "zod";
 var InvalidReviewError = class extends Error {
   name = "InvalidReviewError";
 };
@@ -6700,8 +7084,8 @@ var ZodReviewContract = class {
   }
   schemas() {
     return {
-      full: z39.toJSONSchema(ReviewSchema, { target: "draft-07" }),
-      transport: z39.toJSONSchema(TransportReviewSchema, { target: "draft-07" })
+      full: z41.toJSONSchema(ReviewSchema, { target: "draft-07" }),
+      transport: z41.toJSONSchema(TransportReviewSchema, { target: "draft-07" })
     };
   }
   normalize(finding) {
@@ -6867,19 +7251,19 @@ var EvidenceReviewPlanner = class {
     return "APPROVED";
   }
 };
-var ValidatedEvidencePropsSchema = z40.strictObject({
-  verified: z40.array(z40.string()),
-  authorizedDecisions: z40.array(z40.string()),
-  dismissals: z40.array(z40.string())
+var ValidatedEvidencePropsSchema = z42.strictObject({
+  verified: z42.array(z42.string()),
+  authorizedDecisions: z42.array(z42.string()),
+  dismissals: z42.array(z42.string())
 });
 
 // src/code-review/review-codec.ts
 import { createHash as createHash2 } from "node:crypto";
-import { z as z41 } from "zod";
-var MarkerInputSchema = z41.strictObject({
-  body: z41.string(),
-  authorId: z41.number().int().positive(),
-  trustedAuthorIds: z41.array(z41.number().int().positive())
+import { z as z43 } from "zod";
+var MarkerInputSchema = z43.strictObject({
+  body: z43.string(),
+  authorId: z43.number().int().positive(),
+  trustedAuthorIds: z43.array(z43.number().int().positive())
 });
 var JsonReviewCodec = class {
   finding(record) {
@@ -6951,71 +7335,71 @@ ${this.finding(validated)}`;
 };
 
 // src/operations/review-operations.ts
-var ReviewOperationsLaunchPropsSchema = z42.strictObject({
-  cwd: z42.string().min(1).optional(),
+var ReviewOperationsLaunchPropsSchema = z44.strictObject({
+  cwd: z44.string().min(1).optional(),
   trustedRef: HeadShaSchema2.optional(),
-  owners: z42.record(z42.string(), z42.array(z42.string().min(1))).default({}),
-  requireMapping: z42.boolean().default(false)
+  owners: z44.record(z44.string(), z44.array(z44.string().min(1))).default({}),
+  requireMapping: z44.boolean().default(false)
 });
 var ReviewOperationsPropsSchema = ReviewOperationsLaunchPropsSchema.extend({
-  cwd: z42.string().min(1),
-  env: z42.custom(
+  cwd: z44.string().min(1),
+  env: z44.custom(
     (value) => typeof value === "object" && value !== null && !Array.isArray(value)
   ).optional(),
-  policy: z42.custom(
+  policy: z44.custom(
     (value) => typeof value === "object" && value !== null && "repository" in value && "load" in value
   ).optional(),
-  api: z42.custom(
+  api: z44.custom(
     (value) => typeof value === "object" && value !== null && "get" in value && "graphql" in value
   ).optional()
 });
-var JsonValueSchema = z42.json();
-var schemaInput = z42.strictObject({ transport: z42.boolean().default(false) });
-var reviewInput = z42.strictObject({ review: JsonValueSchema });
+var JsonValueSchema = z44.json();
+var schemaInput = z44.strictObject({ transport: z44.boolean().default(false) });
+var reviewInput = z44.strictObject({ review: JsonValueSchema });
 var reviewOutput = ReviewSchema;
-var stateInput = z42.strictObject({ state: JsonValueSchema });
-var stateOutput = z42.string();
-var contextInput = z42.strictObject({
-  contextPath: z42.string().min(1).default("CODE-REVIEW.md")
+var stateInput = z44.strictObject({ state: JsonValueSchema });
+var stateOutput = z44.string();
+var contextInput = z44.strictObject({
+  contextPath: z44.string().min(1).default("CODE-REVIEW.md")
 });
-var contextOutput = z42.object({
+var contextOutput = z44.object({
   trustedRef: HeadShaSchema2,
-  contextPath: z42.string(),
-  sources: z42.array(z42.object({ path: z42.string(), contents: z42.string() })),
-  missing: z42.array(z42.string())
+  contextPath: z44.string(),
+  sources: z44.array(z44.object({ path: z44.string(), contents: z44.string() })),
+  missing: z44.array(z44.string())
 });
-var planInput = z42.strictObject({
-  number: z42.number().int().positive(),
-  repo: z42.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
+var planInput = z44.strictObject({
+  number: z44.number().int().positive(),
+  repo: z44.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
   review: JsonValueSchema,
-  records: z42.array(JsonValueSchema)
+  records: z44.array(JsonValueSchema)
 });
-var renderInput = z42.strictObject({
+var renderInput = z44.strictObject({
   review: JsonValueSchema,
-  records: z42.array(FindingRecordSchema),
-  outcome: z42.string(),
-  problems: z42.array(z42.string())
+  records: z44.array(FindingRecordSchema),
+  outcome: z44.string(),
+  problems: z44.array(z44.string())
 });
-var renderOutput = z42.object({
-  headSha: z42.string(),
-  outcome: z42.string(),
-  problems: z42.array(z42.string()),
-  findings: z42.array(
-    z42.object({
-      id: z42.string(),
-      status: z42.string(),
-      path: z42.string(),
-      line: z42.number(),
-      body: z42.string()
+var renderOutput = z44.object({
+  headSha: z44.string(),
+  outcome: z44.string(),
+  problems: z44.array(z44.string()),
+  findings: z44.array(
+    z44.object({
+      id: z44.string(),
+      status: z44.string(),
+      path: z44.string(),
+      line: z44.number(),
+      body: z44.string()
     })
   )
 });
-var planOutput = z42.object({
+var planOutput = z44.object({
   review: ReviewSchema,
-  records: z42.array(FindingRecordSchema),
-  informational: z42.array(StoredFindingSchema),
-  outcome: z42.enum(["APPROVED", "CHANGES_NEEDED", "ESCALATE", "INCOMPLETE"]),
-  problems: z42.array(z42.string())
+  records: z44.array(FindingRecordSchema),
+  informational: z44.array(StoredFindingSchema),
+  outcome: z44.enum(["APPROVED", "CHANGES_NEEDED", "ESCALATE", "INCOMPLETE"]),
+  problems: z44.array(z44.string())
 });
 var MissingTrustedReviewRefError = class extends Error {
   name = "MissingTrustedReviewRefError";
@@ -7120,9 +7504,9 @@ var DefaultReviewOperations = class {
         planInput,
         planOutput,
         async ({ number, repo, review, records }) => {
-          const pullRequest = z42.looseObject({
-            head: z42.looseObject({ sha: HeadShaSchema2 }),
-            user: z42.looseObject({ id: z42.number().int().positive() })
+          const pullRequest = z44.looseObject({
+            head: z44.looseObject({ sha: HeadShaSchema2 }),
+            user: z44.looseObject({ id: z44.number().int().positive() })
           }).parse(await this.api.get(`/repos/${repo}/pulls/${number}`));
           const planner = new EvidenceReviewPlanner({
             verifier: new GitHubReviewVerifier({
@@ -7156,20 +7540,24 @@ var DefaultReviewOperations = class {
 var DefaultFlightRules = class {
   cwd;
   env;
+  gitEnv;
   explicitConfigPath;
   hostSettings;
   host;
+  configWritePolicy;
   untrackedRoot;
   constructor(props = {}) {
     const parsed = FlightRulesPropsSchema.parse({
       ...props,
       env: props.env === void 0 ? void 0 : { ...props.env }
     });
-    this.cwd = parsed.cwd ?? process.cwd();
+    this.cwd = resolve8(parsed.cwd ?? process.cwd());
     this.env = props.env ?? process.env;
+    this.gitEnv = { ...props.env ?? process.env };
     this.explicitConfigPath = parsed.configPath;
     this.hostSettings = props.hostSettings;
     this.host = parsed.host;
+    this.configWritePolicy = parsed.configWritePolicy;
   }
   configPath() {
     return this.configStore().filePath();
@@ -7253,7 +7641,16 @@ var DefaultFlightRules = class {
     return new GhPullRequestHost({ repo: config.repo });
   }
   git() {
-    return new NodeGitExecutor();
+    return new NodeGitExecutor({ cwd: this.cwd, env: this.gitEnv });
+  }
+  gitConfigOperations(policy) {
+    return new DefaultGitConfigOperations({
+      cwd: this.cwd,
+      configStore: this.configStore(),
+      git: this.git(),
+      agentEnv: this.gitEnv["AI_AGENT"],
+      configPolicy: policy ?? this.configWritePolicy
+    });
   }
   probe() {
     return new NodeToolProbe({ cwd: this.cwd, env: this.env });
@@ -7313,113 +7710,6 @@ var DefaultFlightRules = class {
 function createFlightRules(props = {}) {
   return new DefaultFlightRules(props);
 }
-
-// src/git/commit-message-builder/commit-message-builder.ts
-import { readFileSync as readFileSync12 } from "node:fs";
-import { dirname as dirname12, join as join13 } from "node:path";
-
-// src/shared/attribution-stripper/attribution-stripper.ts
-var trailerText = String.raw`(?:Co-Authored-By:[^\n"']*(?:Claude|anthropic\.com)[^\n"']*|Claude-Session:[^\n"']*|https://claude\.ai/code/session_[A-Za-z0-9_-]+)`;
-var lineEnd = String.raw`(?=["']?[ \t]*(?:\r?\n|$))`;
-var closingBlock = new RegExp(
-  String.raw`(?:\r?\n[ \t]*)+${trailerText}(?:\r?\n[ \t]*${trailerText})*(?=["'](?:\s|$)|$)`,
-  "gi"
-);
-var attributionLine = new RegExp(String.raw`(?:^|\r?\n)[ \t]*${trailerText}${lineEnd}`, "gi");
-var messageCommand = /(^|[\s;&|(])(?:git\b[^\n;&|]*\bcommit\b|gh\s+pr\s+(?:create|edit)\b|flight-rules\s+(?:git\s+commit|pr\s+create)\b)/;
-var AttributionStripper = class {
-  strip(text) {
-    const stripped = text.replace(closingBlock, "").replace(attributionLine, "");
-    if (stripped === text) return text;
-    return stripped.replace(/\n{3,}/g, "\n\n");
-  }
-  /** The command with attribution removed, or undefined when it writes no message or carries none. */
-  stripCommand(command) {
-    if (!messageCommand.test(command)) return void 0;
-    const stripped = this.strip(command);
-    return stripped === command ? void 0 : stripped;
-  }
-  /** True when a single trailer line, such as one `--footer` value, is Claude attribution. */
-  isAttribution(line) {
-    return this.strip(`
-${line.trim()}`) === "";
-  }
-};
-
-// src/git/commit-message-builder/commit-message.schema.ts
-import { z as z43 } from "zod";
-var CommitMessageInputSchema = z43.object({
-  type: SemanticTypeSchema,
-  // Bare issue numbers make one-character scopes legitimate; 32 clears a 10-character tracker key plus a six-digit number.
-  scope: z43.string().min(1).max(32),
-  description: z43.string().min(2).max(50),
-  body: z43.string().optional(),
-  model: z43.string().max(72).optional(),
-  footers: z43.array(z43.string().regex(/^[a-zA-Z0-9-]+(: |=).*$/)).default([])
-});
-var CommitMessageHeaderSchema = z43.preprocess(
-  (arg) => {
-    return z43.string({ error: "Git Commit headers should be 72 characters or less" }).max(72).parse(arg);
-  },
-  z43.templateLiteral([SemanticTypeSchema, "(", z43.string(), "): ", z43.string()])
-);
-var CommitMessageBuilderPropsSchema = z43.object({
-  binPath: z43.string().min(1),
-  agentEnv: z43.string().optional()
-});
-
-// src/git/commit-message-builder/commit-message-builder.ts
-var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
-  pluginVersion;
-  harnessVersion;
-  stripper = new AttributionStripper();
-  constructor(props) {
-    const parsed = CommitMessageBuilderPropsSchema.parse(props);
-    this.pluginVersion = _DefaultCommitMessageBuilder.readPluginVersion(parsed.binPath);
-    this.harnessVersion = _DefaultCommitMessageBuilder.parseHarnessVersion(parsed.agentEnv);
-  }
-  build(input) {
-    const sections = [];
-    const headerValidation = CommitMessageHeaderSchema.safeParse(
-      `${input.type}(${input.scope}): ${input.description}`
-    );
-    if (!headerValidation.success) throw headerValidation.error;
-    sections.push(`${headerValidation.data}
-`);
-    const body = input.body === void 0 ? void 0 : this.stripper.strip(input.body).trim();
-    if (body !== void 0 && body !== "") {
-      sections.push(`${body}
-`);
-    }
-    const trailers = [];
-    if (input.footers) trailers.push(...input.footers.filter((footer) => !this.stripper.isAttribution(footer)));
-    trailers.push(
-      `Flight-Rules-Version: ${this.pluginVersion}`,
-      ...this.harnessVersion !== void 0 ? [`Harness-Version: ${this.harnessVersion}`] : [],
-      ...input.model !== void 0 ? [`Model-Used: ${input.model}`] : []
-    );
-    sections.push(trailers.join("\n"));
-    return sections.join("\n");
-  }
-  static readPluginVersion(binPath) {
-    try {
-      const pkgPath = join13(dirname12(binPath), "..", "package.json");
-      const parsed = JSON.parse(readFileSync12(pkgPath, "utf-8"));
-      if (typeof parsed === "object" && parsed !== null && "version" in parsed && typeof parsed.version === "string") {
-        return parsed.version;
-      }
-      return "unknown";
-    } catch {
-      return "unknown";
-    }
-  }
-  static parseHarnessVersion(agentEnv) {
-    if (!agentEnv) return void 0;
-    const match = /^(.+)_(\d+-\d+-\d+)_agent$/.exec(agentEnv);
-    if (match?.[1] === void 0 || match?.[2] === void 0) return void 0;
-    return `${match[1]}@${match[2].replace(/-/g, ".")}`;
-  }
-};
 
 // src/tasks/dependency-planner/dependency-planner.ts
 var DependencyPlannerService = class {
@@ -7658,12 +7948,12 @@ var bodyFormatDetector = new PrecedenceBodyFormatDetector();
 
 // src/tasks/evidence/evidence.ts
 import { basename as basename3 } from "node:path/posix";
-import { z as z44 } from "zod";
+import { z as z45 } from "zod";
 var mediaReference = /(!?)\[([^\]]*)\]\(\s*<?([^\s()<>]+)>?(?:\s+"[^"]*")?\s*\)/g;
 var absoluteTarget = /^[a-zA-Z][a-zA-Z0-9+.-]*:|^\/\/|^#/;
 var localPrefix = /^(?:\.\/)+/;
 var fenceRun2 = /^ {0,3}(`{3,}|~{3,})(.*)$/;
-var AttachmentSpecSchema = z44.string().min(1).transform((spec) => {
+var AttachmentSpecSchema = z45.string().min(1).transform((spec) => {
   const hash = spec.lastIndexOf("#");
   const path = hash > 0 ? spec.slice(0, hash) : spec;
   const caption = hash > 0 ? spec.slice(hash + 1).trim() : "";
@@ -7806,24 +8096,24 @@ var agentFrontmatterParser = new YamlAgentFrontmatterParser();
 
 // src/agents/agent-registry/agent-registry.ts
 import { readFileSync as readFileSync13, readdirSync as readdirSync5 } from "node:fs";
-import { basename as basename4, join as join14 } from "node:path";
-import { z as z45 } from "zod";
+import { basename as basename4, join as join15 } from "node:path";
+import { z as z46 } from "zod";
 var AgentNameSchema = AgentFrontmatterSchema.shape.name;
-var AgentVariantSchema = z45.strictObject({
+var AgentVariantSchema = z46.strictObject({
   name: AgentNameSchema,
   extends: AgentNameSchema,
   description: AgentFrontmatterSchema.shape.description,
   model: ModelTierSchema,
-  modelReason: z45.string().trim().min(1).optional()
+  modelReason: z46.string().trim().min(1).optional()
 });
-var AgentVariantsSchema = z45.array(AgentVariantSchema);
+var AgentVariantsSchema = z46.array(AgentVariantSchema);
 var InvalidAgentDefinitionError = class extends Error {
   name = "InvalidAgentDefinitionError";
 };
 var FileAgentRegistry = class {
   load(directory) {
     const agents = readdirSync5(directory, { withFileTypes: true }).filter((entry) => entry.isFile() && entry.name.endsWith(".md")).sort((a, b) => a.name.localeCompare(b.name)).map((entry) => {
-      const markdown = readFileSync13(join14(directory, entry.name), "utf8");
+      const markdown = readFileSync13(join15(directory, entry.name), "utf8");
       const frontmatter = AgentRegistrationSchema.parse(agentFrontmatterParser.parse(markdown));
       const body = markdown.replace(/^---\r?\n[\s\S]*?^---(?:\r?\n|$)/m, "");
       if (frontmatter.name !== basename4(entry.name, ".md") || body.trim() === "") {
@@ -7833,7 +8123,7 @@ var FileAgentRegistry = class {
     });
     const canonical = new Map(agents.map((agent) => [agent.frontmatter.name, agent]));
     const names = new Set(canonical.keys());
-    const variants = AgentVariantsSchema.parse(JSON.parse(readFileSync13(join14(directory, "variants.json"), "utf8")));
+    const variants = AgentVariantsSchema.parse(JSON.parse(readFileSync13(join15(directory, "variants.json"), "utf8")));
     for (const variant of variants) {
       const base = canonical.get(variant.extends);
       if (base === void 0 || names.has(variant.name)) {
@@ -7856,7 +8146,7 @@ var FileAgentRegistry = class {
 
 // src/agents/agent-emitter/claude-agent-emitter.ts
 import { stringify as stringifyYaml3 } from "yaml";
-import { z as z46 } from "zod";
+import { z as z47 } from "zod";
 
 // src/agents/agent-emitter/agent-emitter.ts
 var UnsupportedAgentSettingError = class extends Error {
@@ -7864,7 +8154,7 @@ var UnsupportedAgentSettingError = class extends Error {
 };
 
 // src/agents/agent-emitter/claude-agent-emitter.ts
-var ClaudeAgentEmitterPropsSchema = z46.strictObject({ models: ModelBindingsSchema });
+var ClaudeAgentEmitterPropsSchema = z47.strictObject({ models: ModelBindingsSchema });
 var MarkdownClaudeAgentEmitter = class {
   models;
   constructor(props) {
@@ -7897,13 +8187,13 @@ ${body}`;
 };
 
 // src/agents/agent-emitter/codex-agent-emitter.ts
-import { z as z47 } from "zod";
-var ReasoningBindingsSchema = z47.strictObject({
-  standard: z47.enum(reasoningLevels),
-  escalated: z47.enum(reasoningLevels),
-  expert: z47.enum(reasoningLevels)
+import { z as z48 } from "zod";
+var ReasoningBindingsSchema = z48.strictObject({
+  standard: z48.enum(reasoningLevels),
+  escalated: z48.enum(reasoningLevels),
+  expert: z48.enum(reasoningLevels)
 });
-var CodexAgentEmitterPropsSchema = z47.strictObject({
+var CodexAgentEmitterPropsSchema = z48.strictObject({
   models: ModelBindingsSchema,
   reasoning: ReasoningBindingsSchema
 });
@@ -7946,27 +8236,27 @@ var TomlCodexAgentEmitter = class {
 import {
   chmodSync as chmodSync2,
   copyFileSync,
-  existsSync as existsSync11,
-  lstatSync as lstatSync2,
+  existsSync as existsSync12,
+  lstatSync as lstatSync3,
   mkdirSync as mkdirSync7,
   readFileSync as readFileSync14,
   readdirSync as readdirSync6,
-  realpathSync as realpathSync4,
+  realpathSync as realpathSync5,
   rmSync as rmSync3,
   writeFileSync as writeFileSync7
 } from "node:fs";
-import { join as join15, resolve as resolve7 } from "node:path";
+import { join as join16, resolve as resolve9 } from "node:path";
 import { createHash as createHash3 } from "node:crypto";
-import { z as z48 } from "zod";
-var NativePluginCompilerPropsSchema = z48.strictObject({ sourceDir: z48.string().min(1) });
-var PluginHostSchema = z48.enum(["claude", "codex"]);
-var PackageVersionSchema = z48.object({ version: z48.string().min(1) });
-var PluginIdentitySchema = z48.strictObject({
-  name: z48.string().regex(/^[a-z][a-z0-9-]*$/),
-  description: z48.string().min(1),
-  repository: z48.url(),
-  author: z48.strictObject({ name: z48.string().min(1) }),
-  license: z48.string().min(1)
+import { z as z49 } from "zod";
+var NativePluginCompilerPropsSchema = z49.strictObject({ sourceDir: z49.string().min(1) });
+var PluginHostSchema = z49.enum(["claude", "codex"]);
+var PackageVersionSchema = z49.object({ version: z49.string().min(1) });
+var PluginIdentitySchema = z49.strictObject({
+  name: z49.string().regex(/^[a-z][a-z0-9-]*$/),
+  description: z49.string().min(1),
+  repository: z49.url(),
+  author: z49.strictObject({ name: z49.string().min(1) }),
+  license: z49.string().min(1)
 });
 var InvalidPluginSourceError = class extends Error {
   name = "InvalidPluginSourceError";
@@ -7974,7 +8264,7 @@ var InvalidPluginSourceError = class extends Error {
 var NativePluginCompiler = class {
   sourceDir;
   constructor(props) {
-    this.sourceDir = realpathSync4(resolve7(NativePluginCompilerPropsSchema.parse(props).sourceDir));
+    this.sourceDir = realpathSync5(resolve9(NativePluginCompilerPropsSchema.parse(props).sourceDir));
   }
   compile(host = "claude") {
     const target = PluginHostSchema.parse(host);
@@ -7987,22 +8277,22 @@ var NativePluginCompiler = class {
       "hooks",
       "bin"
     ]) {
-      this.validateSource(join15(this.sourceDir, resource));
+      this.validateSource(join16(this.sourceDir, resource));
     }
     const identity = PluginIdentitySchema.parse(
-      JSON.parse(readFileSync14(join15(this.sourceDir, "adapters/plugin.json"), "utf8"))
+      JSON.parse(readFileSync14(join16(this.sourceDir, "adapters/plugin.json"), "utf8"))
     );
     const { version } = PackageVersionSchema.parse(
-      JSON.parse(readFileSync14(join15(this.sourceDir, "package.json"), "utf8"))
+      JSON.parse(readFileSync14(join16(this.sourceDir, "package.json"), "utf8"))
     );
-    const definitions = new FileAgentRegistry().load(join15(this.sourceDir, "agents"));
+    const definitions = new FileAgentRegistry().load(join16(this.sourceDir, "agents"));
     const models = JSON.parse(
-      readFileSync14(join15(this.sourceDir, "adapters", target, "model-tiers.json"), "utf8")
+      readFileSync14(join16(this.sourceDir, "adapters", target, "model-tiers.json"), "utf8")
     );
     const codexEmitter = target === "codex" ? new TomlCodexAgentEmitter({
       models,
       reasoning: JSON.parse(
-        readFileSync14(join15(this.sourceDir, "adapters/codex/reasoning-tiers.json"), "utf8")
+        readFileSync14(join16(this.sourceDir, "adapters/codex/reasoning-tiers.json"), "utf8")
       )
     }) : void 0;
     const emitter = codexEmitter ?? new MarkdownClaudeAgentEmitter({ models });
@@ -8017,32 +8307,32 @@ var NativePluginCompiler = class {
         "Claude commit and Ariadne hooks are omitted; this target emits no Codex hooks."
       );
     for (const executable of ["flight-rules", "flight-rules.mjs"]) {
-      if (!existsSync11(join15(this.sourceDir, "bin", executable))) {
+      if (!existsSync12(join16(this.sourceDir, "bin", executable))) {
         throw new InvalidPluginSourceError(
           `Build the CLI before native assembly: missing bin/${executable}`
         );
       }
     }
-    const directory = join15(this.sourceDir, "dist", target);
-    if (existsSync11(join15(this.sourceDir, "dist")) && lstatSync2(join15(this.sourceDir, "dist")).isSymbolicLink()) {
+    const directory = join16(this.sourceDir, "dist", target);
+    if (existsSync12(join16(this.sourceDir, "dist")) && lstatSync3(join16(this.sourceDir, "dist")).isSymbolicLink()) {
       throw new InvalidPluginSourceError("Native output cannot use a symlinked dist directory");
     }
     rmSync3(directory, { recursive: true, force: true });
     mkdirSync7(directory, { recursive: true });
     const resources = target === "claude" ? ["skills", "docs", "hooks", "bin"] : ["skills", "docs", "bin"];
     for (const resource of resources)
-      this.copyDirectory(join15(this.sourceDir, resource), join15(directory, resource));
+      this.copyDirectory(join16(this.sourceDir, resource), join16(directory, resource));
     this.copyDirectory(
-      join15(this.sourceDir, "agents"),
-      join15(directory, "bin", "resources", "agents")
+      join16(this.sourceDir, "agents"),
+      join16(directory, "bin", "resources", "agents")
     );
-    const agentDirectory = target === "claude" ? join15(directory, "agents") : join15(directory, ".codex", "agents");
+    const agentDirectory = target === "claude" ? join16(directory, "agents") : join16(directory, ".codex", "agents");
     mkdirSync7(agentDirectory, { recursive: true });
     const extension = target === "claude" ? "md" : "toml";
     for (const agent of agents)
-      writeFileSync7(join15(agentDirectory, `${agent.name}.${extension}`), agent.contents);
+      writeFileSync7(join16(agentDirectory, `${agent.name}.${extension}`), agent.contents);
     writeFileSync7(
-      join15(directory, "flight-rules-install.json"),
+      join16(directory, "flight-rules-install.json"),
       JSON.stringify(
         {
           host: target,
@@ -8056,19 +8346,19 @@ var NativePluginCompiler = class {
         2
       ) + "\n"
     );
-    mkdirSync7(join15(directory, "adapters", target), { recursive: true });
+    mkdirSync7(join16(directory, "adapters", target), { recursive: true });
     copyFileSync(
-      join15(this.sourceDir, "adapters", target, "model-tiers.json"),
-      join15(directory, "adapters", target, "model-tiers.json")
+      join16(this.sourceDir, "adapters", target, "model-tiers.json"),
+      join16(directory, "adapters", target, "model-tiers.json")
     );
     if (target === "codex")
       copyFileSync(
-        join15(this.sourceDir, "adapters/codex/reasoning-tiers.json"),
-        join15(directory, "adapters/codex/reasoning-tiers.json")
+        join16(this.sourceDir, "adapters/codex/reasoning-tiers.json"),
+        join16(directory, "adapters/codex/reasoning-tiers.json")
       );
     for (const executable of ["flight-rules", "flight-rules.mjs"])
-      chmodSync2(join15(directory, "bin", executable), 493);
-    const manifestDirectory = join15(
+      chmodSync2(join16(directory, "bin", executable), 493);
+    const manifestDirectory = join16(
       directory,
       target === "claude" ? ".claude-plugin" : ".codex-plugin"
     );
@@ -8079,10 +8369,10 @@ var NativePluginCompiler = class {
       skills: "./skills/",
       agents: agents.map((agent) => `./agents/${agent.name}.md`)
     } : { ...identity, version, skills: "./skills/" };
-    writeFileSync7(join15(manifestDirectory, "plugin.json"), JSON.stringify(manifest, null, 2) + "\n");
+    writeFileSync7(join16(manifestDirectory, "plugin.json"), JSON.stringify(manifest, null, 2) + "\n");
     if (target === "codex") {
       writeFileSync7(
-        join15(directory, "plugin.json"),
+        join16(directory, "plugin.json"),
         JSON.stringify(
           {
             $schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
@@ -8093,30 +8383,30 @@ var NativePluginCompiler = class {
           2
         ) + "\n"
       );
-      writeFileSync7(join15(directory, ".codex", "config.toml"), "[agents]\nenabled = true\n");
+      writeFileSync7(join16(directory, ".codex", "config.toml"), "[agents]\nenabled = true\n");
       writeFileSync7(
-        join15(directory, "diagnostics.json"),
+        join16(directory, "diagnostics.json"),
         JSON.stringify(diagnostics, null, 2) + "\n"
       );
     }
     return { directory, agents: agents.map((agent) => agent.name), diagnostics };
   }
   validateSource(path) {
-    const stat = lstatSync2(path);
+    const stat = lstatSync3(path);
     if (stat.isSymbolicLink() || !stat.isFile() && !stat.isDirectory()) {
       throw new InvalidPluginSourceError(
         `Native resources must be regular files/directories: ${path}`
       );
     }
     if (stat.isDirectory()) {
-      for (const entry of readdirSync6(path)) this.validateSource(join15(path, entry));
+      for (const entry of readdirSync6(path)) this.validateSource(join16(path, entry));
     }
   }
   copyDirectory(source, destination) {
     mkdirSync7(destination, { recursive: true });
     for (const entry of readdirSync6(source, { withFileTypes: true })) {
-      const from = join15(source, entry.name);
-      const to = join15(destination, entry.name);
+      const from = join16(source, entry.name);
+      const to = join16(destination, entry.name);
       if (entry.isDirectory()) this.copyDirectory(from, to);
       else copyFileSync(from, to);
     }
@@ -8167,46 +8457,46 @@ var ValidatedReportHandoff = class {
 };
 
 // src/orchestration/implementation-loop.schema.ts
-import { z as z49 } from "zod";
-var ImplementationReportSchema = z49.strictObject({
+import { z as z50 } from "zod";
+var ImplementationReportSchema = z50.strictObject({
   summary: OrchestrationTextSchema,
-  filesChanged: z49.array(
-    z49.strictObject({ path: OrchestrationTextSchema, why: OrchestrationTextSchema })
+  filesChanged: z50.array(
+    z50.strictObject({ path: OrchestrationTextSchema, why: OrchestrationTextSchema })
   ),
-  testsRun: z49.array(
-    z49.strictObject({ command: OrchestrationTextSchema, result: OrchestrationTextSchema })
+  testsRun: z50.array(
+    z50.strictObject({ command: OrchestrationTextSchema, result: OrchestrationTextSchema })
   ),
   approach: OrchestrationTextSchema,
-  openQuestions: z49.array(OrchestrationTextSchema).optional()
+  openQuestions: z50.array(OrchestrationTextSchema).optional()
 });
-var CriterionResultSchema = z49.strictObject({
+var CriterionResultSchema = z50.strictObject({
   criterion: OrchestrationTextSchema,
-  verdict: z49.enum(["PASS", "FAIL", "UNVERIFIABLE"]),
+  verdict: z50.enum(["PASS", "FAIL", "UNVERIFIABLE"]),
   evidence: OrchestrationTextSchema
 });
-var VerificationReportSchema = z49.strictObject({
+var VerificationReportSchema = z50.strictObject({
   summary: OrchestrationTextSchema,
-  criteria: z49.array(CriterionResultSchema).min(1),
-  charterConcerns: z49.array(OrchestrationTextSchema).optional(),
-  openQuestions: z49.array(OrchestrationTextSchema).optional(),
-  verified: z49.boolean()
+  criteria: z50.array(CriterionResultSchema).min(1),
+  charterConcerns: z50.array(OrchestrationTextSchema).optional(),
+  openQuestions: z50.array(OrchestrationTextSchema).optional(),
+  verified: z50.boolean()
 }).refine(
   (report) => report.verified === report.criteria.every((criterion) => criterion.verdict === "PASS"),
   "verified must agree with every itemized verdict"
 );
-var HandoffRecordSchema = z49.strictObject({
+var HandoffRecordSchema = z50.strictObject({
   request: DispatchRequestSchema,
-  outcome: z49.unknown()
+  outcome: z50.unknown()
 });
-var ImplementationRunSchema = z49.strictObject({
+var ImplementationRunSchema = z50.strictObject({
   context: RunContextSchema,
-  criteria: z49.array(OrchestrationTextSchema).min(1).refine((criteria) => new Set(criteria).size === criteria.length, "criteria must be distinct"),
-  implementationInput: z49.record(z49.string(), z49.json()).refine(
+  criteria: z50.array(OrchestrationTextSchema).min(1).refine((criteria) => new Set(criteria).size === criteria.length, "criteria must be distinct"),
+  implementationInput: z50.record(z50.string(), z50.json()).refine(
     (input) => !Object.hasOwn(input, "verifierFailures"),
     "verifierFailures is reserved for validated retry evidence"
   ),
-  history: z49.array(
-    z49.strictObject({ implementation: HandoffRecordSchema, verification: HandoffRecordSchema })
+  history: z50.array(
+    z50.strictObject({ implementation: HandoffRecordSchema, verification: HandoffRecordSchema })
   ).max(3)
 });
 
@@ -8389,16 +8679,16 @@ var VerifiedImplementationLoop = class {
 };
 
 // src/orchestration/dispatch-queue.ts
-import { z as z50 } from "zod";
-var DispatchQueuePropsSchema = z50.strictObject({
-  agents: z50.array(AgentDefinitionSchema).min(1),
-  requests: z50.array(DispatchRequestSchema).refine(
+import { z as z51 } from "zod";
+var DispatchQueuePropsSchema = z51.strictObject({
+  agents: z51.array(AgentDefinitionSchema).min(1),
+  requests: z51.array(DispatchRequestSchema).refine(
     (requests) => new Set(requests.map((request) => request.id)).size === requests.length,
     "dispatch IDs must be unique"
   ),
-  maxConcurrent: z50.int().positive()
+  maxConcurrent: z51.int().positive()
 });
-var ObservedDispatchIdsSchema = z50.array(z50.string().min(1)).refine((ids) => new Set(ids).size === ids.length, "observed dispatch IDs must be unique");
+var ObservedDispatchIdsSchema = z51.array(z51.string().min(1)).refine((ids) => new Set(ids).size === ids.length, "observed dispatch IDs must be unique");
 var InvalidDispatchQueueStateError = class extends Error {
   name = "InvalidDispatchQueueStateError";
 };
@@ -8522,6 +8812,7 @@ export {
   CommentSchema,
   CommitMessageInputSchema,
   ConfigSchema,
+  ConfigScopeSchema,
   ConfigStore,
   CreateEpicInputSchema,
   CreateInitiativeInputSchema,
@@ -8530,6 +8821,7 @@ export {
   CriterionResultSchema,
   DefaultCommitMessageBuilder,
   DefaultFlightRules,
+  DefaultGitConfigOperations,
   DefaultPullRequestBuilder,
   DependencyPlannerService,
   DispatchOutcomeSchema,
@@ -8556,6 +8848,7 @@ export {
   InvalidPluginSourceError,
   InvalidSettingsError,
   JiraTaskTracker,
+  LaunchConfigOperationDeniedError,
   LayeredBodyAdfConverter,
   MarkdownClaudeAgentEmitter,
   MediaLookupSchema,

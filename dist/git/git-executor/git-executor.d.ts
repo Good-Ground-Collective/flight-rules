@@ -1,10 +1,18 @@
-import { z } from 'zod';
-import { type BranchSpec } from '../branch-namer/branch-namer.js';
-export type { BranchSpec } from '../branch-namer/branch-namer.js';
-type ExecFileFn = (file: string, args: readonly string[]) => Promise<{
+import { z } from "zod";
+import { type BranchSpec } from "../branch-namer/branch-namer.js";
+export type { BranchSpec } from "../branch-namer/branch-namer.js";
+type ExecFileFn = (file: string, args: readonly string[], options?: {
+    cwd?: string;
+    env?: NodeJS.ProcessEnv;
+}) => Promise<{
     stdout: string;
     stderr: string;
 }>;
+declare const NodeGitExecutorPropsSchema: z.ZodObject<{
+    cwd: z.ZodOptional<z.ZodString>;
+    env: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodOptional<z.ZodString>>>;
+    execFile: z.ZodOptional<z.ZodCustom<ExecFileFn, ExecFileFn>>;
+}, z.core.$strip>;
 /** Where a branch started: a new branch, or a disposable worktree branch renamed in place. */
 export interface BranchStart {
     branch: string;
@@ -33,7 +41,9 @@ export interface GitExecutor {
 }
 export declare class NodeGitExecutor implements GitExecutor {
     private readonly execFile;
-    constructor(execFileFn?: ExecFileFn);
+    private readonly cwd;
+    private readonly env;
+    constructor(props?: z.input<typeof NodeGitExecutorPropsSchema>);
     stage(files: string[]): Promise<void>;
     commit(message: string, files?: readonly string[]): Promise<void>;
     getCommitSha(): Promise<string>;
@@ -44,4 +54,5 @@ export declare class NodeGitExecutor implements GitExecutor {
     private isDisposableWorktreeBranch;
     private defaultBranch;
     private succeeds;
+    private run;
 }

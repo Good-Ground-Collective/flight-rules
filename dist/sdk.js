@@ -1506,21 +1506,16 @@ var ReadinessResultSchema = z25.object({
   scope: z25.enum(["environment", "workflow"])
 });
 var LocalDiscoveryCliPropsSchema = z25.object({
-  operations: z25.custom(
-    (value) => typeof value === "object" && value !== null && "operations" in value && typeof value.operations === "function" && "configStore" in value && typeof value.configStore === "function"
-  ),
   registry: z25.custom(
     (value) => typeof value === "object" && value !== null && "invoke" in value
   ),
   readStdin: z25.custom((value) => typeof value === "function").optional()
 });
 var CommanderLocalDiscoveryCli = class {
-  operations;
   registry;
   readStdin;
   constructor(props) {
     const parsed = LocalDiscoveryCliPropsSchema.parse(props);
-    this.operations = parsed.operations;
     this.registry = parsed.registry;
     this.readStdin = parsed.readStdin ?? (() => text(process.stdin));
   }
@@ -1629,21 +1624,27 @@ var CommanderLocalDiscoveryCli = class {
       );
     });
     const scopeHelp = "where to write: user, project, local, or file; config show reports the selected host and exact paths (override with FLIGHT_RULES_HOST=claude|codex)";
-    config.command("set").description("write one config value; array keys take several values").argument("<key>").argument("<values...>").addOption(new Option2("--scope <scope>", scopeHelp).choices(configScopes)).exitOverride().action((key, values, options) => {
-      const store = this.operations.configStore();
-      const scope = options.scope ?? store.defaultScopeFor(key);
-      store.set(key, values, scope);
-      const shadowedBy = store.shadowingScope(key, scope);
-      process.stdout.write(
-        `${JSON.stringify({ key, scope, path: store.pathFor(scope), ...shadowedBy === void 0 ? {} : { warning: `${key} is also set in ${shadowedBy} scope (${store.pathFor(shadowedBy)}), which takes precedence` } })}
-`
+    config.command("set").description("write one config value; array keys take several values").argument("<key>").argument("<values...>").addOption(new Option2("--scope <scope>", scopeHelp).choices(configScopes)).exitOverride().action(async (key, values, options) => {
+      const result = await this.invoke(
+        "config-set",
+        { key, values, ...options.scope === void 0 ? {} : { scope: options.scope } },
+        z25.object({
+          key: z25.string(),
+          scope: z25.enum(configScopes),
+          path: z25.string(),
+          warning: z25.string().optional()
+        })
       );
+      process.stdout.write(`${JSON.stringify(result)}
+`);
     });
-    config.command("unset").description("remove one config value from a scope").argument("<key>").addOption(new Option2("--scope <scope>", scopeHelp).choices(configScopes)).exitOverride().action((key, options) => {
-      const store = this.operations.configStore();
-      const scope = options.scope ?? store.defaultScopeFor(key);
-      store.unset(key, scope);
-      process.stdout.write(`${JSON.stringify({ key, scope, path: store.pathFor(scope) })}
+    config.command("unset").description("remove one config value from a scope").argument("<key>").addOption(new Option2("--scope <scope>", scopeHelp).choices(configScopes)).exitOverride().action(async (key, options) => {
+      const result = await this.invoke(
+        "config-unset",
+        { key, ...options.scope === void 0 ? {} : { scope: options.scope } },
+        z25.object({ key: z25.string(), scope: z25.enum(configScopes), path: z25.string() })
+      );
+      process.stdout.write(`${JSON.stringify(result)}
 `);
     });
   }
@@ -1842,8 +1843,6 @@ var ManifestCliRouteCoverage = class _ManifestCliRouteCoverage {
   }
 };
 var pendingRoutes = [
-  "config set",
-  "config unset",
   "ticket get",
   "ticket transitions",
   "users get",
@@ -1867,11 +1866,6 @@ var pendingRoutes = [
   "ticket status",
   "ticket comment",
   "ticket label",
-  "git commit",
-  "git checkout",
-  "git push",
-  "commit-message",
-  "branch-name",
   "pr create",
   "pr comment",
   "pr list",
@@ -1937,6 +1931,13 @@ var cliRouteCoverage = new ManifestCliRouteCoverage({
       ["qa recipe", "qa-recipe"],
       ["config path", "config-path"],
       ["config show", "config-show"],
+      ["config set", "config-set"],
+      ["config unset", "config-unset"],
+      ["git commit", "git-commit"],
+      ["git checkout", "git-checkout"],
+      ["git push", "git-push"],
+      ["commit-message", "commit-message"],
+      ["branch-name", "branch-name"],
       ["check", "check"],
       ["review schema", "review-schema"],
       ["review validate", "review-validate"],
