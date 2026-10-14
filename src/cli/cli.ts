@@ -36,6 +36,7 @@ import { createPrCommand } from "../pr/commands/pr/command.js";
 import { appVersion } from "../version.js";
 import { createAgentsCommand } from "../plugins/commands/agents/command.js";
 import { cliRouteCoverage } from "../operations/cli-coverage.js";
+import { createMcpCommand } from "../mcp/command.js";
 import { DefaultTrackerReadOperations } from "../operations/tracker-read-operations.js";
 
 export function buildProgram(
@@ -170,6 +171,7 @@ export function buildProgram(
     ),
   );
   program.addCommand(createPacketCommand(() => services.packets()));
+  program.addCommand(createMcpCommand());
   cliRouteCoverage.check(program, operationRegistry);
   return program;
 }

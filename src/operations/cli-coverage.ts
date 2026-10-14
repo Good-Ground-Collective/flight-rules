@@ -212,6 +212,12 @@ const pendingRoutes = [
 
 const excludedRoutes = [
   {
+    path: ["mcp"],
+    aliases: [],
+    reason:
+      "Starts a local stdio transport whose operations are registered from the shared catalog.",
+  },
+  {
     path: ["hook", "pre-bash"],
     aliases: ["guard-commit"],
     reason: "Consumes Claude hook payloads and governs host shell commands.",
@@ -249,7 +255,7 @@ const excludedRoutes = [
   { path: ["board", "logout"], aliases: [], reason: "Removes a machine-local Ariadne credential." },
 ];
 
-/** Inventory of the existing 68 CLI routes; pending entries stay unavailable to operation consumers. */
+/** Records domain migration states and the local MCP transport launcher. */
 export const cliRouteCoverage: CliRouteCoverage = new ManifestCliRouteCoverage({
   entries: [
     { status: "supported", route: { path: ["doc"], aliases: [] }, operationId: "doc" },

@@ -225,11 +225,15 @@ describe("shared operations", () => {
       policy: new LaunchOperationAccessPolicy({ allowedEffects: ["read", "process", "network"] }),
     });
     const routes = cliRouteCoverage.check(program, registry);
-    expect(routes).toHaveLength(68);
+    expect(routes).toHaveLength(69);
     expect(routes.filter((route) => route.aliases.length > 0)).toEqual([
       { path: ["hook", "pre-bash"], aliases: ["guard-commit"] },
     ]);
-    expect(cliRouteCoverage.list().filter((item) => item.status === "excluded")).toHaveLength(8);
+    const excluded = cliRouteCoverage.list().filter((item) => item.status === "excluded");
+    expect(excluded).toHaveLength(9);
+    expect(excluded.find((item) => item.route.path.join(" ") === "mcp")).toMatchObject({
+      reason: expect.stringContaining("local stdio transport"),
+    });
     expect(() => cliRouteCoverage.assertComplete(program, registry)).toThrow(
       /remain pending migration/,
     );
