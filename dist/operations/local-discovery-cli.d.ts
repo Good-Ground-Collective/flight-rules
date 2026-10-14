@@ -1,8 +1,6 @@
 import type { Command } from "commander";
 import { type OperationRegistry } from "./operation-registry.js";
-import type { LocalDiscoveryOperations } from "./local-discovery-operations.js";
 export interface LocalDiscoveryCliProps {
-    operations: LocalDiscoveryOperations;
     registry: OperationRegistry;
     readStdin?: () => Promise<string>;
 }
@@ -11,7 +9,6 @@ export interface LocalDiscoveryCommandAdapter {
 }
 /** Adapts Commander arguments and terminal rendering to the shared local operations. */
 export declare class CommanderLocalDiscoveryCli implements LocalDiscoveryCommandAdapter {
-    private readonly operations;
     private readonly registry;
     private readonly readStdin;
     constructor(props: LocalDiscoveryCliProps);

@@ -6,7 +6,7 @@
     "name": "Good Ground Collective"
   },
   "license": "MIT",
-  "version": "1.84.0",
+  "version": "1.89.0",
   "skills": "./skills/",
   "agents": [
     "./agents/code-implementation.md",

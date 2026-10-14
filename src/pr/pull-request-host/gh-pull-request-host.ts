@@ -23,6 +23,11 @@ type ExecFileFn = (file: string, args: readonly string[]) => Promise<{ stdout: s
 
 const GhPullRequestHostPropsSchema = z.object({
   repo: z.string().regex(/^[^/\s]+\/[^/\s]+$/, 'expected "owner/repo"'),
+  cwd: z.string().min(1).optional(),
+  env: z.custom<NodeJS.ProcessEnv>(
+    (value): value is NodeJS.ProcessEnv =>
+      typeof value === 'object' && value !== null && !Array.isArray(value),
+  ).optional(),
 })
 
 export type GhPullRequestHostProps = z.input<typeof GhPullRequestHostPropsSchema> & {
@@ -68,7 +73,9 @@ export class GhPullRequestHost implements PullRequestHost {
     this.builder = props.builder ?? new DefaultPullRequestBuilder()
 
     const promisified = promisify(execFile)
-    this.execFile = props.execFileFn ?? ((file, args) => promisified(file, [...args]))
+    const cwd = parsed.cwd ?? process.cwd()
+    const env = { ...(props.env ?? process.env) }
+    this.execFile = props.execFileFn ?? ((file, args) => promisified(file, [...args], { cwd, env }))
   }
 
   async createPullRequest(input: PullRequestTemplate, options?: PullRequestAttachOptions): Promise<CreatedPullRequest> {

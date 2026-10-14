@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from "zod";
 export declare const entitySizes: readonly ["ticket", "epic", "initiative"];
 export type EntitySize = (typeof entitySizes)[number];
 export declare const TrackerUserSchema: z.ZodObject<{
@@ -275,6 +275,17 @@ export type CreateInitiativeInput = z.infer<typeof CreateInitiativeInputSchema>;
 export type UpdateEpicInput = z.infer<typeof UpdateEpicInputSchema>;
 export type UpdateTicketInput = z.infer<typeof UpdateTicketInputSchema>;
 export type UpdateInitiativeInput = z.infer<typeof UpdateInitiativeInputSchema>;
+/** A tracker write completed, but a follow-up step failed; callers can reconcile by id. */
+export declare class TaskTrackerPartialWriteError extends Error {
+    name: string;
+    readonly id: string;
+    constructor(props: {
+        id: string;
+        cause: unknown;
+    });
+    /** Recognizes adapter failures across independently bundled package entry points. */
+    static isPartialWrite(error: unknown): error is TaskTrackerPartialWriteError;
+}
 export interface TaskTracker {
     createEpic(input: CreateEpicInput): Promise<Epic>;
     getEpic(id: string): Promise<Epic>;

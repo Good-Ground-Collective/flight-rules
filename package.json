@@ -1,6 +1,6 @@
 {
   "name": "@good-ground-collective/flight-rules",
-  "version": "1.84.0",
+  "version": "1.89.0",
   "description": "Harness-agnostic software workflow skills and review library",
   "repository": {
     "type": "git",
@@ -28,7 +28,11 @@
       "import": "./dist/sdk-deepagents.js"
     },
     "./review/schema": "./contracts/code-review/review.v1.schema.json",
-    "./review/transport-schema": "./contracts/code-review/review.v1.transport.schema.json"
+    "./review/transport-schema": "./contracts/code-review/review.v1.transport.schema.json",
+    "./mcp": {
+      "types": "./dist/mcp/index.d.ts",
+      "import": "./dist/mcp.js"
+    }
   },
   "types": "./dist/index.d.ts",
   "bin": {
@@ -92,6 +96,7 @@
     ]
   },
   "dependencies": {
+    "@modelcontextprotocol/server": "2.3.1",
     "@octokit/graphql": "^9.0.3",
     "@octokit/rest": "^22.0.1",
     "commander": "^15.0.0",
@@ -108,6 +113,7 @@
     "@good-ground-collective/preflight": "^0.2.2",
     "@langchain/core": "1.2.17",
     "@langchain/langgraph": "1.5.0",
+    "@modelcontextprotocol/client": "2.3.1",
     "@semantic-release/commit-analyzer": "^13.0.1",
     "@semantic-release/exec": "^7.1.0",
     "@semantic-release/git": "^10.0.1",

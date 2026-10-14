@@ -2,6 +2,7 @@ import { z } from "zod";
 import { type Charter } from "../bundled-docs/charter-catalog/charter-catalog.js";
 declare const ReviewPolicyPropsSchema: z.ZodObject<{
     home: z.ZodOptional<z.ZodString>;
+    env: z.ZodOptional<z.ZodCustom<NodeJS.ProcessEnv, NodeJS.ProcessEnv>>;
 }, z.core.$strict>;
 declare const LoadPolicyPropsSchema: z.ZodObject<{
     paths: z.ZodOptional<z.ZodArray<z.ZodString>>;
@@ -41,6 +42,7 @@ export interface ReviewPolicy {
 /** Loads one review method for local skills and Actions, with repo rules read only from a pinned trusted commit. */
 export declare class FileReviewPolicy implements ReviewPolicy {
     private readonly home;
+    private readonly env;
     constructor(props?: z.input<typeof ReviewPolicyPropsSchema>);
     load(input?: z.input<typeof LoadPolicyPropsSchema>): LoadedReviewPolicy;
     repository(input: z.input<typeof RepositoryContextPropsSchema>): RepositoryReviewContext;

@@ -1,22 +1,54 @@
 import { Command } from "commander";
 import type { TaskTracker } from "../../task-tracker/task-tracker.js";
 import { resolveBody } from "../resolve-body.js";
-import { portableContextGuard } from "../../portable-context/portable-context.js";
-import { DependencyPlannerService } from "../../dependency-planner/dependency-planner.js";
-import { ReviewPlanService } from "../../review-plan/review-plan.js";
-import { CrossEpicEdgeFinder } from "../../epic-boundary/epic-boundary.js";
 import type { PullRequestHost } from "../../../pr/pull-request-host/pull-request-host.js";
 import type { Config } from "../../../shared/config.js";
+import { z } from "zod";
+import { RegistryCommandOperationClient } from "../../../operations/command-operation-client.js";
+import {
+  TrackerDependencyPlanSchema,
+  TrackerReviewPlanSchema,
+} from "../../../operations/tracker-read-operations.js";
+import { DefaultTrackerEntityOperations } from "../../../operations/tracker-entity-operations.js";
+import {
+  LaunchOperationAccessPolicy,
+  type OperationRegistry,
+} from "../../../operations/operation-registry.js";
 
-type CreateInitiativeOptions = { title: string; body?: string; bodyFile?: string; allowLocalPaths?: boolean };
-type EditInitiativeOptions = { body?: string; bodyFile?: string; title?: string; allowLocalPaths?: boolean };
+type CreateInitiativeOptions = {
+  title: string;
+  body?: string;
+  bodyFile?: string;
+  allowLocalPaths?: boolean;
+};
+type EditInitiativeOptions = {
+  body?: string;
+  bodyFile?: string;
+  title?: string;
+  allowLocalPaths?: boolean;
+};
 
 export function createInitiativeCommand(
   getTracker: () => TaskTracker,
   getPrHost: () => PullRequestHost,
   getConfig: () => Pick<Config, "inReviewStatus"> = () => ({}),
+  registry?: OperationRegistry,
 ): Command {
   const initiative = new Command("initiative");
+  const operations = new RegistryCommandOperationClient({
+    registry:
+      registry ??
+      new DefaultTrackerEntityOperations({
+        getTracker,
+        getPrHost,
+        getConfig,
+        cwd: process.cwd(),
+      }).registry(
+        new LaunchOperationAccessPolicy({
+          allowedEffects: ["read", "write", "network", "process"],
+        }),
+      ),
+  });
 
   initiative
     .command("create")
@@ -24,14 +56,21 @@ export function createInitiativeCommand(
     .requiredOption("--title <title>", "initiative title")
     .option("--body <body>", "initiative body (or use --body-file)")
     .option("--body-file <path>", "read the initiative body from a file")
-    .option("--allow-local-paths", "accept machine-local paths in the body (see docs/layered-body-format.md)")
+    .option(
+      "--allow-local-paths",
+      "accept machine-local paths in the body (see docs/layered-body-format.md)",
+    )
     .action(async (opts: CreateInitiativeOptions) => {
       const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
-      portableContextGuard.assertPortable(body, { allowLocalPaths: opts.allowLocalPaths });
-      const result = await getTracker().createInitiative({
-        title: opts.title,
-        body,
-      });
+      const result = await operations.invoke(
+        "initiative-create",
+        {
+          title: opts.title,
+          body,
+          allowLocalPaths: opts.allowLocalPaths ?? false,
+        },
+        z.unknown(),
+      );
       process.stdout.write(JSON.stringify(result) + "\n");
     });
 
@@ -42,14 +81,22 @@ export function createInitiativeCommand(
     .option("--body <body>", "new initiative body (or use --body-file)")
     .option("--body-file <path>", "read the new initiative body from a file")
     .option("--title <title>", "new initiative title (unchanged if omitted)")
-    .option("--allow-local-paths", "accept machine-local paths in the body (see docs/layered-body-format.md)")
+    .option(
+      "--allow-local-paths",
+      "accept machine-local paths in the body (see docs/layered-body-format.md)",
+    )
     .action(async (id: string, opts: EditInitiativeOptions) => {
       const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
-      portableContextGuard.assertPortable(body, { allowLocalPaths: opts.allowLocalPaths });
-      const result = await getTracker().updateInitiativeDescription(id, {
-        body,
-        ...(opts.title !== undefined ? { title: opts.title } : {}),
-      });
+      const result = await operations.invoke(
+        "initiative-edit",
+        {
+          id,
+          body,
+          ...(opts.title !== undefined ? { title: opts.title } : {}),
+          allowLocalPaths: opts.allowLocalPaths ?? false,
+        },
+        z.unknown(),
+      );
       process.stdout.write(JSON.stringify(result) + "\n");
     });
 
@@ -58,7 +105,7 @@ export function createInitiativeCommand(
     .exitOverride()
     .argument("<id>", "initiative id")
     .action(async (id: string) => {
-      const result = await getTracker().getInitiative(id);
+      const result = await operations.invoke("initiative-get", { id }, z.unknown());
       process.stdout.write(JSON.stringify(result) + "\n");
     });
 
@@ -67,26 +114,21 @@ export function createInitiativeCommand(
     .exitOverride()
     .argument("<id>", "initiative id")
     .action(async (id: string) => {
-      const tracker = getTracker();
-      const initiativeData = await tracker.getInitiative(id);
-      const epics = await Promise.all(initiativeData.epics.map((e) => tracker.getEpic(e.id)));
-      const planner = new DependencyPlannerService();
-      const plan = planner.plan(
-        epics.flatMap((e) =>
-          e.childIssues.map((ticket) => ({
-            id: ticket.id,
-            status: ticket.status,
-            blockedBy: ticket.blockedBy,
-            epicId: e.id,
-          })),
-        ),
+      const result = await operations.invoke(
+        "initiative-plan",
+        { id },
+        TrackerDependencyPlanSchema,
       );
-      const edges = new CrossEpicEdgeFinder(tracker);
-      const crossEpicEdges = await edges.find(epics);
-      for (const warning of edges.warnings(crossEpicEdges)) process.stderr.write(warning + "\n");
-      process.stdout.write(JSON.stringify({ ...plan, crossEpicEdges }) + "\n");
-      if (plan.cycles.length > 0) {
-        throw new Error(`dependency cycle detected among tickets: ${plan.cycles.join(", ")}`);
+      for (const warning of result.warnings) process.stderr.write(warning + "\n");
+      process.stdout.write(
+        JSON.stringify({
+          waves: result.waves,
+          cycles: result.cycles,
+          crossEpicEdges: result.crossEpicEdges,
+        }) + "\n",
+      );
+      if (result.cycles.length > 0) {
+        throw new Error(`dependency cycle detected among tickets: ${result.cycles.join(", ")}`);
       }
     });
 
@@ -95,43 +137,26 @@ export function createInitiativeCommand(
     .exitOverride()
     .argument("<id>", "initiative id")
     .action(async (id: string) => {
-      const tracker = getTracker();
-      const initiativeData = await tracker.getInitiative(id);
-      const epics = await Promise.all(initiativeData.epics.map((e) => tracker.getEpic(e.id)));
-      const tickets = epics.flatMap((e) => e.childIssues);
-      const plan = new DependencyPlannerService().plan(
-        tickets.map((ticket) => ({
-          id: ticket.id,
-          status: ticket.status,
-          blockedBy: ticket.blockedBy,
-        })),
+      const result = await operations.invoke(
+        "initiative-review-plan",
+        { id },
+        TrackerReviewPlanSchema,
       );
-      const { inReviewStatus } = getConfig();
-      const reviewPlan = new ReviewPlanService();
-      const inReviewIds = reviewPlan.inReviewTicketIds(plan, inReviewStatus);
-
-      const host = getPrHost();
-      const pullRequests = inReviewIds.length > 0 ? await host.listOpenPullRequestsForTickets(inReviewIds) : [];
-      const defaultBranch = await host.defaultBranch();
-
-      const result = reviewPlan.build({ plan, tickets, pullRequests, defaultBranch, inReviewStatus });
-      const edges = new CrossEpicEdgeFinder(tracker);
-      const crossEpicEdges = await edges.find(epics);
-      for (const warning of edges.warnings(crossEpicEdges)) process.stderr.write(warning + "\n");
+      for (const warning of result.warnings) process.stderr.write(warning + "\n");
       process.stdout.write(
         JSON.stringify({
-          initiative: { id: initiativeData.id, title: initiativeData.title },
-          defaultBranch,
+          initiative: result.initiative,
+          defaultBranch: result.defaultBranch,
           route: result.route,
           reasons: result.reasons,
           missing: result.missing,
           blocked: result.blocked,
           unblocksOnMerge: result.unblocksOnMerge,
-          crossEpicEdges,
+          crossEpicEdges: result.crossEpicEdges,
         }) + "\n",
       );
-      if (plan.cycles.length > 0) {
-        throw new Error(`dependency cycle detected among tickets: ${plan.cycles.join(", ")}`);
+      if (result.cycles.length > 0) {
+        throw new Error(`dependency cycle detected among tickets: ${result.cycles.join(", ")}`);
       }
     });
 

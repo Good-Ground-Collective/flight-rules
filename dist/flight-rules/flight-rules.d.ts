@@ -15,6 +15,9 @@ import { type ToolProbe } from "../tasks/tool-probe/tool-probe.js";
 import { type RepositoryReadiness } from "../tasks/readiness/repository-readiness.js";
 import { type FlightRulesProps } from "./flight-rules.schema.js";
 import { type LocalDiscoveryOperations } from "../operations/local-discovery-operations.js";
+import { type ConfigOperationPolicy, type GitConfigOperations } from "../operations/git-config-operations.js";
+import { type ReviewOperations, type ReviewOperationsLaunchProps } from "../operations/review-operations.js";
+import type { TrackerEntityOperations } from "../operations/tracker-entity-operations.js";
 export interface FlightRules {
     installation(): NativeInstallation;
     configPath(): string;
@@ -30,6 +33,9 @@ export interface FlightRules {
     readiness(): RepositoryReadiness;
     docs(): DocResolver;
     localOperations(): LocalDiscoveryOperations;
+    gitConfigOperations(policy?: ConfigOperationPolicy): GitConfigOperations;
+    reviewOperations(props?: ReviewOperationsLaunchProps): ReviewOperations;
+    trackerEntityOperations(): TrackerEntityOperations;
     /** Ariadne's Agents page reporter; reads only the `ariadne.*` keys from user and local scope, so it works without a valid tracker config. */
     board(): AriadneBoard;
     packets(): AriadnePackets;
@@ -43,9 +49,11 @@ export interface FlightRules {
 export declare class DefaultFlightRules implements FlightRules {
     private readonly cwd;
     private readonly env;
+    private readonly gitEnv;
     private readonly explicitConfigPath;
     private readonly hostSettings;
     private readonly host;
+    private readonly configWritePolicy;
     private untrackedRoot;
     constructor(props?: FlightRulesProps);
     configPath(): string;
@@ -58,10 +66,13 @@ export declare class DefaultFlightRules implements FlightRules {
     tracker(overrideTracker?: string): TaskTracker;
     prHost(overrideTracker?: string): PullRequestHost;
     git(): GitExecutor;
+    gitConfigOperations(policy?: ConfigOperationPolicy): GitConfigOperations;
     probe(): ToolProbe;
     readiness(): RepositoryReadiness;
     docs(): DocResolver;
     localOperations(): LocalDiscoveryOperations;
+    reviewOperations(props?: ReviewOperationsLaunchProps): ReviewOperations;
+    trackerEntityOperations(): TrackerEntityOperations;
     board(): AriadneBoard;
     packets(): AriadnePackets;
     ariadneTokens(): AriadneTokenStore;

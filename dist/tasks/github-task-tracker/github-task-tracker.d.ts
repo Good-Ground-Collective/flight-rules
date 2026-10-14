@@ -1,4 +1,4 @@
-import type { Attachment, Comment, CreateEpicInput, CreateInitiativeInput, CreateTicketInput, CreateTechnicalDesignInput, EntityMetadata, Epic, Initiative, TaskTracker, TechnicalDesign, Ticket, TrackerUser, UpdateEpicInput, UpdateInitiativeInput, UpdateTicketInput } from '../task-tracker/task-tracker.js';
+import type { Attachment, Comment, CreateEpicInput, CreateInitiativeInput, CreateTicketInput, CreateTechnicalDesignInput, EntityMetadata, Epic, Initiative, TaskTracker, TechnicalDesign, Ticket, TrackerUser, UpdateEpicInput, UpdateInitiativeInput, UpdateTicketInput } from "../task-tracker/task-tracker.js";
 export interface GitHubTrackerConfig {
     token: string;
     owner: string;

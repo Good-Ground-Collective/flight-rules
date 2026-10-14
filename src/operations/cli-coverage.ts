@@ -182,40 +182,11 @@ export class ManifestCliRouteCoverage implements CliRouteCoverage {
 }
 
 const pendingRoutes = [
-  "config set",
-  "config unset",
-  "ticket get",
-  "ticket transitions",
-  "users get",
-  "tdd get",
-  "tdd create",
-  "epic get",
-  "epic create",
-  "epic edit",
-  "epic plan",
-  "epic review-plan",
-  "epic link-initiative",
-  "initiative get",
-  "initiative create",
-  "initiative edit",
-  "initiative plan",
-  "initiative review-plan",
-  "ticket create",
-  "ticket edit",
   "ticket block",
   "ticket unblock",
   "ticket status",
   "ticket comment",
   "ticket label",
-  "git commit",
-  "git checkout",
-  "git push",
-  "commit-message",
-  "branch-name",
-  "pr create",
-  "pr comment",
-  "pr list",
-  "pr request-review",
   "board post heartbeat",
   "board post item",
   "board post activity",
@@ -228,6 +199,12 @@ const pendingRoutes = [
 ];
 
 const excludedRoutes = [
+  {
+    path: ["mcp"],
+    aliases: [],
+    reason:
+      "Starts a local stdio transport whose operations are registered from the shared catalog.",
+  },
   {
     path: ["hook", "pre-bash"],
     aliases: ["guard-commit"],
@@ -266,11 +243,29 @@ const excludedRoutes = [
   { path: ["board", "logout"], aliases: [], reason: "Removes a machine-local Ariadne credential." },
 ];
 
-/** Inventory of the existing 68 CLI routes; pending entries stay unavailable to operation consumers. */
+/** Records domain migration states and the local MCP transport launcher. */
 export const cliRouteCoverage: CliRouteCoverage = new ManifestCliRouteCoverage({
   entries: [
     { status: "supported", route: { path: ["doc"], aliases: [] }, operationId: "doc" },
     ...[
+      ["tdd create", "tdd-create"],
+      ["epic create", "epic-create"],
+      ["epic edit", "epic-edit"],
+      ["epic link-initiative", "epic-link-initiative"],
+      ["initiative create", "initiative-create"],
+      ["initiative edit", "initiative-edit"],
+      ["ticket create", "ticket-create"],
+      ["ticket edit", "ticket-edit"],
+      ["ticket get", "ticket-get"],
+      ["ticket transitions", "ticket-transitions"],
+      ["users get", "users-get"],
+      ["tdd get", "tdd-get"],
+      ["epic get", "epic-get"],
+      ["epic plan", "epic-plan"],
+      ["epic review-plan", "epic-review-plan"],
+      ["initiative get", "initiative-get"],
+      ["initiative plan", "initiative-plan"],
+      ["initiative review-plan", "initiative-review-plan"],
       ["charter", "charter"],
       ["competencies", "competencies"],
       ["rfc dir", "rfc-dir"],
@@ -280,6 +275,13 @@ export const cliRouteCoverage: CliRouteCoverage = new ManifestCliRouteCoverage({
       ["qa recipe", "qa-recipe"],
       ["config path", "config-path"],
       ["config show", "config-show"],
+      ["config set", "config-set"],
+      ["config unset", "config-unset"],
+      ["git commit", "git-commit"],
+      ["git checkout", "git-checkout"],
+      ["git push", "git-push"],
+      ["commit-message", "commit-message"],
+      ["branch-name", "branch-name"],
       ["check", "check"],
       ["review schema", "review-schema"],
       ["review validate", "review-validate"],
@@ -287,6 +289,10 @@ export const cliRouteCoverage: CliRouteCoverage = new ManifestCliRouteCoverage({
       ["review state", "review-state"],
       ["review context", "review-context"],
       ["review plan", "review-plan"],
+      ["pr create", "pr-create"],
+      ["pr comment", "pr-comment"],
+      ["pr list", "pr-list"],
+      ["pr request-review", "pr-request-review"],
     ].map(([path, operationId]) => ({
       status: "supported" as const,
       route: { path: (path ?? "").split(" "), aliases: [] },

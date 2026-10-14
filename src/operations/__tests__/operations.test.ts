@@ -18,6 +18,7 @@ import type { OperationEffect } from "../operation.schema.js";
 import { buildProgram } from "../../cli/cli.js";
 import { createFlightRules } from "../../flight-rules/flight-rules.js";
 import type { DocResolver } from "../../bundled-docs/doc-resolver/doc-resolver.js";
+import { DefaultPrOperations } from "../pr-operations.js";
 
 const resolver: DocResolver = {
   list: () => ["workflow"],
@@ -200,7 +201,7 @@ describe("shared operations", () => {
     });
   });
 
-  it("discovers all existing CLI routes once and keeps pending routes unavailable to completion", () => {
+  it("discovers all CLI routes once and registers tracker reads and plans as shared operations", () => {
     const core = createFlightRules();
     const program = buildProgram(
       (override) => core.tracker(override),
@@ -213,16 +214,23 @@ describe("shared operations", () => {
       operations: [
         new DocOperation({ getResolver: () => core.docs() }),
         ...core.localOperations().operations(),
+        ...core.gitConfigOperations().operations(),
         ...core.reviewOperations().operations(),
+        ...core.trackerEntityOperations().operations(),
+        ...new DefaultPrOperations({ cwd: process.cwd(), getHost: () => core.prHost() }).operations(),
       ],
       policy: new LaunchOperationAccessPolicy({ allowedEffects: ["read", "process", "network"] }),
     });
     const routes = cliRouteCoverage.check(program, registry);
-    expect(routes).toHaveLength(68);
+    expect(routes).toHaveLength(69);
     expect(routes.filter((route) => route.aliases.length > 0)).toEqual([
       { path: ["hook", "pre-bash"], aliases: ["guard-commit"] },
     ]);
-    expect(cliRouteCoverage.list().filter((item) => item.status === "excluded")).toHaveLength(8);
+    const excluded = cliRouteCoverage.list().filter((item) => item.status === "excluded");
+    expect(excluded).toHaveLength(9);
+    expect(excluded.find((item) => item.route.path.join(" ") === "mcp")).toMatchObject({
+      reason: expect.stringContaining("local stdio transport"),
+    });
     expect(() => cliRouteCoverage.assertComplete(program, registry)).toThrow(
       /remain pending migration/,
     );
@@ -238,12 +246,41 @@ describe("shared operations", () => {
       "config-path",
       "config-show",
       "check",
+      "config-set",
+      "config-unset",
+      "git-commit",
+      "git-checkout",
+      "git-push",
+      "commit-message",
+      "branch-name",
       "review-schema",
       "review-validate",
       "review-render",
       "review-state",
       "review-context",
       "review-plan",
+      "ticket-get",
+      "ticket-transitions",
+      "users-get",
+      "tdd-get",
+      "epic-get",
+      "initiative-get",
+      "epic-plan",
+      "epic-review-plan",
+      "initiative-plan",
+      "initiative-review-plan",
+      "epic-create",
+      "epic-edit",
+      "epic-link-initiative",
+      "initiative-create",
+      "initiative-edit",
+      "ticket-create",
+      "ticket-edit",
+      "tdd-create",
+      "pr-create",
+      "pr-comment",
+      "pr-list",
+      "pr-request-review",
     ]);
   });
 

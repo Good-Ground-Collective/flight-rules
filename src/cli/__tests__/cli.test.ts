@@ -184,11 +184,13 @@ describe("injected core", () => {
       tracker: vi.fn(),
       prHost: vi.fn(),
       git: vi.fn(),
+      gitConfigOperations: vi.fn(),
       probe: vi.fn(),
       readiness: vi.fn(),
       docs: vi.fn(),
       localOperations: vi.fn(),
       reviewOperations: vi.fn(),
+      trackerEntityOperations: vi.fn(),
       configStore: vi.fn(),
       installation: vi.fn(),
       mainCheckout: vi.fn(),
@@ -205,7 +207,10 @@ describe("injected core", () => {
       await expect(run(["--help"], core)).rejects.toMatchObject({
         code: "commander.helpDisplayed",
       });
-      for (const accessor of Object.values(core)) expect(accessor).not.toHaveBeenCalled();
+      for (const [name, accessor] of Object.entries(core)) {
+        if (name === "gitConfigOperations") expect(accessor).toHaveBeenCalledOnce();
+        else expect(accessor).not.toHaveBeenCalled();
+      }
     } finally {
       output.mockRestore();
     }

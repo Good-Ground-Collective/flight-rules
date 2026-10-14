@@ -1,199 +1,250 @@
-import { execFile } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { promisify } from 'node:util'
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { NodeGitExecutor } from '../git-executor.js'
+import { execFile } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { NodeGitExecutor } from "../git-executor.js";
 
-const makeExec = (stdout = '') =>
-  vi.fn().mockResolvedValue({ stdout, stderr: '' })
+const makeExec = (stdout = "") => vi.fn().mockResolvedValue({ stdout, stderr: "" });
 
-describe('NodeGitExecutor.stage', () => {
-  it('calls git add -- with provided files', async () => {
-    const exec = makeExec()
-    const executor = new NodeGitExecutor(exec)
-    await executor.stage(['src/foo.ts', 'src/bar.ts'])
-    expect(exec).toHaveBeenCalledWith('git', ['add', '--', 'src/foo.ts', 'src/bar.ts'])
-  })
+describe("NodeGitExecutor.stage", () => {
+  it("binds each subprocess to its launch checkout and environment", async () => {
+    const exec = makeExec("main\n");
+    const executor = new NodeGitExecutor({
+      cwd: "/launch/repository",
+      env: { MARKER: "launch-value" },
+      execFile: exec,
+    });
+    await executor.getCurrentBranch();
+    expect(exec).toHaveBeenCalledWith("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+      cwd: "/launch/repository",
+      env: { MARKER: "launch-value" },
+    });
+  });
 
-  it('does nothing when files array is empty', async () => {
-    const exec = makeExec()
-    const executor = new NodeGitExecutor(exec)
-    await executor.stage([])
-    expect(exec).not.toHaveBeenCalled()
-  })
-})
+  it("calls git add -- with provided files", async () => {
+    const exec = makeExec();
+    const executor = new NodeGitExecutor({ execFile: exec });
+    await executor.stage(["src/foo.ts", "src/bar.ts"]);
+    expect(exec).toHaveBeenCalledWith(
+      "git",
+      ["add", "--", "src/foo.ts", "src/bar.ts"],
+      expect.any(Object),
+    );
+  });
 
-describe('NodeGitExecutor.commit', () => {
-  it('restricts the commit to the named paths with --only', async () => {
-    const exec = makeExec()
-    const executor = new NodeGitExecutor(exec)
-    await executor.commit('feat(scope): description', ['src/foo.ts', 'src/bar.ts'])
-    expect(exec).toHaveBeenCalledWith('git', [
-      'commit',
-      '--cleanup=whitespace',
-      '--only',
-      '-m',
-      'feat(scope): description',
-      '--',
-      'src/foo.ts',
-      'src/bar.ts',
-    ])
-  })
+  it("does nothing when files array is empty", async () => {
+    const exec = makeExec();
+    const executor = new NodeGitExecutor({ execFile: exec });
+    await executor.stage([]);
+    expect(exec).not.toHaveBeenCalled();
+  });
+});
 
-  it('commits the whole index when no paths are given', async () => {
-    const exec = makeExec()
-    const executor = new NodeGitExecutor(exec)
-    await executor.commit('feat(scope): description')
-    expect(exec).toHaveBeenCalledWith('git', ['commit', '--cleanup=whitespace', '-m', 'feat(scope): description'])
-  })
+describe("NodeGitExecutor.commit", () => {
+  it("restricts the commit to the named paths with --only", async () => {
+    const exec = makeExec();
+    const executor = new NodeGitExecutor({ execFile: exec });
+    await executor.commit("feat(scope): description", ["src/foo.ts", "src/bar.ts"]);
+    expect(exec).toHaveBeenCalledWith(
+      "git",
+      [
+        "commit",
+        "--cleanup=whitespace",
+        "--only",
+        "-m",
+        "feat(scope): description",
+        "--",
+        "src/foo.ts",
+        "src/bar.ts",
+      ],
+      expect.any(Object),
+    );
+  });
 
-  it('commits the whole index rather than passing --only with an empty pathspec', async () => {
-    const exec = makeExec()
-    const executor = new NodeGitExecutor(exec)
-    await executor.commit('feat(scope): description', [])
-    expect(exec).toHaveBeenCalledWith('git', ['commit', '--cleanup=whitespace', '-m', 'feat(scope): description'])
-  })
-})
+  it("commits the whole index when no paths are given", async () => {
+    const exec = makeExec();
+    const executor = new NodeGitExecutor({ execFile: exec });
+    await executor.commit("feat(scope): description");
+    expect(exec).toHaveBeenCalledWith(
+      "git",
+      ["commit", "--cleanup=whitespace", "-m", "feat(scope): description"],
+      expect.any(Object),
+    );
+  });
 
-describe('NodeGitExecutor.commit against a real repository', () => {
-  let dir: string
-  const git = promisify(execFile)
-  const inRepo = (file: string, args: readonly string[]) => git(file, [...args], { cwd: dir })
+  it("commits the whole index rather than passing --only with an empty pathspec", async () => {
+    const exec = makeExec();
+    const executor = new NodeGitExecutor({ execFile: exec });
+    await executor.commit("feat(scope): description", []);
+    expect(exec).toHaveBeenCalledWith(
+      "git",
+      ["commit", "--cleanup=whitespace", "-m", "feat(scope): description"],
+      expect.any(Object),
+    );
+  });
+});
+
+describe("NodeGitExecutor.commit against a real repository", () => {
+  let dir: string;
+  const git = promisify(execFile);
+  const inRepo = (file: string, args: readonly string[]) => git(file, [...args], { cwd: dir });
 
   beforeEach(async () => {
-    dir = mkdtempSync(join(tmpdir(), 'fr-git-'))
-    await inRepo('git', ['init', '-q'])
-    await inRepo('git', ['config', 'user.email', 'test@example.com'])
-    await inRepo('git', ['config', 'user.name', 'Test'])
+    dir = mkdtempSync(join(tmpdir(), "fr-git-"));
+    await inRepo("git", ["init", "-q"]);
+    await inRepo("git", ["config", "user.email", "test@example.com"]);
+    await inRepo("git", ["config", "user.name", "Test"]);
     // A user-level strip setting must not reach the body.
-    await inRepo('git', ['config', 'commit.cleanup', 'strip'])
-    writeFileSync(join(dir, 'a.txt'), 'a\n')
-  })
+    await inRepo("git", ["config", "commit.cleanup", "strip"]);
+    writeFileSync(join(dir, "a.txt"), "a\n");
+  });
 
   afterEach(() => {
-    rmSync(dir, { recursive: true, force: true })
-  })
+    rmSync(dir, { recursive: true, force: true });
+  });
 
-  it('records a multi-paragraph markdown body verbatim, # lines included', async () => {
+  it("records a multi-paragraph markdown body verbatim, # lines included", async () => {
     const message = [
-      'feat(KAN-1): add thing',
-      '',
-      '## Why',
-      '',
-      'The old path dropped data.',
-      '',
-      '- first point',
-      '- second point',
-      '',
-      'Flight-Rules-Version: 1.2.3',
-    ].join('\n')
-    const executor = new NodeGitExecutor(inRepo)
-    await executor.stage(['a.txt'])
-    await executor.commit(message, ['a.txt'])
-    const { stdout } = await inRepo('git', ['log', '-1', '--format=%B'])
-    expect(stdout.trimEnd()).toBe(message)
-  })
-})
+      "feat(KAN-1): add thing",
+      "",
+      "## Why",
+      "",
+      "The old path dropped data.",
+      "",
+      "- first point",
+      "- second point",
+      "",
+      "Flight-Rules-Version: 1.2.3",
+    ].join("\n");
+    const executor = new NodeGitExecutor({ cwd: dir });
+    await executor.stage(["a.txt"]);
+    await executor.commit(message, ["a.txt"]);
+    const { stdout } = await inRepo("git", ["log", "-1", "--format=%B"]);
+    expect(stdout.trimEnd()).toBe(message);
+  });
+});
 
-describe('NodeGitExecutor.getCommitSha', () => {
-  it('returns trimmed output of git rev-parse HEAD', async () => {
-    const exec = makeExec('abc123\n')
-    const executor = new NodeGitExecutor(exec)
-    const sha = await executor.getCommitSha()
-    expect(sha).toBe('abc123')
-    expect(exec).toHaveBeenCalledWith('git', ['rev-parse', 'HEAD'])
-  })
-})
+describe("NodeGitExecutor.getCommitSha", () => {
+  it("returns trimmed output of git rev-parse HEAD", async () => {
+    const exec = makeExec("abc123\n");
+    const executor = new NodeGitExecutor({ execFile: exec });
+    const sha = await executor.getCommitSha();
+    expect(sha).toBe("abc123");
+    expect(exec).toHaveBeenCalledWith("git", ["rev-parse", "HEAD"], expect.any(Object));
+  });
+});
 
-describe('NodeGitExecutor.checkout', () => {
-  it('builds a semantic branch name and creates it off current HEAD', async () => {
-    const exec = makeExec()
-    const executor = new NodeGitExecutor(exec)
-    const branch = await executor.checkout({ type: 'feat', scope: '25', description: 'sharpen-the-saw' })
-    expect(branch).toBe('feat/25-sharpen-the-saw')
-    expect(exec).toHaveBeenCalledWith('git', ['checkout', '-b', 'feat/25-sharpen-the-saw'])
-  })
+describe("NodeGitExecutor.checkout", () => {
+  it("builds a semantic branch name and creates it off current HEAD", async () => {
+    const exec = makeExec();
+    const executor = new NodeGitExecutor({ execFile: exec });
+    const branch = await executor.checkout({
+      type: "feat",
+      scope: "25",
+      description: "sharpen-the-saw",
+    });
+    expect(branch).toBe("feat/25-sharpen-the-saw");
+    expect(exec).toHaveBeenCalledWith(
+      "git",
+      ["checkout", "-b", "feat/25-sharpen-the-saw"],
+      expect.any(Object),
+    );
+  });
 
-  it('omits the description slug when not provided', async () => {
-    const exec = makeExec()
-    const executor = new NodeGitExecutor(exec)
-    const branch = await executor.checkout({ type: 'fix', scope: '30' })
-    expect(branch).toBe('fix/30')
-    expect(exec).toHaveBeenCalledWith('git', ['checkout', '-b', 'fix/30'])
-  })
+  it("omits the description slug when not provided", async () => {
+    const exec = makeExec();
+    const executor = new NodeGitExecutor({ execFile: exec });
+    const branch = await executor.checkout({ type: "fix", scope: "30" });
+    expect(branch).toBe("fix/30");
+    expect(exec).toHaveBeenCalledWith("git", ["checkout", "-b", "fix/30"], expect.any(Object));
+  });
 
-  it('branches off a given base when from is provided (stacking)', async () => {
-    const exec = makeExec()
-    const executor = new NodeGitExecutor(exec)
-    await executor.checkout({ type: 'feat', scope: '25', description: 'saw' }, 'feat/22-research-agent')
-    expect(exec).toHaveBeenCalledWith('git', ['checkout', '-b', 'feat/25-saw', 'feat/22-research-agent'])
-  })
+  it("branches off a given base when from is provided (stacking)", async () => {
+    const exec = makeExec();
+    const executor = new NodeGitExecutor({ execFile: exec });
+    await executor.checkout(
+      { type: "feat", scope: "25", description: "saw" },
+      "feat/22-research-agent",
+    );
+    expect(exec).toHaveBeenCalledWith(
+      "git",
+      ["checkout", "-b", "feat/25-saw", "feat/22-research-agent"],
+      expect.any(Object),
+    );
+  });
 
-  it('rejects a type outside the semantic set', async () => {
-    const exec = makeExec()
-    const executor = new NodeGitExecutor(exec)
-    await expect(executor.checkout({ type: 'banana', scope: '25' })).rejects.toThrow(/banana/)
-    expect(exec).not.toHaveBeenCalled()
-  })
+  it("rejects a type outside the semantic set", async () => {
+    const exec = makeExec();
+    const executor = new NodeGitExecutor({ execFile: exec });
+    await expect(executor.checkout({ type: "banana", scope: "25" })).rejects.toThrow(/banana/);
+    expect(exec).not.toHaveBeenCalled();
+  });
 
-  it('rejects an empty scope', async () => {
-    const exec = makeExec()
-    const executor = new NodeGitExecutor(exec)
-    await expect(executor.checkout({ type: 'feat', scope: '   ' })).rejects.toThrow(/scope/)
-    expect(exec).not.toHaveBeenCalled()
-  })
-})
+  it("rejects an empty scope", async () => {
+    const exec = makeExec();
+    const executor = new NodeGitExecutor({ execFile: exec });
+    await expect(executor.checkout({ type: "feat", scope: "   " })).rejects.toThrow(/scope/);
+    expect(exec).not.toHaveBeenCalled();
+  });
+});
 
-describe('NodeGitExecutor.getCurrentBranch', () => {
-  it('returns the trimmed abbreviated ref', async () => {
-    const exec = makeExec('feat/35-execute-work\n')
-    const executor = new NodeGitExecutor(exec)
-    const branch = await executor.getCurrentBranch()
-    expect(branch).toBe('feat/35-execute-work')
-    expect(exec).toHaveBeenCalledWith('git', ['rev-parse', '--abbrev-ref', 'HEAD'])
-  })
-})
+describe("NodeGitExecutor.getCurrentBranch", () => {
+  it("returns the trimmed abbreviated ref", async () => {
+    const exec = makeExec("feat/35-execute-work\n");
+    const executor = new NodeGitExecutor({ execFile: exec });
+    const branch = await executor.getCurrentBranch();
+    expect(branch).toBe("feat/35-execute-work");
+    expect(exec).toHaveBeenCalledWith(
+      "git",
+      ["rev-parse", "--abbrev-ref", "HEAD"],
+      expect.any(Object),
+    );
+  });
+});
 
-describe('NodeGitExecutor.push', () => {
-  it('pushes to origin and sets upstream by default, matching the CLI', async () => {
-    const exec = makeExec()
-    const executor = new NodeGitExecutor(exec)
-    await executor.push({ branch: 'feat/35-execute-work' })
-    expect(exec).toHaveBeenCalledWith('git', [
-      'push',
-      '--set-upstream',
-      'origin',
-      'feat/35-execute-work',
-    ])
-  })
+describe("NodeGitExecutor.push", () => {
+  it("pushes to origin and sets upstream by default, matching the CLI", async () => {
+    const exec = makeExec();
+    const executor = new NodeGitExecutor({ execFile: exec });
+    await executor.push({ branch: "feat/35-execute-work" });
+    expect(exec).toHaveBeenCalledWith(
+      "git",
+      ["push", "--set-upstream", "origin", "feat/35-execute-work"],
+      expect.any(Object),
+    );
+  });
 
-  it('omits --set-upstream when explicitly disabled', async () => {
-    const exec = makeExec()
-    const executor = new NodeGitExecutor(exec)
-    await executor.push({ branch: 'feat/35-x', setUpstream: false })
-    expect(exec).toHaveBeenCalledWith('git', ['push', 'origin', 'feat/35-x'])
-  })
+  it("omits --set-upstream when explicitly disabled", async () => {
+    const exec = makeExec();
+    const executor = new NodeGitExecutor({ execFile: exec });
+    await executor.push({ branch: "feat/35-x", setUpstream: false });
+    expect(exec).toHaveBeenCalledWith("git", ["push", "origin", "feat/35-x"], expect.any(Object));
+  });
 
-  it('honours an explicit remote', async () => {
-    const exec = makeExec()
-    const executor = new NodeGitExecutor(exec)
-    await executor.push({ branch: 'feat/35-x', remote: 'upstream' })
-    expect(exec).toHaveBeenCalledWith('git', ['push', '--set-upstream', 'upstream', 'feat/35-x'])
-  })
+  it("honours an explicit remote", async () => {
+    const exec = makeExec();
+    const executor = new NodeGitExecutor({ execFile: exec });
+    await executor.push({ branch: "feat/35-x", remote: "upstream" });
+    expect(exec).toHaveBeenCalledWith(
+      "git",
+      ["push", "--set-upstream", "upstream", "feat/35-x"],
+      expect.any(Object),
+    );
+  });
 
-  it('rejects a detached HEAD without shelling out', async () => {
-    const exec = makeExec()
-    const executor = new NodeGitExecutor(exec)
-    await expect(executor.push({ branch: 'HEAD' })).rejects.toThrow(/detached HEAD/)
-    expect(exec).not.toHaveBeenCalled()
-  })
+  it("rejects a detached HEAD without shelling out", async () => {
+    const exec = makeExec();
+    const executor = new NodeGitExecutor({ execFile: exec });
+    await expect(executor.push({ branch: "HEAD" })).rejects.toThrow(/detached HEAD/);
+    expect(exec).not.toHaveBeenCalled();
+  });
 
-  it('rejects an empty branch without shelling out', async () => {
-    const exec = makeExec()
-    const executor = new NodeGitExecutor(exec)
-    await expect(executor.push({ branch: '' })).rejects.toThrow()
-    expect(exec).not.toHaveBeenCalled()
-  })
-})
+  it("rejects an empty branch without shelling out", async () => {
+    const exec = makeExec();
+    const executor = new NodeGitExecutor({ execFile: exec });
+    await expect(executor.push({ branch: "" })).rejects.toThrow();
+    expect(exec).not.toHaveBeenCalled();
+  });
+});

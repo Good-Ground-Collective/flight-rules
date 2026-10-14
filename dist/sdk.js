@@ -1,4 +1,4 @@
-// src/sdk/instruction-catalog.ts
+// src/sdk/instruction-catalog-core.ts
 import { existsSync, readFileSync as readFileSync2, readdirSync as readdirSync2, realpathSync, statSync } from "node:fs";
 import { basename as basename2, dirname, isAbsolute, join as join2, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -111,7 +111,7 @@ var FileAgentRegistry = class {
   }
 };
 
-// src/sdk/instruction-catalog.ts
+// src/sdk/instruction-catalog-core.ts
 var CatalogPropsSchema = z3.strictObject({
   moduleUrl: z3.string().min(1),
   env: z3.record(z3.string(), z3.string().optional())
@@ -203,6 +203,8 @@ var FileInstructionCatalog = class {
     return realPath;
   }
 };
+
+// src/sdk/instruction-catalog.ts
 var instructionCatalog = new FileInstructionCatalog({
   moduleUrl: import.meta.url,
   env: process.env
@@ -623,10 +625,12 @@ var OperationCliError = class extends Error {
   name = "OperationCliError";
   operationId;
   operationErrorName;
+  partialData;
   constructor(props) {
     super(props.message);
     this.operationId = props.operationId;
     this.operationErrorName = props.errorName;
+    this.partialData = props.partialData;
   }
 };
 var MapOperationRegistry = class {
@@ -1506,21 +1510,16 @@ var ReadinessResultSchema = z25.object({
   scope: z25.enum(["environment", "workflow"])
 });
 var LocalDiscoveryCliPropsSchema = z25.object({
-  operations: z25.custom(
-    (value) => typeof value === "object" && value !== null && "operations" in value && typeof value.operations === "function" && "configStore" in value && typeof value.configStore === "function"
-  ),
   registry: z25.custom(
     (value) => typeof value === "object" && value !== null && "invoke" in value
   ),
   readStdin: z25.custom((value) => typeof value === "function").optional()
 });
 var CommanderLocalDiscoveryCli = class {
-  operations;
   registry;
   readStdin;
   constructor(props) {
     const parsed = LocalDiscoveryCliPropsSchema.parse(props);
-    this.operations = parsed.operations;
     this.registry = parsed.registry;
     this.readStdin = parsed.readStdin ?? (() => text(process.stdin));
   }
@@ -1629,21 +1628,27 @@ var CommanderLocalDiscoveryCli = class {
       );
     });
     const scopeHelp = "where to write: user, project, local, or file; config show reports the selected host and exact paths (override with FLIGHT_RULES_HOST=claude|codex)";
-    config.command("set").description("write one config value; array keys take several values").argument("<key>").argument("<values...>").addOption(new Option2("--scope <scope>", scopeHelp).choices(configScopes)).exitOverride().action((key, values, options) => {
-      const store = this.operations.configStore();
-      const scope = options.scope ?? store.defaultScopeFor(key);
-      store.set(key, values, scope);
-      const shadowedBy = store.shadowingScope(key, scope);
-      process.stdout.write(
-        `${JSON.stringify({ key, scope, path: store.pathFor(scope), ...shadowedBy === void 0 ? {} : { warning: `${key} is also set in ${shadowedBy} scope (${store.pathFor(shadowedBy)}), which takes precedence` } })}
-`
+    config.command("set").description("write one config value; array keys take several values").argument("<key>").argument("<values...>").addOption(new Option2("--scope <scope>", scopeHelp).choices(configScopes)).exitOverride().action(async (key, values, options) => {
+      const result = await this.invoke(
+        "config-set",
+        { key, values, ...options.scope === void 0 ? {} : { scope: options.scope } },
+        z25.object({
+          key: z25.string(),
+          scope: z25.enum(configScopes),
+          path: z25.string(),
+          warning: z25.string().optional()
+        })
       );
+      process.stdout.write(`${JSON.stringify(result)}
+`);
     });
-    config.command("unset").description("remove one config value from a scope").argument("<key>").addOption(new Option2("--scope <scope>", scopeHelp).choices(configScopes)).exitOverride().action((key, options) => {
-      const store = this.operations.configStore();
-      const scope = options.scope ?? store.defaultScopeFor(key);
-      store.unset(key, scope);
-      process.stdout.write(`${JSON.stringify({ key, scope, path: store.pathFor(scope) })}
+    config.command("unset").description("remove one config value from a scope").argument("<key>").addOption(new Option2("--scope <scope>", scopeHelp).choices(configScopes)).exitOverride().action(async (key, options) => {
+      const result = await this.invoke(
+        "config-unset",
+        { key, ...options.scope === void 0 ? {} : { scope: options.scope } },
+        z25.object({ key: z25.string(), scope: z25.enum(configScopes), path: z25.string() })
+      );
+      process.stdout.write(`${JSON.stringify(result)}
 `);
     });
   }
@@ -1842,46 +1847,15 @@ var ManifestCliRouteCoverage = class _ManifestCliRouteCoverage {
   }
 };
 var pendingRoutes = [
-  "config set",
-  "config unset",
-  "ticket get",
-  "ticket transitions",
-  "users get",
-  "tdd get",
-  "tdd create",
-  "epic get",
-  "epic create",
-  "epic edit",
-  "epic plan",
-  "epic review-plan",
-  "epic link-initiative",
-  "initiative get",
-  "initiative create",
-  "initiative edit",
-  "initiative plan",
-  "initiative review-plan",
-  "ticket create",
-  "ticket edit",
   "ticket block",
   "ticket unblock",
   "ticket status",
   "ticket comment",
   "ticket label",
-  "git commit",
-  "git checkout",
-  "git push",
-  "commit-message",
-  "branch-name",
   "pr create",
   "pr comment",
   "pr list",
   "pr request-review",
-  "review schema",
-  "review validate",
-  "review render",
-  "review state",
-  "review context",
-  "review plan",
   "board post heartbeat",
   "board post item",
   "board post activity",
@@ -1893,6 +1867,11 @@ var pendingRoutes = [
   "packet reviewers"
 ];
 var excludedRoutes = [
+  {
+    path: ["mcp"],
+    aliases: [],
+    reason: "Starts a local stdio transport whose operations are registered from the shared catalog."
+  },
   {
     path: ["hook", "pre-bash"],
     aliases: ["guard-commit"],
@@ -1934,6 +1913,24 @@ var cliRouteCoverage = new ManifestCliRouteCoverage({
   entries: [
     { status: "supported", route: { path: ["doc"], aliases: [] }, operationId: "doc" },
     ...[
+      ["tdd create", "tdd-create"],
+      ["epic create", "epic-create"],
+      ["epic edit", "epic-edit"],
+      ["epic link-initiative", "epic-link-initiative"],
+      ["initiative create", "initiative-create"],
+      ["initiative edit", "initiative-edit"],
+      ["ticket create", "ticket-create"],
+      ["ticket edit", "ticket-edit"],
+      ["ticket get", "ticket-get"],
+      ["ticket transitions", "ticket-transitions"],
+      ["users get", "users-get"],
+      ["tdd get", "tdd-get"],
+      ["epic get", "epic-get"],
+      ["epic plan", "epic-plan"],
+      ["epic review-plan", "epic-review-plan"],
+      ["initiative get", "initiative-get"],
+      ["initiative plan", "initiative-plan"],
+      ["initiative review-plan", "initiative-review-plan"],
       ["charter", "charter"],
       ["competencies", "competencies"],
       ["rfc dir", "rfc-dir"],
@@ -1943,7 +1940,20 @@ var cliRouteCoverage = new ManifestCliRouteCoverage({
       ["qa recipe", "qa-recipe"],
       ["config path", "config-path"],
       ["config show", "config-show"],
-      ["check", "check"]
+      ["config set", "config-set"],
+      ["config unset", "config-unset"],
+      ["git commit", "git-commit"],
+      ["git checkout", "git-checkout"],
+      ["git push", "git-push"],
+      ["commit-message", "commit-message"],
+      ["branch-name", "branch-name"],
+      ["check", "check"],
+      ["review schema", "review-schema"],
+      ["review validate", "review-validate"],
+      ["review render", "review-render"],
+      ["review state", "review-state"],
+      ["review context", "review-context"],
+      ["review plan", "review-plan"]
     ].map(([path, operationId]) => ({
       status: "supported",
       route: { path: (path ?? "").split(" "), aliases: [] },
@@ -1961,6 +1971,1355 @@ var cliRouteCoverage = new ManifestCliRouteCoverage({
     }))
   ]
 });
+
+// src/operations/tracker-entity-operations.ts
+import { existsSync as existsSync4, realpathSync as realpathSync3, statSync as statSync4 } from "node:fs";
+import { isAbsolute as isAbsolute4, relative as relative3, resolve as resolve5 } from "node:path";
+import { z as z30 } from "zod";
+
+// src/tasks/evidence/evidence.ts
+import { realpathSync as realpathSync2 } from "node:fs";
+import { basename as basename3 } from "node:path/posix";
+import { z as z27 } from "zod";
+var mediaReference = /(!?)\[([^\]]*)\]\(\s*<?([^\s()<>]+)>?(?:\s+"[^"]*")?\s*\)/g;
+var absoluteTarget = /^[a-zA-Z][a-zA-Z0-9+.-]*:|^\/\/|^#/;
+var localPrefix = /^(?:\.\/)+/;
+var fenceRun2 = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+var AttachmentSpecSchema = z27.string().min(1).transform((spec) => {
+  const hash = spec.lastIndexOf("#");
+  const path = hash > 0 ? spec.slice(0, hash) : spec;
+  const caption = hash > 0 ? spec.slice(hash + 1).trim() : "";
+  return { path, caption: caption.length > 0 ? caption : basename3(path) };
+});
+var DuplicateEvidenceNameError = class extends Error {
+  name = "DuplicateEvidenceNameError";
+  constructor(props) {
+    super(`Two attachments share the filename "${props.filename}": ${props.paths.join(", ")}`);
+  }
+};
+var EvidenceUploadFailure = class extends Error {
+  name = "EvidenceUploadFailure";
+  attachments;
+  constructor(props) {
+    super(
+      props.attachments.length === 0 && props.cause instanceof Error ? props.cause.message : "One or more attachments could not be uploaded",
+      { cause: props.cause }
+    );
+    this.attachments = props.attachments;
+  }
+};
+var TrackerEvidenceService = class {
+  tracker;
+  constructor(props) {
+    this.tracker = props.tracker;
+  }
+  async attach(input) {
+    const specs = this.parseSpecs(input.specs);
+    const attachments = [];
+    for (const spec of specs) {
+      try {
+        const uploaded = await this.tracker.addAttachment(input.ticketId, spec.path);
+        attachments.push({
+          ...uploaded,
+          path: spec.path,
+          caption: spec.caption,
+          referenced: false
+        });
+      } catch (cause) {
+        throw new EvidenceUploadFailure({ cause, attachments });
+      }
+    }
+    const byName = /* @__PURE__ */ new Map();
+    for (const attachment of attachments) byName.set(basename3(attachment.path), attachment);
+    const rewritten = this.rewriteReferences(input.body, byName);
+    return { body: this.appendUnreferenced(rewritten, attachments), attachments };
+  }
+  prepareBody(input) {
+    const specs = this.parseSpecs(input.specs);
+    const attachments = specs.map((spec) => ({
+      id: "pending",
+      filename: basename3(spec.path),
+      mimeType: "application/octet-stream",
+      path: spec.path,
+      caption: spec.caption,
+      referenced: false
+    }));
+    const byName = /* @__PURE__ */ new Map();
+    for (const attachment of attachments) byName.set(basename3(attachment.path), attachment);
+    const rewritten = this.rewriteReferences(input.body, byName);
+    return this.appendUnreferenced(rewritten, attachments);
+  }
+  parseSpecs(specs) {
+    const parsed = specs.map((spec) => AttachmentSpecSchema.parse(spec));
+    this.rejectDuplicateNames(parsed);
+    return parsed;
+  }
+  rejectDuplicateNames(specs) {
+    const paths = /* @__PURE__ */ new Map();
+    for (const spec of specs) {
+      const name = basename3(spec.path);
+      paths.set(name, [...paths.get(name) ?? [], spec.path]);
+    }
+    for (const [filename, group] of paths) {
+      if (group.length > 1) throw new DuplicateEvidenceNameError({ filename, paths: group });
+    }
+  }
+  rewriteReferences(body, byName) {
+    let fence;
+    return body.split("\n").map((line) => {
+      if (fence === void 0) {
+        const opened = this.openingFence(line);
+        if (opened !== void 0) {
+          fence = opened;
+          return line;
+        }
+        return this.rewriteLine(line, byName);
+      }
+      if (this.closesFence(line, fence)) fence = void 0;
+      return line;
+    }).join("\n");
+  }
+  /**
+   * A line opens a fence when it is a run of >=3 backticks or tildes; a backtick
+   * fence's info string may not itself contain a backtick, which keeps inline
+   * code from being read as a fence.
+   */
+  openingFence(line) {
+    const match = fenceRun2.exec(line);
+    if (match === null) return void 0;
+    const run = match[1];
+    const rest = match[2];
+    if (run === void 0 || rest === void 0) return void 0;
+    if (run.charAt(0) === "`" && rest.includes("`")) return void 0;
+    return { char: run.charAt(0), length: run.length };
+  }
+  /**
+   * A line closes an open fence only when it is a run of the SAME character, at
+   * least as long as the opening run, with nothing but whitespace after it.
+   */
+  closesFence(line, fence) {
+    const match = fenceRun2.exec(line);
+    if (match === null) return false;
+    const run = match[1];
+    const rest = match[2];
+    if (run === void 0 || rest === void 0) return false;
+    return run.charAt(0) === fence.char && run.length >= fence.length && rest.trim().length === 0;
+  }
+  rewriteLine(line, byName) {
+    let result = "";
+    let last = 0;
+    mediaReference.lastIndex = 0;
+    for (let match = mediaReference.exec(line); match !== null; match = mediaReference.exec(line)) {
+      const whole = match[0];
+      const bang = match[1];
+      const label = match[2];
+      const target = match[3];
+      result += line.slice(last, match.index);
+      const attachment = bang !== void 0 && label !== void 0 && target !== void 0 ? this.resolve(target, byName) : void 0;
+      if (attachment === void 0 || bang === void 0 || label === void 0) {
+        result += whole;
+      } else {
+        attachment.referenced = true;
+        result += `${bang}[${label}](attachment:${attachment.filename})`;
+      }
+      last = match.index + whole.length;
+    }
+    return result + line.slice(last);
+  }
+  resolve(target, byName) {
+    if (absoluteTarget.test(target)) return void 0;
+    if (target.startsWith("/") || /^[a-zA-Z]:[\\/]/.test(target)) {
+      try {
+        const realTarget = realpathSync2(target);
+        return [...byName.values()].find((attachment) => {
+          try {
+            return realpathSync2(attachment.path) === realTarget;
+          } catch {
+            return false;
+          }
+        });
+      } catch {
+        return void 0;
+      }
+    }
+    return byName.get(basename3(target.replace(localPrefix, "")));
+  }
+  appendUnreferenced(body, attachments) {
+    let result = body;
+    for (const attachment of attachments) {
+      if (!attachment.referenced)
+        result += `
+
+![${attachment.caption}](attachment:${attachment.filename})`;
+    }
+    return result;
+  }
+};
+
+// src/tasks/portable-context/portable-context.ts
+var tokenStart = String.raw`(?:^|(?<=[\s(\[<{"'\x60=,:;|]))`;
+var localReferencePatterns = [
+  /file:\/\/\S*/g,
+  new RegExp(`${tokenStart}/(?:Users|home)/[^\\s/)\\]>"'\\x60]+\\S*`, "g"),
+  new RegExp(`${tokenStart}~/\\S*`, "g"),
+  /\b[A-Za-z]:\\Users\\\S*/g
+];
+var trailingPunctuation = /[`.,;:!?)\]>"']+$/;
+var maxReported = 5;
+var RegexPortableContextGuard = class {
+  find(body) {
+    return body.split("\n").flatMap(
+      (text2, index) => localReferencePatterns.flatMap(
+        (pattern) => [...text2.matchAll(pattern)].map((m) => ({ line: index + 1, match: m[0].replace(trailingPunctuation, "") }))
+      )
+    );
+  }
+  assertPortable(body, opts = {}) {
+    if (opts.allowLocalPaths === true) return;
+    const found = this.find(body);
+    if (found.length === 0) return;
+    const listed = found.slice(0, maxReported).map((ref) => `  line ${ref.line}: ${ref.match}`).join("\n");
+    const more = found.length > maxReported ? `
+  \u2026and ${found.length - maxReported} more` : "";
+    throw new Error(
+      `body references files on this machine, which nobody else can open:
+${listed}${more}
+A tracker body must stand on its own for an engineer on a fresh clone. Inline the content, link a published artifact (\`flight-rules tdd create\`, a tracker issue, or a file on the default branch by URL), or use a repo-relative path for code that exists on the default branch. Pass --allow-local-paths only when the path is the subject of the work, not a pointer to context.`
+    );
+  }
+};
+var portableContextGuard = new RegexPortableContextGuard();
+
+// src/tasks/task-tracker/task-tracker.ts
+import { z as z28 } from "zod";
+var TrackerUserSchema = z28.object({
+  accountId: z28.string(),
+  displayName: z28.string()
+});
+var EntityMetadataSchema = z28.object({
+  tddId: z28.number().optional(),
+  epicId: z28.number().optional(),
+  notes: z28.string().optional(),
+  /** Explicit body-format override read first by BodyFormatDetector (docs/bug-report-format.md). */
+  kind: z28.enum(["bug", "story"]).optional(),
+  /** Why a blocked-by edge leaves this ticket's epic, keyed by blocker id (docs/epic-boundaries.md). */
+  crossEpicReasons: z28.record(z28.string(), z28.string()).optional()
+}).passthrough();
+var CommentSchema = z28.object({
+  id: z28.string(),
+  body: z28.string(),
+  author: z28.string(),
+  createdAt: z28.string(),
+  updatedAt: z28.string()
+});
+var AttachmentSchema = z28.object({
+  id: z28.string(),
+  filename: z28.string(),
+  mimeType: z28.string(),
+  size: z28.number().optional(),
+  mediaUuid: z28.string().optional()
+});
+var TechnicalDesignSchema = z28.object({
+  id: z28.string(),
+  epicId: z28.string(),
+  url: z28.string().optional(),
+  body: z28.string(),
+  comments: z28.array(CommentSchema),
+  metadata: EntityMetadataSchema.default({}),
+  updatedAt: z28.string()
+});
+var TicketSchema = z28.object({
+  id: z28.string(),
+  size: z28.literal("ticket"),
+  status: z28.string(),
+  labels: z28.array(z28.string()),
+  title: z28.string(),
+  body: z28.string(),
+  comments: z28.array(CommentSchema),
+  assignee: z28.string().nullable(),
+  attachments: z28.array(AttachmentSchema).default([]),
+  reporter: z28.string().nullable().default(null),
+  issueType: z28.string().default("unknown"),
+  blockedBy: z28.array(z28.string()).default([]),
+  blocking: z28.array(z28.string()).default([]),
+  metadata: EntityMetadataSchema.default({}),
+  updatedAt: z28.string()
+});
+var EpicSchema = z28.object({
+  id: z28.string(),
+  size: z28.literal("epic"),
+  status: z28.string(),
+  labels: z28.array(z28.string()),
+  title: z28.string(),
+  body: z28.string(),
+  childIssues: z28.array(TicketSchema),
+  comments: z28.array(CommentSchema),
+  tdd: TechnicalDesignSchema.optional(),
+  metadata: EntityMetadataSchema.default({}),
+  updatedAt: z28.string()
+});
+var CreateEpicInputSchema = z28.object({
+  title: z28.string(),
+  body: z28.string(),
+  labels: z28.array(z28.string()).default([]),
+  metadata: EntityMetadataSchema.partial().optional()
+});
+var CreateTicketInputSchema = z28.object({
+  title: z28.string(),
+  body: z28.string(),
+  /** Absent for a standalone ticket: a ticket-sized RFC has no epic to parent to. */
+  epicId: z28.string().optional(),
+  labels: z28.array(z28.string()).default([]),
+  assignee: z28.string().optional(),
+  metadata: EntityMetadataSchema.partial().optional()
+});
+var CreateTechnicalDesignInputSchema = z28.object({
+  title: z28.string(),
+  body: z28.string(),
+  epicId: z28.string(),
+  metadata: EntityMetadataSchema.partial().optional()
+});
+var UpdateEpicInputSchema = z28.object({
+  body: z28.string(),
+  title: z28.string().optional(),
+  labels: z28.array(z28.string()).optional()
+});
+var UpdateTicketInputSchema = z28.object({
+  body: z28.string(),
+  title: z28.string().optional(),
+  labels: z28.array(z28.string()).optional()
+});
+var UpdateInitiativeInputSchema = z28.object({
+  body: z28.string(),
+  title: z28.string().optional()
+});
+var InitiativeSchema = z28.object({
+  id: z28.string(),
+  size: z28.literal("initiative"),
+  title: z28.string(),
+  body: z28.string(),
+  epics: z28.array(z28.object({ id: z28.string(), title: z28.string() })).default([])
+});
+var CreateInitiativeInputSchema = z28.object({
+  title: z28.string(),
+  body: z28.string()
+});
+var partialWriteErrorSchema = z28.object({
+  name: z28.literal("TaskTrackerPartialWriteError"),
+  id: z28.string().min(1),
+  message: z28.string()
+});
+var TaskTrackerPartialWriteError = class extends Error {
+  name = "TaskTrackerPartialWriteError";
+  id;
+  constructor(props) {
+    super(props.cause instanceof Error ? props.cause.message : String(props.cause), {
+      cause: props.cause
+    });
+    this.id = props.id;
+  }
+  /** Recognizes adapter failures across independently bundled package entry points. */
+  static isPartialWrite(error) {
+    return error instanceof Error && partialWriteErrorSchema.safeParse(error).success;
+  }
+};
+
+// src/operations/tracker-read-operations.ts
+import { z as z29 } from "zod";
+
+// src/tasks/epic-boundary/epic-boundary.ts
+var TrackerRefFormatter = class {
+  format(id) {
+    return /^\d+$/.test(id) ? `#${id}` : id;
+  }
+};
+var refs = new TrackerRefFormatter();
+var CrossEpicEdgeFinder = class {
+  constructor(tracker) {
+    this.tracker = tracker;
+  }
+  tracker;
+  async find(epics) {
+    const epicOf = /* @__PURE__ */ new Map();
+    for (const epic of epics) for (const ticket of epic.childIssues) epicOf.set(ticket.id, epic.id);
+    const external = [
+      ...new Set(
+        epics.flatMap(
+          (epic) => epic.childIssues.flatMap((ticket) => ticket.blockedBy.filter((id) => !epicOf.has(id)))
+        )
+      )
+    ];
+    const resolved = await Promise.all(
+      external.map(
+        async (id) => [id, await this.tracker.getTicketEpicId(id).catch(() => null)]
+      )
+    );
+    for (const [id, epic] of resolved)
+      if (epic !== null && epic !== void 0) epicOf.set(id, epic);
+    return epics.flatMap(
+      (epic) => epic.childIssues.filter((ticket) => ticket.status !== "closed").flatMap(
+        (ticket) => ticket.blockedBy.filter((blockerId) => epicOf.get(blockerId) !== epic.id).map((blockerId) => ({
+          ticket: ticket.id,
+          ticketEpic: epic.id,
+          blockedBy: blockerId,
+          blockerEpic: epicOf.get(blockerId) ?? null,
+          justification: ticket.metadata.crossEpicReasons?.[blockerId] ?? null
+        }))
+      )
+    );
+  }
+  /** One human-readable warning line per edge, for stderr. */
+  warnings(edges) {
+    return edges.map((edge) => {
+      const blockerEpic = edge.blockerEpic === null ? "epic unknown" : `epic ${refs.format(edge.blockerEpic)}`;
+      const why = edge.justification === null ? "no justification recorded" : `justification: ${edge.justification}`;
+      return `warning: cross-epic dependency: ${refs.format(edge.ticket)} (epic ${refs.format(edge.ticketEpic)}) is blocked by ${refs.format(edge.blockedBy)} (${blockerEpic}); ${why}`;
+    });
+  }
+};
+
+// src/tasks/dependency-planner/dependency-planner.ts
+var DependencyPlannerService = class {
+  plan(tickets) {
+    const byId = new Map(tickets.map((t) => [t.id, t]));
+    const isOpen = (t) => t.status !== "closed";
+    const openTickets = tickets.filter(isOpen);
+    const waveOf = /* @__PURE__ */ new Map();
+    const failed = /* @__PURE__ */ new Set();
+    const visiting = /* @__PURE__ */ new Set();
+    const computeWave = (id) => {
+      if (failed.has(id)) return null;
+      if (waveOf.has(id)) return waveOf.get(id) ?? null;
+      const ticket = byId.get(id);
+      if (ticket === void 0 || !isOpen(ticket)) return -1;
+      if (visiting.has(id)) return null;
+      visiting.add(id);
+      const blockerWaves = ticket.blockedBy.map(computeWave);
+      visiting.delete(id);
+      if (blockerWaves.some((w) => w === null)) {
+        failed.add(id);
+        return null;
+      }
+      const wave = Math.max(-1, ...blockerWaves.filter((w) => w !== null)) + 1;
+      waveOf.set(id, wave);
+      return wave;
+    };
+    openTickets.forEach((t) => computeWave(t.id));
+    const scheduled = openTickets.filter((t) => waveOf.has(t.id));
+    const cycles = openTickets.filter((t) => !waveOf.has(t.id)).map((t) => t.id);
+    const maxWave = scheduled.reduce((max, t) => Math.max(max, waveOf.get(t.id) ?? 0), -1);
+    const waves = Array.from(
+      { length: maxWave + 1 },
+      (_, i) => scheduled.filter((t) => waveOf.get(t.id) === i)
+    );
+    return { waves, cycles };
+  }
+};
+
+// src/tasks/review-plan/review-plan.ts
+var maxSimplePrCount = 4;
+var ReviewRouteClassifier = class {
+  classify(blocked, defaultBranch) {
+    const reasons = [];
+    const pullRequests = blocked.flatMap((entry) => entry.pr === null ? [] : [entry.pr]);
+    const waveCount = new Set(blocked.map((entry) => entry.wave)).size;
+    if (waveCount > 1) {
+      reasons.push(`spans more than one wave (${waveCount} waves)`);
+    }
+    const stacked = pullRequests.filter((pr) => pr.baseRefName !== defaultBranch);
+    if (stacked.length > 0) {
+      const bases = [...new Set(stacked.map((pr) => pr.baseRefName))].join(", ");
+      reasons.push(`stacked base: a PR targets ${bases} instead of ${defaultBranch}`);
+    }
+    if (pullRequests.length > maxSimplePrCount) {
+      reasons.push(`more than ${maxSimplePrCount} PRs (${pullRequests.length} PRs)`);
+    }
+    return { route: reasons.length > 0 ? "complex" : "simple", reasons };
+  }
+};
+var ReviewPlanService = class {
+  classifier = new ReviewRouteClassifier();
+  /** Tracker statuses are display names on some trackers, so "In Review" and "in-review" must match. */
+  normalizeStatus(status) {
+    return status.trim().toLowerCase().replace(/[\s-]+/g, "-");
+  }
+  isInReview(status, inReviewStatus) {
+    const normalized = this.normalizeStatus(status);
+    return normalized === "in-review" || inReviewStatus !== void 0 && normalized === this.normalizeStatus(inReviewStatus);
+  }
+  /** Ids of open tickets in review, in plan order. */
+  inReviewTicketIds(plan, inReviewStatus) {
+    return plan.waves.flat().filter((t) => this.isInReview(t.status, inReviewStatus)).map((t) => t.id);
+  }
+  build(input) {
+    const titles = new Map(input.tickets.map((ticket) => [ticket.id, ticket.title]));
+    const blocked = [];
+    const missingPrReasons = [];
+    input.plan.waves.forEach((wave, waveIndex) => {
+      for (const planned of wave) {
+        if (!this.isInReview(planned.status, input.inReviewStatus)) continue;
+        const found = input.pullRequests.find((pr) => pr.ticket === planned.id);
+        blocked.push({
+          ticketId: planned.id,
+          title: titles.get(planned.id) ?? "",
+          wave: waveIndex,
+          blockedBy: planned.blockedBy,
+          pr: found === void 0 ? null : { number: found.number, url: found.url, headRefName: found.headRefName, baseRefName: found.baseRefName }
+        });
+        if (found === void 0) missingPrReasons.push(`ticket ${planned.id} is in review but has no open PR`);
+      }
+    });
+    const missing = blocked.filter((entry) => entry.pr === null).map((entry) => entry.ticketId);
+    if (missing.length > 0) {
+      return {
+        route: "incomplete",
+        reasons: missingPrReasons,
+        missing,
+        blocked,
+        unblocksOnMerge: this.unblockedOnMerge(input.plan, blocked)
+      };
+    }
+    const decision = this.classifier.classify(blocked, input.defaultBranch);
+    return {
+      route: decision.route,
+      reasons: decision.reasons,
+      missing,
+      blocked,
+      unblocksOnMerge: this.unblockedOnMerge(input.plan, blocked)
+    };
+  }
+  unblockedOnMerge(plan, blocked) {
+    const blockedIds = new Set(blocked.map((entry) => entry.ticketId));
+    const openIds = new Set(plan.waves.flat().map((t) => t.id));
+    return plan.waves.flat().filter((t) => !blockedIds.has(t.id)).filter((t) => {
+      const openBlockers = t.blockedBy.filter((id) => openIds.has(id));
+      return openBlockers.some((id) => blockedIds.has(id)) && openBlockers.every((id) => blockedIds.has(id));
+    }).map((t) => t.id);
+  }
+};
+
+// src/tasks/body-sections/body-sections.ts
+var headingLine = /^##\s+(.+?)\s*$/;
+var detailsOpen = /^<details/;
+var detailsClose = /^<\/details>/;
+var checklistItem = /^-\s+\[( |x|X)\]\s+(.*)$/;
+var fenceLine = /^(`{3,}|~{3,})/;
+var layeredHeadingKeys = {
+  "Problem Statement": "problemStatement",
+  Solution: "solution",
+  "Acceptance Criteria": "acceptanceCriteria",
+  "High-level technical writeup": "technicalWriteup"
+};
+var bugReportHeadingKeys = {
+  Symptom: "symptom",
+  Environment: "environment",
+  "Steps To Reproduce": "stepsToReproduce",
+  "Expected vs Actual": "expectedVsActual",
+  "Root Cause": "rootCause",
+  "Fixed When": "fixedWhen",
+  Evidence: "evidence"
+};
+var stringSectionKeys = [
+  "problemStatement",
+  "solution",
+  "acceptanceCriteria",
+  "technicalWriteup",
+  "guidedWalkthrough",
+  "symptom",
+  "environment",
+  "stepsToReproduce",
+  "expectedVsActual",
+  "rootCause",
+  "fixedWhen",
+  "evidence",
+  "reproductionNotes"
+];
+var BlobSectionSource = class {
+  read(input) {
+    const lines = input.body.replace(/\r\n/g, "\n").split("\n");
+    const format = input.format ?? this.sniff(lines);
+    const headingKeys = format === "bug-report" ? bugReportHeadingKeys : layeredHeadingKeys;
+    const raw = {};
+    let current;
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i] ?? "";
+      const heading = line.match(headingLine);
+      if (heading?.[1] !== void 0) {
+        current = headingKeys[heading[1]];
+        if (current !== void 0) raw[current] = [];
+        i++;
+        continue;
+      }
+      if (detailsOpen.test(line.trim())) {
+        const block = this.consumeDetails(lines, i);
+        if (/guided walkthrough/i.test(block.title)) {
+          raw.guidedWalkthrough = block.inner.split("\n");
+        } else if (/reproduction notes/i.test(block.title)) {
+          raw.reproductionNotes = block.inner.split("\n");
+        }
+        current = void 0;
+        i = block.next;
+        continue;
+      }
+      if (current !== void 0) raw[current]?.push(line);
+      i++;
+    }
+    const text2 = (key) => {
+      const joined = (raw[key] ?? []).join("\n").trim();
+      return joined.length > 0 ? joined : void 0;
+    };
+    const sections = {
+      format,
+      acceptanceCriteriaItems: this.checklistItems(raw.acceptanceCriteria),
+      fixedWhenItems: this.checklistItems(raw.fixedWhen)
+    };
+    for (const key of stringSectionKeys) {
+      const value = text2(key);
+      if (value !== void 0) sections[key] = value;
+    }
+    return sections;
+  }
+  /**
+   * Classifies the body from its FIRST top-level `##` heading, not from any
+   * occurrence anywhere: a bug report leads with `## Symptom`, a layered body
+   * with `## Problem Statement`. A `## Symptom` buried inside a fenced code
+   * block or a `<details>` block (e.g. the Guided Walkthrough) must not flip a
+   * layered body to `bug-report`, so both are skipped exactly as the section
+   * parser skips them — details via `consumeDetails`, fences by tracking the
+   * open marker.
+   */
+  sniff(lines) {
+    let i = 0;
+    let openFence;
+    while (i < lines.length) {
+      const line = lines[i] ?? "";
+      const trimmed = line.trim();
+      if (openFence !== void 0) {
+        if (trimmed.startsWith(openFence)) openFence = void 0;
+        i++;
+        continue;
+      }
+      const fence = trimmed.match(fenceLine);
+      if (fence?.[1] !== void 0) {
+        openFence = fence[1];
+        i++;
+        continue;
+      }
+      if (detailsOpen.test(trimmed)) {
+        i = this.consumeDetails(lines, i).next;
+        continue;
+      }
+      const heading = line.match(headingLine);
+      if (heading?.[1] !== void 0) return heading[1] === "Symptom" ? "bug-report" : "layered-body";
+      i++;
+    }
+    return "layered-body";
+  }
+  checklistItems(lines) {
+    return (lines ?? []).map((item) => item.match(checklistItem)).filter((match) => match !== null).map((match) => ({ text: (match[2] ?? "").trim(), done: match[1]?.toLowerCase() === "x" }));
+  }
+  consumeDetails(lines, start) {
+    let depth = 0;
+    let end = lines.length - 1;
+    for (let j = start; j < lines.length; j++) {
+      const trimmed = (lines[j] ?? "").trim();
+      if (detailsOpen.test(trimmed)) depth++;
+      if (detailsClose.test(trimmed)) depth--;
+      if (depth === 0) {
+        end = j;
+        break;
+      }
+    }
+    const block = lines.slice(start, end + 1).join("\n");
+    const summary = block.match(/<summary>([\s\S]*?)<\/summary>/);
+    const title = summary?.[1]?.trim() ?? "";
+    const afterSummary = block.indexOf("</summary>");
+    const withoutHead = afterSummary !== -1 ? block.slice(afterSummary + "</summary>".length) : block.replace(detailsOpen, "");
+    const inner = withoutHead.replace(/<\/details>\s*$/, "").trim();
+    return { title, inner, next: end + 1 };
+  }
+};
+var blobSectionSource = new BlobSectionSource();
+var sectionFields = {
+  "problem-statement": "problemStatement",
+  solution: "solution",
+  "acceptance-criteria": "acceptanceCriteria",
+  "technical-writeup": "technicalWriteup",
+  "guided-walkthrough": "guidedWalkthrough",
+  symptom: "symptom",
+  environment: "environment",
+  "steps-to-reproduce": "stepsToReproduce",
+  "expected-vs-actual": "expectedVsActual",
+  "root-cause": "rootCause",
+  "fixed-when": "fixedWhen",
+  evidence: "evidence",
+  "reproduction-notes": "reproductionNotes"
+};
+var BodySectionSelector = class {
+  select(id, sections, slug) {
+    const field = sectionFields[slug];
+    if (field === void 0) {
+      throw new Error(`unknown section "${slug}" \u2014 expected one of: ${Object.keys(sectionFields).join(", ")}`);
+    }
+    return {
+      id,
+      section: slug,
+      format: sections.format,
+      markdown: sections[field] ?? null,
+      ...field === "acceptanceCriteria" ? { items: sections.acceptanceCriteriaItems } : {},
+      ...field === "fixedWhen" ? { items: sections.fixedWhenItems } : {}
+    };
+  }
+};
+var sectionSelector = new BodySectionSelector();
+
+// src/tasks/body-sections/body-format-detector.ts
+var placeholderIssueTypes = ["unknown", "issue"];
+var PrecedenceBodyFormatDetector = class {
+  detect(input) {
+    const { body, metadata, issueType } = input;
+    if (metadata.kind === "bug") return "bug-report";
+    if (metadata.kind === "story") return "layered-body";
+    const explicitType = this.explicitIssueType(issueType);
+    if (explicitType === "bug") return "bug-report";
+    if (explicitType !== void 0) return "layered-body";
+    return blobSectionSource.read({ body }).format;
+  }
+  /** The lower-cased issue type, or `undefined` when absent or a tracker placeholder. */
+  explicitIssueType(issueType) {
+    if (issueType === void 0) return void 0;
+    const lowered = issueType.toLowerCase();
+    return placeholderIssueTypes.includes(lowered) ? void 0 : lowered;
+  }
+};
+var bodyFormatDetector = new PrecedenceBodyFormatDetector();
+
+// src/operations/tracker-read-operations.ts
+var propsSchema = z29.object({
+  getTracker: z29.custom((value) => typeof value === "function"),
+  getPrHost: z29.custom((value) => typeof value === "function").optional(),
+  getConfig: z29.custom((value) => typeof value === "function").optional()
+});
+var sectionNames = [
+  "problem-statement",
+  "solution",
+  "acceptance-criteria",
+  "technical-writeup",
+  "guided-walkthrough",
+  "symptom",
+  "environment",
+  "steps-to-reproduce",
+  "expected-vs-actual",
+  "root-cause",
+  "fixed-when",
+  "evidence",
+  "reproduction-notes"
+];
+var sectionNameSet = new Set(sectionNames);
+var sectionName = z29.string().refine(
+  (value) => sectionNameSet.has(value),
+  `unknown section \u2014 expected one of: ${sectionNames.join(", ")}`
+);
+var entityInput = z29.strictObject({ id: z29.string().min(1) });
+var ticketInput = entityInput.extend({
+  section: sectionName.optional()
+});
+var ticketResult = TicketSchema.passthrough();
+var epicResult = EpicSchema.extend({ childIssues: z29.array(ticketResult) }).passthrough();
+var initiativeResult = InitiativeSchema.extend({
+  epics: z29.array(z29.object({ id: z29.string(), title: z29.string() }).passthrough())
+}).passthrough();
+var tddResult = TechnicalDesignSchema.passthrough();
+var sectionResult = z29.object({
+  id: z29.string(),
+  section: z29.string(),
+  format: z29.enum(["layered-body", "bug-report"]),
+  markdown: z29.string().nullable(),
+  items: z29.array(z29.object({ text: z29.string(), done: z29.boolean() })).optional()
+});
+var edgeResult = z29.object({
+  ticket: z29.string(),
+  ticketEpic: z29.string(),
+  blockedBy: z29.string(),
+  blockerEpic: z29.string().nullable(),
+  justification: z29.string().nullable()
+});
+var planTicket = z29.object({
+  id: z29.string(),
+  status: z29.string(),
+  blockedBy: z29.array(z29.string()),
+  epicId: z29.string().optional()
+});
+var dependencyPlan = z29.object({
+  waves: z29.array(z29.array(planTicket)),
+  cycles: z29.array(z29.string())
+});
+var TrackerDependencyPlanSchema = dependencyPlan.extend({
+  crossEpicEdges: z29.array(edgeResult),
+  warnings: z29.array(z29.string())
+});
+var TrackerReviewPlanSchema = z29.object({
+  epic: z29.object({ id: z29.string(), title: z29.string() }).optional(),
+  initiative: z29.object({ id: z29.string(), title: z29.string() }).optional(),
+  defaultBranch: z29.string(),
+  route: z29.enum(["simple", "complex", "incomplete"]),
+  reasons: z29.array(z29.string()),
+  missing: z29.array(z29.string()),
+  blocked: z29.array(
+    z29.object({
+      ticketId: z29.string(),
+      title: z29.string(),
+      wave: z29.number(),
+      blockedBy: z29.array(z29.string()),
+      pr: z29.object({
+        number: z29.number(),
+        url: z29.string(),
+        headRefName: z29.string(),
+        baseRefName: z29.string()
+      }).nullable()
+    })
+  ),
+  unblocksOnMerge: z29.array(z29.string()),
+  crossEpicEdges: z29.array(edgeResult),
+  warnings: z29.array(z29.string()),
+  cycles: z29.array(z29.string())
+});
+var DefaultTrackerReadOperations = class {
+  props;
+  constructor(props) {
+    this.props = propsSchema.parse(props);
+  }
+  operations() {
+    return [
+      this.descriptor(
+        "ticket-get",
+        "Read a ticket and optionally select one body section.",
+        ["read", "network"],
+        ["ticket", "get"],
+        ticketInput,
+        z29.union([ticketResult, sectionResult]),
+        (input) => this.getTicket(input)
+      ),
+      this.descriptor(
+        "ticket-transitions",
+        "List available status transitions for a ticket.",
+        ["read", "network"],
+        ["ticket", "transitions"],
+        entityInput,
+        z29.object({ id: z29.string(), transitions: z29.array(z29.string()) }),
+        async ({ id }) => ({ id, transitions: await this.props.getTracker().listTransitions(id) })
+      ),
+      this.descriptor(
+        "users-get",
+        "List users available for tracker assignment.",
+        ["read", "network"],
+        ["users", "get"],
+        z29.strictObject({}),
+        z29.array(TrackerUserSchema.passthrough()),
+        () => this.props.getTracker().getUsers()
+      ),
+      this.descriptor(
+        "tdd-get",
+        "Read a technical design by its tracker identifier.",
+        ["read", "network"],
+        ["tdd", "get"],
+        entityInput,
+        tddResult,
+        ({ id }) => this.props.getTracker().getTechnicalDesign(id)
+      ),
+      this.descriptor(
+        "epic-get",
+        "Read an epic and its tracker fields.",
+        ["read", "network"],
+        ["epic", "get"],
+        entityInput,
+        epicResult,
+        ({ id }) => this.props.getTracker().getEpic(id)
+      ),
+      this.descriptor(
+        "initiative-get",
+        "Read an initiative and its linked epics.",
+        ["read", "network"],
+        ["initiative", "get"],
+        entityInput,
+        initiativeResult,
+        ({ id }) => this.props.getTracker().getInitiative(id)
+      ),
+      this.descriptor(
+        "epic-plan",
+        "Plan dependency waves and cross-epic edges for an epic.",
+        ["read", "network", "process"],
+        ["epic", "plan"],
+        entityInput,
+        TrackerDependencyPlanSchema,
+        ({ id }) => this.planEpic(id)
+      ),
+      this.descriptor(
+        "epic-review-plan",
+        "Build the review hand-off for an epic's open pull requests.",
+        ["read", "network", "process"],
+        ["epic", "review-plan"],
+        entityInput,
+        TrackerReviewPlanSchema,
+        ({ id }) => this.reviewEpic(id)
+      ),
+      this.descriptor(
+        "initiative-plan",
+        "Plan dependency waves across every epic in an initiative.",
+        ["read", "network", "process"],
+        ["initiative", "plan"],
+        entityInput,
+        TrackerDependencyPlanSchema,
+        ({ id }) => this.planInitiative(id)
+      ),
+      this.descriptor(
+        "initiative-review-plan",
+        "Build the review hand-off across an initiative's epics.",
+        ["read", "network", "process"],
+        ["initiative", "review-plan"],
+        entityInput,
+        TrackerReviewPlanSchema,
+        ({ id }) => this.reviewInitiative(id)
+      )
+    ];
+  }
+  registry() {
+    return new MapOperationRegistry({
+      operations: this.operations(),
+      policy: new LaunchOperationAccessPolicy({ allowedEffects: ["read", "network", "process"] })
+    });
+  }
+  descriptor(id, description, effects, path, inputSchema, outputSchema, handler) {
+    return {
+      id,
+      description,
+      effects,
+      cli: { path, aliases: [] },
+      inputSchema,
+      outputSchema,
+      handler
+    };
+  }
+  async getTicket(input) {
+    const ticket = await this.props.getTracker().getTicket(input.id);
+    if (input.section === void 0) return ticket;
+    const format = bodyFormatDetector.detect({
+      body: ticket.body,
+      metadata: ticket.metadata,
+      issueType: ticket.issueType
+    });
+    return sectionSelector.select(
+      input.id,
+      blobSectionSource.read({ body: ticket.body, format }),
+      input.section
+    );
+  }
+  async planEpic(id) {
+    const tracker = this.props.getTracker();
+    const epic = await tracker.getEpic(id);
+    const plan = new DependencyPlannerService().plan(this.plannerTickets(epic.childIssues));
+    const edges = new CrossEpicEdgeFinder(tracker);
+    const crossEpicEdges = await edges.find([epic]);
+    return { ...plan, crossEpicEdges, warnings: edges.warnings(crossEpicEdges) };
+  }
+  async planInitiative(id) {
+    const tracker = this.props.getTracker();
+    const initiative = await tracker.getInitiative(id);
+    const epics = await Promise.all(initiative.epics.map((epic) => tracker.getEpic(epic.id)));
+    const tickets = epics.flatMap(
+      (epic) => epic.childIssues.map((ticket) => ({ ticket, epicId: epic.id }))
+    );
+    const plan = new DependencyPlannerService().plan(
+      tickets.map(({ ticket, epicId }) => ({
+        id: ticket.id,
+        status: ticket.status,
+        blockedBy: ticket.blockedBy,
+        epicId
+      }))
+    );
+    const edges = new CrossEpicEdgeFinder(tracker);
+    const crossEpicEdges = await edges.find(epics);
+    return { ...plan, crossEpicEdges, warnings: edges.warnings(crossEpicEdges) };
+  }
+  async reviewEpic(id) {
+    const tracker = this.props.getTracker();
+    const epic = await tracker.getEpic(id);
+    return this.reviewPlan({ epic, epics: [epic] });
+  }
+  async reviewInitiative(id) {
+    const tracker = this.props.getTracker();
+    const initiative = await tracker.getInitiative(id);
+    const epics = await Promise.all(initiative.epics.map((epic) => tracker.getEpic(epic.id)));
+    return this.reviewPlan({ initiative, epics });
+  }
+  async reviewPlan(input) {
+    const tracker = this.props.getTracker();
+    const tickets = input.epics.flatMap((epic) => epic.childIssues);
+    const plan = new DependencyPlannerService().plan(this.plannerTickets(tickets));
+    const { inReviewStatus } = this.props.getConfig?.() ?? {};
+    const service = new ReviewPlanService();
+    const ids = service.inReviewTicketIds(plan, inReviewStatus);
+    const host = this.props.getPrHost?.();
+    if (host === void 0)
+      throw new PullRequestHostUnavailableError(
+        "pull request host is unavailable for review planning"
+      );
+    const pullRequests = ids.length > 0 ? await host.listOpenPullRequestsForTickets(ids) : [];
+    const defaultBranch = await host.defaultBranch();
+    const result = service.build({ plan, tickets, pullRequests, defaultBranch, inReviewStatus });
+    const edges = new CrossEpicEdgeFinder(tracker);
+    const crossEpicEdges = await edges.find(input.epics);
+    return {
+      ...input.epic === void 0 ? {} : { epic: { id: input.epic.id, title: input.epic.title } },
+      ...input.initiative === void 0 ? {} : { initiative: input.initiative },
+      defaultBranch,
+      ...result,
+      crossEpicEdges,
+      warnings: edges.warnings(crossEpicEdges),
+      cycles: plan.cycles
+    };
+  }
+  plannerTickets(tickets) {
+    return tickets.map((ticket) => ({
+      id: ticket.id,
+      status: ticket.status,
+      blockedBy: ticket.blockedBy
+    }));
+  }
+};
+var PullRequestHostUnavailableError = class extends Error {
+  name = "PullRequestHostUnavailableError";
+};
+
+// src/operations/tracker-entity-operations.ts
+var labelListSchema = z30.array(z30.string()).transform((labels) => [...new Set(labels.map((label) => label.trim()).filter(Boolean))]);
+var labelsSchema = labelListSchema.default([]);
+var createEpicInput = z30.object({
+  ...CreateEpicInputSchema.shape,
+  labels: labelsSchema,
+  allowLocalPaths: z30.boolean().default(false)
+}).strict();
+var updateEpicInput = z30.object({
+  ...UpdateEpicInputSchema.shape,
+  labels: labelListSchema.optional(),
+  allowLocalPaths: z30.boolean().default(false)
+}).strict();
+var createInitiativeInput = CreateInitiativeInputSchema.extend({
+  allowLocalPaths: z30.boolean().default(false)
+}).strict();
+var updateInitiativeInput = UpdateInitiativeInputSchema.extend({
+  allowLocalPaths: z30.boolean().default(false)
+}).strict();
+var createTicketInput = z30.object({
+  ...CreateTicketInputSchema.shape,
+  labels: labelsSchema,
+  allowLocalPaths: z30.boolean().default(false)
+}).strict();
+var updateTicketInput = z30.object({
+  ...UpdateTicketInputSchema.shape,
+  labels: labelListSchema.optional(),
+  allowLocalPaths: z30.boolean().default(false),
+  attach: z30.array(z30.string().min(1)).default([])
+}).strict();
+var createTddInput = CreateTechnicalDesignInputSchema.extend({
+  allowLocalPaths: z30.boolean().default(false)
+}).strict();
+var entityId = z30.string().min(1);
+var linkInput = z30.object({ epicId: entityId, initiativeId: entityId }).strict();
+var partialTicketEdit = z30.object({
+  id: entityId,
+  attachments: z30.array(AttachmentSchema),
+  body: z30.string()
+});
+var ticketEditResult = z30.union([TicketSchema, partialTicketEdit]);
+var partialTicketCreate = z30.object({ id: entityId, title: z30.string() });
+var ticketCreateResult = z30.union([TicketSchema, partialTicketCreate]);
+var partialEntityWrite = z30.object({
+  id: entityId,
+  title: z30.string().optional(),
+  body: z30.string().optional()
+});
+var partialTddCreate = z30.object({ id: entityId, epicId: entityId, body: z30.string() });
+var propsSchema2 = z30.object({
+  getTracker: z30.custom((value) => typeof value === "function"),
+  getPrHost: z30.custom((value) => typeof value === "function").optional(),
+  getConfig: z30.custom((value) => typeof value === "function").optional(),
+  cwd: z30.string().min(1),
+  trustedRoots: z30.array(z30.string().min(1)).default([])
+});
+var DefaultTrackerEntityOperations = class {
+  props;
+  roots;
+  constructor(props) {
+    this.props = propsSchema2.parse(props);
+    const roots = this.props.trustedRoots.length === 0 ? [this.props.cwd] : this.props.trustedRoots;
+    this.roots = [...new Set(roots.map((root) => realpathSync3(root)))];
+  }
+  operations() {
+    return [
+      ...new DefaultTrackerReadOperations({
+        getTracker: this.props.getTracker,
+        ...this.props.getPrHost === void 0 ? {} : { getPrHost: this.props.getPrHost },
+        ...this.props.getConfig === void 0 ? {} : { getConfig: this.props.getConfig }
+      }).operations(),
+      this.descriptor(
+        "epic-create",
+        "Create an epic with portable context and labels.",
+        ["write", "network"],
+        ["epic", "create"],
+        createEpicInput,
+        z30.union([EpicSchema, partialEntityWrite]),
+        (input) => this.createEpic(input)
+      ),
+      this.descriptor(
+        "epic-edit",
+        "Update an epic description, title, or labels.",
+        ["write", "network"],
+        ["epic", "edit"],
+        z30.object({ id: entityId, ...updateEpicInput.shape }).strict(),
+        z30.union([EpicSchema, partialEntityWrite]),
+        ({ id, ...input }) => this.editEpic(id, input)
+      ),
+      this.descriptor(
+        "epic-link-initiative",
+        "Link an epic to an initiative.",
+        ["write", "network"],
+        ["epic", "link-initiative"],
+        linkInput,
+        z30.object({ epicId: entityId, initiativeId: entityId }),
+        async ({ epicId, initiativeId }) => {
+          await this.props.getTracker().linkEpicToInitiative(epicId, initiativeId);
+          return { epicId, initiativeId };
+        }
+      ),
+      this.descriptor(
+        "initiative-create",
+        "Create an initiative with portable context.",
+        ["write", "network"],
+        ["initiative", "create"],
+        createInitiativeInput,
+        z30.union([InitiativeSchema, partialEntityWrite]),
+        (input) => this.createInitiative(input)
+      ),
+      this.descriptor(
+        "initiative-edit",
+        "Update an initiative description or title.",
+        ["write", "network"],
+        ["initiative", "edit"],
+        z30.object({ id: entityId, ...updateInitiativeInput.shape }).strict(),
+        z30.union([InitiativeSchema, partialEntityWrite]),
+        ({ id, ...input }) => this.editInitiative(id, input)
+      ),
+      this.descriptor(
+        "ticket-create",
+        "Create a ticket with its parent, labels, and assignee.",
+        ["write", "network"],
+        ["ticket", "create"],
+        createTicketInput,
+        ticketCreateResult,
+        (input) => this.createTicket(input)
+      ),
+      this.descriptor(
+        "ticket-edit",
+        "Update a ticket and attach local evidence files.",
+        ["write", "network"],
+        ["ticket", "edit"],
+        z30.object({ id: entityId, ...updateTicketInput.shape }).strict(),
+        ticketEditResult,
+        ({ id, ...input }) => this.editTicket(id, input)
+      ),
+      this.descriptor(
+        "tdd-create",
+        "Create a technical design under its parent epic.",
+        ["write", "network"],
+        ["tdd", "create"],
+        createTddInput,
+        z30.union([TechnicalDesignSchema, partialTddCreate]),
+        (input) => this.createTdd(input)
+      )
+    ];
+  }
+  registry(policy) {
+    return new MapOperationRegistry({
+      operations: this.operations(),
+      policy: policy ?? new LaunchOperationAccessPolicy({ allowedEffects: ["read", "network", "process"] })
+    });
+  }
+  descriptor(id, description, effects, path, inputSchema, outputSchema, handler) {
+    return {
+      id,
+      description,
+      effects,
+      cli: { path, aliases: [] },
+      inputSchema,
+      outputSchema,
+      handler
+    };
+  }
+  async createEpic(input) {
+    this.assertPortable(input.body, input.allowLocalPaths);
+    const fields = CreateEpicInputSchema.parse(input);
+    try {
+      return await this.props.getTracker().createEpic(fields);
+    } catch (error) {
+      if (!TaskTrackerPartialWriteError.isPartialWrite(error)) throw error;
+      return {
+        status: "partial",
+        data: { id: error.id, title: fields.title, body: fields.body },
+        error: { name: error.name, message: error.message }
+      };
+    }
+  }
+  async editEpic(id, input) {
+    this.assertPortable(input.body, input.allowLocalPaths);
+    const fields = UpdateEpicInputSchema.parse(input);
+    try {
+      return await this.props.getTracker().updateEpicDescription(id, fields);
+    } catch (error) {
+      if (!TaskTrackerPartialWriteError.isPartialWrite(error)) throw error;
+      return {
+        status: "partial",
+        data: {
+          id,
+          ...fields.title === void 0 ? {} : { title: fields.title },
+          body: fields.body
+        },
+        error: { name: error.name, message: error.message }
+      };
+    }
+  }
+  async createInitiative(input) {
+    this.assertPortable(input.body, input.allowLocalPaths);
+    const fields = CreateInitiativeInputSchema.parse(input);
+    try {
+      return await this.props.getTracker().createInitiative(fields);
+    } catch (error) {
+      if (!TaskTrackerPartialWriteError.isPartialWrite(error)) throw error;
+      return {
+        status: "partial",
+        data: { id: error.id, title: fields.title, body: fields.body },
+        error: { name: error.name, message: error.message }
+      };
+    }
+  }
+  async editInitiative(id, input) {
+    this.assertPortable(input.body, input.allowLocalPaths);
+    const fields = UpdateInitiativeInputSchema.parse(input);
+    try {
+      return await this.props.getTracker().updateInitiativeDescription(id, fields);
+    } catch (error) {
+      if (!TaskTrackerPartialWriteError.isPartialWrite(error)) throw error;
+      return {
+        status: "partial",
+        data: {
+          id,
+          ...fields.title === void 0 ? {} : { title: fields.title },
+          body: fields.body
+        },
+        error: { name: error.name, message: error.message }
+      };
+    }
+  }
+  async createTicket(input) {
+    this.assertPortable(input.body, input.allowLocalPaths);
+    const fields = CreateTicketInputSchema.parse(input);
+    try {
+      return await this.props.getTracker().createTicket(fields);
+    } catch (error) {
+      if (!TaskTrackerPartialWriteError.isPartialWrite(error)) throw error;
+      return {
+        status: "partial",
+        data: { id: error.id, title: fields.title },
+        error: { name: error.name, message: error.message }
+      };
+    }
+  }
+  async editTicket(id, input) {
+    const specs = input.attach;
+    const safeSpecs = specs.map((spec) => {
+      const parsed = AttachmentSpecSchema.parse(spec);
+      return `${this.trustedFilePath(parsed.path)}#${parsed.caption}`;
+    });
+    const tracker = this.props.getTracker();
+    const evidence = new TrackerEvidenceService({ tracker });
+    let body = input.body;
+    let attachments = [];
+    if (safeSpecs.length > 0) {
+      body = evidence.prepareBody({ body, specs: safeSpecs });
+      this.assertPortable(body, input.allowLocalPaths);
+      try {
+        const result = await evidence.attach({
+          ticketId: id,
+          body: input.body,
+          specs: safeSpecs
+        });
+        body = result.body;
+        attachments = result.attachments;
+      } catch (error) {
+        if (!(error instanceof EvidenceUploadFailure) || error.attachments.length === 0) {
+          if (error instanceof EvidenceUploadFailure) throw error.cause;
+          throw error;
+        }
+        return {
+          status: "partial",
+          data: { id, attachments: error.attachments, body: input.body },
+          error: {
+            name: error.cause instanceof Error ? error.cause.name : "Error",
+            message: error.cause instanceof Error ? error.cause.message : String(error.cause)
+          }
+        };
+      }
+    } else {
+      this.assertPortable(body, input.allowLocalPaths);
+    }
+    try {
+      const fields = UpdateTicketInputSchema.parse(input);
+      return await tracker.updateTicketDescription(id, { ...fields, body });
+    } catch (error) {
+      if (attachments.length === 0 && !TaskTrackerPartialWriteError.isPartialWrite(error))
+        throw error;
+      return {
+        status: "partial",
+        data: { id, attachments, body },
+        error: {
+          name: error instanceof Error ? error.name : "Error",
+          message: error instanceof Error ? error.message : String(error)
+        }
+      };
+    }
+  }
+  async createTdd(input) {
+    this.assertPortable(input.body, input.allowLocalPaths);
+    const fields = CreateTechnicalDesignInputSchema.parse(input);
+    try {
+      return await this.props.getTracker().createTechnicalDesign(fields);
+    } catch (error) {
+      if (!TaskTrackerPartialWriteError.isPartialWrite(error)) throw error;
+      return {
+        status: "partial",
+        data: { id: error.id, epicId: fields.epicId, body: fields.body },
+        error: { name: error.name, message: error.message }
+      };
+    }
+  }
+  assertPortable(body, allowLocalPaths = false) {
+    portableContextGuard.assertPortable(body, { allowLocalPaths });
+  }
+  trustedFilePath(path) {
+    const absolute = isAbsolute4(path) ? path : resolve5(this.props.cwd, path);
+    if (!existsSync4(absolute)) throw new Error(`Attachment file does not exist: ${path}`);
+    const realPath = realpathSync3(absolute);
+    const stat = statSync4(realPath);
+    const contained = this.roots.some((root) => {
+      const fromRoot = relative3(root, realPath);
+      return fromRoot === "" || !fromRoot.startsWith("..") && !isAbsolute4(fromRoot);
+    });
+    if (!contained || !stat.isFile())
+      throw new Error(`Attachment file is outside trusted roots: ${path}`);
+    return realPath;
+  }
+};
 export {
   BlankQaRecipeError,
   CallerContextSchema,
@@ -1969,6 +3328,7 @@ export {
   CliRouteSchema,
   CommanderLocalDiscoveryCli,
   DefaultLocalDiscoveryOperations,
+  DefaultTrackerEntityOperations,
   DispatchOutcomeSchema,
   DispatchRequestSchema,
   DocOperation,

@@ -1,5 +1,7 @@
 import { createFlightRules, type FlightRules } from "../flight-rules/flight-rules.js";
 import { Command } from "commander";
+import { parse } from "node:path";
+import { configScopes } from "../shared/config-store.js";
 import { createDocCommand } from "../bundled-docs/commands/doc/command.js";
 import { DocOperation } from "../operations/doc-operation.js";
 import { DefaultLocalDiscoveryOperations } from "../operations/local-discovery-operations.js";
@@ -34,6 +36,9 @@ import { createPrCommand } from "../pr/commands/pr/command.js";
 import { appVersion } from "../version.js";
 import { createAgentsCommand } from "../plugins/commands/agents/command.js";
 import { cliRouteCoverage } from "../operations/cli-coverage.js";
+import { DefaultTrackerEntityOperations } from "../operations/tracker-entity-operations.js";
+import { createMcpCommand } from "../mcp/command.js";
+import { DefaultPrOperations } from "../operations/pr-operations.js";
 
 export function buildProgram(
   getTracker: (overrideTracker?: string) => TaskTracker,
@@ -43,6 +48,7 @@ export function buildProgram(
   services: Pick<
     FlightRules,
     | "git"
+    | "gitConfigOperations"
     | "probe"
     | "readiness"
     | "docs"
@@ -73,15 +79,6 @@ export function buildProgram(
   const config = (): Config => getConfig(overrideTracker);
   const prHost = (): PullRequestHost => getPrHost(overrideTracker);
 
-  program.addCommand(createEpicCommand(tracker, prHost, config));
-  program.addCommand(createInitiativeCommand(tracker, prHost, config));
-  program.addCommand(createTicketCommand(tracker));
-  program.addCommand(createTddCommand(tracker));
-  program.addCommand(createGitCommand(() => services.git()));
-  program.addCommand(createCommitMessageCommand());
-  program.addCommand(createBranchNameCommand());
-  program.addCommand(createPrCommand(prHost));
-  program.addCommand(createUsersCommand(tracker));
   program.addCommand(createAgentsCommand(() => services.installation()));
   const boardHooks = (): BoardHookKit =>
     new BoardHookKit({
@@ -115,12 +112,39 @@ export function buildProgram(
     operations: [
       docOperation,
       ...localOperations.operations(),
+      ...(
+        services.gitConfigOperations?.({
+          scopes: [...configScopes],
+          roots: [parse(launchCwd).root],
+        }) ??
+        createFlightRules({ cwd: launchCwd }).gitConfigOperations({
+          scopes: [...configScopes],
+          roots: [parse(launchCwd).root],
+        })
+      ).operations(),
       ...new DefaultReviewOperations({ cwd: launchCwd }).operations(),
+      ...new DefaultTrackerEntityOperations({
+        getTracker: tracker,
+        getPrHost: prHost,
+        getConfig: config,
+        cwd: launchCwd,
+      }).operations(),
+      ...new DefaultPrOperations({ cwd: launchCwd, getHost: prHost }).operations(),
     ],
-    policy: new LaunchOperationAccessPolicy({ allowedEffects: ["read", "process", "network"] }),
+    policy: new LaunchOperationAccessPolicy({
+      allowedEffects: ["read", "write", "process", "network"],
+    }),
   });
+  program.addCommand(createPrCommand(operationRegistry));
+  program.addCommand(createEpicCommand(tracker, prHost, config, operationRegistry));
+  program.addCommand(createInitiativeCommand(tracker, prHost, config, operationRegistry));
+  program.addCommand(createTicketCommand(tracker, operationRegistry));
+  program.addCommand(createTddCommand(tracker, operationRegistry));
+  program.addCommand(createUsersCommand(tracker, operationRegistry));
+  program.addCommand(createGitCommand(operationRegistry));
+  program.addCommand(createCommitMessageCommand(operationRegistry));
+  program.addCommand(createBranchNameCommand(operationRegistry));
   new CommanderLocalDiscoveryCli({
-    operations: localOperations,
     registry: operationRegistry,
   }).addTo(program);
   program.addCommand(
@@ -150,6 +174,7 @@ export function buildProgram(
     ),
   );
   program.addCommand(createPacketCommand(() => services.packets()));
+  program.addCommand(createMcpCommand());
   cliRouteCoverage.check(program, operationRegistry);
   return program;
 }
