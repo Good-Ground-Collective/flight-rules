@@ -182,18 +182,8 @@ export class ManifestCliRouteCoverage implements CliRouteCoverage {
 }
 
 const pendingRoutes = [
-  "charter",
-  "competencies",
-  "rfc dir",
-  "rfc next-id",
-  "qa instructions",
-  "qa evidence-dir",
-  "qa recipe",
-  "config path",
-  "config show",
   "config set",
   "config unset",
-  "check",
   "ticket get",
   "ticket transitions",
   "users get",
@@ -286,6 +276,22 @@ const excludedRoutes = [
 export const cliRouteCoverage: CliRouteCoverage = new ManifestCliRouteCoverage({
   entries: [
     { status: "supported", route: { path: ["doc"], aliases: [] }, operationId: "doc" },
+    ...[
+      ["charter", "charter"],
+      ["competencies", "competencies"],
+      ["rfc dir", "rfc-dir"],
+      ["rfc next-id", "rfc-next-id"],
+      ["qa instructions", "qa-instructions"],
+      ["qa evidence-dir", "qa-evidence-dir"],
+      ["qa recipe", "qa-recipe"],
+      ["config path", "config-path"],
+      ["config show", "config-show"],
+      ["check", "check"],
+    ].map(([path, operationId]) => ({
+      status: "supported" as const,
+      route: { path: (path ?? "").split(" "), aliases: [] },
+      operationId: operationId ?? "",
+    })),
     ...pendingRoutes.map((path) => ({
       status: "pending-migration" as const,
       route: { path: path.split(" "), aliases: [] },
