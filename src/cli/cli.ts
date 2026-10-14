@@ -31,6 +31,7 @@ import type { PullRequestHost } from "../pr/pull-request-host/pull-request-host.
 import { createPrCommand } from "../pr/commands/pr/command.js";
 import { appVersion } from "../version.js";
 import { createAgentsCommand } from "../plugins/commands/agents/command.js";
+import { cliRouteCoverage } from "../operations/cli-coverage.js";
 
 export function buildProgram(
   getTracker: (overrideTracker?: string) => TaskTracker,
@@ -113,6 +114,7 @@ export function buildProgram(
     ),
   );
   program.addCommand(createPacketCommand(() => services.packets()));
+  cliRouteCoverage.check(program);
   return program;
 }
 

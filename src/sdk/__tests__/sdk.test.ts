@@ -18,6 +18,7 @@ import {
   UnknownInstructionError,
 } from "../instruction-catalog.js";
 import { InvalidWorkerReportError, ReportModeSchema, WorkerReportCodec } from "../report-codec.js";
+import { DocOperation, OperationRegistry } from "../index.js";
 
 const temporaryRoots: string[] = [];
 const makeRoot = (): string => {
@@ -31,6 +32,11 @@ afterEach(() => {
 });
 
 describe("neutral SDK instruction catalog", () => {
+  it("exports provider-free operation contracts for programmatic callers", () => {
+    expect(typeof OperationRegistry).toBe("function");
+    expect(new DocOperation({ getResolver: () => ({ list: () => [], resolve: id => ({ id, path: `/docs/${id}.md`, contents: "Doc" }) }) }).id).toBe("doc");
+  });
+
   it("lists canonical skills and all named agent variants with unchanged prompt bodies", () => {
     expect(instructionCatalog.listSkills()).toContain("execute-work");
     expect(instructionCatalog.listAgents()).toEqual([

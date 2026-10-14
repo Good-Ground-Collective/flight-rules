@@ -45,6 +45,27 @@ import type {
   SiblingSkillRequest,
 } from "../orchestration/orchestration.schema.js";
 
+export {
+  OperationRegistry,
+  LaunchOperationAccessPolicy,
+  OperationInputError,
+  OperationOutputError,
+  OperationAccessDeniedError,
+  UnknownOperationError,
+} from "../operations/operation-registry.js";
+export type { OperationDescriptor, OperationAccessPolicy, OperationHandlerResult } from "../operations/operation-registry.js";
+export {
+  OperationEffectSchema,
+  OperationIdSchema,
+  CliRouteSchema,
+  OperationEnvelopeSchema,
+  OperationErrorSchema,
+} from "../operations/operation.schema.js";
+export type { OperationEffect, OperationEnvelope, CliRoute } from "../operations/operation.schema.js";
+export { DocOperation, DocOperationInputSchema, DocOperationOutputSchema } from "../operations/doc-operation.js";
+export { CliRouteCoverage, CliRouteCoverageError, cliRouteCoverage } from "../operations/cli-coverage.js";
+export type { RouteDisposition } from "../operations/cli-coverage.js";
+
 export interface OrderedDispatch<T> {
   index: number;
   request: DispatchRequest;
