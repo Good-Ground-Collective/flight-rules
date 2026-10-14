@@ -1852,10 +1852,6 @@ var pendingRoutes = [
   "ticket status",
   "ticket comment",
   "ticket label",
-  "pr create",
-  "pr comment",
-  "pr list",
-  "pr request-review",
   "board post heartbeat",
   "board post item",
   "board post activity",
@@ -1953,7 +1949,11 @@ var cliRouteCoverage = new ManifestCliRouteCoverage({
       ["review render", "review-render"],
       ["review state", "review-state"],
       ["review context", "review-context"],
-      ["review plan", "review-plan"]
+      ["review plan", "review-plan"],
+      ["pr create", "pr-create"],
+      ["pr comment", "pr-comment"],
+      ["pr list", "pr-list"],
+      ["pr request-review", "pr-request-review"]
     ].map(([path, operationId]) => ({
       status: "supported",
       route: { path: (path ?? "").split(" "), aliases: [] },

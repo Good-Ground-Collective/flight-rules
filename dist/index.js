@@ -298,7 +298,11 @@ var pullRequestBuilder = new DefaultPullRequestBuilder();
 
 // src/pr/pull-request-host/gh-pull-request-host.ts
 var GhPullRequestHostPropsSchema = z5.object({
-  repo: z5.string().regex(/^[^/\s]+\/[^/\s]+$/, 'expected "owner/repo"')
+  repo: z5.string().regex(/^[^/\s]+\/[^/\s]+$/, 'expected "owner/repo"'),
+  cwd: z5.string().min(1).optional(),
+  env: z5.custom(
+    (value) => typeof value === "object" && value !== null && !Array.isArray(value)
+  ).optional()
 });
 var GhPullRequestListSchema = z5.array(
   z5.object({
@@ -325,7 +329,9 @@ var GhPullRequestHost = class {
     this.repo = parsed.repo;
     this.builder = props.builder ?? new DefaultPullRequestBuilder();
     const promisified = promisify2(execFile2);
-    this.execFile = props.execFileFn ?? ((file, args) => promisified(file, [...args]));
+    const cwd = parsed.cwd ?? process.cwd();
+    const env = { ...props.env ?? process.env };
+    this.execFile = props.execFileFn ?? ((file, args) => promisified(file, [...args], { cwd, env }));
   }
   async createPullRequest(input, options) {
     const template = PullRequestTemplateSchema.parse(input);
@@ -1282,7 +1288,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.89.0";
+var appVersion = false ? "0.0.0-dev" : "1.90.0";
 
 // src/shared/ariadne/review-packet.schema.ts
 import { z as z14 } from "zod";
@@ -9079,6 +9085,7 @@ var DefaultTrackerEntityOperations = class {
 var DefaultFlightRules = class {
   cwd;
   env;
+  launchEnv;
   gitEnv;
   explicitConfigPath;
   hostSettings;
@@ -9092,6 +9099,7 @@ var DefaultFlightRules = class {
     });
     this.cwd = resolve9(parsed.cwd ?? process.cwd());
     this.env = props.env ?? process.env;
+    this.launchEnv = { ...props.env ?? process.env };
     this.gitEnv = { ...props.env ?? process.env };
     this.explicitConfigPath = parsed.configPath;
     this.hostSettings = props.hostSettings;
@@ -9177,7 +9185,7 @@ var DefaultFlightRules = class {
     if (config.repo === void 0) {
       throw new Error("repo (owner/repo) is required in config to create pull requests");
     }
-    return new GhPullRequestHost({ repo: config.repo });
+    return new GhPullRequestHost({ repo: config.repo, cwd: this.cwd, env: this.launchEnv });
   }
   git() {
     return new NodeGitExecutor({ cwd: this.cwd, env: this.gitEnv });

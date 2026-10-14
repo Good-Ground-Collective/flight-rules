@@ -15772,7 +15772,7 @@ var recursive = /* @__PURE__ */ new WeakMap();
 var NONE = 0;
 var ASSUMED = 1;
 var PROVEN = 2;
-function isRecursive(inst, stack, resolve13) {
+function isRecursive(inst, stack, resolve14) {
   const cached2 = recursive.get(inst);
   if (cached2 !== void 0)
     return cached2 ? PROVEN : NONE;
@@ -15782,7 +15782,7 @@ function isRecursive(inst, stack, resolve13) {
   let result = NONE;
   const check2 = (child) => {
     if (result !== PROVEN && child?._zod) {
-      const answer = isRecursive(child, stack, resolve13);
+      const answer = isRecursive(child, stack, resolve14);
       if (answer > result)
         result = answer;
     }
@@ -15793,7 +15793,7 @@ function isRecursive(inst, stack, resolve13) {
       const desc = Object.getOwnPropertyDescriptor(sh, key);
       if (spread && !desc.enumerable)
         continue;
-      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve13) : NONE;
+      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve14) : NONE;
       if (child > answer)
         answer = child;
     }
@@ -15860,7 +15860,7 @@ function isRecursive(inst, stack, resolve13) {
       break;
     // `$ZodLazy` caches its inner on the def, so a resolved edge is followed exactly
     case "lazy": {
-      const inner = def._cachedInner ?? (resolve13 ? inst._zod.innerType : void 0);
+      const inner = def._cachedInner ?? (resolve14 ? inst._zod.innerType : void 0);
       merge3(inner ? isRecursive(inner, stack, false) : ASSUMED);
       break;
     }
@@ -30707,7 +30707,11 @@ var pullRequestBuilder = new DefaultPullRequestBuilder();
 
 // src/pr/pull-request-host/gh-pull-request-host.ts
 var GhPullRequestHostPropsSchema = external_exports.object({
-  repo: external_exports.string().regex(/^[^/\s]+\/[^/\s]+$/, 'expected "owner/repo"')
+  repo: external_exports.string().regex(/^[^/\s]+\/[^/\s]+$/, 'expected "owner/repo"'),
+  cwd: external_exports.string().min(1).optional(),
+  env: external_exports.custom(
+    (value) => typeof value === "object" && value !== null && !Array.isArray(value)
+  ).optional()
 });
 var GhPullRequestListSchema = external_exports.array(
   external_exports.object({
@@ -30734,7 +30738,9 @@ var GhPullRequestHost = class {
     this.repo = parsed.repo;
     this.builder = props.builder ?? new DefaultPullRequestBuilder();
     const promisified = promisify2(execFile2);
-    this.execFile = props.execFileFn ?? ((file2, args) => promisified(file2, [...args]));
+    const cwd = parsed.cwd ?? process.cwd();
+    const env = { ...props.env ?? process.env };
+    this.execFile = props.execFileFn ?? ((file2, args) => promisified(file2, [...args], { cwd, env }));
   }
   async createPullRequest(input2, options) {
     const template = PullRequestTemplateSchema.parse(input2);
@@ -31678,7 +31684,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.89.0";
+var appVersion = false ? "0.0.0-dev" : "1.90.0";
 
 // src/shared/ariadne/review-packet.schema.ts
 var packetLimits = {
@@ -37714,7 +37720,7 @@ var JiraClient = class {
       const retryAfterSeconds = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : defaultRetryAfterSeconds;
       const jitter = 0.7 + Math.random() * 0.6;
       const delayMs = Math.min(retryAfterSeconds * 1e3 * jitter, maxBackoffMs);
-      await new Promise((resolve13) => setTimeout(resolve13, delayMs));
+      await new Promise((resolve14) => setTimeout(resolve14, delayMs));
       return this.fetchWithRetry(url2, init, attempt + 1);
     }
     return res;
@@ -37766,7 +37772,7 @@ var ConfluenceClient = class {
       const retryAfterSeconds = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : defaultRetryAfterSeconds2;
       const jitter = 0.7 + Math.random() * 0.6;
       const delayMs = Math.min(retryAfterSeconds * 1e3 * jitter, maxBackoffMs2);
-      await new Promise((resolve13) => setTimeout(resolve13, delayMs));
+      await new Promise((resolve14) => setTimeout(resolve14, delayMs));
       return this.fetchWithRetry(url2, init, attempt + 1);
     }
     return res;
@@ -40374,10 +40380,10 @@ function resolveAll(constructs2, events, context) {
   const called = [];
   let index2 = -1;
   while (++index2 < constructs2.length) {
-    const resolve13 = constructs2[index2].resolveAll;
-    if (resolve13 && !called.includes(resolve13)) {
-      events = resolve13(events, context);
-      called.push(resolve13);
+    const resolve14 = constructs2[index2].resolveAll;
+    if (resolve14 && !called.includes(resolve14)) {
+      events = resolve14(events, context);
+      called.push(resolve14);
     }
   }
   return events;
@@ -52457,6 +52463,7 @@ var DefaultTrackerEntityOperations = class {
 var DefaultFlightRules = class {
   cwd;
   env;
+  launchEnv;
   gitEnv;
   explicitConfigPath;
   hostSettings;
@@ -52470,6 +52477,7 @@ var DefaultFlightRules = class {
     });
     this.cwd = resolve9(parsed.cwd ?? process.cwd());
     this.env = props.env ?? process.env;
+    this.launchEnv = { ...props.env ?? process.env };
     this.gitEnv = { ...props.env ?? process.env };
     this.explicitConfigPath = parsed.configPath;
     this.hostSettings = props.hostSettings;
@@ -52555,7 +52563,7 @@ var DefaultFlightRules = class {
     if (config2.repo === void 0) {
       throw new Error("repo (owner/repo) is required in config to create pull requests");
     }
-    return new GhPullRequestHost({ repo: config2.repo });
+    return new GhPullRequestHost({ repo: config2.repo, cwd: this.cwd, env: this.launchEnv });
   }
   git() {
     return new NodeGitExecutor({ cwd: this.cwd, env: this.gitEnv });
@@ -53079,7 +53087,7 @@ var HiddenPrompt = class {
     const muted = new Writable({ write: (_chunk, _encoding, done) => done() });
     const prompt = createInterface({ input: process.stdin, output: muted, terminal: true });
     try {
-      return await new Promise((resolve13) => prompt.once("line", resolve13));
+      return await new Promise((resolve14) => prompt.once("line", resolve14));
     } finally {
       prompt.close();
       process.stderr.write("\n");
@@ -54539,45 +54547,76 @@ function createBranchNameCommand(registry2) {
 }
 
 // src/pr/commands/pr/command.ts
-function createPrCommand(getHost) {
-  const pr = new Command("pr");
-  pr.command("create").exitOverride().requiredOption("--type <type>", "conventional commit type").requiredOption("--scope <scope>", "conventional commit scope").requiredOption("--description <description>", "PR title description").requiredOption("--why <why>", 'the "Why Was It Changed" prose section').requiredOption("--what <what>", 'a "What Was Changed" bullet (repeatable, 1-5)', collect, []).requiredOption("--base <base>", "base branch to merge into").requiredOption("--head <head>", "head branch to merge from").option("--ots <markdown>", 'the "OTS Materials" block (raw markdown/JSON)').option("--ticket-id <id>", "tracker ticket id").option("--ticket-url <url>", "tracker ticket url").option("--reviewer <reviewer>", "reviewer to request (repeatable)", collect, []).option("--label <label>", "label to apply (repeatable)", collect, []).option("--attach <spec>", "file to attach, as <path>#<caption> (repeatable)", collect, []).action(async (opts) => {
-    const template = PullRequestTemplateSchema.parse({
-      type: opts.type,
-      scope: opts.scope,
-      description: opts.description,
-      whatWasChanged: opts.what,
-      whyWasItChanged: opts.why,
-      baseBranch: opts.base,
-      headBranch: opts.head,
-      ...opts.ots !== void 0 ? { otsMaterials: opts.ots } : {},
-      ...opts.ticketId !== void 0 ? { ticketId: opts.ticketId } : {},
-      ...opts.ticketUrl !== void 0 ? { ticketUrl: opts.ticketUrl } : {},
-      reviewers: opts.reviewer,
-      labels: opts.label
+var propsSchema3 = external_exports.strictObject({
+  registry: external_exports.custom(
+    (value) => typeof value === "object" && value !== null && "invoke" in value
+  )
+});
+var CommanderPrCommand = class {
+  registry;
+  constructor(props) {
+    this.registry = propsSchema3.parse(props).registry;
+  }
+  create() {
+    const pr = new Command("pr");
+    pr.command("create").exitOverride().requiredOption("--type <type>", "conventional commit type").requiredOption("--scope <scope>", "conventional commit scope").requiredOption("--description <description>", "PR title description").requiredOption("--why <why>", 'the "Why Was It Changed" prose section').requiredOption("--what <what>", 'a "What Was Changed" bullet (repeatable, 1-5)', collect, []).requiredOption("--base <base>", "base branch to merge into").requiredOption("--head <head>", "head branch to merge from").option("--ots <markdown>", 'the "OTS Materials" block (raw markdown/JSON)').option("--ticket-id <id>", "tracker ticket id").option("--ticket-url <url>", "tracker ticket url").option("--reviewer <reviewer>", "reviewer to request (repeatable)", collect, []).option("--label <label>", "label to apply (repeatable)", collect, []).option("--attach <spec>", "file to attach, as <path>#<caption> (repeatable)", collect, []).action(async (opts, command) => {
+      await this.invokeAndPrint("pr-create", {
+        type: opts.type,
+        scope: opts.scope,
+        description: opts.description,
+        why: opts.why,
+        what: opts.what,
+        ...opts.ots === void 0 ? {} : { ots: opts.ots },
+        base: opts.base,
+        head: opts.head,
+        ...opts.ticketId === void 0 ? {} : { ticketId: opts.ticketId },
+        ...opts.ticketUrl === void 0 ? {} : { ticketUrl: opts.ticketUrl },
+        reviewer: opts.reviewer,
+        label: opts.label,
+        attach: opts.attach
+      }, command);
     });
-    const created = await getHost().createPullRequest(template, { attach: opts.attach });
-    process.stdout.write(JSON.stringify(created) + "\n");
-  });
-  pr.command("comment").exitOverride().argument("<number>", "pull request number", (value) => decimalIntegers.positive(value)).option("--body <body>", "comment body (or use --body-file)").option("--body-file <path>", "read the comment body from a file").option("--attach <spec>", "file to attach, as <path>#<caption> (repeatable)", collect, []).action(async (number4, opts) => {
-    const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
-    const result = await getHost().commentOnPullRequest(number4, body, { attach: opts.attach });
-    process.stdout.write(JSON.stringify(result) + "\n");
-  });
-  pr.command("list").exitOverride().option("--ticket <id>", "ticket id (repeatable, required)", collect, []).action(async (opts, command) => {
-    if (opts.ticket.length === 0) command.error("pr list needs at least one --ticket <id>");
-    const matches = await getHost().listOpenPullRequestsForTickets(opts.ticket);
-    process.stdout.write(JSON.stringify(matches) + "\n");
-  });
-  pr.command("request-review").exitOverride().argument("<number>", "pull request number", (value) => decimalIntegers.positive(value)).option("--reviewer <login>", "reviewer to request (repeatable, required)", collect, []).action(async (number4, opts, command) => {
-    if (opts.reviewer.length === 0) command.error("pr request-review needs at least one --reviewer <login>");
-    const result = await getHost().requestReviewers(number4, opts.reviewer);
-    process.stdout.write(JSON.stringify(result) + "\n");
-    if (result.failed.length > 0) {
-      throw new Error(`reviewer request failed for: ${result.failed.map((f) => f.login).join(", ")}`);
+    pr.command("comment").exitOverride().argument("<number>", "pull request number", (value) => decimalIntegers.positive(value)).option("--body <body>", "comment body (or use --body-file)").option("--body-file <path>", "read the comment body from a file").option("--attach <spec>", "file to attach, as <path>#<caption> (repeatable)", collect, []).action(async (number4, opts, command) => {
+      const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
+      await this.invokeAndPrint("pr-comment", { number: number4, body, attach: opts.attach }, command);
+    });
+    pr.command("list").exitOverride().option("--ticket <id>", "ticket id (repeatable, required)", collect, []).action(async (opts, command) => {
+      await this.invokeAndPrint("pr-list", { ticket: opts.ticket }, command);
+    });
+    pr.command("request-review").exitOverride().argument("<number>", "pull request number", (value) => decimalIntegers.positive(value)).option("--reviewer <login>", "reviewer to request (repeatable, required)", collect, []).action(async (number4, opts, command) => {
+      await this.invokeAndPrint("pr-request-review", { number: number4, reviewer: opts.reviewer }, command);
+    });
+    return pr;
+  }
+  async invokeAndPrint(id, input2, command) {
+    let envelope;
+    try {
+      envelope = await this.registry.invoke(id, input2);
+    } catch (error62) {
+      if (error62 instanceof OperationInputError) command.error(error62.message);
+      throw error62;
     }
-  });
-  return pr;
+    if (envelope.status === "error") {
+      if (envelope.error.name === "OperationInputError") command.error(envelope.error.message);
+      throw new OperationCliError({
+        operationId: id,
+        errorName: envelope.error.name,
+        message: envelope.error.message
+      });
+    }
+    process.stdout.write(`${JSON.stringify(envelope.data)}
+`);
+    if (envelope.status === "partial") {
+      throw new OperationCliError({
+        operationId: id,
+        errorName: envelope.error.name,
+        message: envelope.error.message
+      });
+    }
+  }
+};
+function createPrCommand(registry2) {
+  return new CommanderPrCommand({ registry: registry2 }).create();
 }
 
 // src/plugins/commands/agents/command.ts
@@ -54731,10 +54770,6 @@ var pendingRoutes = [
   "ticket status",
   "ticket comment",
   "ticket label",
-  "pr create",
-  "pr comment",
-  "pr list",
-  "pr request-review",
   "board post heartbeat",
   "board post item",
   "board post activity",
@@ -54832,7 +54867,11 @@ var cliRouteCoverage = new ManifestCliRouteCoverage({
       ["review render", "review-render"],
       ["review state", "review-state"],
       ["review context", "review-context"],
-      ["review plan", "review-plan"]
+      ["review plan", "review-plan"],
+      ["pr create", "pr-create"],
+      ["pr comment", "pr-comment"],
+      ["pr list", "pr-list"],
+      ["pr request-review", "pr-request-review"]
     ].map(([path3, operationId]) => ({
       status: "supported",
       route: { path: (path3 ?? "").split(" "), aliases: [] },
@@ -59277,14 +59316,14 @@ function inputRequiredRoundsExceededMessage(method, maxRounds) {
   return `Multi-round-trip request '${method}' still required input after ${maxRounds} rounds (inputRequired.maxRounds)`;
 }
 function sleep(ms, signal) {
-  return new Promise((resolve13, reject) => {
+  return new Promise((resolve14, reject) => {
     if (signal?.aborted) {
       reject(signal.reason instanceof SdkError ? signal.reason : new SdkError(SdkErrorCode.RequestTimeout, String(signal.reason)));
       return;
     }
     const timer = setTimeout(() => {
       signal?.removeEventListener("abort", onAbort);
-      resolve13();
+      resolve14();
     }, ms);
     const onAbort = () => {
       clearTimeout(timer);
@@ -60083,7 +60122,7 @@ var Protocol = class {
     const flowStartedAt = Date.now();
     let onAbort;
     let cleanupMessageId;
-    return new Promise((resolve13, reject) => {
+    return new Promise((resolve14, reject) => {
       const earlyReject = (error62) => {
         reject(error62);
       };
@@ -60152,7 +60191,7 @@ var Protocol = class {
         }
         if (decoded.kind === "invalid") return reject(decoded.error);
         if (decoded.kind === "input_required") {
-          if (options?.allowInputRequired === true) return resolve13(manualInputRequiredValue(decoded));
+          if (options?.allowInputRequired === true) return resolve14(manualInputRequiredValue(decoded));
           const flow3 = {
             codec: codec2,
             request: request2,
@@ -60164,11 +60203,11 @@ var Protocol = class {
               params
             }, resultSchema, legOptions)
           };
-          return resolve13(this._resolveNonCompleteResult(decoded, flow3));
+          return resolve14(this._resolveNonCompleteResult(decoded, flow3));
         }
         const result = decoded.result;
         validateStandardSchema(resultSchema, result).then((parseResult) => {
-          if (parseResult.success) resolve13(parseResult.data);
+          if (parseResult.success) resolve14(parseResult.data);
           else reject(new SdkError(SdkErrorCode.InvalidResult, `Invalid result for ${request2.method}: ${parseResult.error}`));
         }, reject);
       });
@@ -63084,7 +63123,7 @@ var require_compile = /* @__PURE__ */ __commonJSMin(((exports) => {
     ref = (0, resolve_1.resolveUrl)(this.opts.uriResolver, baseId, ref);
     const schOrFunc = root.refs[ref];
     if (schOrFunc) return schOrFunc;
-    let _sch = resolve13.call(this, root, ref);
+    let _sch = resolve14.call(this, root, ref);
     if (_sch === void 0) {
       const schema = (_a3 = root.localRefs) === null || _a3 === void 0 ? void 0 : _a3[ref];
       const { schemaId } = this.opts;
@@ -63110,7 +63149,7 @@ var require_compile = /* @__PURE__ */ __commonJSMin(((exports) => {
   function sameSchemaEnv(s1, s2) {
     return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
   }
-  function resolve13(root, ref) {
+  function resolve14(root, ref) {
     let sch;
     while (typeof (sch = this.refs[ref]) == "string") ref = sch;
     return sch || this.schemas[ref] || resolveSchema.call(this, root, ref);
@@ -63560,47 +63599,47 @@ var require_fast_uri = /* @__PURE__ */ __commonJSMin(((exports, module) => {
     else if (typeof uri === "object") uri = parse8(serialize(uri, options), options);
     return uri;
   }
-  function resolve13(baseURI, relativeURI, options) {
+  function resolve14(baseURI, relativeURI, options) {
     const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
     const resolved = resolveComponent(parse8(baseURI, schemelessOptions), parse8(relativeURI, schemelessOptions), schemelessOptions, true);
     schemelessOptions.skipEscape = true;
     return serialize(resolved, schemelessOptions);
   }
-  function resolveComponent(base, relative7, options, skipNormalization) {
+  function resolveComponent(base, relative8, options, skipNormalization) {
     const target = {};
     if (!skipNormalization) {
       base = parse8(serialize(base, options), options);
-      relative7 = parse8(serialize(relative7, options), options);
+      relative8 = parse8(serialize(relative8, options), options);
     }
     options = options || {};
-    if (!options.tolerant && relative7.scheme) {
-      target.scheme = relative7.scheme;
-      target.userinfo = relative7.userinfo;
-      target.host = relative7.host;
-      target.port = relative7.port;
-      target.path = removeDotSegments(relative7.path || "");
-      target.query = relative7.query;
+    if (!options.tolerant && relative8.scheme) {
+      target.scheme = relative8.scheme;
+      target.userinfo = relative8.userinfo;
+      target.host = relative8.host;
+      target.port = relative8.port;
+      target.path = removeDotSegments(relative8.path || "");
+      target.query = relative8.query;
     } else {
-      if (relative7.userinfo !== void 0 || relative7.host !== void 0 || relative7.port !== void 0) {
-        target.userinfo = relative7.userinfo;
-        target.host = relative7.host;
-        target.port = relative7.port;
-        target.path = removeDotSegments(relative7.path || "");
-        target.query = relative7.query;
+      if (relative8.userinfo !== void 0 || relative8.host !== void 0 || relative8.port !== void 0) {
+        target.userinfo = relative8.userinfo;
+        target.host = relative8.host;
+        target.port = relative8.port;
+        target.path = removeDotSegments(relative8.path || "");
+        target.query = relative8.query;
       } else {
-        if (!relative7.path) {
+        if (!relative8.path) {
           target.path = base.path;
-          if (relative7.query !== void 0) target.query = relative7.query;
+          if (relative8.query !== void 0) target.query = relative8.query;
           else target.query = base.query;
         } else {
-          if (relative7.path[0] === "/") target.path = removeDotSegments(relative7.path);
+          if (relative8.path[0] === "/") target.path = removeDotSegments(relative8.path);
           else {
-            if ((base.userinfo !== void 0 || base.host !== void 0 || base.port !== void 0) && !base.path) target.path = "/" + relative7.path;
-            else if (!base.path) target.path = relative7.path;
-            else target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative7.path;
+            if ((base.userinfo !== void 0 || base.host !== void 0 || base.port !== void 0) && !base.path) target.path = "/" + relative8.path;
+            else if (!base.path) target.path = relative8.path;
+            else target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative8.path;
             target.path = removeDotSegments(target.path);
           }
-          target.query = relative7.query;
+          target.query = relative8.query;
         }
         target.userinfo = base.userinfo;
         target.host = base.host;
@@ -63608,7 +63647,7 @@ var require_fast_uri = /* @__PURE__ */ __commonJSMin(((exports, module) => {
       }
       target.scheme = base.scheme;
     }
-    target.fragment = relative7.fragment;
+    target.fragment = relative8.fragment;
     return target;
   }
   function equal(uriA, uriB, options) {
@@ -63734,7 +63773,7 @@ var require_fast_uri = /* @__PURE__ */ __commonJSMin(((exports, module) => {
   const fastUri = {
     SCHEMES,
     normalize,
-    resolve: resolve13,
+    resolve: resolve14,
     resolveComponent,
     equal,
     serialize,
@@ -65233,8 +65272,8 @@ var require_additionalProperties = /* @__PURE__ */ __commonJSMin(((exports) => {
       function isAdditional(key) {
         let definedProp;
         if (props.length > 8) {
-          const propsSchema3 = (0, util_1.schemaRefOrVal)(it, parentSchema.properties, "properties");
-          definedProp = (0, code_1.isOwnProperty)(gen, propsSchema3, key);
+          const propsSchema5 = (0, util_1.schemaRefOrVal)(it, parentSchema.properties, "properties");
+          definedProp = (0, code_1.isOwnProperty)(gen, propsSchema5, key);
         } else if (props.length) definedProp = (0, codegen_1.or)(...props.map((p) => (0, codegen_1._)`${key} === ${p}`));
         else definedProp = codegen_1.nil;
         if (patProps.length) definedProp = (0, codegen_1.or)(definedProp, ...patProps.map((p) => (0, codegen_1._)`${(0, code_1.usePattern)(cxt, p)}.test(${key})`));
@@ -69196,7 +69235,7 @@ var StdioServerTransport = class {
   }
   send(message) {
     if (this._closed) return Promise.reject(/* @__PURE__ */ new Error("StdioServerTransport is closed"));
-    return new Promise((resolve13, reject) => {
+    return new Promise((resolve14, reject) => {
       const json2 = serializeMessage(message);
       let settled = false;
       const onError = (error62) => {
@@ -69211,14 +69250,14 @@ var StdioServerTransport = class {
         settled = true;
         this._stdout.off("error", onError);
         this._stdout.off("drain", onDrain);
-        resolve13();
+        resolve14();
       };
       this._stdout.once("error", onError);
       if (this._stdout.write(json2)) {
         if (settled) return;
         settled = true;
         this._stdout.off("error", onError);
-        resolve13();
+        resolve14();
       } else if (!settled) this._stdout.once("drain", onDrain);
     });
   }
@@ -69272,14 +69311,14 @@ var StdioConnectionChannel = class {
   */
   async whenRequestsAnswered(timeoutMs) {
     if (this._closed || this._pendingRequests.size === 0) return true;
-    return await new Promise((resolve13) => {
+    return await new Promise((resolve14) => {
       const waiter = () => {
         clearTimeout(timer);
-        resolve13(true);
+        resolve14(true);
       };
       const timer = setTimeout(() => {
         this._drainWaiters = this._drainWaiters.filter((pending) => pending !== waiter);
-        resolve13(false);
+        resolve14(false);
       }, timeoutMs);
       this._drainWaiters.push(waiter);
     });
@@ -69621,15 +69660,161 @@ function toError(value) {
 }
 
 // src/mcp/mcp-server.ts
-import { existsSync as existsSync15, readFileSync as readFileSync23, realpathSync as realpathSync8, statSync as statSync7 } from "node:fs";
-import { dirname as dirname16, isAbsolute as isAbsolute7, relative as relative6, resolve as resolve12, sep as sep6 } from "node:path";
+import { existsSync as existsSync15, readFileSync as readFileSync23, realpathSync as realpathSync9, statSync as statSync8 } from "node:fs";
+import { dirname as dirname16, isAbsolute as isAbsolute8, relative as relative7, resolve as resolve13, sep as sep6 } from "node:path";
 
 // node_modules/@modelcontextprotocol/server/dist/index.mjs
 var DEFAULT_MAX_REQUEST_BODY_SIZE = 4 * 1024 * 1024;
 
+// src/operations/pr-operations.ts
+import { realpathSync as realpathSync7, statSync as statSync6 } from "node:fs";
+import { isAbsolute as isAbsolute6, relative as relative5, resolve as resolve11 } from "node:path";
+var propsSchema4 = external_exports.strictObject({
+  cwd: external_exports.string().min(1),
+  getHost: external_exports.custom((value) => typeof value === "function")
+});
+var createInput = external_exports.strictObject({
+  type: SemanticTypeSchema,
+  scope: external_exports.string().min(1),
+  description: external_exports.string().min(1),
+  why: external_exports.string().min(1),
+  what: external_exports.array(external_exports.string().min(1).max(256)).min(1).max(5),
+  ots: external_exports.string().min(1).optional(),
+  base: external_exports.string().min(1),
+  head: external_exports.string().min(1),
+  ticketId: external_exports.string().min(1).optional(),
+  ticketUrl: external_exports.url().optional(),
+  reviewer: external_exports.array(external_exports.string()).default([]),
+  label: external_exports.array(external_exports.string()).default([]),
+  attach: external_exports.array(external_exports.string()).default([])
+});
+var commentInput = external_exports.strictObject({
+  number: external_exports.number().int().positive(),
+  body: external_exports.string(),
+  attach: external_exports.array(external_exports.string()).default([])
+});
+var listInput = external_exports.strictObject({ ticket: external_exports.array(external_exports.string().min(1)).min(1) });
+var reviewInput2 = external_exports.strictObject({
+  number: external_exports.number().int().positive(),
+  reviewer: external_exports.array(external_exports.string().min(1)).min(1)
+});
+var createdSchema = external_exports.object({ number: external_exports.number().int().positive(), url: external_exports.string().url() });
+var commentResultSchema = external_exports.object({ url: external_exports.string() });
+var openPullRequestSchema = external_exports.object({
+  ticket: external_exports.string(),
+  number: external_exports.number(),
+  url: external_exports.string(),
+  headRefName: external_exports.string(),
+  baseRefName: external_exports.string(),
+  title: external_exports.string()
+});
+var reviewerResultSchema = external_exports.object({
+  number: external_exports.number().int().positive(),
+  requested: external_exports.array(external_exports.string()),
+  failed: external_exports.array(external_exports.object({ login: external_exports.string(), error: external_exports.string() }))
+});
+var PullRequestAttachmentPathError = class extends Error {
+  name = "PullRequestAttachmentPathError";
+};
+var DefaultPrOperations = class {
+  cwd;
+  launchRoot;
+  launchDevice;
+  launchInode;
+  getHost;
+  constructor(props) {
+    const parsed = propsSchema4.parse(props);
+    this.cwd = resolve11(parsed.cwd);
+    this.launchRoot = realpathSync7(this.cwd);
+    const launchStat = statSync6(this.launchRoot);
+    this.launchDevice = launchStat.dev;
+    this.launchInode = launchStat.ino;
+    this.getHost = parsed.getHost;
+  }
+  operations() {
+    const effects = ["write", "network", "process"];
+    return [
+      this.descriptor("pr-create", "Create a pull request from the validated PR template.", ["write", "network", "process"], ["pr", "create"], createInput, createdSchema, async (input2) => {
+        const template = PullRequestTemplateSchema.parse({
+          type: input2.type,
+          scope: input2.scope,
+          description: input2.description,
+          whyWasItChanged: input2.why,
+          whatWasChanged: input2.what,
+          baseBranch: input2.base,
+          headBranch: input2.head,
+          ...input2.ots === void 0 ? {} : { otsMaterials: input2.ots },
+          ...input2.ticketId === void 0 ? {} : { ticketId: input2.ticketId },
+          ...input2.ticketUrl === void 0 ? {} : { ticketUrl: input2.ticketUrl },
+          reviewers: input2.reviewer,
+          labels: input2.label
+        });
+        this.validateAttachments(input2.attach);
+        return this.getHost().createPullRequest(template, { attach: input2.attach });
+      }),
+      this.descriptor("pr-comment", "Post a comment on a pull request.", effects, ["pr", "comment"], commentInput, commentResultSchema, (input2) => {
+        this.validateAttachments(input2.attach);
+        return this.getHost().commentOnPullRequest(input2.number, input2.body, { attach: input2.attach });
+      }),
+      this.descriptor("pr-list", "List open pull requests matched to ticket identifiers.", ["read", "network", "process"], ["pr", "list"], listInput, external_exports.array(openPullRequestSchema), (input2) => this.getHost().listOpenPullRequestsForTickets(input2.ticket)),
+      this.descriptor("pr-request-review", "Request reviewers for a pull request and preserve each outcome.", effects, ["pr", "request-review"], reviewInput2, reviewerResultSchema, async (input2) => {
+        const result = await this.getHost().requestReviewers(input2.number, input2.reviewer);
+        if (result.failed.length > 0) {
+          return {
+            status: "partial",
+            data: result,
+            error: {
+              name: "ReviewerRequestPartialFailure",
+              message: `reviewer request failed for: ${result.failed.map(({ login }) => login).join(", ")}`
+            }
+          };
+        }
+        return result;
+      })
+    ];
+  }
+  descriptor(id, description, effects, path3, inputSchema, outputSchema, handler2) {
+    return { id, description, effects, cli: { path: path3, aliases: [] }, inputSchema, outputSchema, handler: handler2 };
+  }
+  validateAttachments(specs) {
+    this.requireOriginalLaunchDirectory();
+    for (const spec of specs) {
+      const split = spec.indexOf("#");
+      const pathname = split < 0 ? spec : spec.slice(0, split);
+      if (pathname.length === 0 || split >= 0 && spec.slice(split + 1).length === 0) {
+        throw new PullRequestAttachmentPathError(`Invalid attachment spec: ${spec}`);
+      }
+      const candidate = isAbsolute6(pathname) ? pathname : resolve11(this.cwd, pathname);
+      let canonical;
+      try {
+        canonical = realpathSync7(candidate);
+        if (!statSync6(canonical).isFile()) throw new Error("not a file");
+      } catch {
+        throw new PullRequestAttachmentPathError(`Attachment is not a readable file: ${pathname}`);
+      }
+      const fromRoot = relative5(this.launchRoot, canonical);
+      if (fromRoot === ".." || fromRoot.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || isAbsolute6(fromRoot)) {
+        throw new PullRequestAttachmentPathError(`Attachment must be inside the launch checkout: ${pathname}`);
+      }
+    }
+  }
+  requireOriginalLaunchDirectory() {
+    try {
+      const directory = statSync6(this.cwd);
+      if (realpathSync7(this.cwd) !== this.launchRoot || directory.dev !== this.launchDevice || directory.ino !== this.launchInode) {
+        throw new Error("replaced");
+      }
+    } catch {
+      throw new PullRequestAttachmentPathError(
+        `The launch checkout was moved or replaced: ${this.cwd}`
+      );
+    }
+  }
+};
+
 // src/sdk/instruction-catalog-core.ts
-import { existsSync as existsSync14, readFileSync as readFileSync22, readdirSync as readdirSync6, realpathSync as realpathSync7, statSync as statSync6 } from "node:fs";
-import { basename as basename7, dirname as dirname15, isAbsolute as isAbsolute6, join as join18, relative as relative5, resolve as resolve11, sep as sep5 } from "node:path";
+import { existsSync as existsSync14, readFileSync as readFileSync22, readdirSync as readdirSync6, realpathSync as realpathSync8, statSync as statSync7 } from "node:fs";
+import { basename as basename7, dirname as dirname15, isAbsolute as isAbsolute7, join as join18, relative as relative6, resolve as resolve12, sep as sep5 } from "node:path";
 import { fileURLToPath as fileURLToPath4 } from "node:url";
 
 // src/agents/agent-registry/agent-registry.ts
@@ -69726,7 +69911,7 @@ var FileInstructionCatalog = class {
     const parsed = CatalogPropsSchema.parse({ ...props, env: { ...props.env } });
     const override = parsed.env["FLIGHT_RULES_HOME"]?.trim();
     const moduleDirectory = dirname15(fileURLToPath4(parsed.moduleUrl));
-    const home = override || resolve11(moduleDirectory, basename7(moduleDirectory) === "sdk" ? "../.." : "..");
+    const home = override || resolve12(moduleDirectory, basename7(moduleDirectory) === "sdk" ? "../.." : "..");
     this.skillDir = this.findResourceDirectory(home, ["skills"]);
     this.agentDir = this.findResourceDirectory(home, [
       "bin/resources/agents",
@@ -69739,7 +69924,7 @@ var FileInstructionCatalog = class {
     );
   }
   listSkills() {
-    return readdirSync6(this.skillDir, { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile() && entry.name === "SKILL.md").map((entry) => relative5(this.skillDir, join18(entry.parentPath, entry.name)).split(sep5)[0]).filter((name) => name !== void 0).sort();
+    return readdirSync6(this.skillDir, { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile() && entry.name === "SKILL.md").map((entry) => relative6(this.skillDir, join18(entry.parentPath, entry.name)).split(sep5)[0]).filter((name) => name !== void 0).sort();
   }
   loadSkill(name) {
     const parsed = ResourceNameSchema.safeParse(name);
@@ -69762,18 +69947,18 @@ var FileInstructionCatalog = class {
     return agent;
   }
   findResourceDirectory(home, candidates) {
-    if (!existsSync14(home) || !statSync6(home).isDirectory()) {
+    if (!existsSync14(home) || !statSync7(home).isDirectory()) {
       throw new InstructionsUnavailableError(
         `The flight-rules installation directory is unavailable: ${home}`
       );
     }
-    const installationRoot = realpathSync7(home);
+    const installationRoot = realpathSync8(home);
     for (const candidate of candidates) {
-      const path3 = resolve11(installationRoot, candidate);
-      if (!existsSync14(path3) || !statSync6(path3).isDirectory()) continue;
-      const realPath = realpathSync7(path3);
-      const relativePath = relative5(installationRoot, realPath);
-      if (relativePath === ".." || relativePath.startsWith(`..${sep5}`) || isAbsolute6(relativePath)) {
+      const path3 = resolve12(installationRoot, candidate);
+      if (!existsSync14(path3) || !statSync7(path3).isDirectory()) continue;
+      const realPath = realpathSync8(path3);
+      const relativePath = relative6(installationRoot, realPath);
+      if (relativePath === ".." || relativePath.startsWith(`..${sep5}`) || isAbsolute7(relativePath)) {
         throw new UnsafeInstructionPathError(
           `Instruction directory escapes its installation home: ${path3}`
         );
@@ -69783,11 +69968,11 @@ var FileInstructionCatalog = class {
     throw new InstructionsUnavailableError(`Canonical resources are unavailable under ${home}`);
   }
   safePath(path3, root) {
-    if (!isAbsolute6(path3) || !existsSync14(path3) || !statSync6(path3).isFile())
+    if (!isAbsolute7(path3) || !existsSync14(path3) || !statSync7(path3).isFile())
       throw new UnknownInstructionError(`Unknown instruction resource: ${path3}`);
-    const realPath = realpathSync7(path3);
-    const relativePath = relative5(root, realPath);
-    if (relativePath === ".." || relativePath.startsWith(`..${sep5}`) || isAbsolute6(relativePath)) {
+    const realPath = realpathSync8(path3);
+    const relativePath = relative6(root, realPath);
+    if (relativePath === ".." || relativePath.startsWith(`..${sep5}`) || isAbsolute7(relativePath)) {
       throw new UnsafeInstructionPathError(
         `Instruction resource escapes its installation directory: ${path3}`
       );
@@ -69821,7 +70006,7 @@ var LaunchBoundQaFileSystem = class {
   root;
   constructor(props) {
     const parsed = LaunchBoundQaFileSystemPropsSchema.parse(props);
-    this.root = realpathSync8(parsed.root);
+    this.root = realpathSync9(parsed.root);
   }
   exists(path3) {
     if (!this.isInsideLaunch(path3)) return false;
@@ -69829,23 +70014,23 @@ var LaunchBoundQaFileSystem = class {
   }
   isFile(path3) {
     this.requireInsideLaunch(path3);
-    return existsSync15(path3) && statSync7(path3).isFile();
+    return existsSync15(path3) && statSync8(path3).isFile();
   }
   readFile(path3) {
     this.requireInsideLaunch(path3);
     return readFileSync23(path3, "utf8");
   }
   isInsideLaunch(path3) {
-    const absolute = resolve12(path3);
+    const absolute = resolve13(path3);
     let existing = absolute;
     while (!existsSync15(existing)) {
       const parent = dirname16(existing);
       if (parent === existing) return false;
       existing = parent;
     }
-    const realPath = realpathSync8(existing);
-    const relativePath = relative6(this.root, realPath);
-    return relativePath === "" || relativePath !== ".." && !relativePath.startsWith(`..${sep6}`) && !isAbsolute7(relativePath);
+    const realPath = realpathSync9(existing);
+    const relativePath = relative7(this.root, realPath);
+    return relativePath === "" || relativePath !== ".." && !relativePath.startsWith(`..${sep6}`) && !isAbsolute8(relativePath);
   }
   requireInsideLaunch(path3) {
     if (!this.isInsideLaunch(path3)) {
@@ -69866,8 +70051,8 @@ var FlightRulesMcpServer = class {
   instructions;
   constructor(props) {
     this.props = McpLaunchPropsSchema.parse(props);
-    this.cwd = realpathSync8(this.props.cwd);
-    const directory = statSync7(this.cwd);
+    this.cwd = realpathSync9(this.props.cwd);
+    const directory = statSync8(this.cwd);
     this.launchDevice = directory.dev;
     this.launchInode = directory.ino;
     this.qaFileSystem = new LaunchBoundQaFileSystem({ root: this.cwd });
@@ -70011,6 +70196,7 @@ var FlightRulesMcpServer = class {
         getPrHost: () => core.prHost(),
         getConfig: () => core.config()
       }).operations(),
+      ...new DefaultPrOperations({ cwd, getHost: () => core.prHost() }).operations(),
       ...core.gitConfigOperations({ scopes: this.props.allowedConfigScopes, roots: [cwd] }).operations(),
       ...core.reviewOperations({
         cwd,
@@ -70027,8 +70213,8 @@ var FlightRulesMcpServer = class {
   }
   /** Pathnames can be reused after a rename; the launch grant belongs to the original directory. */
   requireOriginalLaunchCheckout() {
-    const directory = existsSync15(this.cwd) ? statSync7(this.cwd) : void 0;
-    if (directory === void 0 || realpathSync8(this.cwd) !== this.cwd || directory.dev !== this.launchDevice || directory.ino !== this.launchInode) {
+    const directory = existsSync15(this.cwd) ? statSync8(this.cwd) : void 0;
+    if (directory === void 0 || realpathSync9(this.cwd) !== this.cwd || directory.dev !== this.launchDevice || directory.ino !== this.launchInode) {
       throw new LaunchCheckoutChangedError(
         `The launch checkout was moved or replaced: ${this.cwd}`
       );
@@ -70040,11 +70226,11 @@ var FlightRulesMcpServer = class {
     if (!parsedInput.success) return;
     const from = parsedInput.data.from;
     if (typeof from !== "string") return;
-    const candidate = isAbsolute7(from) ? from : resolve12(this.cwd, from);
+    const candidate = isAbsolute8(from) ? from : resolve13(this.cwd, from);
     if (!existsSync15(candidate)) throw new Error(`QA instructions path does not exist: ${from}`);
-    const realPath = realpathSync8(candidate);
-    const relativePath = relative6(this.cwd, realPath);
-    if (relativePath === ".." || relativePath.startsWith(`..${sep6}`) || isAbsolute7(relativePath)) {
+    const realPath = realpathSync9(candidate);
+    const relativePath = relative7(this.cwd, realPath);
+    if (relativePath === ".." || relativePath.startsWith(`..${sep6}`) || isAbsolute8(relativePath)) {
       throw new UnsafeQaInstructionsPathError(
         `QA instructions path escapes the launch checkout: ${from}`
       );
@@ -70120,7 +70306,6 @@ function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = () => cr
   const tracker = () => getTracker(overrideTracker);
   const config2 = () => getConfig(overrideTracker);
   const prHost = () => getPrHost(overrideTracker);
-  program2.addCommand(createPrCommand(prHost));
   program2.addCommand(createAgentsCommand(() => services.installation()));
   const boardHooks = () => new BoardHookKit({
     sessions: services.boardSessions(),
@@ -70166,12 +70351,14 @@ function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = () => cr
         getPrHost: prHost,
         getConfig: config2,
         cwd: launchCwd
-      }).operations()
+      }).operations(),
+      ...new DefaultPrOperations({ cwd: launchCwd, getHost: prHost }).operations()
     ],
     policy: new LaunchOperationAccessPolicy({
       allowedEffects: ["read", "write", "process", "network"]
     })
   });
+  program2.addCommand(createPrCommand(operationRegistry));
   program2.addCommand(createEpicCommand(tracker, prHost, config2, operationRegistry));
   program2.addCommand(createInitiativeCommand(tracker, prHost, config2, operationRegistry));
   program2.addCommand(createTicketCommand(tracker, operationRegistry));
