@@ -15772,7 +15772,7 @@ var recursive = /* @__PURE__ */ new WeakMap();
 var NONE = 0;
 var ASSUMED = 1;
 var PROVEN = 2;
-function isRecursive(inst, stack, resolve14) {
+function isRecursive(inst, stack, resolve15) {
   const cached2 = recursive.get(inst);
   if (cached2 !== void 0)
     return cached2 ? PROVEN : NONE;
@@ -15782,7 +15782,7 @@ function isRecursive(inst, stack, resolve14) {
   let result = NONE;
   const check2 = (child) => {
     if (result !== PROVEN && child?._zod) {
-      const answer = isRecursive(child, stack, resolve14);
+      const answer = isRecursive(child, stack, resolve15);
       if (answer > result)
         result = answer;
     }
@@ -15793,7 +15793,7 @@ function isRecursive(inst, stack, resolve14) {
       const desc = Object.getOwnPropertyDescriptor(sh, key);
       if (spread && !desc.enumerable)
         continue;
-      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve14) : NONE;
+      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve15) : NONE;
       if (child > answer)
         answer = child;
     }
@@ -15860,7 +15860,7 @@ function isRecursive(inst, stack, resolve14) {
       break;
     // `$ZodLazy` caches its inner on the def, so a resolved edge is followed exactly
     case "lazy": {
-      const inner = def._cachedInner ?? (resolve14 ? inst._zod.innerType : void 0);
+      const inner = def._cachedInner ?? (resolve15 ? inst._zod.innerType : void 0);
       merge3(inner ? isRecursive(inner, stack, false) : ASSUMED);
       break;
     }
@@ -30474,7 +30474,7 @@ var FileDocResolver = class _FileDocResolver {
 };
 
 // src/flight-rules/flight-rules.ts
-import { resolve as resolve9 } from "node:path";
+import { resolve as resolve10 } from "node:path";
 
 // src/git/git-executor/git-executor.ts
 import { execFile } from "node:child_process";
@@ -31684,7 +31684,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.91.0";
+var appVersion = false ? "0.0.0-dev" : "1.92.0";
 
 // src/shared/ariadne/review-packet.schema.ts
 var packetLimits = {
@@ -37720,7 +37720,7 @@ var JiraClient = class {
       const retryAfterSeconds = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : defaultRetryAfterSeconds;
       const jitter = 0.7 + Math.random() * 0.6;
       const delayMs = Math.min(retryAfterSeconds * 1e3 * jitter, maxBackoffMs);
-      await new Promise((resolve14) => setTimeout(resolve14, delayMs));
+      await new Promise((resolve15) => setTimeout(resolve15, delayMs));
       return this.fetchWithRetry(url2, init, attempt + 1);
     }
     return res;
@@ -37772,7 +37772,7 @@ var ConfluenceClient = class {
       const retryAfterSeconds = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : defaultRetryAfterSeconds2;
       const jitter = 0.7 + Math.random() * 0.6;
       const delayMs = Math.min(retryAfterSeconds * 1e3 * jitter, maxBackoffMs2);
-      await new Promise((resolve14) => setTimeout(resolve14, delayMs));
+      await new Promise((resolve15) => setTimeout(resolve15, delayMs));
       return this.fetchWithRetry(url2, init, attempt + 1);
     }
     return res;
@@ -40380,10 +40380,10 @@ function resolveAll(constructs2, events, context) {
   const called = [];
   let index2 = -1;
   while (++index2 < constructs2.length) {
-    const resolve14 = constructs2[index2].resolveAll;
-    if (resolve14 && !called.includes(resolve14)) {
-      events = resolve14(events, context);
-      called.push(resolve14);
+    const resolve15 = constructs2[index2].resolveAll;
+    if (resolve15 && !called.includes(resolve15)) {
+      events = resolve15(events, context);
+      called.push(resolve15);
     }
   }
   return events;
@@ -51004,8 +51004,8 @@ var DefaultReviewOperations = class {
 };
 
 // src/operations/tracker-entity-operations.ts
-import { existsSync as existsSync12, realpathSync as realpathSync6, statSync as statSync5 } from "node:fs";
-import { isAbsolute as isAbsolute4, relative as relative4, resolve as resolve8 } from "node:path";
+import { existsSync as existsSync13, realpathSync as realpathSync7, statSync as statSync6 } from "node:fs";
+import { isAbsolute as isAbsolute5, relative as relative5, resolve as resolve9 } from "node:path";
 
 // src/tasks/evidence/evidence.ts
 import { realpathSync as realpathSync5 } from "node:fs";
@@ -52130,6 +52130,298 @@ var PullRequestHostUnavailableError = class extends Error {
   name = "PullRequestHostUnavailableError";
 };
 
+// src/operations/ticket-lifecycle-operations.ts
+import { existsSync as existsSync12, realpathSync as realpathSync6, statSync as statSync5 } from "node:fs";
+import { isAbsolute as isAbsolute4, relative as relative4, resolve as resolve8 } from "node:path";
+var propsSchema2 = external_exports.object({
+  getTracker: external_exports.custom((value) => typeof value === "function"),
+  cwd: external_exports.string().min(1),
+  trustedRoots: external_exports.array(external_exports.string().min(1)).default([])
+});
+var idSchema = external_exports.string().min(1);
+var blockInput = external_exports.object({ ticketId: idSchema, blockerId: idSchema, reason: external_exports.string().optional() }).strict();
+var ticketPairInput = external_exports.object({ ticketId: idSchema, blockerId: idSchema }).strict();
+var statusInput = external_exports.object({ id: idSchema, status: external_exports.string().min(1) }).strict();
+var commentInput = external_exports.object({
+  id: idSchema,
+  body: external_exports.string(),
+  attach: external_exports.array(external_exports.string().min(1)).default([])
+}).strict();
+var labelInput = external_exports.object({
+  id: idSchema,
+  add: external_exports.array(external_exports.string()).default([]),
+  remove: external_exports.array(external_exports.string()).default([])
+}).strict().refine((input2) => input2.add.length > 0 || input2.remove.length > 0, {
+  message: "ticket label needs at least one --add or --remove"
+});
+var blockResult = external_exports.object({
+  ticketId: idSchema,
+  blockerId: idSchema,
+  ticketEpic: idSchema.nullable(),
+  blockerEpic: idSchema.nullable(),
+  crossEpic: external_exports.boolean(),
+  reasonRecorded: external_exports.boolean(),
+  warnings: external_exports.array(external_exports.string())
+});
+var blockPartial = external_exports.object({
+  ticketId: idSchema,
+  blockerId: idSchema,
+  completedSteps: external_exports.array(external_exports.string())
+});
+var ticketPairResult = external_exports.object({ ticketId: idSchema, blockerId: idSchema });
+var statusResult = external_exports.object({ id: idSchema, status: external_exports.string() });
+var commentPartial = external_exports.object({
+  id: idSchema,
+  attachments: external_exports.array(
+    AttachmentSchema.extend({ path: external_exports.string(), caption: external_exports.string(), referenced: external_exports.boolean() })
+  ),
+  body: external_exports.string(),
+  completedSteps: external_exports.array(external_exports.string())
+});
+var commentResult = external_exports.union([CommentSchema, commentPartial]);
+var labelResult = external_exports.object({
+  id: idSchema,
+  added: external_exports.array(external_exports.string()),
+  removed: external_exports.array(external_exports.string())
+});
+var labelPartial = external_exports.object({
+  id: idSchema,
+  added: external_exports.array(external_exports.string()),
+  removed: external_exports.array(external_exports.string()),
+  requestedAdd: external_exports.array(external_exports.string()),
+  requestedRemove: external_exports.array(external_exports.string()),
+  completedSteps: external_exports.array(external_exports.string())
+});
+var DefaultTicketLifecycleOperations = class {
+  props;
+  roots;
+  constructor(props) {
+    this.props = propsSchema2.parse(props);
+    const roots = this.props.trustedRoots.length === 0 ? [this.props.cwd] : this.props.trustedRoots;
+    this.roots = [...new Set(roots.map((root) => realpathSync6(root)))];
+  }
+  operations() {
+    return [
+      this.descriptor(
+        "ticket-block",
+        "Block a ticket with an epic-boundary justification when needed.",
+        ["write", "network"],
+        ["ticket", "block"],
+        blockInput,
+        external_exports.union([blockResult, blockPartial]),
+        (input2) => this.block(input2)
+      ),
+      this.descriptor(
+        "ticket-unblock",
+        "Remove a blocked-by relationship from a ticket.",
+        ["write", "network"],
+        ["ticket", "unblock"],
+        ticketPairInput,
+        ticketPairResult,
+        (input2) => this.unblock(input2)
+      ),
+      this.descriptor(
+        "ticket-status",
+        "Transition a ticket to a supported tracker status.",
+        ["write", "network"],
+        ["ticket", "status"],
+        statusInput,
+        statusResult,
+        (input2) => this.transition(input2)
+      ),
+      this.descriptor(
+        "ticket-comment",
+        "Add a ticket comment with trusted evidence attachments.",
+        ["write", "network"],
+        ["ticket", "comment"],
+        commentInput,
+        commentResult,
+        (input2) => this.comment(input2)
+      ),
+      this.descriptor(
+        "ticket-label",
+        "Remove and add ticket labels in safe order.",
+        ["write", "network"],
+        ["ticket", "label"],
+        labelInput,
+        external_exports.union([labelPartial, labelResult]),
+        (input2) => this.updateLabels(input2)
+      )
+    ];
+  }
+  descriptor(id, description, effects, path3, inputSchema, outputSchema, handler2) {
+    return {
+      id,
+      description,
+      effects,
+      cli: { path: path3, aliases: [] },
+      inputSchema,
+      outputSchema,
+      handler: handler2
+    };
+  }
+  async block(input2) {
+    const completedSteps = [];
+    const tracker = this.props.getTracker();
+    const observed = {
+      getTicketEpicId: (ticketId) => tracker.getTicketEpicId(ticketId),
+      blockTicket: async (ticketId, blockerId) => {
+        await tracker.blockTicket(ticketId, blockerId);
+        completedSteps.push("blocked-by-linked");
+      },
+      getTicket: (ticketId) => tracker.getTicket(ticketId),
+      addComment: async (ticketId, body) => {
+        const result = await tracker.addComment(ticketId, body);
+        completedSteps.push("reason-commented");
+        return result;
+      },
+      updateTicketMetadata: async (ticketId, patch) => {
+        await tracker.updateTicketMetadata(ticketId, patch);
+        completedSteps.push("reason-recorded");
+      }
+    };
+    try {
+      const outcome = await new EpicBoundaryGuard(observed).block(input2);
+      return {
+        ticketId: input2.ticketId,
+        blockerId: input2.blockerId,
+        ...outcome
+      };
+    } catch (error62) {
+      if (completedSteps.length === 0) throw error62;
+      return {
+        status: "partial",
+        data: {
+          ticketId: input2.ticketId,
+          blockerId: input2.blockerId,
+          completedSteps
+        },
+        error: {
+          name: error62 instanceof Error ? error62.name : "Error",
+          message: error62 instanceof Error ? error62.message : String(error62)
+        }
+      };
+    }
+  }
+  async unblock(input2) {
+    await this.props.getTracker().unblockTicket(input2.ticketId, input2.blockerId);
+    return input2;
+  }
+  async transition(input2) {
+    await this.props.getTracker().transitionTicket(input2.id, input2.status);
+    return input2;
+  }
+  async comment(input2) {
+    const tracker = this.props.getTracker();
+    const safeSpecs = input2.attach.map((spec) => {
+      const parsed = AttachmentSpecSchema.parse(spec);
+      return `${this.trustedFilePath(parsed.path)}#${parsed.caption}`;
+    });
+    const evidence = new TrackerEvidenceService({ tracker });
+    let body = input2.body;
+    let attachments = [];
+    if (safeSpecs.length > 0) {
+      try {
+        const attached = await evidence.attach({ ticketId: input2.id, body, specs: safeSpecs });
+        body = attached.body;
+        attachments = attached.attachments;
+      } catch (error62) {
+        if (!(error62 instanceof EvidenceUploadFailure) || error62.attachments.length === 0)
+          throw error62;
+        const rewritten = evidence.prepareBody({
+          body,
+          specs: error62.attachments.map((attachment) => `${attachment.path}#${attachment.caption}`)
+        });
+        return {
+          status: "partial",
+          data: {
+            id: input2.id,
+            attachments: error62.attachments,
+            body: rewritten,
+            completedSteps: error62.attachments.map(
+              (attachment) => `attachment-uploaded:${attachment.id}`
+            )
+          },
+          error: {
+            name: error62.cause instanceof Error ? error62.cause.name : "Error",
+            message: error62.cause instanceof Error ? error62.cause.message : String(error62.cause)
+          }
+        };
+      }
+    }
+    try {
+      return await tracker.addComment(input2.id, body);
+    } catch (error62) {
+      if (attachments.length === 0) throw error62;
+      return {
+        status: "partial",
+        data: {
+          id: input2.id,
+          attachments,
+          body,
+          completedSteps: [
+            "attachments-uploaded",
+            ...attachments.map((attachment) => `attachment-uploaded:${attachment.id}`)
+          ]
+        },
+        error: {
+          name: error62 instanceof Error ? error62.name : "Error",
+          message: error62 instanceof Error ? error62.message : String(error62)
+        }
+      };
+    }
+  }
+  async updateLabels(input2) {
+    const tracker = this.props.getTracker();
+    const completedSteps = [];
+    const added = [];
+    const removed = [];
+    try {
+      for (const label of input2.remove) {
+        await tracker.removeLabel(input2.id, label);
+        removed.push(label);
+        completedSteps.push(`removed:${label}`);
+      }
+      for (const label of input2.add) {
+        await tracker.addLabel(input2.id, label);
+        added.push(label);
+        completedSteps.push(`added:${label}`);
+      }
+      return { id: input2.id, added: input2.add, removed: input2.remove };
+    } catch (error62) {
+      if (completedSteps.length === 0) throw error62;
+      return {
+        status: "partial",
+        data: {
+          id: input2.id,
+          added,
+          removed,
+          requestedAdd: input2.add,
+          requestedRemove: input2.remove,
+          completedSteps
+        },
+        error: {
+          name: error62 instanceof Error ? error62.name : "Error",
+          message: error62 instanceof Error ? error62.message : String(error62)
+        }
+      };
+    }
+  }
+  trustedFilePath(path3) {
+    const absolute = isAbsolute4(path3) ? path3 : resolve8(this.props.cwd, path3);
+    if (!existsSync12(absolute)) throw new Error(`Attachment file does not exist: ${path3}`);
+    const realPath = realpathSync6(absolute);
+    const stat = statSync5(realPath);
+    const contained = this.roots.some((root) => {
+      const fromRoot = relative4(root, realPath);
+      return fromRoot === "" || !fromRoot.startsWith("..") && !isAbsolute4(fromRoot);
+    });
+    if (!contained || !stat.isFile())
+      throw new Error(`Attachment file is outside trusted roots: ${path3}`);
+    return realPath;
+  }
+};
+
 // src/operations/tracker-entity-operations.ts
 var labelListSchema = external_exports.array(external_exports.string()).transform((labels) => [...new Set(labels.map((label) => label.trim()).filter(Boolean))]);
 var labelsSchema = labelListSchema.default([]);
@@ -52179,7 +52471,7 @@ var partialEntityWrite = external_exports.object({
   body: external_exports.string().optional()
 });
 var partialTddCreate = external_exports.object({ id: entityId, epicId: entityId, body: external_exports.string() });
-var propsSchema2 = external_exports.object({
+var propsSchema3 = external_exports.object({
   getTracker: external_exports.custom((value) => typeof value === "function"),
   getPrHost: external_exports.custom((value) => typeof value === "function").optional(),
   getConfig: external_exports.custom((value) => typeof value === "function").optional(),
@@ -52190,9 +52482,9 @@ var DefaultTrackerEntityOperations = class {
   props;
   roots;
   constructor(props) {
-    this.props = propsSchema2.parse(props);
+    this.props = propsSchema3.parse(props);
     const roots = this.props.trustedRoots.length === 0 ? [this.props.cwd] : this.props.trustedRoots;
-    this.roots = [...new Set(roots.map((root) => realpathSync6(root)))];
+    this.roots = [...new Set(roots.map((root) => realpathSync7(root)))];
   }
   operations() {
     return [
@@ -52200,6 +52492,11 @@ var DefaultTrackerEntityOperations = class {
         getTracker: this.props.getTracker,
         ...this.props.getPrHost === void 0 ? {} : { getPrHost: this.props.getPrHost },
         ...this.props.getConfig === void 0 ? {} : { getConfig: this.props.getConfig }
+      }).operations(),
+      ...new DefaultTicketLifecycleOperations({
+        getTracker: this.props.getTracker,
+        cwd: this.props.cwd,
+        trustedRoots: this.props.trustedRoots
       }).operations(),
       this.descriptor(
         "epic-create",
@@ -52445,13 +52742,13 @@ var DefaultTrackerEntityOperations = class {
     portableContextGuard.assertPortable(body, { allowLocalPaths });
   }
   trustedFilePath(path3) {
-    const absolute = isAbsolute4(path3) ? path3 : resolve8(this.props.cwd, path3);
-    if (!existsSync12(absolute)) throw new Error(`Attachment file does not exist: ${path3}`);
-    const realPath = realpathSync6(absolute);
-    const stat = statSync5(realPath);
+    const absolute = isAbsolute5(path3) ? path3 : resolve9(this.props.cwd, path3);
+    if (!existsSync13(absolute)) throw new Error(`Attachment file does not exist: ${path3}`);
+    const realPath = realpathSync7(absolute);
+    const stat = statSync6(realPath);
     const contained = this.roots.some((root) => {
-      const fromRoot = relative4(root, realPath);
-      return fromRoot === "" || !fromRoot.startsWith("..") && !isAbsolute4(fromRoot);
+      const fromRoot = relative5(root, realPath);
+      return fromRoot === "" || !fromRoot.startsWith("..") && !isAbsolute5(fromRoot);
     });
     if (!contained || !stat.isFile())
       throw new Error(`Attachment file is outside trusted roots: ${path3}`);
@@ -52475,7 +52772,7 @@ var DefaultFlightRules = class {
       ...props,
       env: props.env === void 0 ? void 0 : { ...props.env }
     });
-    this.cwd = resolve9(parsed.cwd ?? process.cwd());
+    this.cwd = resolve10(parsed.cwd ?? process.cwd());
     this.env = props.env ?? process.env;
     this.launchEnv = { ...props.env ?? process.env };
     this.gitEnv = { ...props.env ?? process.env };
@@ -53087,7 +53384,7 @@ var HiddenPrompt = class {
     const muted = new Writable({ write: (_chunk, _encoding, done) => done() });
     const prompt = createInterface({ input: process.stdin, output: muted, terminal: true });
     try {
-      return await new Promise((resolve14) => prompt.once("line", resolve14));
+      return await new Promise((resolve15) => prompt.once("line", resolve15));
     } finally {
       prompt.close();
       process.stderr.write("\n");
@@ -53645,44 +53942,45 @@ function createTicketCommand(getTracker, registry2) {
     "--cross-epic-reason <why>",
     "one-line justification, required when the two tickets sit in different epics (see docs/epic-boundaries.md)"
   ).action(async (id, opts) => {
-    const outcome = await new EpicBoundaryGuard(getTracker()).block({
-      ticketId: id,
-      blockerId: opts.by,
-      reason: opts.crossEpicReason
-    });
+    const outcome = await operations.invoke(
+      "ticket-block",
+      {
+        ticketId: id,
+        blockerId: opts.by,
+        ...opts.crossEpicReason === void 0 ? {} : { reason: opts.crossEpicReason }
+      },
+      external_exports.object({ warnings: external_exports.array(external_exports.string()) }).passthrough()
+    );
     for (const warning of outcome.warnings) process.stderr.write(`warning: ${warning}
 `);
   });
   ticket.command("unblock").exitOverride().argument("<id>", "ticket id to unblock").requiredOption("--by <blockerId>", "id of the blocking ticket to remove").action(async (id, opts) => {
-    await getTracker().unblockTicket(id, opts.by);
+    await operations.invoke("ticket-unblock", { ticketId: id, blockerId: opts.by }, external_exports.unknown());
   });
   ticket.command("status").exitOverride().argument("<id>", "ticket id to transition").requiredOption("--to <status>", 'target status, e.g. "In Progress" or "In Review"').action(async (id, opts) => {
-    await getTracker().transitionTicket(id, opts.to);
-    process.stdout.write(JSON.stringify({ id, status: opts.to }) + "\n");
+    const result = await operations.invoke("ticket-status", { id, status: opts.to }, external_exports.unknown());
+    process.stdout.write(JSON.stringify(result) + "\n");
   });
   ticket.command("transitions").exitOverride().argument("<id>", "ticket id").action(async (id) => {
     const result = await operations.invoke("ticket-transitions", { id }, external_exports.unknown());
     process.stdout.write(JSON.stringify(result) + "\n");
   });
   ticket.command("comment").exitOverride().argument("<id>", "ticket id").option("--body <body>", "comment body (or use --body-file)").option("--body-file <path>", "read the comment body from a file").option("--attach <spec>", "file to attach, as <path>#<caption> (repeatable)", collect, []).action(async (id, opts) => {
-    const tracker = getTracker();
     const raw = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
-    const body = opts.attach.length === 0 ? raw : (await new TrackerEvidenceService({ tracker }).attach({
-      ticketId: id,
-      body: raw,
-      specs: opts.attach
-    })).body;
-    const comment = await tracker.addComment(id, body);
+    const comment = await operations.invoke(
+      "ticket-comment",
+      { id, body: raw, attach: opts.attach },
+      external_exports.unknown()
+    );
     process.stdout.write(JSON.stringify(comment) + "\n");
   });
   ticket.command("label").exitOverride().argument("<id>", "ticket id").option("--add <label>", "label to add (repeatable)", collect, []).option("--remove <label>", "label to remove (repeatable)", collect, []).action(async (id, opts) => {
-    if (opts.add.length === 0 && opts.remove.length === 0) {
-      throw new Error("ticket label needs at least one --add or --remove");
-    }
-    const tracker = getTracker();
-    for (const label of opts.remove) await tracker.removeLabel(id, label);
-    for (const label of opts.add) await tracker.addLabel(id, label);
-    process.stdout.write(JSON.stringify({ id, added: opts.add, removed: opts.remove }) + "\n");
+    const result = await operations.invoke(
+      "ticket-label",
+      { id, add: opts.add, remove: opts.remove },
+      external_exports.unknown()
+    );
+    process.stdout.write(JSON.stringify(result) + "\n");
   });
   return ticket;
 }
@@ -54046,7 +54344,7 @@ import { execFileSync as execFileSync4 } from "node:child_process";
 
 // src/hooks/board-heartbeat/agent-ticket-resolver.ts
 import { createHash as createHash3 } from "node:crypto";
-import { closeSync, existsSync as existsSync13, openSync, readFileSync as readFileSync17, readSync } from "node:fs";
+import { closeSync, existsSync as existsSync14, openSync, readFileSync as readFileSync17, readSync } from "node:fs";
 import { basename as basename5, dirname as dirname14, join as join15 } from "node:path";
 var SubagentMetaSchema = external_exports.looseObject({
   agentType: external_exports.string().optional(),
@@ -54137,7 +54435,7 @@ var AgentTicketResolver = class {
     return join15(dirname14(transcript), basename5(transcript, ".jsonl"), "subagents");
   }
   readMeta(path3) {
-    if (!existsSync13(path3)) return void 0;
+    if (!existsSync14(path3)) return void 0;
     try {
       const parsed = SubagentMetaSchema.safeParse(JSON.parse(readFileSync17(path3, "utf-8")));
       return parsed.success ? parsed.data : void 0;
@@ -54146,7 +54444,7 @@ var AgentTicketResolver = class {
     }
   }
   firstUserMessage(path3) {
-    if (!existsSync13(path3)) return void 0;
+    if (!existsSync14(path3)) return void 0;
     let head;
     try {
       const fd = openSync(path3, "r");
@@ -54224,7 +54522,7 @@ var GitBranchReader = class {
 
 // src/hooks/commit-guard/commit-guard.ts
 import { readFileSync as readFileSync18 } from "node:fs";
-import { isAbsolute as isAbsolute5, resolve as resolve10 } from "node:path";
+import { isAbsolute as isAbsolute6, resolve as resolve11 } from "node:path";
 var PreToolUseInputSchema = external_exports.looseObject({
   tool_name: external_exports.string().optional(),
   tool_input: external_exports.looseObject({ command: external_exports.string().optional() }).optional(),
@@ -54314,9 +54612,9 @@ var CommitGuard = class {
   }
   isCliMessage(file2, cwd) {
     const unquoted = file2.replace(/^["']|["']$/g, "");
-    if (unquoted === "-" || !isAbsolute5(unquoted) && cwd === void 0) return false;
+    if (unquoted === "-" || !isAbsolute6(unquoted) && cwd === void 0) return false;
     try {
-      const contents = readFileSync18(isAbsolute5(unquoted) ? unquoted : resolve10(cwd ?? "", unquoted), "utf8");
+      const contents = readFileSync18(isAbsolute6(unquoted) ? unquoted : resolve11(cwd ?? "", unquoted), "utf8");
       return /^Flight-Rules-Version: /m.test(contents);
     } catch {
       return false;
@@ -54547,7 +54845,7 @@ function createBranchNameCommand(registry2) {
 }
 
 // src/pr/commands/pr/command.ts
-var propsSchema3 = external_exports.strictObject({
+var propsSchema4 = external_exports.strictObject({
   registry: external_exports.custom(
     (value) => typeof value === "object" && value !== null && "invoke" in value
   )
@@ -54555,7 +54853,7 @@ var propsSchema3 = external_exports.strictObject({
 var CommanderPrCommand = class {
   registry;
   constructor(props) {
-    this.registry = propsSchema3.parse(props).registry;
+    this.registry = propsSchema4.parse(props).registry;
   }
   create() {
     const pr = new Command("pr");
@@ -54765,11 +55063,6 @@ var ManifestCliRouteCoverage = class _ManifestCliRouteCoverage {
   }
 };
 var pendingRoutes = [
-  "ticket block",
-  "ticket unblock",
-  "ticket status",
-  "ticket comment",
-  "ticket label",
   "board post heartbeat",
   "board post item",
   "board post activity",
@@ -54837,6 +55130,11 @@ var cliRouteCoverage = new ManifestCliRouteCoverage({
       ["ticket edit", "ticket-edit"],
       ["ticket get", "ticket-get"],
       ["ticket transitions", "ticket-transitions"],
+      ["ticket block", "ticket-block"],
+      ["ticket unblock", "ticket-unblock"],
+      ["ticket status", "ticket-status"],
+      ["ticket comment", "ticket-comment"],
+      ["ticket label", "ticket-label"],
       ["users get", "users-get"],
       ["tdd get", "tdd-get"],
       ["epic get", "epic-get"],
@@ -59316,14 +59614,14 @@ function inputRequiredRoundsExceededMessage(method, maxRounds) {
   return `Multi-round-trip request '${method}' still required input after ${maxRounds} rounds (inputRequired.maxRounds)`;
 }
 function sleep(ms, signal) {
-  return new Promise((resolve14, reject) => {
+  return new Promise((resolve15, reject) => {
     if (signal?.aborted) {
       reject(signal.reason instanceof SdkError ? signal.reason : new SdkError(SdkErrorCode.RequestTimeout, String(signal.reason)));
       return;
     }
     const timer = setTimeout(() => {
       signal?.removeEventListener("abort", onAbort);
-      resolve14();
+      resolve15();
     }, ms);
     const onAbort = () => {
       clearTimeout(timer);
@@ -60122,7 +60420,7 @@ var Protocol = class {
     const flowStartedAt = Date.now();
     let onAbort;
     let cleanupMessageId;
-    return new Promise((resolve14, reject) => {
+    return new Promise((resolve15, reject) => {
       const earlyReject = (error62) => {
         reject(error62);
       };
@@ -60191,7 +60489,7 @@ var Protocol = class {
         }
         if (decoded.kind === "invalid") return reject(decoded.error);
         if (decoded.kind === "input_required") {
-          if (options?.allowInputRequired === true) return resolve14(manualInputRequiredValue(decoded));
+          if (options?.allowInputRequired === true) return resolve15(manualInputRequiredValue(decoded));
           const flow3 = {
             codec: codec2,
             request: request2,
@@ -60203,11 +60501,11 @@ var Protocol = class {
               params
             }, resultSchema, legOptions)
           };
-          return resolve14(this._resolveNonCompleteResult(decoded, flow3));
+          return resolve15(this._resolveNonCompleteResult(decoded, flow3));
         }
         const result = decoded.result;
         validateStandardSchema(resultSchema, result).then((parseResult) => {
-          if (parseResult.success) resolve14(parseResult.data);
+          if (parseResult.success) resolve15(parseResult.data);
           else reject(new SdkError(SdkErrorCode.InvalidResult, `Invalid result for ${request2.method}: ${parseResult.error}`));
         }, reject);
       });
@@ -63123,7 +63421,7 @@ var require_compile = /* @__PURE__ */ __commonJSMin(((exports) => {
     ref = (0, resolve_1.resolveUrl)(this.opts.uriResolver, baseId, ref);
     const schOrFunc = root.refs[ref];
     if (schOrFunc) return schOrFunc;
-    let _sch = resolve14.call(this, root, ref);
+    let _sch = resolve15.call(this, root, ref);
     if (_sch === void 0) {
       const schema = (_a3 = root.localRefs) === null || _a3 === void 0 ? void 0 : _a3[ref];
       const { schemaId } = this.opts;
@@ -63149,7 +63447,7 @@ var require_compile = /* @__PURE__ */ __commonJSMin(((exports) => {
   function sameSchemaEnv(s1, s2) {
     return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
   }
-  function resolve14(root, ref) {
+  function resolve15(root, ref) {
     let sch;
     while (typeof (sch = this.refs[ref]) == "string") ref = sch;
     return sch || this.schemas[ref] || resolveSchema.call(this, root, ref);
@@ -63599,47 +63897,47 @@ var require_fast_uri = /* @__PURE__ */ __commonJSMin(((exports, module) => {
     else if (typeof uri === "object") uri = parse8(serialize(uri, options), options);
     return uri;
   }
-  function resolve14(baseURI, relativeURI, options) {
+  function resolve15(baseURI, relativeURI, options) {
     const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
     const resolved = resolveComponent(parse8(baseURI, schemelessOptions), parse8(relativeURI, schemelessOptions), schemelessOptions, true);
     schemelessOptions.skipEscape = true;
     return serialize(resolved, schemelessOptions);
   }
-  function resolveComponent(base, relative8, options, skipNormalization) {
+  function resolveComponent(base, relative9, options, skipNormalization) {
     const target = {};
     if (!skipNormalization) {
       base = parse8(serialize(base, options), options);
-      relative8 = parse8(serialize(relative8, options), options);
+      relative9 = parse8(serialize(relative9, options), options);
     }
     options = options || {};
-    if (!options.tolerant && relative8.scheme) {
-      target.scheme = relative8.scheme;
-      target.userinfo = relative8.userinfo;
-      target.host = relative8.host;
-      target.port = relative8.port;
-      target.path = removeDotSegments(relative8.path || "");
-      target.query = relative8.query;
+    if (!options.tolerant && relative9.scheme) {
+      target.scheme = relative9.scheme;
+      target.userinfo = relative9.userinfo;
+      target.host = relative9.host;
+      target.port = relative9.port;
+      target.path = removeDotSegments(relative9.path || "");
+      target.query = relative9.query;
     } else {
-      if (relative8.userinfo !== void 0 || relative8.host !== void 0 || relative8.port !== void 0) {
-        target.userinfo = relative8.userinfo;
-        target.host = relative8.host;
-        target.port = relative8.port;
-        target.path = removeDotSegments(relative8.path || "");
-        target.query = relative8.query;
+      if (relative9.userinfo !== void 0 || relative9.host !== void 0 || relative9.port !== void 0) {
+        target.userinfo = relative9.userinfo;
+        target.host = relative9.host;
+        target.port = relative9.port;
+        target.path = removeDotSegments(relative9.path || "");
+        target.query = relative9.query;
       } else {
-        if (!relative8.path) {
+        if (!relative9.path) {
           target.path = base.path;
-          if (relative8.query !== void 0) target.query = relative8.query;
+          if (relative9.query !== void 0) target.query = relative9.query;
           else target.query = base.query;
         } else {
-          if (relative8.path[0] === "/") target.path = removeDotSegments(relative8.path);
+          if (relative9.path[0] === "/") target.path = removeDotSegments(relative9.path);
           else {
-            if ((base.userinfo !== void 0 || base.host !== void 0 || base.port !== void 0) && !base.path) target.path = "/" + relative8.path;
-            else if (!base.path) target.path = relative8.path;
-            else target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative8.path;
+            if ((base.userinfo !== void 0 || base.host !== void 0 || base.port !== void 0) && !base.path) target.path = "/" + relative9.path;
+            else if (!base.path) target.path = relative9.path;
+            else target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative9.path;
             target.path = removeDotSegments(target.path);
           }
-          target.query = relative8.query;
+          target.query = relative9.query;
         }
         target.userinfo = base.userinfo;
         target.host = base.host;
@@ -63647,7 +63945,7 @@ var require_fast_uri = /* @__PURE__ */ __commonJSMin(((exports, module) => {
       }
       target.scheme = base.scheme;
     }
-    target.fragment = relative8.fragment;
+    target.fragment = relative9.fragment;
     return target;
   }
   function equal(uriA, uriB, options) {
@@ -63773,7 +64071,7 @@ var require_fast_uri = /* @__PURE__ */ __commonJSMin(((exports, module) => {
   const fastUri = {
     SCHEMES,
     normalize,
-    resolve: resolve14,
+    resolve: resolve15,
     resolveComponent,
     equal,
     serialize,
@@ -65272,8 +65570,8 @@ var require_additionalProperties = /* @__PURE__ */ __commonJSMin(((exports) => {
       function isAdditional(key) {
         let definedProp;
         if (props.length > 8) {
-          const propsSchema5 = (0, util_1.schemaRefOrVal)(it, parentSchema.properties, "properties");
-          definedProp = (0, code_1.isOwnProperty)(gen, propsSchema5, key);
+          const propsSchema6 = (0, util_1.schemaRefOrVal)(it, parentSchema.properties, "properties");
+          definedProp = (0, code_1.isOwnProperty)(gen, propsSchema6, key);
         } else if (props.length) definedProp = (0, codegen_1.or)(...props.map((p) => (0, codegen_1._)`${key} === ${p}`));
         else definedProp = codegen_1.nil;
         if (patProps.length) definedProp = (0, codegen_1.or)(definedProp, ...patProps.map((p) => (0, codegen_1._)`${(0, code_1.usePattern)(cxt, p)}.test(${key})`));
@@ -69235,7 +69533,7 @@ var StdioServerTransport = class {
   }
   send(message) {
     if (this._closed) return Promise.reject(/* @__PURE__ */ new Error("StdioServerTransport is closed"));
-    return new Promise((resolve14, reject) => {
+    return new Promise((resolve15, reject) => {
       const json2 = serializeMessage(message);
       let settled = false;
       const onError = (error62) => {
@@ -69250,14 +69548,14 @@ var StdioServerTransport = class {
         settled = true;
         this._stdout.off("error", onError);
         this._stdout.off("drain", onDrain);
-        resolve14();
+        resolve15();
       };
       this._stdout.once("error", onError);
       if (this._stdout.write(json2)) {
         if (settled) return;
         settled = true;
         this._stdout.off("error", onError);
-        resolve14();
+        resolve15();
       } else if (!settled) this._stdout.once("drain", onDrain);
     });
   }
@@ -69311,14 +69609,14 @@ var StdioConnectionChannel = class {
   */
   async whenRequestsAnswered(timeoutMs) {
     if (this._closed || this._pendingRequests.size === 0) return true;
-    return await new Promise((resolve14) => {
+    return await new Promise((resolve15) => {
       const waiter = () => {
         clearTimeout(timer);
-        resolve14(true);
+        resolve15(true);
       };
       const timer = setTimeout(() => {
         this._drainWaiters = this._drainWaiters.filter((pending) => pending !== waiter);
-        resolve14(false);
+        resolve15(false);
       }, timeoutMs);
       this._drainWaiters.push(waiter);
     });
@@ -69660,16 +69958,16 @@ function toError(value) {
 }
 
 // src/mcp/mcp-server.ts
-import { existsSync as existsSync15, readFileSync as readFileSync23, realpathSync as realpathSync9, statSync as statSync8 } from "node:fs";
-import { dirname as dirname16, isAbsolute as isAbsolute8, relative as relative7, resolve as resolve13, sep as sep6 } from "node:path";
+import { existsSync as existsSync16, readFileSync as readFileSync23, realpathSync as realpathSync10, statSync as statSync9 } from "node:fs";
+import { dirname as dirname16, isAbsolute as isAbsolute9, relative as relative8, resolve as resolve14, sep as sep6 } from "node:path";
 
 // node_modules/@modelcontextprotocol/server/dist/index.mjs
 var DEFAULT_MAX_REQUEST_BODY_SIZE = 4 * 1024 * 1024;
 
 // src/operations/pr-operations.ts
-import { realpathSync as realpathSync7, statSync as statSync6 } from "node:fs";
-import { isAbsolute as isAbsolute6, relative as relative5, resolve as resolve11 } from "node:path";
-var propsSchema4 = external_exports.strictObject({
+import { realpathSync as realpathSync8, statSync as statSync7 } from "node:fs";
+import { isAbsolute as isAbsolute7, relative as relative6, resolve as resolve12 } from "node:path";
+var propsSchema5 = external_exports.strictObject({
   cwd: external_exports.string().min(1),
   getHost: external_exports.custom((value) => typeof value === "function")
 });
@@ -69688,7 +69986,7 @@ var createInput = external_exports.strictObject({
   label: external_exports.array(external_exports.string()).default([]),
   attach: external_exports.array(external_exports.string()).default([])
 });
-var commentInput = external_exports.strictObject({
+var commentInput2 = external_exports.strictObject({
   number: external_exports.number().int().positive(),
   body: external_exports.string(),
   attach: external_exports.array(external_exports.string()).default([])
@@ -69723,10 +70021,10 @@ var DefaultPrOperations = class {
   launchInode;
   getHost;
   constructor(props) {
-    const parsed = propsSchema4.parse(props);
-    this.cwd = resolve11(parsed.cwd);
-    this.launchRoot = realpathSync7(this.cwd);
-    const launchStat = statSync6(this.launchRoot);
+    const parsed = propsSchema5.parse(props);
+    this.cwd = resolve12(parsed.cwd);
+    this.launchRoot = realpathSync8(this.cwd);
+    const launchStat = statSync7(this.launchRoot);
     this.launchDevice = launchStat.dev;
     this.launchInode = launchStat.ino;
     this.getHost = parsed.getHost;
@@ -69752,7 +70050,7 @@ var DefaultPrOperations = class {
         this.validateAttachments(input2.attach);
         return this.getHost().createPullRequest(template, { attach: input2.attach });
       }),
-      this.descriptor("pr-comment", "Post a comment on a pull request.", effects, ["pr", "comment"], commentInput, commentResultSchema, (input2) => {
+      this.descriptor("pr-comment", "Post a comment on a pull request.", effects, ["pr", "comment"], commentInput2, commentResultSchema, (input2) => {
         this.validateAttachments(input2.attach);
         return this.getHost().commentOnPullRequest(input2.number, input2.body, { attach: input2.attach });
       }),
@@ -69784,24 +70082,24 @@ var DefaultPrOperations = class {
       if (pathname.length === 0 || split >= 0 && spec.slice(split + 1).length === 0) {
         throw new PullRequestAttachmentPathError(`Invalid attachment spec: ${spec}`);
       }
-      const candidate = isAbsolute6(pathname) ? pathname : resolve11(this.cwd, pathname);
+      const candidate = isAbsolute7(pathname) ? pathname : resolve12(this.cwd, pathname);
       let canonical;
       try {
-        canonical = realpathSync7(candidate);
-        if (!statSync6(canonical).isFile()) throw new Error("not a file");
+        canonical = realpathSync8(candidate);
+        if (!statSync7(canonical).isFile()) throw new Error("not a file");
       } catch {
         throw new PullRequestAttachmentPathError(`Attachment is not a readable file: ${pathname}`);
       }
-      const fromRoot = relative5(this.launchRoot, canonical);
-      if (fromRoot === ".." || fromRoot.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || isAbsolute6(fromRoot)) {
+      const fromRoot = relative6(this.launchRoot, canonical);
+      if (fromRoot === ".." || fromRoot.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || isAbsolute7(fromRoot)) {
         throw new PullRequestAttachmentPathError(`Attachment must be inside the launch checkout: ${pathname}`);
       }
     }
   }
   requireOriginalLaunchDirectory() {
     try {
-      const directory = statSync6(this.cwd);
-      if (realpathSync7(this.cwd) !== this.launchRoot || directory.dev !== this.launchDevice || directory.ino !== this.launchInode) {
+      const directory = statSync7(this.cwd);
+      if (realpathSync8(this.cwd) !== this.launchRoot || directory.dev !== this.launchDevice || directory.ino !== this.launchInode) {
         throw new Error("replaced");
       }
     } catch {
@@ -69813,8 +70111,8 @@ var DefaultPrOperations = class {
 };
 
 // src/sdk/instruction-catalog-core.ts
-import { existsSync as existsSync14, readFileSync as readFileSync22, readdirSync as readdirSync6, realpathSync as realpathSync8, statSync as statSync7 } from "node:fs";
-import { basename as basename7, dirname as dirname15, isAbsolute as isAbsolute7, join as join18, relative as relative6, resolve as resolve12, sep as sep5 } from "node:path";
+import { existsSync as existsSync15, readFileSync as readFileSync22, readdirSync as readdirSync6, realpathSync as realpathSync9, statSync as statSync8 } from "node:fs";
+import { basename as basename7, dirname as dirname15, isAbsolute as isAbsolute8, join as join18, relative as relative7, resolve as resolve13, sep as sep5 } from "node:path";
 import { fileURLToPath as fileURLToPath4 } from "node:url";
 
 // src/agents/agent-registry/agent-registry.ts
@@ -69911,7 +70209,7 @@ var FileInstructionCatalog = class {
     const parsed = CatalogPropsSchema.parse({ ...props, env: { ...props.env } });
     const override = parsed.env["FLIGHT_RULES_HOME"]?.trim();
     const moduleDirectory = dirname15(fileURLToPath4(parsed.moduleUrl));
-    const home = override || resolve12(moduleDirectory, basename7(moduleDirectory) === "sdk" ? "../.." : "..");
+    const home = override || resolve13(moduleDirectory, basename7(moduleDirectory) === "sdk" ? "../.." : "..");
     this.skillDir = this.findResourceDirectory(home, ["skills"]);
     this.agentDir = this.findResourceDirectory(home, [
       "bin/resources/agents",
@@ -69924,7 +70222,7 @@ var FileInstructionCatalog = class {
     );
   }
   listSkills() {
-    return readdirSync6(this.skillDir, { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile() && entry.name === "SKILL.md").map((entry) => relative6(this.skillDir, join18(entry.parentPath, entry.name)).split(sep5)[0]).filter((name) => name !== void 0).sort();
+    return readdirSync6(this.skillDir, { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile() && entry.name === "SKILL.md").map((entry) => relative7(this.skillDir, join18(entry.parentPath, entry.name)).split(sep5)[0]).filter((name) => name !== void 0).sort();
   }
   loadSkill(name) {
     const parsed = ResourceNameSchema.safeParse(name);
@@ -69947,18 +70245,18 @@ var FileInstructionCatalog = class {
     return agent;
   }
   findResourceDirectory(home, candidates) {
-    if (!existsSync14(home) || !statSync7(home).isDirectory()) {
+    if (!existsSync15(home) || !statSync8(home).isDirectory()) {
       throw new InstructionsUnavailableError(
         `The flight-rules installation directory is unavailable: ${home}`
       );
     }
-    const installationRoot = realpathSync8(home);
+    const installationRoot = realpathSync9(home);
     for (const candidate of candidates) {
-      const path3 = resolve12(installationRoot, candidate);
-      if (!existsSync14(path3) || !statSync7(path3).isDirectory()) continue;
-      const realPath = realpathSync8(path3);
-      const relativePath = relative6(installationRoot, realPath);
-      if (relativePath === ".." || relativePath.startsWith(`..${sep5}`) || isAbsolute7(relativePath)) {
+      const path3 = resolve13(installationRoot, candidate);
+      if (!existsSync15(path3) || !statSync8(path3).isDirectory()) continue;
+      const realPath = realpathSync9(path3);
+      const relativePath = relative7(installationRoot, realPath);
+      if (relativePath === ".." || relativePath.startsWith(`..${sep5}`) || isAbsolute8(relativePath)) {
         throw new UnsafeInstructionPathError(
           `Instruction directory escapes its installation home: ${path3}`
         );
@@ -69968,11 +70266,11 @@ var FileInstructionCatalog = class {
     throw new InstructionsUnavailableError(`Canonical resources are unavailable under ${home}`);
   }
   safePath(path3, root) {
-    if (!isAbsolute7(path3) || !existsSync14(path3) || !statSync7(path3).isFile())
+    if (!isAbsolute8(path3) || !existsSync15(path3) || !statSync8(path3).isFile())
       throw new UnknownInstructionError(`Unknown instruction resource: ${path3}`);
-    const realPath = realpathSync8(path3);
-    const relativePath = relative6(root, realPath);
-    if (relativePath === ".." || relativePath.startsWith(`..${sep5}`) || isAbsolute7(relativePath)) {
+    const realPath = realpathSync9(path3);
+    const relativePath = relative7(root, realPath);
+    if (relativePath === ".." || relativePath.startsWith(`..${sep5}`) || isAbsolute8(relativePath)) {
       throw new UnsafeInstructionPathError(
         `Instruction resource escapes its installation directory: ${path3}`
       );
@@ -70006,31 +70304,31 @@ var LaunchBoundQaFileSystem = class {
   root;
   constructor(props) {
     const parsed = LaunchBoundQaFileSystemPropsSchema.parse(props);
-    this.root = realpathSync9(parsed.root);
+    this.root = realpathSync10(parsed.root);
   }
   exists(path3) {
     if (!this.isInsideLaunch(path3)) return false;
-    return existsSync15(path3);
+    return existsSync16(path3);
   }
   isFile(path3) {
     this.requireInsideLaunch(path3);
-    return existsSync15(path3) && statSync8(path3).isFile();
+    return existsSync16(path3) && statSync9(path3).isFile();
   }
   readFile(path3) {
     this.requireInsideLaunch(path3);
     return readFileSync23(path3, "utf8");
   }
   isInsideLaunch(path3) {
-    const absolute = resolve13(path3);
+    const absolute = resolve14(path3);
     let existing = absolute;
-    while (!existsSync15(existing)) {
+    while (!existsSync16(existing)) {
       const parent = dirname16(existing);
       if (parent === existing) return false;
       existing = parent;
     }
-    const realPath = realpathSync9(existing);
-    const relativePath = relative7(this.root, realPath);
-    return relativePath === "" || relativePath !== ".." && !relativePath.startsWith(`..${sep6}`) && !isAbsolute8(relativePath);
+    const realPath = realpathSync10(existing);
+    const relativePath = relative8(this.root, realPath);
+    return relativePath === "" || relativePath !== ".." && !relativePath.startsWith(`..${sep6}`) && !isAbsolute9(relativePath);
   }
   requireInsideLaunch(path3) {
     if (!this.isInsideLaunch(path3)) {
@@ -70051,8 +70349,8 @@ var FlightRulesMcpServer = class {
   instructions;
   constructor(props) {
     this.props = McpLaunchPropsSchema.parse(props);
-    this.cwd = realpathSync9(this.props.cwd);
-    const directory = statSync8(this.cwd);
+    this.cwd = realpathSync10(this.props.cwd);
+    const directory = statSync9(this.cwd);
     this.launchDevice = directory.dev;
     this.launchInode = directory.ino;
     this.qaFileSystem = new LaunchBoundQaFileSystem({ root: this.cwd });
@@ -70213,8 +70511,8 @@ var FlightRulesMcpServer = class {
   }
   /** Pathnames can be reused after a rename; the launch grant belongs to the original directory. */
   requireOriginalLaunchCheckout() {
-    const directory = existsSync15(this.cwd) ? statSync8(this.cwd) : void 0;
-    if (directory === void 0 || realpathSync9(this.cwd) !== this.cwd || directory.dev !== this.launchDevice || directory.ino !== this.launchInode) {
+    const directory = existsSync16(this.cwd) ? statSync9(this.cwd) : void 0;
+    if (directory === void 0 || realpathSync10(this.cwd) !== this.cwd || directory.dev !== this.launchDevice || directory.ino !== this.launchInode) {
       throw new LaunchCheckoutChangedError(
         `The launch checkout was moved or replaced: ${this.cwd}`
       );
@@ -70226,11 +70524,11 @@ var FlightRulesMcpServer = class {
     if (!parsedInput.success) return;
     const from = parsedInput.data.from;
     if (typeof from !== "string") return;
-    const candidate = isAbsolute8(from) ? from : resolve13(this.cwd, from);
-    if (!existsSync15(candidate)) throw new Error(`QA instructions path does not exist: ${from}`);
-    const realPath = realpathSync9(candidate);
-    const relativePath = relative7(this.cwd, realPath);
-    if (relativePath === ".." || relativePath.startsWith(`..${sep6}`) || isAbsolute8(relativePath)) {
+    const candidate = isAbsolute9(from) ? from : resolve14(this.cwd, from);
+    if (!existsSync16(candidate)) throw new Error(`QA instructions path does not exist: ${from}`);
+    const realPath = realpathSync10(candidate);
+    const relativePath = relative8(this.cwd, realPath);
+    if (relativePath === ".." || relativePath.startsWith(`..${sep6}`) || isAbsolute9(relativePath)) {
       throw new UnsafeQaInstructionsPathError(
         `QA instructions path escapes the launch checkout: ${from}`
       );

@@ -1,8 +1,8 @@
 // src/mcp/mcp-server.ts
-import { existsSync as existsSync14, readFileSync as readFileSync15, realpathSync as realpathSync9, statSync as statSync8 } from "node:fs";
-import { dirname as dirname15, isAbsolute as isAbsolute7, relative as relative7, resolve as resolve12, sep as sep5 } from "node:path";
+import { existsSync as existsSync15, readFileSync as readFileSync15, realpathSync as realpathSync10, statSync as statSync9 } from "node:fs";
+import { dirname as dirname15, isAbsolute as isAbsolute8, relative as relative8, resolve as resolve13, sep as sep5 } from "node:path";
 import { McpServer } from "@modelcontextprotocol/server";
-import { z as z54 } from "zod";
+import { z as z55 } from "zod";
 
 // src/bundled-docs/charter-catalog/charter-catalog.ts
 import { matchesGlob } from "node:path";
@@ -2169,6 +2169,95 @@ var TrackerRefFormatter = class {
   }
 };
 var refs = new TrackerRefFormatter();
+var CrossEpicDependencyError = class extends Error {
+  name = "CrossEpicDependencyError";
+  constructor(props) {
+    const ticket = refs.format(props.ticketId);
+    const blocker = refs.format(props.blockerId);
+    const ticketEpic = refs.format(props.ticketEpic);
+    const blockerEpic = refs.format(props.blockerEpic);
+    super(
+      `refusing to block ${ticket} (epic ${ticketEpic}) on ${blocker} (epic ${blockerEpic}): blocked-by edges stay inside one epic. Move ${ticket} into epic ${blockerEpic}, merge the two tickets, or finish epic ${blockerEpic} before epic ${ticketEpic} starts. If the edge is absolutely necessary, pass --cross-epic-reason "<why>" and it is recorded on ${ticket}.`
+    );
+  }
+};
+var EpicBoundaryGuard = class {
+  constructor(tracker) {
+    this.tracker = tracker;
+  }
+  tracker;
+  async block(request) {
+    const reason = this.normalizeReason(request.reason);
+    const [ticket, blocker] = await Promise.all([
+      this.lookupParent(request.ticketId),
+      this.lookupParent(request.blockerId)
+    ]);
+    const warnings = [ticket.warning, blocker.warning].filter((w) => w !== null);
+    const sameEpic = ticket.epic !== null && ticket.epic === blocker.epic;
+    const crossEpic = ticket.epic !== null && blocker.epic !== null && ticket.epic !== blocker.epic;
+    if (crossEpic && reason === void 0) {
+      throw new CrossEpicDependencyError({
+        ticketId: request.ticketId,
+        ticketEpic: ticket.epic ?? "",
+        blockerId: request.blockerId,
+        blockerEpic: blocker.epic ?? ""
+      });
+    }
+    await this.tracker.blockTicket(request.ticketId, request.blockerId);
+    const reasonRecorded = reason !== void 0 && !sameEpic;
+    if (reasonRecorded) await this.recordReason(request, ticket.epic, blocker.epic, reason);
+    return {
+      ticketEpic: ticket.epic,
+      blockerEpic: blocker.epic,
+      crossEpic,
+      reasonRecorded,
+      warnings
+    };
+  }
+  normalizeReason(reason) {
+    if (reason === void 0) return void 0;
+    const oneLine = reason.replace(/\s+/g, " ").trim();
+    if (oneLine === "")
+      throw new Error("--cross-epic-reason needs a one-line justification, not an empty string");
+    return oneLine;
+  }
+  async lookupParent(ticketId) {
+    try {
+      const epic = await this.tracker.getTicketEpicId(ticketId) ?? null;
+      if (epic !== null) return { epic, warning: null };
+      return {
+        epic: null,
+        warning: `${refs.format(ticketId)} has no parent epic; the epic-boundary check was skipped`
+      };
+    } catch (error) {
+      return {
+        epic: null,
+        warning: `could not resolve the parent epic of ${refs.format(ticketId)} (${error instanceof Error ? error.message : String(error)}); the epic-boundary check was skipped`
+      };
+    }
+  }
+  /**
+   * The reason lands twice: a comment for people reading the ticket, and the
+   * ticket's metadata so the plan verbs can show it without reading comments
+   * (Jira's ticket read carries none). An identical reason already on record
+   * is left alone, so re-running the same link does not repeat the comment.
+   */
+  async recordReason(request, ticketEpic, blockerEpic, reason) {
+    const { ticketId, blockerId } = request;
+    const existing = (await this.tracker.getTicket(ticketId)).metadata.crossEpicReasons ?? {};
+    if (existing[blockerId] === reason) return;
+    const blocker = refs.format(blockerId);
+    const blockerPart = blockerEpic === null ? blocker : `${blocker} (epic ${refs.format(blockerEpic)})`;
+    const ticketPart = ticketEpic === null ? "" : `, while this ticket is in epic ${refs.format(ticketEpic)}`;
+    await this.tracker.addComment(
+      ticketId,
+      `Cross-epic dependency: blocked by ${blockerPart}${ticketPart}. Reason: ${reason}`
+    );
+    await this.tracker.updateTicketMetadata(ticketId, {
+      crossEpicReasons: { ...existing, [blockerId]: reason }
+    });
+  }
+};
 var CrossEpicEdgeFinder = class {
   constructor(tracker) {
     this.tracker = tracker;
@@ -3193,7 +3282,7 @@ var DefaultPrOperations = class {
 };
 
 // src/flight-rules/flight-rules.ts
-import { resolve as resolve10 } from "node:path";
+import { resolve as resolve11 } from "node:path";
 
 // src/git/git-executor/git-executor.ts
 import { execFile as execFile3 } from "node:child_process";
@@ -5881,7 +5970,7 @@ var JiraClient = class {
       const retryAfterSeconds = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : defaultRetryAfterSeconds;
       const jitter = 0.7 + Math.random() * 0.6;
       const delayMs = Math.min(retryAfterSeconds * 1e3 * jitter, maxBackoffMs);
-      await new Promise((resolve13) => setTimeout(resolve13, delayMs));
+      await new Promise((resolve14) => setTimeout(resolve14, delayMs));
       return this.fetchWithRetry(url, init, attempt + 1);
     }
     return res;
@@ -5934,7 +6023,7 @@ var ConfluenceClient = class {
       const retryAfterSeconds = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : defaultRetryAfterSeconds2;
       const jitter = 0.7 + Math.random() * 0.6;
       const delayMs = Math.min(retryAfterSeconds * 1e3 * jitter, maxBackoffMs2);
-      await new Promise((resolve13) => setTimeout(resolve13, delayMs));
+      await new Promise((resolve14) => setTimeout(resolve14, delayMs));
       return this.fetchWithRetry(url, init, attempt + 1);
     }
     return res;
@@ -8708,9 +8797,9 @@ var FlightRulesPropsSchema = z49.object({
 });
 
 // src/operations/tracker-entity-operations.ts
-import { existsSync as existsSync12, realpathSync as realpathSync7, statSync as statSync6 } from "node:fs";
-import { isAbsolute as isAbsolute5, relative as relative5, resolve as resolve9 } from "node:path";
-import { z as z51 } from "zod";
+import { existsSync as existsSync13, realpathSync as realpathSync8, statSync as statSync7 } from "node:fs";
+import { isAbsolute as isAbsolute6, relative as relative6, resolve as resolve10 } from "node:path";
+import { z as z52 } from "zod";
 
 // src/tasks/evidence/evidence.ts
 import { realpathSync as realpathSync6 } from "node:fs";
@@ -8925,63 +9014,70 @@ A tracker body must stand on its own for an engineer on a fresh clone. Inline th
 };
 var portableContextGuard = new RegexPortableContextGuard();
 
-// src/operations/tracker-entity-operations.ts
-var labelListSchema = z51.array(z51.string()).transform((labels) => [...new Set(labels.map((label) => label.trim()).filter(Boolean))]);
-var labelsSchema = labelListSchema.default([]);
-var createEpicInput = z51.object({
-  ...CreateEpicInputSchema.shape,
-  labels: labelsSchema,
-  allowLocalPaths: z51.boolean().default(false)
-}).strict();
-var updateEpicInput = z51.object({
-  ...UpdateEpicInputSchema.shape,
-  labels: labelListSchema.optional(),
-  allowLocalPaths: z51.boolean().default(false)
-}).strict();
-var createInitiativeInput = CreateInitiativeInputSchema.extend({
-  allowLocalPaths: z51.boolean().default(false)
-}).strict();
-var updateInitiativeInput = UpdateInitiativeInputSchema.extend({
-  allowLocalPaths: z51.boolean().default(false)
-}).strict();
-var createTicketInput = z51.object({
-  ...CreateTicketInputSchema.shape,
-  labels: labelsSchema,
-  allowLocalPaths: z51.boolean().default(false)
-}).strict();
-var updateTicketInput = z51.object({
-  ...UpdateTicketInputSchema.shape,
-  labels: labelListSchema.optional(),
-  allowLocalPaths: z51.boolean().default(false),
-  attach: z51.array(z51.string().min(1)).default([])
-}).strict();
-var createTddInput = CreateTechnicalDesignInputSchema.extend({
-  allowLocalPaths: z51.boolean().default(false)
-}).strict();
-var entityId = z51.string().min(1);
-var linkInput = z51.object({ epicId: entityId, initiativeId: entityId }).strict();
-var partialTicketEdit = z51.object({
-  id: entityId,
-  attachments: z51.array(AttachmentSchema),
-  body: z51.string()
-});
-var ticketEditResult = z51.union([TicketSchema, partialTicketEdit]);
-var partialTicketCreate = z51.object({ id: entityId, title: z51.string() });
-var ticketCreateResult = z51.union([TicketSchema, partialTicketCreate]);
-var partialEntityWrite = z51.object({
-  id: entityId,
-  title: z51.string().optional(),
-  body: z51.string().optional()
-});
-var partialTddCreate = z51.object({ id: entityId, epicId: entityId, body: z51.string() });
+// src/operations/ticket-lifecycle-operations.ts
+import { existsSync as existsSync12, realpathSync as realpathSync7, statSync as statSync6 } from "node:fs";
+import { isAbsolute as isAbsolute5, relative as relative5, resolve as resolve9 } from "node:path";
+import { z as z51 } from "zod";
 var propsSchema3 = z51.object({
   getTracker: z51.custom((value) => typeof value === "function"),
-  getPrHost: z51.custom((value) => typeof value === "function").optional(),
-  getConfig: z51.custom((value) => typeof value === "function").optional(),
   cwd: z51.string().min(1),
   trustedRoots: z51.array(z51.string().min(1)).default([])
 });
-var DefaultTrackerEntityOperations = class {
+var idSchema = z51.string().min(1);
+var blockInput = z51.object({ ticketId: idSchema, blockerId: idSchema, reason: z51.string().optional() }).strict();
+var ticketPairInput = z51.object({ ticketId: idSchema, blockerId: idSchema }).strict();
+var statusInput = z51.object({ id: idSchema, status: z51.string().min(1) }).strict();
+var commentInput2 = z51.object({
+  id: idSchema,
+  body: z51.string(),
+  attach: z51.array(z51.string().min(1)).default([])
+}).strict();
+var labelInput = z51.object({
+  id: idSchema,
+  add: z51.array(z51.string()).default([]),
+  remove: z51.array(z51.string()).default([])
+}).strict().refine((input) => input.add.length > 0 || input.remove.length > 0, {
+  message: "ticket label needs at least one --add or --remove"
+});
+var blockResult = z51.object({
+  ticketId: idSchema,
+  blockerId: idSchema,
+  ticketEpic: idSchema.nullable(),
+  blockerEpic: idSchema.nullable(),
+  crossEpic: z51.boolean(),
+  reasonRecorded: z51.boolean(),
+  warnings: z51.array(z51.string())
+});
+var blockPartial = z51.object({
+  ticketId: idSchema,
+  blockerId: idSchema,
+  completedSteps: z51.array(z51.string())
+});
+var ticketPairResult = z51.object({ ticketId: idSchema, blockerId: idSchema });
+var statusResult = z51.object({ id: idSchema, status: z51.string() });
+var commentPartial = z51.object({
+  id: idSchema,
+  attachments: z51.array(
+    AttachmentSchema.extend({ path: z51.string(), caption: z51.string(), referenced: z51.boolean() })
+  ),
+  body: z51.string(),
+  completedSteps: z51.array(z51.string())
+});
+var commentResult = z51.union([CommentSchema2, commentPartial]);
+var labelResult = z51.object({
+  id: idSchema,
+  added: z51.array(z51.string()),
+  removed: z51.array(z51.string())
+});
+var labelPartial = z51.object({
+  id: idSchema,
+  added: z51.array(z51.string()),
+  removed: z51.array(z51.string()),
+  requestedAdd: z51.array(z51.string()),
+  requestedRemove: z51.array(z51.string()),
+  completedSteps: z51.array(z51.string())
+});
+var DefaultTicketLifecycleOperations = class {
   props;
   roots;
   constructor(props) {
@@ -8991,10 +9087,301 @@ var DefaultTrackerEntityOperations = class {
   }
   operations() {
     return [
+      this.descriptor(
+        "ticket-block",
+        "Block a ticket with an epic-boundary justification when needed.",
+        ["write", "network"],
+        ["ticket", "block"],
+        blockInput,
+        z51.union([blockResult, blockPartial]),
+        (input) => this.block(input)
+      ),
+      this.descriptor(
+        "ticket-unblock",
+        "Remove a blocked-by relationship from a ticket.",
+        ["write", "network"],
+        ["ticket", "unblock"],
+        ticketPairInput,
+        ticketPairResult,
+        (input) => this.unblock(input)
+      ),
+      this.descriptor(
+        "ticket-status",
+        "Transition a ticket to a supported tracker status.",
+        ["write", "network"],
+        ["ticket", "status"],
+        statusInput,
+        statusResult,
+        (input) => this.transition(input)
+      ),
+      this.descriptor(
+        "ticket-comment",
+        "Add a ticket comment with trusted evidence attachments.",
+        ["write", "network"],
+        ["ticket", "comment"],
+        commentInput2,
+        commentResult,
+        (input) => this.comment(input)
+      ),
+      this.descriptor(
+        "ticket-label",
+        "Remove and add ticket labels in safe order.",
+        ["write", "network"],
+        ["ticket", "label"],
+        labelInput,
+        z51.union([labelPartial, labelResult]),
+        (input) => this.updateLabels(input)
+      )
+    ];
+  }
+  descriptor(id, description, effects, path, inputSchema, outputSchema, handler) {
+    return {
+      id,
+      description,
+      effects,
+      cli: { path, aliases: [] },
+      inputSchema,
+      outputSchema,
+      handler
+    };
+  }
+  async block(input) {
+    const completedSteps = [];
+    const tracker = this.props.getTracker();
+    const observed = {
+      getTicketEpicId: (ticketId) => tracker.getTicketEpicId(ticketId),
+      blockTicket: async (ticketId, blockerId) => {
+        await tracker.blockTicket(ticketId, blockerId);
+        completedSteps.push("blocked-by-linked");
+      },
+      getTicket: (ticketId) => tracker.getTicket(ticketId),
+      addComment: async (ticketId, body) => {
+        const result = await tracker.addComment(ticketId, body);
+        completedSteps.push("reason-commented");
+        return result;
+      },
+      updateTicketMetadata: async (ticketId, patch) => {
+        await tracker.updateTicketMetadata(ticketId, patch);
+        completedSteps.push("reason-recorded");
+      }
+    };
+    try {
+      const outcome = await new EpicBoundaryGuard(observed).block(input);
+      return {
+        ticketId: input.ticketId,
+        blockerId: input.blockerId,
+        ...outcome
+      };
+    } catch (error) {
+      if (completedSteps.length === 0) throw error;
+      return {
+        status: "partial",
+        data: {
+          ticketId: input.ticketId,
+          blockerId: input.blockerId,
+          completedSteps
+        },
+        error: {
+          name: error instanceof Error ? error.name : "Error",
+          message: error instanceof Error ? error.message : String(error)
+        }
+      };
+    }
+  }
+  async unblock(input) {
+    await this.props.getTracker().unblockTicket(input.ticketId, input.blockerId);
+    return input;
+  }
+  async transition(input) {
+    await this.props.getTracker().transitionTicket(input.id, input.status);
+    return input;
+  }
+  async comment(input) {
+    const tracker = this.props.getTracker();
+    const safeSpecs = input.attach.map((spec) => {
+      const parsed = AttachmentSpecSchema.parse(spec);
+      return `${this.trustedFilePath(parsed.path)}#${parsed.caption}`;
+    });
+    const evidence = new TrackerEvidenceService({ tracker });
+    let body = input.body;
+    let attachments = [];
+    if (safeSpecs.length > 0) {
+      try {
+        const attached = await evidence.attach({ ticketId: input.id, body, specs: safeSpecs });
+        body = attached.body;
+        attachments = attached.attachments;
+      } catch (error) {
+        if (!(error instanceof EvidenceUploadFailure) || error.attachments.length === 0)
+          throw error;
+        const rewritten = evidence.prepareBody({
+          body,
+          specs: error.attachments.map((attachment) => `${attachment.path}#${attachment.caption}`)
+        });
+        return {
+          status: "partial",
+          data: {
+            id: input.id,
+            attachments: error.attachments,
+            body: rewritten,
+            completedSteps: error.attachments.map(
+              (attachment) => `attachment-uploaded:${attachment.id}`
+            )
+          },
+          error: {
+            name: error.cause instanceof Error ? error.cause.name : "Error",
+            message: error.cause instanceof Error ? error.cause.message : String(error.cause)
+          }
+        };
+      }
+    }
+    try {
+      return await tracker.addComment(input.id, body);
+    } catch (error) {
+      if (attachments.length === 0) throw error;
+      return {
+        status: "partial",
+        data: {
+          id: input.id,
+          attachments,
+          body,
+          completedSteps: [
+            "attachments-uploaded",
+            ...attachments.map((attachment) => `attachment-uploaded:${attachment.id}`)
+          ]
+        },
+        error: {
+          name: error instanceof Error ? error.name : "Error",
+          message: error instanceof Error ? error.message : String(error)
+        }
+      };
+    }
+  }
+  async updateLabels(input) {
+    const tracker = this.props.getTracker();
+    const completedSteps = [];
+    const added = [];
+    const removed = [];
+    try {
+      for (const label of input.remove) {
+        await tracker.removeLabel(input.id, label);
+        removed.push(label);
+        completedSteps.push(`removed:${label}`);
+      }
+      for (const label of input.add) {
+        await tracker.addLabel(input.id, label);
+        added.push(label);
+        completedSteps.push(`added:${label}`);
+      }
+      return { id: input.id, added: input.add, removed: input.remove };
+    } catch (error) {
+      if (completedSteps.length === 0) throw error;
+      return {
+        status: "partial",
+        data: {
+          id: input.id,
+          added,
+          removed,
+          requestedAdd: input.add,
+          requestedRemove: input.remove,
+          completedSteps
+        },
+        error: {
+          name: error instanceof Error ? error.name : "Error",
+          message: error instanceof Error ? error.message : String(error)
+        }
+      };
+    }
+  }
+  trustedFilePath(path) {
+    const absolute = isAbsolute5(path) ? path : resolve9(this.props.cwd, path);
+    if (!existsSync12(absolute)) throw new Error(`Attachment file does not exist: ${path}`);
+    const realPath = realpathSync7(absolute);
+    const stat = statSync6(realPath);
+    const contained = this.roots.some((root) => {
+      const fromRoot = relative5(root, realPath);
+      return fromRoot === "" || !fromRoot.startsWith("..") && !isAbsolute5(fromRoot);
+    });
+    if (!contained || !stat.isFile())
+      throw new Error(`Attachment file is outside trusted roots: ${path}`);
+    return realPath;
+  }
+};
+
+// src/operations/tracker-entity-operations.ts
+var labelListSchema = z52.array(z52.string()).transform((labels) => [...new Set(labels.map((label) => label.trim()).filter(Boolean))]);
+var labelsSchema = labelListSchema.default([]);
+var createEpicInput = z52.object({
+  ...CreateEpicInputSchema.shape,
+  labels: labelsSchema,
+  allowLocalPaths: z52.boolean().default(false)
+}).strict();
+var updateEpicInput = z52.object({
+  ...UpdateEpicInputSchema.shape,
+  labels: labelListSchema.optional(),
+  allowLocalPaths: z52.boolean().default(false)
+}).strict();
+var createInitiativeInput = CreateInitiativeInputSchema.extend({
+  allowLocalPaths: z52.boolean().default(false)
+}).strict();
+var updateInitiativeInput = UpdateInitiativeInputSchema.extend({
+  allowLocalPaths: z52.boolean().default(false)
+}).strict();
+var createTicketInput = z52.object({
+  ...CreateTicketInputSchema.shape,
+  labels: labelsSchema,
+  allowLocalPaths: z52.boolean().default(false)
+}).strict();
+var updateTicketInput = z52.object({
+  ...UpdateTicketInputSchema.shape,
+  labels: labelListSchema.optional(),
+  allowLocalPaths: z52.boolean().default(false),
+  attach: z52.array(z52.string().min(1)).default([])
+}).strict();
+var createTddInput = CreateTechnicalDesignInputSchema.extend({
+  allowLocalPaths: z52.boolean().default(false)
+}).strict();
+var entityId = z52.string().min(1);
+var linkInput = z52.object({ epicId: entityId, initiativeId: entityId }).strict();
+var partialTicketEdit = z52.object({
+  id: entityId,
+  attachments: z52.array(AttachmentSchema),
+  body: z52.string()
+});
+var ticketEditResult = z52.union([TicketSchema, partialTicketEdit]);
+var partialTicketCreate = z52.object({ id: entityId, title: z52.string() });
+var ticketCreateResult = z52.union([TicketSchema, partialTicketCreate]);
+var partialEntityWrite = z52.object({
+  id: entityId,
+  title: z52.string().optional(),
+  body: z52.string().optional()
+});
+var partialTddCreate = z52.object({ id: entityId, epicId: entityId, body: z52.string() });
+var propsSchema4 = z52.object({
+  getTracker: z52.custom((value) => typeof value === "function"),
+  getPrHost: z52.custom((value) => typeof value === "function").optional(),
+  getConfig: z52.custom((value) => typeof value === "function").optional(),
+  cwd: z52.string().min(1),
+  trustedRoots: z52.array(z52.string().min(1)).default([])
+});
+var DefaultTrackerEntityOperations = class {
+  props;
+  roots;
+  constructor(props) {
+    this.props = propsSchema4.parse(props);
+    const roots = this.props.trustedRoots.length === 0 ? [this.props.cwd] : this.props.trustedRoots;
+    this.roots = [...new Set(roots.map((root) => realpathSync8(root)))];
+  }
+  operations() {
+    return [
       ...new DefaultTrackerReadOperations({
         getTracker: this.props.getTracker,
         ...this.props.getPrHost === void 0 ? {} : { getPrHost: this.props.getPrHost },
         ...this.props.getConfig === void 0 ? {} : { getConfig: this.props.getConfig }
+      }).operations(),
+      ...new DefaultTicketLifecycleOperations({
+        getTracker: this.props.getTracker,
+        cwd: this.props.cwd,
+        trustedRoots: this.props.trustedRoots
       }).operations(),
       this.descriptor(
         "epic-create",
@@ -9002,7 +9389,7 @@ var DefaultTrackerEntityOperations = class {
         ["write", "network"],
         ["epic", "create"],
         createEpicInput,
-        z51.union([EpicSchema, partialEntityWrite]),
+        z52.union([EpicSchema, partialEntityWrite]),
         (input) => this.createEpic(input)
       ),
       this.descriptor(
@@ -9010,8 +9397,8 @@ var DefaultTrackerEntityOperations = class {
         "Update an epic description, title, or labels.",
         ["write", "network"],
         ["epic", "edit"],
-        z51.object({ id: entityId, ...updateEpicInput.shape }).strict(),
-        z51.union([EpicSchema, partialEntityWrite]),
+        z52.object({ id: entityId, ...updateEpicInput.shape }).strict(),
+        z52.union([EpicSchema, partialEntityWrite]),
         ({ id, ...input }) => this.editEpic(id, input)
       ),
       this.descriptor(
@@ -9020,7 +9407,7 @@ var DefaultTrackerEntityOperations = class {
         ["write", "network"],
         ["epic", "link-initiative"],
         linkInput,
-        z51.object({ epicId: entityId, initiativeId: entityId }),
+        z52.object({ epicId: entityId, initiativeId: entityId }),
         async ({ epicId, initiativeId }) => {
           await this.props.getTracker().linkEpicToInitiative(epicId, initiativeId);
           return { epicId, initiativeId };
@@ -9032,7 +9419,7 @@ var DefaultTrackerEntityOperations = class {
         ["write", "network"],
         ["initiative", "create"],
         createInitiativeInput,
-        z51.union([InitiativeSchema, partialEntityWrite]),
+        z52.union([InitiativeSchema, partialEntityWrite]),
         (input) => this.createInitiative(input)
       ),
       this.descriptor(
@@ -9040,8 +9427,8 @@ var DefaultTrackerEntityOperations = class {
         "Update an initiative description or title.",
         ["write", "network"],
         ["initiative", "edit"],
-        z51.object({ id: entityId, ...updateInitiativeInput.shape }).strict(),
-        z51.union([InitiativeSchema, partialEntityWrite]),
+        z52.object({ id: entityId, ...updateInitiativeInput.shape }).strict(),
+        z52.union([InitiativeSchema, partialEntityWrite]),
         ({ id, ...input }) => this.editInitiative(id, input)
       ),
       this.descriptor(
@@ -9058,7 +9445,7 @@ var DefaultTrackerEntityOperations = class {
         "Update a ticket and attach local evidence files.",
         ["write", "network"],
         ["ticket", "edit"],
-        z51.object({ id: entityId, ...updateTicketInput.shape }).strict(),
+        z52.object({ id: entityId, ...updateTicketInput.shape }).strict(),
         ticketEditResult,
         ({ id, ...input }) => this.editTicket(id, input)
       ),
@@ -9068,7 +9455,7 @@ var DefaultTrackerEntityOperations = class {
         ["write", "network"],
         ["tdd", "create"],
         createTddInput,
-        z51.union([TechnicalDesignSchema, partialTddCreate]),
+        z52.union([TechnicalDesignSchema, partialTddCreate]),
         (input) => this.createTdd(input)
       )
     ];
@@ -9240,13 +9627,13 @@ var DefaultTrackerEntityOperations = class {
     portableContextGuard.assertPortable(body, { allowLocalPaths });
   }
   trustedFilePath(path) {
-    const absolute = isAbsolute5(path) ? path : resolve9(this.props.cwd, path);
-    if (!existsSync12(absolute)) throw new Error(`Attachment file does not exist: ${path}`);
-    const realPath = realpathSync7(absolute);
-    const stat = statSync6(realPath);
+    const absolute = isAbsolute6(path) ? path : resolve10(this.props.cwd, path);
+    if (!existsSync13(absolute)) throw new Error(`Attachment file does not exist: ${path}`);
+    const realPath = realpathSync8(absolute);
+    const stat = statSync7(realPath);
     const contained = this.roots.some((root) => {
-      const fromRoot = relative5(root, realPath);
-      return fromRoot === "" || !fromRoot.startsWith("..") && !isAbsolute5(fromRoot);
+      const fromRoot = relative6(root, realPath);
+      return fromRoot === "" || !fromRoot.startsWith("..") && !isAbsolute6(fromRoot);
     });
     if (!contained || !stat.isFile())
       throw new Error(`Attachment file is outside trusted roots: ${path}`);
@@ -9270,7 +9657,7 @@ var DefaultFlightRules = class {
       ...props,
       env: props.env === void 0 ? void 0 : { ...props.env }
     });
-    this.cwd = resolve10(parsed.cwd ?? process.cwd());
+    this.cwd = resolve11(parsed.cwd ?? process.cwd());
     this.env = props.env ?? process.env;
     this.launchEnv = { ...props.env ?? process.env };
     this.gitEnv = { ...props.env ?? process.env };
@@ -9437,15 +9824,15 @@ var DefaultFlightRules = class {
 };
 
 // src/sdk/instruction-catalog-core.ts
-import { existsSync as existsSync13, readFileSync as readFileSync14, readdirSync as readdirSync6, realpathSync as realpathSync8, statSync as statSync7 } from "node:fs";
-import { basename as basename5, dirname as dirname14, isAbsolute as isAbsolute6, join as join16, relative as relative6, resolve as resolve11, sep as sep4 } from "node:path";
+import { existsSync as existsSync14, readFileSync as readFileSync14, readdirSync as readdirSync6, realpathSync as realpathSync9, statSync as statSync8 } from "node:fs";
+import { basename as basename5, dirname as dirname14, isAbsolute as isAbsolute7, join as join16, relative as relative7, resolve as resolve12, sep as sep4 } from "node:path";
 import { fileURLToPath as fileURLToPath4 } from "node:url";
-import { z as z53 } from "zod";
+import { z as z54 } from "zod";
 
 // src/agents/agent-registry/agent-registry.ts
 import { readFileSync as readFileSync13, readdirSync as readdirSync5 } from "node:fs";
 import { basename as basename4, join as join15 } from "node:path";
-import { z as z52 } from "zod";
+import { z as z53 } from "zod";
 
 // src/agents/agent-frontmatter/agent-frontmatter.ts
 import { parse as parseYaml4 } from "yaml";
@@ -9469,14 +9856,14 @@ var agentFrontmatterParser = new YamlAgentFrontmatterParser();
 
 // src/agents/agent-registry/agent-registry.ts
 var AgentNameSchema = AgentFrontmatterSchema.shape.name;
-var AgentVariantSchema = z52.strictObject({
+var AgentVariantSchema = z53.strictObject({
   name: AgentNameSchema,
   extends: AgentNameSchema,
   description: AgentFrontmatterSchema.shape.description,
   model: ModelTierSchema,
-  modelReason: z52.string().trim().min(1).optional()
+  modelReason: z53.string().trim().min(1).optional()
 });
-var AgentVariantsSchema = z52.array(AgentVariantSchema);
+var AgentVariantsSchema = z53.array(AgentVariantSchema);
 var InvalidAgentDefinitionError = class extends Error {
   name = "InvalidAgentDefinitionError";
 };
@@ -9515,11 +9902,11 @@ var FileAgentRegistry = class {
 };
 
 // src/sdk/instruction-catalog-core.ts
-var CatalogPropsSchema = z53.strictObject({
-  moduleUrl: z53.string().min(1),
-  env: z53.record(z53.string(), z53.string().optional())
+var CatalogPropsSchema = z54.strictObject({
+  moduleUrl: z54.string().min(1),
+  env: z54.record(z54.string(), z54.string().optional())
 });
-var ResourceNameSchema = z53.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
+var ResourceNameSchema = z54.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
 var UnknownInstructionError = class extends Error {
   name = "UnknownInstructionError";
 };
@@ -9537,7 +9924,7 @@ var FileInstructionCatalog = class {
     const parsed = CatalogPropsSchema.parse({ ...props, env: { ...props.env } });
     const override = parsed.env["FLIGHT_RULES_HOME"]?.trim();
     const moduleDirectory = dirname14(fileURLToPath4(parsed.moduleUrl));
-    const home = override || resolve11(moduleDirectory, basename5(moduleDirectory) === "sdk" ? "../.." : "..");
+    const home = override || resolve12(moduleDirectory, basename5(moduleDirectory) === "sdk" ? "../.." : "..");
     this.skillDir = this.findResourceDirectory(home, ["skills"]);
     this.agentDir = this.findResourceDirectory(home, [
       "bin/resources/agents",
@@ -9550,7 +9937,7 @@ var FileInstructionCatalog = class {
     );
   }
   listSkills() {
-    return readdirSync6(this.skillDir, { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile() && entry.name === "SKILL.md").map((entry) => relative6(this.skillDir, join16(entry.parentPath, entry.name)).split(sep4)[0]).filter((name) => name !== void 0).sort();
+    return readdirSync6(this.skillDir, { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile() && entry.name === "SKILL.md").map((entry) => relative7(this.skillDir, join16(entry.parentPath, entry.name)).split(sep4)[0]).filter((name) => name !== void 0).sort();
   }
   loadSkill(name) {
     const parsed = ResourceNameSchema.safeParse(name);
@@ -9573,18 +9960,18 @@ var FileInstructionCatalog = class {
     return agent;
   }
   findResourceDirectory(home, candidates) {
-    if (!existsSync13(home) || !statSync7(home).isDirectory()) {
+    if (!existsSync14(home) || !statSync8(home).isDirectory()) {
       throw new InstructionsUnavailableError(
         `The flight-rules installation directory is unavailable: ${home}`
       );
     }
-    const installationRoot = realpathSync8(home);
+    const installationRoot = realpathSync9(home);
     for (const candidate of candidates) {
-      const path = resolve11(installationRoot, candidate);
-      if (!existsSync13(path) || !statSync7(path).isDirectory()) continue;
-      const realPath = realpathSync8(path);
-      const relativePath = relative6(installationRoot, realPath);
-      if (relativePath === ".." || relativePath.startsWith(`..${sep4}`) || isAbsolute6(relativePath)) {
+      const path = resolve12(installationRoot, candidate);
+      if (!existsSync14(path) || !statSync8(path).isDirectory()) continue;
+      const realPath = realpathSync9(path);
+      const relativePath = relative7(installationRoot, realPath);
+      if (relativePath === ".." || relativePath.startsWith(`..${sep4}`) || isAbsolute7(relativePath)) {
         throw new UnsafeInstructionPathError(
           `Instruction directory escapes its installation home: ${path}`
         );
@@ -9594,11 +9981,11 @@ var FileInstructionCatalog = class {
     throw new InstructionsUnavailableError(`Canonical resources are unavailable under ${home}`);
   }
   safePath(path, root) {
-    if (!isAbsolute6(path) || !existsSync13(path) || !statSync7(path).isFile())
+    if (!isAbsolute7(path) || !existsSync14(path) || !statSync8(path).isFile())
       throw new UnknownInstructionError(`Unknown instruction resource: ${path}`);
-    const realPath = realpathSync8(path);
-    const relativePath = relative6(root, realPath);
-    if (relativePath === ".." || relativePath.startsWith(`..${sep4}`) || isAbsolute6(relativePath)) {
+    const realPath = realpathSync9(path);
+    const relativePath = relative7(root, realPath);
+    if (relativePath === ".." || relativePath.startsWith(`..${sep4}`) || isAbsolute7(relativePath)) {
       throw new UnsafeInstructionPathError(
         `Instruction resource escapes its installation directory: ${path}`
       );
@@ -9608,20 +9995,20 @@ var FileInstructionCatalog = class {
 };
 
 // src/mcp/mcp-server.ts
-var McpLaunchPropsSchema = z54.strictObject({
-  cwd: z54.string().min(1),
-  env: z54.record(z54.string(), z54.string().optional()),
-  allowedOperationIds: z54.array(z54.string()).default([]),
-  allowedEffects: z54.array(z54.enum(["read", "write", "network", "process"])).default(["read", "process", "network"]),
-  allowedConfigScopes: z54.array(z54.enum(configScopes)).default([]),
+var McpLaunchPropsSchema = z55.strictObject({
+  cwd: z55.string().min(1),
+  env: z55.record(z55.string(), z55.string().optional()),
+  allowedOperationIds: z55.array(z55.string()).default([]),
+  allowedEffects: z55.array(z55.enum(["read", "write", "network", "process"])).default(["read", "process", "network"]),
+  allowedConfigScopes: z55.array(z55.enum(configScopes)).default([]),
   ...ReviewOperationsLaunchPropsSchema.pick({
     trustedRef: true,
     owners: true,
     requireMapping: true
   }).shape
 });
-var resourceId = z54.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
-var LaunchBoundQaFileSystemPropsSchema = z54.object({ root: z54.string().min(1) });
+var resourceId = z55.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
+var LaunchBoundQaFileSystemPropsSchema = z55.object({ root: z55.string().min(1) });
 var LaunchCheckoutChangedError = class extends Error {
   name = "LaunchCheckoutChangedError";
 };
@@ -9632,31 +10019,31 @@ var LaunchBoundQaFileSystem = class {
   root;
   constructor(props) {
     const parsed = LaunchBoundQaFileSystemPropsSchema.parse(props);
-    this.root = realpathSync9(parsed.root);
+    this.root = realpathSync10(parsed.root);
   }
   exists(path) {
     if (!this.isInsideLaunch(path)) return false;
-    return existsSync14(path);
+    return existsSync15(path);
   }
   isFile(path) {
     this.requireInsideLaunch(path);
-    return existsSync14(path) && statSync8(path).isFile();
+    return existsSync15(path) && statSync9(path).isFile();
   }
   readFile(path) {
     this.requireInsideLaunch(path);
     return readFileSync15(path, "utf8");
   }
   isInsideLaunch(path) {
-    const absolute = resolve12(path);
+    const absolute = resolve13(path);
     let existing = absolute;
-    while (!existsSync14(existing)) {
+    while (!existsSync15(existing)) {
       const parent = dirname15(existing);
       if (parent === existing) return false;
       existing = parent;
     }
-    const realPath = realpathSync9(existing);
-    const relativePath = relative7(this.root, realPath);
-    return relativePath === "" || relativePath !== ".." && !relativePath.startsWith(`..${sep5}`) && !isAbsolute7(relativePath);
+    const realPath = realpathSync10(existing);
+    const relativePath = relative8(this.root, realPath);
+    return relativePath === "" || relativePath !== ".." && !relativePath.startsWith(`..${sep5}`) && !isAbsolute8(relativePath);
   }
   requireInsideLaunch(path) {
     if (!this.isInsideLaunch(path)) {
@@ -9677,8 +10064,8 @@ var FlightRulesMcpServer = class {
   instructions;
   constructor(props) {
     this.props = McpLaunchPropsSchema.parse(props);
-    this.cwd = realpathSync9(this.props.cwd);
-    const directory = statSync8(this.cwd);
+    this.cwd = realpathSync10(this.props.cwd);
+    const directory = statSync9(this.cwd);
     this.launchDevice = directory.dev;
     this.launchInode = directory.ino;
     this.qaFileSystem = new LaunchBoundQaFileSystem({ root: this.cwd });
@@ -9693,7 +10080,7 @@ var FlightRulesMcpServer = class {
     const server = new McpServer({ name: "flight-rules", version: "1.0.0" });
     for (const operation of registry.list()) {
       const descriptor = this.findOperation(operation.id);
-      if (!(descriptor.inputSchema instanceof z54.ZodObject)) {
+      if (!(descriptor.inputSchema instanceof z55.ZodObject)) {
         throw new Error(`MCP operation input must be an object schema: ${operation.id}`);
       }
       server.registerTool(
@@ -9839,8 +10226,8 @@ var FlightRulesMcpServer = class {
   }
   /** Pathnames can be reused after a rename; the launch grant belongs to the original directory. */
   requireOriginalLaunchCheckout() {
-    const directory = existsSync14(this.cwd) ? statSync8(this.cwd) : void 0;
-    if (directory === void 0 || realpathSync9(this.cwd) !== this.cwd || directory.dev !== this.launchDevice || directory.ino !== this.launchInode) {
+    const directory = existsSync15(this.cwd) ? statSync9(this.cwd) : void 0;
+    if (directory === void 0 || realpathSync10(this.cwd) !== this.cwd || directory.dev !== this.launchDevice || directory.ino !== this.launchInode) {
       throw new LaunchCheckoutChangedError(
         `The launch checkout was moved or replaced: ${this.cwd}`
       );
@@ -9848,15 +10235,15 @@ var FlightRulesMcpServer = class {
   }
   validateLocalPaths(id, input) {
     if (id !== "qa-instructions") return;
-    const parsedInput = z54.object({ from: z54.string().optional() }).safeParse(input);
+    const parsedInput = z55.object({ from: z55.string().optional() }).safeParse(input);
     if (!parsedInput.success) return;
     const from = parsedInput.data.from;
     if (typeof from !== "string") return;
-    const candidate = isAbsolute7(from) ? from : resolve12(this.cwd, from);
-    if (!existsSync14(candidate)) throw new Error(`QA instructions path does not exist: ${from}`);
-    const realPath = realpathSync9(candidate);
-    const relativePath = relative7(this.cwd, realPath);
-    if (relativePath === ".." || relativePath.startsWith(`..${sep5}`) || isAbsolute7(relativePath)) {
+    const candidate = isAbsolute8(from) ? from : resolve13(this.cwd, from);
+    if (!existsSync15(candidate)) throw new Error(`QA instructions path does not exist: ${from}`);
+    const realPath = realpathSync10(candidate);
+    const relativePath = relative8(this.cwd, realPath);
+    if (relativePath === ".." || relativePath.startsWith(`..${sep5}`) || isAbsolute8(relativePath)) {
       throw new UnsafeQaInstructionsPathError(
         `QA instructions path escapes the launch checkout: ${from}`
       );
@@ -9866,10 +10253,10 @@ var FlightRulesMcpServer = class {
 
 // src/mcp/stdio.ts
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
-import { z as z55 } from "zod";
+import { z as z56 } from "zod";
 var StdioLaunchPropsSchema = McpLaunchPropsSchema.extend({
-  cwd: z55.string().min(1).default(process.cwd()),
-  env: z55.record(z55.string(), z55.string().optional()).default(() => ({ ...process.env }))
+  cwd: z56.string().min(1).default(process.cwd()),
+  env: z56.record(z56.string(), z56.string().optional()).default(() => ({ ...process.env }))
 });
 var StdioFlightRulesMcpTransport = class {
   launch;
