@@ -3,6 +3,7 @@ import { Command } from "commander";
 import { createDocCommand } from "../bundled-docs/commands/doc/command.js";
 import { DocOperation } from "../operations/doc-operation.js";
 import { DefaultLocalDiscoveryOperations } from "../operations/local-discovery-operations.js";
+import { DefaultReviewOperations } from "../operations/review-operations.js";
 import { CommanderLocalDiscoveryCli } from "../operations/local-discovery-cli.js";
 import {
   LaunchOperationAccessPolicy,
@@ -110,7 +111,11 @@ export function buildProgram(
     getConfigPath,
   });
   const operationRegistry = new MapOperationRegistry({
-    operations: [docOperation, ...localOperations.operations()],
+    operations: [
+      docOperation,
+      ...localOperations.operations(),
+      ...new DefaultReviewOperations({ cwd: launchCwd }).operations(),
+    ],
     policy: new LaunchOperationAccessPolicy({ allowedEffects: ["read", "process", "network"] }),
   });
   new CommanderLocalDiscoveryCli({
@@ -124,7 +129,7 @@ export function buildProgram(
       registry: operationRegistry,
     }),
   );
-  program.addCommand(createReviewCommand());
+  program.addCommand(createReviewCommand({ registry: operationRegistry }));
   program.addCommand(
     createBoardCommand(
       () => services.board(),

@@ -34,6 +34,7 @@ import {
 } from "../operations/local-discovery-operations.js";
 import { DocCharterCatalog } from "../bundled-docs/charter-catalog/charter-catalog.js";
 import { GitRepositoryPaths } from "../bundled-docs/charter-catalog/repository-paths.js";
+import { DefaultReviewOperations, type ReviewOperations } from "../operations/review-operations.js";
 
 export interface FlightRules {
   installation(): NativeInstallation;
@@ -50,6 +51,7 @@ export interface FlightRules {
   readiness(): RepositoryReadiness;
   docs(): DocResolver;
   localOperations(): LocalDiscoveryOperations;
+  reviewOperations(): ReviewOperations;
   /** Ariadne's Agents page reporter; reads only the `ariadne.*` keys from user and local scope, so it works without a valid tracker config. */
   board(): AriadneBoard;
   packets(): AriadnePackets;
@@ -215,6 +217,10 @@ export class DefaultFlightRules implements FlightRules {
       getTracker: () => this.tracker(),
       getConfigPath: () => this.configPath(),
     });
+  }
+
+  reviewOperations(): ReviewOperations {
+    return new DefaultReviewOperations({ cwd: this.cwd });
   }
 
   board(): AriadneBoard {
