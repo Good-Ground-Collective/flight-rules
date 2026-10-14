@@ -4,6 +4,9 @@ import { z } from "zod";
 import type { AriadnePackets } from "../../ariadne/ariadne-packets.js";
 import { packetIdGenerator } from "../../ariadne/packet-id-generator.js";
 import { decimalIntegers } from "../../decimal-integer.js";
+import type { OperationRegistry } from "../../../operations/operation-registry.js";
+import { RegistryAriadneCommandClient } from "../../../operations/ariadne-command-client.js";
+import { PacketSchema, ReviewerListResponseSchema } from "../../ariadne/review-packet.schema.js";
 
 interface FileOptions {
   file: string;
@@ -14,11 +17,20 @@ interface UpdateOptions extends FileOptions {
 }
 
 /** Fields the server owns; `packet get` output carries them and an update must not send them back. */
-const serverOwnedFields: ReadonlySet<string> = new Set(["id", "authorId", "status", "revision", "createdAt", "updatedAt"]);
+const serverOwnedFields: ReadonlySet<string> = new Set([
+  "id",
+  "authorId",
+  "status",
+  "revision",
+  "createdAt",
+  "updatedAt",
+]);
 
 const ReviewerEntrySchema = z.union([
   z.string(),
-  z.looseObject({ github: z.looseObject({ login: z.string() }) }).transform((reviewer) => reviewer.github.login),
+  z
+    .looseObject({ github: z.looseObject({ login: z.string() }) })
+    .transform((reviewer) => reviewer.github.login),
 ]);
 
 /**
@@ -27,7 +39,11 @@ const ReviewerEntrySchema = z.union([
  * logins an update sends.
  */
 const UpdateFileSchema = z
-  .looseObject({ id: z.string().optional(), revision: z.number().int().optional(), reviewers: z.array(ReviewerEntrySchema).optional() })
+  .looseObject({
+    id: z.string().optional(),
+    revision: z.number().int().optional(),
+    reviewers: z.array(ReviewerEntrySchema).optional(),
+  })
   .transform((file) => ({
     id: file.id,
     revision: file.revision,
@@ -55,12 +71,18 @@ class PacketFile {
     try {
       text = readFileSync(this.path, "utf8");
     } catch (err) {
-      throw new Error(`cannot read ${this.path}: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
+      throw new Error(
+        `cannot read ${this.path}: ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err },
+      );
     }
     try {
       return JSON.parse(text);
     } catch (err) {
-      throw new Error(`${this.path} is not valid JSON: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
+      throw new Error(
+        `${this.path} is not valid JSON: ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err },
+      );
     }
   }
 
@@ -91,7 +113,9 @@ class PacketFile {
  * one-line next step.
  */
 export class PacketCommandFactory {
-  create(getPackets: () => AriadnePackets): Command {
+  create(getPackets: () => AriadnePackets, registry?: OperationRegistry): Command {
+    const operations =
+      registry === undefined ? undefined : new RegistryAriadneCommandClient({ registry });
     const packet = new Command("packet")
       .description("publish and revise a Review Packet in Ariadne, as its author")
       .addHelpText(
@@ -121,26 +145,45 @@ export class PacketCommandFactory {
       .action(async (opts: FileOptions) => {
         const packetFile = new PacketFile(opts.file);
         const input = packetFile.read();
-        const published = await getPackets().create(input);
+        const published =
+          operations === undefined
+            ? await getPackets().create(input)
+            : await operations.packet("packet-create", { packet: input }, PacketSchema);
         print(published);
         const written = JsonObjectSchema.safeParse(input);
-        if (written.success && written.data.id !== published.id) packetFile.writeId(written.data, published.id);
+        if (written.success && written.data.id !== published.id)
+          packetFile.writeId(written.data, published.id);
       });
 
     packet
       .command("new-id")
-      .description('print {"id": "<slug>-<8 hex>"}: a globally unique packet id to write into the packet file once and reuse for every retry')
+      .description(
+        'print {"id": "<slug>-<8 hex>"}: a globally unique packet id to write into the packet file once and reuse for every retry',
+      )
       .requiredOption("--title <title>", "the packet title")
       .exitOverride()
-      .action((opts: { title: string }) => {
-        print({ id: packetIdGenerator.generate(opts.title) });
+      .action(async (opts: { title: string }) => {
+        print(
+          operations === undefined
+            ? { id: packetIdGenerator.generate(opts.title) }
+            : await operations.packet(
+                "packet-new-id",
+                { title: opts.title },
+                z.object({ id: z.string() }),
+              ),
+        );
       });
 
     packet
       .command("update")
-      .description("revise a packet from a JSON file; a stale revision fails with 409 revision_conflict")
+      .description(
+        "revise a packet from a JSON file; a stale revision fails with 409 revision_conflict",
+      )
       .argument("<id>", "the packet id")
-      .requiredOption("--file <path>", "the packet JSON; `packet get` output works, and its revision is used")
+      .requiredOption(
+        "--file <path>",
+        "the packet JSON; `packet get` output works, and its revision is used",
+      )
       .option(
         "--expected-revision <n>",
         "the revision you read, in decimal digits; defaults to the file's `revision`",
@@ -150,15 +193,29 @@ export class PacketCommandFactory {
       .action(async (id: string, opts: UpdateOptions) => {
         const file = new PacketFile(opts.file).readForUpdate();
         if (file.id !== undefined && file.id !== id) {
-          throw new Error(`${opts.file} holds packet ${file.id} but the command names ${id}; nothing was sent`);
+          throw new Error(
+            `${opts.file} holds packet ${file.id} but the command names ${id}; nothing was sent`,
+          );
         }
         const expectedRevision = opts.expectedRevision ?? file.revision;
-        if (expectedRevision === undefined || !Number.isInteger(expectedRevision) || expectedRevision < 0) {
+        if (
+          expectedRevision === undefined ||
+          !Number.isInteger(expectedRevision) ||
+          expectedRevision < 0
+        ) {
           throw new Error(
             "no expected revision: pass --expected-revision <n>, or use a file with a numeric `revision` such as `flight-rules packet get` output; nothing was sent",
           );
         }
-        print(await getPackets().update(id, { packet: file.packet, expectedRevision }));
+        print(
+          operations === undefined
+            ? await getPackets().update(id, { packet: file.packet, expectedRevision })
+            : await operations.packet(
+                "packet-update",
+                { id, packet: file.packet, expectedRevision },
+                PacketSchema,
+              ),
+        );
       });
 
     packet
@@ -167,19 +224,32 @@ export class PacketCommandFactory {
       .argument("<id>", "the packet id")
       .exitOverride()
       .action(async (id: string) => {
-        print(await getPackets().get(id));
+        print(
+          operations === undefined
+            ? await getPackets().get(id)
+            : await operations.packet("packet-get", { id }, PacketSchema),
+        );
       });
 
     packet
       .command("reviewers")
-      .description("list the Ariadne members you can name as reviewers: {id, name, github: {id, login}}")
+      .description(
+        "list the Ariadne members you can name as reviewers: {id, name, github: {id, login}}",
+      )
       .exitOverride()
       .action(async () => {
-        print(await getPackets().reviewers());
+        print(
+          operations === undefined
+            ? await getPackets().reviewers()
+            : await operations.packet("packet-reviewers", {}, ReviewerListResponseSchema),
+        );
       });
 
     return packet;
   }
 }
 
-export const createPacketCommand = (getPackets: () => AriadnePackets): Command => new PacketCommandFactory().create(getPackets);
+export const createPacketCommand = (
+  getPackets: () => AriadnePackets,
+  registry?: OperationRegistry,
+): Command => new PacketCommandFactory().create(getPackets, registry);

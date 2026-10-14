@@ -39,6 +39,7 @@ import { cliRouteCoverage } from "../operations/cli-coverage.js";
 import { DefaultTrackerEntityOperations } from "../operations/tracker-entity-operations.js";
 import { createMcpCommand } from "../mcp/command.js";
 import { DefaultPrOperations } from "../operations/pr-operations.js";
+import { DefaultAriadneOperations } from "../operations/ariadne-operations.js";
 
 export function buildProgram(
   getTracker: (overrideTracker?: string) => TaskTracker,
@@ -61,6 +62,7 @@ export function buildProgram(
     | "ariadneTokens"
     | "boardSessions"
     | "boardAgents"
+    | "ariadneOperations"
   > = createFlightRules(),
 ): Command {
   const launchCwd = process.cwd();
@@ -130,6 +132,13 @@ export function buildProgram(
         cwd: launchCwd,
       }).operations(),
       ...new DefaultPrOperations({ cwd: launchCwd, getHost: prHost }).operations(),
+      ...(
+        services.ariadneOperations?.() ??
+        new DefaultAriadneOperations({
+          getBoard: () => services.board(),
+          getPackets: () => services.packets(),
+        })
+      ).operations(),
     ],
     policy: new LaunchOperationAccessPolicy({
       allowedEffects: ["read", "write", "process", "network"],
@@ -171,9 +180,11 @@ export function buildProgram(
     createBoardCommand(
       () => services.board(),
       () => services.ariadneTokens(),
+      undefined,
+      operationRegistry,
     ),
   );
-  program.addCommand(createPacketCommand(() => services.packets()));
+  program.addCommand(createPacketCommand(() => services.packets(), operationRegistry));
   program.addCommand(createMcpCommand());
   cliRouteCoverage.check(program, operationRegistry);
   return program;

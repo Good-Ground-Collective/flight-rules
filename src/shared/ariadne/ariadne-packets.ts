@@ -53,37 +53,20 @@ export class AriadnePackets {
 
   /**
    * Publishes a packet, generating its id from the title when the file has none.
-   * When another author already holds the id (409 `packet_id_taken`) the random
-   * suffix is regenerated and the create is retried once.
    */
   async create(packet: unknown): Promise<Packet> {
     const first = this.withId(packet);
-    return this.call(async (client) => {
-      try {
-        return await client.createPacket(first.packet);
-      } catch (err) {
-        if (!(err instanceof AriadneError) || err.code !== "packet_id_taken") throw err;
-      }
-
-      const retryId = packetIdGenerator.regenerate(first.id);
-      try {
-        return await client.createPacket(Object.assign({}, first.packet, { id: retryId }));
-      } catch (err) {
-        if (err instanceof AriadneError && err.code === "packet_id_taken") {
-          throw new AriadnePacketError(
-            `the packet id is taken by another author (409 packet_id_taken; tried ${first.id} and ${retryId}); change the title in the packet file or run \`flight-rules packet new-id --title <title>\` and set its id, then retry`,
-            { cause: err },
-          );
-        }
-        throw err;
-      }
-    });
+    return this.call((client) => client.createPacket(first.packet));
   }
 
   async update(id: string, input: PacketUpdate): Promise<Packet> {
     const operationId = input.operationId ?? randomUUID().replaceAll("-", "");
     return this.call((client) =>
-      client.updatePacket(id, { expectedRevision: input.expectedRevision, operationId, packet: input.packet }),
+      client.updatePacket(id, {
+        expectedRevision: input.expectedRevision,
+        operationId,
+        packet: input.packet,
+      }),
     );
   }
 
@@ -97,7 +80,8 @@ export class AriadnePackets {
 
   /** The packet carrying an id: the file's own, or one generated from its title. Anything else is left for validation to reject. */
   private withId(packet: unknown): { packet: unknown; id: string } {
-    if (typeof packet !== "object" || packet === null || Array.isArray(packet)) return { packet, id: "" };
+    if (typeof packet !== "object" || packet === null || Array.isArray(packet))
+      return { packet, id: "" };
     const fields: Record<string, unknown> = { ...packet };
     if (typeof fields["id"] === "string") return { packet: fields, id: fields["id"] };
     if (fields["id"] === undefined && typeof fields["title"] === "string") {
@@ -153,7 +137,8 @@ export class AriadnePackets {
 
   private describe(err: unknown, url: string): string {
     if (!(err instanceof AriadneError)) return err instanceof Error ? err.message : String(err);
-    if (err.failure === "invalid-input") return `${err.message}; fix the packet file and retry, nothing was sent`;
+    if (err.failure === "invalid-input")
+      return `${err.message}; fix the packet file and retry, nothing was sent`;
     if (err.failure === "network") {
       return `could not reach Ariadne at ${url}: ${err.message}; check the network and \`ariadne.url\`, then retry`;
     }
@@ -178,7 +163,8 @@ export class AriadnePackets {
     if (err.code === "reviewer_not_found") {
       return `a reviewer is not an active Ariadne member with a linked GitHub login (422 reviewer_not_found): ${err.message}; list valid logins with \`flight-rules packet reviewers\``;
     }
-    if (err.failure === "http") return `Ariadne returned ${err.message}; check the packet and retry`;
+    if (err.failure === "http")
+      return `Ariadne returned ${err.message}; check the packet and retry`;
     return `Ariadne request failed: ${err.message}`;
   }
 

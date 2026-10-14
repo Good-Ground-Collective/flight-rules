@@ -5,8 +5,21 @@ import { Command, Option } from "commander";
 import { collect } from "../../collect.js";
 import type { AriadneBoard, BoardOutcome } from "../../ariadne/ariadne-board.js";
 import { agentActivityLevels, agentItemKinds, agentStates } from "../../ariadne/ariadne.schema.js";
-import type { AgentActivityLevel, AgentItem, AgentItemKind, AgentState } from "../../ariadne/ariadne.schema.js";
+import type {
+  AgentActivityLevel,
+  AgentItem,
+  AgentItemKind,
+  AgentState,
+} from "../../ariadne/ariadne.schema.js";
 import { AriadneTokenStore } from "../../ariadne/ariadne-token-store.js";
+import {
+  ActivityResponseSchema,
+  HeartbeatResponseSchema,
+  ItemListResponseSchema,
+  ItemResponseSchema,
+} from "../../ariadne/ariadne.schema.js";
+import type { OperationRegistry } from "../../../operations/operation-registry.js";
+import { RegistryAriadneCommandClient } from "../../../operations/ariadne-command-client.js";
 
 interface ReportOptions {
   session?: string;
@@ -59,11 +72,14 @@ export class HiddenPrompt {
 }
 
 const ticketHelp = "Jira issue key";
-const sessionHelp = "session id; defaults to <$CLAUDE_CODE_SESSION_ID>-<TICKET>, the row the heartbeat hook keeps alive for that ticket";
-const itemsSessionHelp = "session id; defaults to <$CLAUDE_CODE_SESSION_ID>-<TICKET> with --ticket, else $CLAUDE_CODE_SESSION_ID";
+const sessionHelp =
+  "session id; defaults to <$CLAUDE_CODE_SESSION_ID>-<TICKET>, the row the heartbeat hook keeps alive for that ticket";
+const itemsSessionHelp =
+  "session id; defaults to <$CLAUDE_CODE_SESSION_ID>-<TICKET> with --ticket, else $CLAUDE_CODE_SESSION_ID";
 const skillHelp = "the skill reporting, e.g. flight-rules:execute-work";
 const bootstrapSkillHelp = `${skillHelp}; names the skill on a session this post has to create`;
-const strictHelp ="exit 1 when the post fails, and post even without a token so a missing one fails with 401";
+const strictHelp =
+  "exit 1 when the post fails, and post even without a token so a missing one fails with 401";
 
 /**
  * `flight-rules board`: reports this run to Ariadne's Agents page. Not
@@ -74,9 +90,14 @@ export function createBoardCommand(
   getBoard: () => AriadneBoard,
   getTokens: () => AriadneTokenStore = () => new AriadneTokenStore(),
   readSecret: () => Promise<string> = () => new HiddenPrompt().read("Ariadne agent token: "),
+  registry?: OperationRegistry,
 ): Command {
+  const operations =
+    registry === undefined ? undefined : new RegistryAriadneCommandClient({ registry });
   const board = new Command("board")
-    .description("report this run to Ariadne's Agents page (opt-in; silent unless an Ariadne token is set)")
+    .description(
+      "report this run to Ariadne's Agents page (opt-in; silent unless an Ariadne token is set)",
+    )
     .addHelpText(
       "after",
       [
@@ -92,7 +113,11 @@ export function createBoardCommand(
     );
   board.exitOverride();
 
-  const withReportOptions = (command: Command, jsonHelp: string, session: string = sessionHelp): Command =>
+  const withReportOptions = (
+    command: Command,
+    jsonHelp: string,
+    session: string = sessionHelp,
+  ): Command =>
     command
       .option("--session <id>", session)
       .option("--strict", strictHelp)
@@ -109,7 +134,9 @@ export function createBoardCommand(
     print: (value: T) => void,
     loud: boolean = opts.strict === true,
   ): void => {
-    if (loud) for (const notice of outcome.notices ?? []) process.stderr.write(`flight-rules board: ${notice}\n`);
+    if (loud)
+      for (const notice of outcome.notices ?? [])
+        process.stderr.write(`flight-rules board: ${notice}\n`);
     if (outcome.status === "skipped") return;
     if (outcome.status === "failed") {
       if (opts.strict === true) throw new Error(`flight-rules board: ${outcome.message}`);
@@ -135,7 +162,9 @@ export function createBoardCommand(
     return `${item.status}\t${item.kind}\t${item.ticket ?? "-"}\t${item.id}\t${item.title}${answer}`;
   };
 
-  const post = new Command("post").description("send a heartbeat, an item that needs a person, or an activity line");
+  const post = new Command("post").description(
+    "send a heartbeat, an item that needs a person, or an activity line",
+  );
   post.exitOverride();
 
   withReportOptions(
@@ -143,55 +172,95 @@ export function createBoardCommand(
       .command("heartbeat")
       .description("create or update this session: ticket, step and state")
       .requiredOption("--ticket <key>", ticketHelp)
-      .requiredOption("--step <step>", "one line up to 60 characters: implement, verify 2/3, pr, qa")
-      .addOption(new Option("--state <state>", "how the run is going").choices(agentStates).makeOptionMandatory())
+      .requiredOption(
+        "--step <step>",
+        "one line up to 60 characters: implement, verify 2/3, pr, qa",
+      )
+      .addOption(
+        new Option("--state <state>", "how the run is going")
+          .choices(agentStates)
+          .makeOptionMandatory(),
+      )
       .option("--branch <branch>", "the branch as git prints it")
       .option("--repo <repo>", "owner/name")
       .option("--skill <skill>", skillHelp)
       .option("--detail <line>", "one line up to 500 characters"),
     "print the API response {session} as JSON",
   ).action(async (opts: HeartbeatOptions) => {
-    const outcome = await getBoard().heartbeat(
-      {
-        session: opts.session,
-        ticket: opts.ticket,
-        step: opts.step,
-        state: opts.state,
-        branch: opts.branch,
-        repo: opts.repo,
-        skill: opts.skill,
-        detail: opts.detail,
-      },
-      { strict: opts.strict === true },
-    );
+    const input = {
+      session: opts.session,
+      ticket: opts.ticket,
+      step: opts.step,
+      state: opts.state,
+      branch: opts.branch,
+      repo: opts.repo,
+      skill: opts.skill,
+      detail: opts.detail,
+    };
+    const outcome =
+      operations === undefined
+        ? await getBoard().heartbeat(input, { strict: opts.strict === true })
+        : await operations.board(
+            "board-post-heartbeat",
+            {
+              input,
+              options: { strict: opts.strict === true },
+            },
+            HeartbeatResponseSchema,
+          );
     finish(outcome, opts, printJson(opts));
   });
 
   withReportOptions(
     post
       .command("item")
-      .description("ask a person for something: a question, blocker, testable or wave gate, with up to 6 options")
-      .addOption(new Option("--kind <kind>", "what the person is asked for").choices(agentItemKinds).makeOptionMandatory())
+      .description(
+        "ask a person for something: a question, blocker, testable or wave gate, with up to 6 options",
+      )
+      .addOption(
+        new Option("--kind <kind>", "what the person is asked for")
+          .choices(agentItemKinds)
+          .makeOptionMandatory(),
+      )
       .requiredOption("--ticket <key>", ticketHelp)
       .requiredOption("--title <text>", "one line up to 200 characters")
       .option("--detail <text>", "up to 2,000 characters; line breaks allowed")
-      .option("--option <label>", "an answer the person can choose (repeatable, up to 6)", collect, [])
-      .option("--id <id>", "client id; reposting the same id returns the stored item and its chosenOption")
+      .option(
+        "--option <label>",
+        "an answer the person can choose (repeatable, up to 6)",
+        collect,
+        [],
+      )
+      .option(
+        "--id <id>",
+        "client id; reposting the same id returns the stored item and its chosenOption",
+      )
       .option("--skill <skill>", bootstrapSkillHelp),
     "print the API response {item, created} as JSON, including any chosenOption",
   ).action(async (opts: ItemOptions) => {
-    const outcome = await getBoard().item(
-      {
-        session: opts.session,
-        kind: opts.kind,
-        ticket: opts.ticket,
-        title: opts.title,
-        detail: opts.detail,
-        ...(opts.option.length > 0 ? { options: opts.option } : {}),
-        id: opts.id,
-      },
-      { strict: opts.strict === true, skill: opts.skill },
-    );
+    const input = {
+      session: opts.session,
+      kind: opts.kind,
+      ticket: opts.ticket,
+      title: opts.title,
+      detail: opts.detail,
+      ...(opts.option.length > 0 ? { options: opts.option } : {}),
+      id: opts.id,
+    };
+    const outcome =
+      operations === undefined
+        ? await getBoard().item(input, { strict: opts.strict === true, skill: opts.skill })
+        : await operations.board(
+            "board-post-item",
+            {
+              input,
+              options: {
+                strict: opts.strict === true,
+                ...(opts.skill === undefined ? {} : { skill: opts.skill }),
+              },
+            },
+            ItemResponseSchema,
+          );
     finish(outcome, opts, printJson(opts));
   });
 
@@ -206,10 +275,27 @@ export function createBoardCommand(
       .option("--skill <skill>", bootstrapSkillHelp),
     "print the API response {activity, created} as JSON",
   ).action(async (opts: ActivityOptions) => {
-    const outcome = await getBoard().activity(
-      { session: opts.session, ticket: opts.ticket, text: opts.text, level: opts.level, id: opts.id },
-      { strict: opts.strict === true, skill: opts.skill },
-    );
+    const input = {
+      session: opts.session,
+      ticket: opts.ticket,
+      text: opts.text,
+      level: opts.level,
+      id: opts.id,
+    };
+    const outcome =
+      operations === undefined
+        ? await getBoard().activity(input, { strict: opts.strict === true, skill: opts.skill })
+        : await operations.board(
+            "board-post-activity",
+            {
+              input,
+              options: {
+                strict: opts.strict === true,
+                ...(opts.skill === undefined ? {} : { skill: opts.skill }),
+              },
+            },
+            ActivityResponseSchema,
+          );
     finish(outcome, opts, printJson(opts));
   });
 
@@ -219,11 +305,25 @@ export function createBoardCommand(
     board
       .command("items")
       .description("list a session's items, open and resolved, with any chosen option")
-      .option("--ticket <key>", "the Jira key the items were posted on; picks the same default session as the post"),
+      .option(
+        "--ticket <key>",
+        "the Jira key the items were posted on; picks the same default session as the post",
+      ),
     "print {items} as JSON",
     itemsSessionHelp,
   ).action(async (opts: ReportOptions & { ticket?: string }) => {
-    const outcome = await getBoard().items(opts.session, { strict: opts.strict === true }, opts.ticket);
+    const outcome =
+      operations === undefined
+        ? await getBoard().items(opts.session, { strict: opts.strict === true }, opts.ticket)
+        : await operations.board(
+            "board-items",
+            {
+              session: opts.session,
+              ticket: opts.ticket,
+              strict: opts.strict === true,
+            },
+            ItemListResponseSchema,
+          );
     finish(
       outcome,
       opts,
@@ -264,7 +364,9 @@ export function createBoardCommand(
     .exitOverride()
     .action(() => {
       const tokens = getTokens();
-      process.stdout.write(JSON.stringify({ removed: tokens.remove(), path: tokens.path() }) + "\n");
+      process.stdout.write(
+        JSON.stringify({ removed: tokens.remove(), path: tokens.path() }) + "\n",
+      );
     });
 
   return board;

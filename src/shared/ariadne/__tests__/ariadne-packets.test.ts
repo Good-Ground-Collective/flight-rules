@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AriadnePacketError, AriadnePackets } from "../ariadne-packets.js";
 import { AriadneTokenStore } from "../ariadne-token-store.js";
 import { defaultAriadneUrl } from "../ariadne.schema.js";
-import { FakeTransport, agentToken, packetContract, packetEnvelope, storedPacket } from "./fake-transport.js";
+import { FakeTransport, agentToken, packetContract, packetEnvelope } from "./fake-transport.js";
 
 describe("AriadnePackets", () => {
   let home: string;
@@ -24,7 +24,11 @@ describe("AriadnePackets", () => {
       env = { ARIADNE_AGENT_TOKEN: agentToken },
       user = {},
       project = {},
-    }: { env?: Record<string, string | undefined>; user?: Record<string, unknown>; project?: Record<string, unknown> } = {},
+    }: {
+      env?: Record<string, string | undefined>;
+      user?: Record<string, unknown>;
+      project?: Record<string, unknown>;
+    } = {},
   ) =>
     new AriadnePackets({
       readLayers: () => [
@@ -66,12 +70,16 @@ describe("AriadnePackets", () => {
 
     const honoured = new FakeTransport(FakeTransport.json(200, packetContract.reviewerList));
     await packets(honoured, { user: { "ariadne.url": "https://ariadne.example.com" } }).reviewers();
-    expect(honoured.requests[0]?.url).toBe("https://ariadne.example.com/v1/review-packets/reviewers");
+    expect(honoured.requests[0]?.url).toBe(
+      "https://ariadne.example.com/v1/review-packets/reviewers",
+    );
   });
 
   it("refuses an invalid ariadne.url and sends nothing", async () => {
     const transport = new FakeTransport();
-    const error = await failure(packets(transport, { user: { "ariadne.url": "http://example.com" } }).reviewers());
+    const error = await failure(
+      packets(transport, { user: { "ariadne.url": "http://example.com" } }).reviewers(),
+    );
     expect(error.message).toContain("ariadne.url is invalid");
     expect(transport.requests).toHaveLength(0);
   });
@@ -100,9 +108,12 @@ describe("AriadnePackets", () => {
   });
 
   describe("create ids", () => {
-    const withoutId = Object.fromEntries(Object.entries(packetContract.createRequest).filter(([key]) => key !== "id"));
+    const withoutId = Object.fromEntries(
+      Object.entries(packetContract.createRequest).filter(([key]) => key !== "id"),
+    );
     const taken = () => FakeTransport.json(409, packetContract.errors["packet_id_taken"]);
-    const sentIds = (transport: FakeTransport) => transport.bodies().map((body) => (body as { id: string }).id);
+    const sentIds = (transport: FakeTransport) =>
+      transport.bodies().map((body) => (body as { id: string }).id);
 
     it("generates an id from the title when the packet has none", async () => {
       const transport = new FakeTransport(FakeTransport.json(200, packetEnvelope));
@@ -117,53 +128,38 @@ describe("AriadnePackets", () => {
       expect(sentIds(transport)).toEqual(["rp-frt-2400"]);
     });
 
-    it("resends the same id and body when a 5xx is retried", async () => {
-      const transport = new FakeTransport(FakeTransport.json(503, {}), FakeTransport.json(200, packetEnvelope));
-      await packets(transport).create(withoutId);
-      const [first, second] = sentIds(transport);
-      expect(transport.requests).toHaveLength(2);
-      expect(first).toBe(second);
-    });
-
-    it("regenerates the suffix once after packet_id_taken and returns the stored packet", async () => {
-      const stored = { ...storedPacket, id: "ignored" };
-      const transport = new FakeTransport(taken(), FakeTransport.json(200, { packet: stored }));
-      const result = await packets(transport).create(withoutId);
-      const [first, second] = sentIds(transport);
-      expect(sentIds(transport)).toHaveLength(2);
-      expect(first).toMatch(/^review-packets-api-store-and-routes-[0-9a-f]{8}$/);
-      expect(second).toMatch(/^review-packets-api-store-and-routes-[0-9a-f]{8}$/);
-      expect(second).not.toBe(first);
-      expect(result).toEqual(stored);
-    });
-
-    it("keeps the slug of a file-supplied id when regenerating", async () => {
-      const transport = new FakeTransport(taken(), FakeTransport.json(200, packetEnvelope));
-      await packets(transport).create(packetContract.createRequest);
-      const [first, second] = sentIds(transport);
-      expect(first).toBe("rp-frt-2400");
-      expect(second).toMatch(/^rp-frt-2400-[0-9a-f]{8}$/);
-    });
-
-    it("fails on a second packet_id_taken, naming the ids tried", async () => {
-      const transport = new FakeTransport(taken(), taken(), FakeTransport.json(200, packetEnvelope));
+    it("does not resend a create after a 5xx response", async () => {
+      const transport = new FakeTransport(
+        FakeTransport.json(503, {}),
+        FakeTransport.json(200, packetEnvelope),
+      );
       const error = await failure(packets(transport).create(withoutId));
-      const [first, second] = sentIds(transport);
-      expect(transport.requests).toHaveLength(2);
+      expect(error.message).toContain("503");
+      expect(transport.requests).toHaveLength(1);
+    });
+
+    it("does not retry packet_id_taken and gives the author a new-id next step", async () => {
+      const transport = new FakeTransport(taken(), FakeTransport.json(200, packetEnvelope));
+      const error = await failure(packets(transport).create(withoutId));
+      const [first] = sentIds(transport);
+      expect(transport.requests).toHaveLength(1);
       expect(error.message).toContain("packet_id_taken");
-      expect(error.message).toContain(String(first));
-      expect(error.message).toContain(String(second));
+      expect(first).toMatch(/^review-packets-api-store-and-routes-[0-9a-f]{8}$/);
       expect(error.message).toContain("flight-rules packet new-id");
     });
 
     it("never retries packet_exists", async () => {
-      const transport = new FakeTransport(FakeTransport.json(409, packetContract.errors["packet_exists"]));
+      const transport = new FakeTransport(
+        FakeTransport.json(409, packetContract.errors["packet_exists"]),
+      );
       await failure(packets(transport).create(withoutId));
       expect(transport.requests).toHaveLength(1);
     });
 
     it("never retries an unknown 409", async () => {
-      const transport = new FakeTransport(FakeTransport.json(409, { error: "surprise", message: "x" }));
+      const transport = new FakeTransport(
+        FakeTransport.json(409, { error: "surprise", message: "x" }),
+      );
       const error = await failure(packets(transport).create(withoutId));
       expect(transport.requests).toHaveLength(1);
       expect(error.message).toContain("409");
@@ -183,7 +179,9 @@ describe("AriadnePackets", () => {
   });
 
   it("never lets the token into an error", async () => {
-    const transport = new FakeTransport(FakeTransport.json(400, { error: "bad", message: `echo ${agentToken}` }));
+    const transport = new FakeTransport(
+      FakeTransport.json(400, { error: "bad", message: `echo ${agentToken}` }),
+    );
     const error = await failure(packets(transport).get("rp-frt-2400"));
     expect(error.message).not.toContain(agentToken);
     expect(error.message).toContain("[redacted]");
