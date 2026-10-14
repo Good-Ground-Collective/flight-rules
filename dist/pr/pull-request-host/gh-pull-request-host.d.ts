@@ -7,6 +7,8 @@ type ExecFileFn = (file: string, args: readonly string[]) => Promise<{
 }>;
 declare const GhPullRequestHostPropsSchema: z.ZodObject<{
     repo: z.ZodString;
+    cwd: z.ZodOptional<z.ZodString>;
+    env: z.ZodOptional<z.ZodCustom<NodeJS.ProcessEnv, NodeJS.ProcessEnv>>;
 }, z.core.$strip>;
 export type GhPullRequestHostProps = z.input<typeof GhPullRequestHostPropsSchema> & {
     builder?: PullRequestBuilder;

@@ -33,6 +33,7 @@ import {
 import { DefaultTrackerReadOperations } from "./tracker-read-operations.js";
 import type { PullRequestHost } from "../pr/pull-request-host/pull-request-host.js";
 import type { Config } from "../shared/config.js";
+import { DefaultTicketLifecycleOperations } from "./ticket-lifecycle-operations.js";
 
 const labelListSchema = z
   .array(z.string())
@@ -125,6 +126,11 @@ export class DefaultTrackerEntityOperations implements TrackerEntityOperations {
         getTracker: this.props.getTracker,
         ...(this.props.getPrHost === undefined ? {} : { getPrHost: this.props.getPrHost }),
         ...(this.props.getConfig === undefined ? {} : { getConfig: this.props.getConfig }),
+      }).operations(),
+      ...new DefaultTicketLifecycleOperations({
+        getTracker: this.props.getTracker,
+        cwd: this.props.cwd,
+        trustedRoots: this.props.trustedRoots,
       }).operations(),
       this.descriptor(
         "epic-create",

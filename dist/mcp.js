@@ -1,8 +1,8 @@
 // src/mcp/mcp-server.ts
-import { existsSync as existsSync14, readFileSync as readFileSync15, realpathSync as realpathSync8, statSync as statSync7 } from "node:fs";
-import { dirname as dirname15, isAbsolute as isAbsolute6, relative as relative6, resolve as resolve11, sep as sep5 } from "node:path";
+import { existsSync as existsSync15, readFileSync as readFileSync15, realpathSync as realpathSync10, statSync as statSync9 } from "node:fs";
+import { dirname as dirname15, isAbsolute as isAbsolute8, relative as relative8, resolve as resolve13, sep as sep5 } from "node:path";
 import { McpServer } from "@modelcontextprotocol/server";
-import { z as z53 } from "zod";
+import { z as z55 } from "zod";
 
 // src/bundled-docs/charter-catalog/charter-catalog.ts
 import { matchesGlob } from "node:path";
@@ -2169,6 +2169,95 @@ var TrackerRefFormatter = class {
   }
 };
 var refs = new TrackerRefFormatter();
+var CrossEpicDependencyError = class extends Error {
+  name = "CrossEpicDependencyError";
+  constructor(props) {
+    const ticket = refs.format(props.ticketId);
+    const blocker = refs.format(props.blockerId);
+    const ticketEpic = refs.format(props.ticketEpic);
+    const blockerEpic = refs.format(props.blockerEpic);
+    super(
+      `refusing to block ${ticket} (epic ${ticketEpic}) on ${blocker} (epic ${blockerEpic}): blocked-by edges stay inside one epic. Move ${ticket} into epic ${blockerEpic}, merge the two tickets, or finish epic ${blockerEpic} before epic ${ticketEpic} starts. If the edge is absolutely necessary, pass --cross-epic-reason "<why>" and it is recorded on ${ticket}.`
+    );
+  }
+};
+var EpicBoundaryGuard = class {
+  constructor(tracker) {
+    this.tracker = tracker;
+  }
+  tracker;
+  async block(request) {
+    const reason = this.normalizeReason(request.reason);
+    const [ticket, blocker] = await Promise.all([
+      this.lookupParent(request.ticketId),
+      this.lookupParent(request.blockerId)
+    ]);
+    const warnings = [ticket.warning, blocker.warning].filter((w) => w !== null);
+    const sameEpic = ticket.epic !== null && ticket.epic === blocker.epic;
+    const crossEpic = ticket.epic !== null && blocker.epic !== null && ticket.epic !== blocker.epic;
+    if (crossEpic && reason === void 0) {
+      throw new CrossEpicDependencyError({
+        ticketId: request.ticketId,
+        ticketEpic: ticket.epic ?? "",
+        blockerId: request.blockerId,
+        blockerEpic: blocker.epic ?? ""
+      });
+    }
+    await this.tracker.blockTicket(request.ticketId, request.blockerId);
+    const reasonRecorded = reason !== void 0 && !sameEpic;
+    if (reasonRecorded) await this.recordReason(request, ticket.epic, blocker.epic, reason);
+    return {
+      ticketEpic: ticket.epic,
+      blockerEpic: blocker.epic,
+      crossEpic,
+      reasonRecorded,
+      warnings
+    };
+  }
+  normalizeReason(reason) {
+    if (reason === void 0) return void 0;
+    const oneLine = reason.replace(/\s+/g, " ").trim();
+    if (oneLine === "")
+      throw new Error("--cross-epic-reason needs a one-line justification, not an empty string");
+    return oneLine;
+  }
+  async lookupParent(ticketId) {
+    try {
+      const epic = await this.tracker.getTicketEpicId(ticketId) ?? null;
+      if (epic !== null) return { epic, warning: null };
+      return {
+        epic: null,
+        warning: `${refs.format(ticketId)} has no parent epic; the epic-boundary check was skipped`
+      };
+    } catch (error) {
+      return {
+        epic: null,
+        warning: `could not resolve the parent epic of ${refs.format(ticketId)} (${error instanceof Error ? error.message : String(error)}); the epic-boundary check was skipped`
+      };
+    }
+  }
+  /**
+   * The reason lands twice: a comment for people reading the ticket, and the
+   * ticket's metadata so the plan verbs can show it without reading comments
+   * (Jira's ticket read carries none). An identical reason already on record
+   * is left alone, so re-running the same link does not repeat the comment.
+   */
+  async recordReason(request, ticketEpic, blockerEpic, reason) {
+    const { ticketId, blockerId } = request;
+    const existing = (await this.tracker.getTicket(ticketId)).metadata.crossEpicReasons ?? {};
+    if (existing[blockerId] === reason) return;
+    const blocker = refs.format(blockerId);
+    const blockerPart = blockerEpic === null ? blocker : `${blocker} (epic ${refs.format(blockerEpic)})`;
+    const ticketPart = ticketEpic === null ? "" : `, while this ticket is in epic ${refs.format(ticketEpic)}`;
+    await this.tracker.addComment(
+      ticketId,
+      `Cross-epic dependency: blocked by ${blockerPart}${ticketPart}. Reason: ${reason}`
+    );
+    await this.tracker.updateTicketMetadata(ticketId, {
+      crossEpicReasons: { ...existing, [blockerId]: reason }
+    });
+  }
+};
 var CrossEpicEdgeFinder = class {
   constructor(tracker) {
     this.tracker = tracker;
@@ -2961,12 +3050,12 @@ var PullRequestHostUnavailableError = class extends Error {
   name = "PullRequestHostUnavailableError";
 };
 
-// src/flight-rules/flight-rules.ts
-import { resolve as resolve9 } from "node:path";
+// src/operations/pr-operations.ts
+import { realpathSync as realpathSync3, statSync as statSync4 } from "node:fs";
+import { isAbsolute as isAbsolute3, relative as relative3, resolve as resolve5 } from "node:path";
+import { z as z25 } from "zod";
 
-// src/git/git-executor/git-executor.ts
-import { execFile as execFile3 } from "node:child_process";
-import { promisify as promisify3 } from "node:util";
+// src/git/pr-template/pr-template.ts
 import { z as z24 } from "zod";
 
 // src/git/semantic-types.ts
@@ -2985,6 +3074,220 @@ var semanticTypes = [
   "revert"
 ];
 var SemanticTypeSchema = z23.enum(semanticTypes);
+
+// src/git/pr-template/pr-template.ts
+var maxChangeLineLength = 256;
+var maxChangeLines = 5;
+var PullRequestTemplateSchema = z24.object({
+  type: z24.enum(semanticTypes),
+  scope: z24.string().min(1),
+  description: z24.string().min(1),
+  whatWasChanged: z24.array(z24.string().min(1).max(maxChangeLineLength)).min(1).max(maxChangeLines),
+  whyWasItChanged: z24.string().min(1),
+  otsMaterials: z24.string().min(1).optional(),
+  ticketId: z24.string().min(1).optional(),
+  ticketUrl: z24.url().optional(),
+  baseBranch: z24.string().min(1),
+  headBranch: z24.string().min(1),
+  reviewers: z24.array(z24.string()).default([]),
+  labels: z24.array(z24.string()).default([])
+});
+var DefaultPullRequestBuilder = class {
+  build(input) {
+    const parsed = PullRequestTemplateSchema.parse(input);
+    const title = `${parsed.type}(${parsed.scope}): ${parsed.description}`;
+    const sections = [
+      "## What Was Changed",
+      "",
+      ...parsed.whatWasChanged.map((change) => `- ${change}`),
+      "",
+      "## Why Was It Changed",
+      "",
+      parsed.whyWasItChanged
+    ];
+    if (parsed.otsMaterials !== void 0) {
+      sections.push(
+        "",
+        "## OTS Materials",
+        "",
+        "<details><summary>Click to expand</summary>",
+        "",
+        parsed.otsMaterials,
+        "",
+        "</details>"
+      );
+    }
+    const ticketLink = this.renderTicketLink(parsed.ticketId, parsed.ticketUrl);
+    if (ticketLink !== void 0) {
+      sections.push("", "## Ticket Link", "", `- ${ticketLink}`);
+    }
+    return { title, body: sections.join("\n") };
+  }
+  /**
+   * A markdown link when a URL is present, the bare id when only an id is, the
+   * bare URL when only a URL is, and nothing when neither is — so the section
+   * is omitted rather than rendered empty.
+   */
+  renderTicketLink(ticketId, ticketUrl) {
+    if (ticketId !== void 0 && ticketUrl !== void 0) return `[${ticketId}](${ticketUrl})`;
+    if (ticketId !== void 0) return ticketId;
+    if (ticketUrl !== void 0) return ticketUrl;
+    return void 0;
+  }
+};
+var pullRequestBuilder = new DefaultPullRequestBuilder();
+
+// src/operations/pr-operations.ts
+var propsSchema2 = z25.strictObject({
+  cwd: z25.string().min(1),
+  getHost: z25.custom((value) => typeof value === "function")
+});
+var createInput = z25.strictObject({
+  type: SemanticTypeSchema,
+  scope: z25.string().min(1),
+  description: z25.string().min(1),
+  why: z25.string().min(1),
+  what: z25.array(z25.string().min(1).max(256)).min(1).max(5),
+  ots: z25.string().min(1).optional(),
+  base: z25.string().min(1),
+  head: z25.string().min(1),
+  ticketId: z25.string().min(1).optional(),
+  ticketUrl: z25.url().optional(),
+  reviewer: z25.array(z25.string()).default([]),
+  label: z25.array(z25.string()).default([]),
+  attach: z25.array(z25.string()).default([])
+});
+var commentInput = z25.strictObject({
+  number: z25.number().int().positive(),
+  body: z25.string(),
+  attach: z25.array(z25.string()).default([])
+});
+var listInput = z25.strictObject({ ticket: z25.array(z25.string().min(1)).min(1) });
+var reviewInput2 = z25.strictObject({
+  number: z25.number().int().positive(),
+  reviewer: z25.array(z25.string().min(1)).min(1)
+});
+var createdSchema = z25.object({ number: z25.number().int().positive(), url: z25.string().url() });
+var commentResultSchema = z25.object({ url: z25.string() });
+var openPullRequestSchema = z25.object({
+  ticket: z25.string(),
+  number: z25.number(),
+  url: z25.string(),
+  headRefName: z25.string(),
+  baseRefName: z25.string(),
+  title: z25.string()
+});
+var reviewerResultSchema = z25.object({
+  number: z25.number().int().positive(),
+  requested: z25.array(z25.string()),
+  failed: z25.array(z25.object({ login: z25.string(), error: z25.string() }))
+});
+var PullRequestAttachmentPathError = class extends Error {
+  name = "PullRequestAttachmentPathError";
+};
+var DefaultPrOperations = class {
+  cwd;
+  launchRoot;
+  launchDevice;
+  launchInode;
+  getHost;
+  constructor(props) {
+    const parsed = propsSchema2.parse(props);
+    this.cwd = resolve5(parsed.cwd);
+    this.launchRoot = realpathSync3(this.cwd);
+    const launchStat = statSync4(this.launchRoot);
+    this.launchDevice = launchStat.dev;
+    this.launchInode = launchStat.ino;
+    this.getHost = parsed.getHost;
+  }
+  operations() {
+    const effects = ["write", "network", "process"];
+    return [
+      this.descriptor("pr-create", "Create a pull request from the validated PR template.", ["write", "network", "process"], ["pr", "create"], createInput, createdSchema, async (input) => {
+        const template = PullRequestTemplateSchema.parse({
+          type: input.type,
+          scope: input.scope,
+          description: input.description,
+          whyWasItChanged: input.why,
+          whatWasChanged: input.what,
+          baseBranch: input.base,
+          headBranch: input.head,
+          ...input.ots === void 0 ? {} : { otsMaterials: input.ots },
+          ...input.ticketId === void 0 ? {} : { ticketId: input.ticketId },
+          ...input.ticketUrl === void 0 ? {} : { ticketUrl: input.ticketUrl },
+          reviewers: input.reviewer,
+          labels: input.label
+        });
+        this.validateAttachments(input.attach);
+        return this.getHost().createPullRequest(template, { attach: input.attach });
+      }),
+      this.descriptor("pr-comment", "Post a comment on a pull request.", effects, ["pr", "comment"], commentInput, commentResultSchema, (input) => {
+        this.validateAttachments(input.attach);
+        return this.getHost().commentOnPullRequest(input.number, input.body, { attach: input.attach });
+      }),
+      this.descriptor("pr-list", "List open pull requests matched to ticket identifiers.", ["read", "network", "process"], ["pr", "list"], listInput, z25.array(openPullRequestSchema), (input) => this.getHost().listOpenPullRequestsForTickets(input.ticket)),
+      this.descriptor("pr-request-review", "Request reviewers for a pull request and preserve each outcome.", effects, ["pr", "request-review"], reviewInput2, reviewerResultSchema, async (input) => {
+        const result = await this.getHost().requestReviewers(input.number, input.reviewer);
+        if (result.failed.length > 0) {
+          return {
+            status: "partial",
+            data: result,
+            error: {
+              name: "ReviewerRequestPartialFailure",
+              message: `reviewer request failed for: ${result.failed.map(({ login }) => login).join(", ")}`
+            }
+          };
+        }
+        return result;
+      })
+    ];
+  }
+  descriptor(id, description, effects, path, inputSchema, outputSchema, handler) {
+    return { id, description, effects, cli: { path, aliases: [] }, inputSchema, outputSchema, handler };
+  }
+  validateAttachments(specs) {
+    this.requireOriginalLaunchDirectory();
+    for (const spec of specs) {
+      const split = spec.indexOf("#");
+      const pathname = split < 0 ? spec : spec.slice(0, split);
+      if (pathname.length === 0 || split >= 0 && spec.slice(split + 1).length === 0) {
+        throw new PullRequestAttachmentPathError(`Invalid attachment spec: ${spec}`);
+      }
+      const candidate = isAbsolute3(pathname) ? pathname : resolve5(this.cwd, pathname);
+      let canonical;
+      try {
+        canonical = realpathSync3(candidate);
+        if (!statSync4(canonical).isFile()) throw new Error("not a file");
+      } catch {
+        throw new PullRequestAttachmentPathError(`Attachment is not a readable file: ${pathname}`);
+      }
+      const fromRoot = relative3(this.launchRoot, canonical);
+      if (fromRoot === ".." || fromRoot.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || isAbsolute3(fromRoot)) {
+        throw new PullRequestAttachmentPathError(`Attachment must be inside the launch checkout: ${pathname}`);
+      }
+    }
+  }
+  requireOriginalLaunchDirectory() {
+    try {
+      const directory = statSync4(this.cwd);
+      if (realpathSync3(this.cwd) !== this.launchRoot || directory.dev !== this.launchDevice || directory.ino !== this.launchInode) {
+        throw new Error("replaced");
+      }
+    } catch {
+      throw new PullRequestAttachmentPathError(
+        `The launch checkout was moved or replaced: ${this.cwd}`
+      );
+    }
+  }
+};
+
+// src/flight-rules/flight-rules.ts
+import { resolve as resolve11 } from "node:path";
+
+// src/git/git-executor/git-executor.ts
+import { execFile as execFile3 } from "node:child_process";
+import { promisify as promisify3 } from "node:util";
+import { z as z26 } from "zod";
 
 // src/git/branch-namer/branch-namer.ts
 var BranchNamer = class {
@@ -3005,19 +3308,19 @@ var BranchNamer = class {
 var branchNamer = new BranchNamer();
 
 // src/git/git-executor/git-executor.ts
-var NodeGitExecutorPropsSchema = z24.object({
-  cwd: z24.string().min(1).optional(),
-  env: z24.record(z24.string(), z24.string().optional()).default(() => ({ ...process.env })),
-  execFile: z24.custom((value) => typeof value === "function").optional()
+var NodeGitExecutorPropsSchema = z26.object({
+  cwd: z26.string().min(1).optional(),
+  env: z26.record(z26.string(), z26.string().optional()).default(() => ({ ...process.env })),
+  execFile: z26.custom((value) => typeof value === "function").optional()
 });
-var PushSpecSchema = z24.object({
+var PushSpecSchema = z26.object({
   // A detached HEAD makes `rev-parse --abbrev-ref` yield the literal "HEAD", which would push a ref rather than a branch.
-  branch: z24.string().min(1, "branch is required").refine((branch) => branch !== "HEAD", {
+  branch: z26.string().min(1, "branch is required").refine((branch) => branch !== "HEAD", {
     message: "cannot push from a detached HEAD \u2014 check out a branch first"
   }),
-  remote: z24.string().min(1).default("origin"),
+  remote: z26.string().min(1).default("origin"),
   // Defaults true to match the CLI's `--no-set-upstream`, so a programmatic push tracks the branch too.
-  setUpstream: z24.boolean().default(true)
+  setUpstream: z26.boolean().default(true)
 });
 var NodeGitExecutor = class {
   execFile;
@@ -3132,82 +3435,21 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join as join5 } from "node:path";
 import { promisify as promisify4 } from "node:util";
-import { z as z26 } from "zod";
-
-// src/git/pr-template/pr-template.ts
-import { z as z25 } from "zod";
-var maxChangeLineLength = 256;
-var maxChangeLines = 5;
-var PullRequestTemplateSchema = z25.object({
-  type: z25.enum(semanticTypes),
-  scope: z25.string().min(1),
-  description: z25.string().min(1),
-  whatWasChanged: z25.array(z25.string().min(1).max(maxChangeLineLength)).min(1).max(maxChangeLines),
-  whyWasItChanged: z25.string().min(1),
-  otsMaterials: z25.string().min(1).optional(),
-  ticketId: z25.string().min(1).optional(),
-  ticketUrl: z25.url().optional(),
-  baseBranch: z25.string().min(1),
-  headBranch: z25.string().min(1),
-  reviewers: z25.array(z25.string()).default([]),
-  labels: z25.array(z25.string()).default([])
+import { z as z27 } from "zod";
+var GhPullRequestHostPropsSchema = z27.object({
+  repo: z27.string().regex(/^[^/\s]+\/[^/\s]+$/, 'expected "owner/repo"'),
+  cwd: z27.string().min(1).optional(),
+  env: z27.custom(
+    (value) => typeof value === "object" && value !== null && !Array.isArray(value)
+  ).optional()
 });
-var DefaultPullRequestBuilder = class {
-  build(input) {
-    const parsed = PullRequestTemplateSchema.parse(input);
-    const title = `${parsed.type}(${parsed.scope}): ${parsed.description}`;
-    const sections = [
-      "## What Was Changed",
-      "",
-      ...parsed.whatWasChanged.map((change) => `- ${change}`),
-      "",
-      "## Why Was It Changed",
-      "",
-      parsed.whyWasItChanged
-    ];
-    if (parsed.otsMaterials !== void 0) {
-      sections.push(
-        "",
-        "## OTS Materials",
-        "",
-        "<details><summary>Click to expand</summary>",
-        "",
-        parsed.otsMaterials,
-        "",
-        "</details>"
-      );
-    }
-    const ticketLink = this.renderTicketLink(parsed.ticketId, parsed.ticketUrl);
-    if (ticketLink !== void 0) {
-      sections.push("", "## Ticket Link", "", `- ${ticketLink}`);
-    }
-    return { title, body: sections.join("\n") };
-  }
-  /**
-   * A markdown link when a URL is present, the bare id when only an id is, the
-   * bare URL when only a URL is, and nothing when neither is — so the section
-   * is omitted rather than rendered empty.
-   */
-  renderTicketLink(ticketId, ticketUrl) {
-    if (ticketId !== void 0 && ticketUrl !== void 0) return `[${ticketId}](${ticketUrl})`;
-    if (ticketId !== void 0) return ticketId;
-    if (ticketUrl !== void 0) return ticketUrl;
-    return void 0;
-  }
-};
-var pullRequestBuilder = new DefaultPullRequestBuilder();
-
-// src/pr/pull-request-host/gh-pull-request-host.ts
-var GhPullRequestHostPropsSchema = z26.object({
-  repo: z26.string().regex(/^[^/\s]+\/[^/\s]+$/, 'expected "owner/repo"')
-});
-var GhPullRequestListSchema = z26.array(
-  z26.object({
-    number: z26.number(),
-    url: z26.string(),
-    headRefName: z26.string(),
-    baseRefName: z26.string(),
-    title: z26.string()
+var GhPullRequestListSchema = z27.array(
+  z27.object({
+    number: z27.number(),
+    url: z27.string(),
+    headRefName: z27.string(),
+    baseRefName: z27.string(),
+    title: z27.string()
   })
 );
 var pullUrl = /\/pull\/(\d+)\b/;
@@ -3226,7 +3468,9 @@ var GhPullRequestHost = class {
     this.repo = parsed.repo;
     this.builder = props.builder ?? new DefaultPullRequestBuilder();
     const promisified = promisify4(execFile4);
-    this.execFile = props.execFileFn ?? ((file, args) => promisified(file, [...args]));
+    const cwd = parsed.cwd ?? process.cwd();
+    const env = { ...props.env ?? process.env };
+    this.execFile = props.execFileFn ?? ((file, args) => promisified(file, [...args], { cwd, env }));
   }
   async createPullRequest(input, options) {
     const template = PullRequestTemplateSchema.parse(input);
@@ -3378,11 +3622,11 @@ import { dirname as dirname8 } from "node:path";
 import { existsSync as existsSync4, mkdirSync, readFileSync as readFileSync5, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname as dirname5, join as join6 } from "node:path";
-import { z as z27 } from "zod";
+import { z as z28 } from "zod";
 var pluginId = "flight-rules@flight-rules";
 var pluginKeyPattern = /^flight-rules(@.+)?$/;
-var SettingsSchema = z27.looseObject({
-  pluginConfigs: z27.record(z27.string(), z27.looseObject({ options: z27.record(z27.string(), z27.unknown()).optional() })).optional()
+var SettingsSchema = z28.looseObject({
+  pluginConfigs: z28.record(z28.string(), z28.looseObject({ options: z28.record(z28.string(), z28.unknown()).optional() })).optional()
 });
 var ClaudeSettingsSource = class {
   host = "claude";
@@ -3452,13 +3696,13 @@ var ClaudeSettingsSource = class {
 import { existsSync as existsSync5, mkdirSync as mkdirSync2, readFileSync as readFileSync6, writeFileSync as writeFileSync2 } from "node:fs";
 import { homedir as homedir2 } from "node:os";
 import { dirname as dirname6, join as join7 } from "node:path";
-import { z as z28 } from "zod";
-var PropsSchema = z28.object({
-  cwd: z28.string().min(1),
-  home: z28.string().min(1).default(homedir2),
-  untrackedCwd: z28.string().min(1).optional()
+import { z as z29 } from "zod";
+var PropsSchema = z29.object({
+  cwd: z29.string().min(1),
+  home: z29.string().min(1).default(homedir2),
+  untrackedCwd: z29.string().min(1).optional()
 });
-var SettingsSchema2 = z28.record(z28.string(), z28.unknown());
+var SettingsSchema2 = z29.record(z29.string(), z29.unknown());
 var InvalidSettingsError = class extends Error {
   name = "InvalidSettingsError";
 };
@@ -3497,26 +3741,26 @@ var NeutralSettingsSource = class {
 
 // src/plugins/native-installation/native-installation.ts
 import { createHash as createHash2 } from "node:crypto";
-import { existsSync as existsSync6, lstatSync, mkdirSync as mkdirSync3, readFileSync as readFileSync7, realpathSync as realpathSync3, writeFileSync as writeFileSync3 } from "node:fs";
+import { existsSync as existsSync6, lstatSync, mkdirSync as mkdirSync3, readFileSync as readFileSync7, realpathSync as realpathSync4, writeFileSync as writeFileSync3 } from "node:fs";
 import { homedir as homedir3 } from "node:os";
-import { dirname as dirname7, join as join8, resolve as resolve5 } from "node:path";
+import { dirname as dirname7, join as join8, resolve as resolve6 } from "node:path";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
-import { z as z29 } from "zod";
-var NativeHostSchema = z29.enum(["claude", "codex"]);
-var AgentInstallScopeSchema = z29.enum(["project", "user"]);
-var InstallationManifestSchema = z29.strictObject({
+import { z as z30 } from "zod";
+var NativeHostSchema = z30.enum(["claude", "codex"]);
+var AgentInstallScopeSchema = z30.enum(["project", "user"]);
+var InstallationManifestSchema = z30.strictObject({
   host: NativeHostSchema,
-  agents: z29.array(z29.strictObject({
-    name: z29.string().regex(/^[a-z][a-z0-9-]*$/),
-    sha256: z29.string().regex(/^[a-f0-9]{64}$/),
+  agents: z30.array(z30.strictObject({
+    name: z30.string().regex(/^[a-z][a-z0-9-]*$/),
+    sha256: z30.string().regex(/^[a-f0-9]{64}$/),
     registration: AgentRegistrationSchema
   })).min(1)
 }).refine((value) => new Set(value.agents.map((agent) => agent.name)).size === value.agents.length, "Duplicate agent names").refine((value) => value.agents.every((agent) => agent.name === agent.registration.name), "Registration name mismatch");
-var PropsSchema2 = z29.object({
-  root: z29.string().min(1),
-  cwd: z29.string().min(1),
-  home: z29.string().min(1).default(homedir3),
-  env: z29.record(z29.string(), z29.string().optional()).default({})
+var PropsSchema2 = z30.object({
+  root: z30.string().min(1),
+  cwd: z30.string().min(1),
+  home: z30.string().min(1).default(homedir3),
+  env: z30.record(z30.string(), z30.string().optional()).default({})
 });
 var NativeInstallationError = class extends Error {
   name = "NativeInstallationError";
@@ -3534,7 +3778,7 @@ var FileNativeInstallation = class _FileNativeInstallation {
     const selected = AgentInstallScopeSchema.parse(scope);
     const root = this.codexRoot();
     const manifest = this.manifest(root);
-    const directory = selected === "project" ? resolve5(this.props.cwd, ".codex", "agents") : resolve5(this.props.env["CODEX_HOME"] || join8(this.props.home, ".codex"), "agents");
+    const directory = selected === "project" ? resolve6(this.props.cwd, ".codex", "agents") : resolve6(this.props.env["CODEX_HOME"] || join8(this.props.home, ".codex"), "agents");
     this.assertRegularPath(directory);
     const agents = manifest.agents.map((agent) => {
       const source = join8(root, ".codex", "agents", `${agent.name}.toml`);
@@ -3572,7 +3816,7 @@ var FileNativeInstallation = class _FileNativeInstallation {
     return this.status(scope);
   }
   codexRoot() {
-    const root = resolve5(this.props.root);
+    const root = resolve6(this.props.root);
     if (this.host() === "codex") return root;
     const target = join8(root, "dist", "codex");
     if (existsSync6(join8(target, "flight-rules-install.json")) && this.manifest(target).host === "codex") return target;
@@ -3589,8 +3833,8 @@ var FileNativeInstallation = class _FileNativeInstallation {
     return createHash2("sha256").update(contents).digest("hex");
   }
   assertRegularPath(path) {
-    let current = resolve5(path);
-    const anchors = [this.props.cwd, this.props.home, this.props.env["CODEX_HOME"], this.props.root].filter((anchor) => anchor !== void 0).map((anchor) => resolve5(anchor));
+    let current = resolve6(path);
+    const anchors = [this.props.cwd, this.props.home, this.props.env["CODEX_HOME"], this.props.root].filter((anchor) => anchor !== void 0).map((anchor) => resolve6(anchor));
     while (!anchors.includes(current) && dirname7(current) !== current) {
       try {
         if (lstatSync(current).isSymbolicLink()) throw new NativeInstallationError(`Refusing symlinked installation path: ${current}`);
@@ -3599,7 +3843,7 @@ var FileNativeInstallation = class _FileNativeInstallation {
       }
       current = dirname7(current);
     }
-    if (existsSync6(current)) realpathSync3(current);
+    if (existsSync6(current)) realpathSync4(current);
   }
   static fromInstall(props) {
     return new _FileNativeInstallation({
@@ -3828,11 +4072,11 @@ var EvidenceLocation = class {
 };
 
 // src/shared/env.ts
-import { z as z30 } from "zod";
-var EnvSchema = z30.object({
-  githubToken: z30.string().optional(),
-  jiraToken: z30.string().optional(),
-  jiraEmail: z30.string().optional(),
+import { z as z31 } from "zod";
+var EnvSchema = z31.object({
+  githubToken: z31.string().optional(),
+  jiraToken: z31.string().optional(),
+  jiraEmail: z31.string().optional(),
   jiraHost: JiraHostSchema.optional()
 });
 var EnvLoader = class {
@@ -3861,7 +4105,7 @@ var EnvLoader = class {
 var appVersion = typeof _appVersion === "undefined" ? "0.0.0-dev" : _appVersion;
 
 // src/shared/ariadne/review-packet.schema.ts
-import { z as z31 } from "zod";
+import { z as z32 } from "zod";
 var packetLimits = {
   title: 200,
   objective: 600,
@@ -3877,74 +4121,74 @@ var packetLimits = {
 };
 var focusAreaKinds = ["design-pattern", "business-logic", "data-schema", "other"];
 var anchorSides = ["LEFT", "RIGHT"];
-var textSchema = (max) => z31.string().min(1, "must not be blank").max(max, `must be at most ${max} characters`);
+var textSchema = (max) => z32.string().min(1, "must not be blank").max(max, `must be at most ${max} characters`);
 var oneLineTextSchema = (max) => textSchema(max).refine((value) => !/[\r\n]/.test(value), "must be one line");
-var PositiveIntSchema = z31.number().int().positive();
+var PositiveIntSchema = z32.number().int().positive();
 var PacketIdSchema = AgentRecordIdSchema;
-var OperationIdSchema2 = z31.string().regex(/^[A-Za-z0-9_-]{16,80}$/, "must be 16\u201380 letters, digits, underscores or hyphens");
-var HeadShaSchema2 = z31.string().regex(/^[0-9a-f]{40}$/, "must be a 40-character lowercase hex commit sha");
-var GithubLoginSchema = z31.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/, "must be a GitHub login");
-var PacketAnchorSchema = z31.strictObject({
+var OperationIdSchema2 = z32.string().regex(/^[A-Za-z0-9_-]{16,80}$/, "must be 16\u201380 letters, digits, underscores or hyphens");
+var HeadShaSchema2 = z32.string().regex(/^[0-9a-f]{40}$/, "must be a 40-character lowercase hex commit sha");
+var GithubLoginSchema = z32.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/, "must be a GitHub login");
+var PacketAnchorSchema = z32.strictObject({
   path: textSchema(packetLimits.path),
   line: PositiveIntSchema,
   startLine: optionalSchema(PositiveIntSchema),
-  side: z31.enum(anchorSides)
+  side: z32.enum(anchorSides)
 }).refine((anchor) => anchor.startLine === void 0 || anchor.startLine < anchor.line, {
   path: ["startLine"],
   message: "must be before line"
 });
-var SignOffTimeSchema = z31.string().regex(/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,3})?Z$/, "must be an ISO 8601 UTC time ending in Z").refine((value) => {
+var SignOffTimeSchema = z32.string().regex(/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,3})?Z$/, "must be an ISO 8601 UTC time ending in Z").refine((value) => {
   const [year = 0, month = 0, day = 0] = value.slice(0, 10).split("-").map(Number);
   const date = new Date(Date.UTC(year, month - 1, day));
   return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
 }, "must be a real calendar date");
-var FocusAreaSchema = z31.strictObject({
+var FocusAreaSchema = z32.strictObject({
   id: AgentRecordIdSchema,
-  kind: z31.enum(focusAreaKinds),
+  kind: z32.enum(focusAreaKinds),
   title: oneLineTextSchema(packetLimits.title),
   rationale: textSchema(packetLimits.rationale),
-  anchors: z31.array(PacketAnchorSchema).max(packetLimits.anchors, `up to ${packetLimits.anchors} anchors`)
+  anchors: z32.array(PacketAnchorSchema).max(packetLimits.anchors, `up to ${packetLimits.anchors} anchors`)
 });
-var PacketPrSchema = z31.strictObject({
-  repo: z31.string().regex(/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9_.-]{1,100}$/, "must be owner/name"),
+var PacketPrSchema = z32.strictObject({
+  repo: z32.string().regex(/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9_.-]{1,100}$/, "must be owner/name"),
   number: PositiveIntSchema,
   headSha: HeadShaSchema2,
   title: oneLineTextSchema(packetLimits.title),
   ticket: optionalSchema(oneLineTextSchema(packetLimits.ticket)),
-  signOff: z31.strictObject({ at: SignOffTimeSchema, headSha: HeadShaSchema2 }).nullable().optional(),
-  focusAreas: z31.array(FocusAreaSchema).max(packetLimits.focusAreas, `up to ${packetLimits.focusAreas} focus areas per PR`)
+  signOff: z32.strictObject({ at: SignOffTimeSchema, headSha: HeadShaSchema2 }).nullable().optional(),
+  focusAreas: z32.array(FocusAreaSchema).max(packetLimits.focusAreas, `up to ${packetLimits.focusAreas} focus areas per PR`)
 });
-var PacketInputSchema = z31.strictObject({
+var PacketInputSchema = z32.strictObject({
   id: PacketIdSchema,
   title: oneLineTextSchema(packetLimits.title),
-  overview: z31.strictObject({
+  overview: z32.strictObject({
     objective: textSchema(packetLimits.objective),
-    highlights: z31.array(oneLineTextSchema(packetLimits.highlight)).min(1, "at least 1 highlight").max(packetLimits.highlights, `up to ${packetLimits.highlights} highlights`)
+    highlights: z32.array(oneLineTextSchema(packetLimits.highlight)).min(1, "at least 1 highlight").max(packetLimits.highlights, `up to ${packetLimits.highlights} highlights`)
   }),
-  prs: z31.array(PacketPrSchema).min(1, "at least 1 PR").max(packetLimits.prs, `up to ${packetLimits.prs} PRs`),
-  reviewers: z31.array(GithubLoginSchema).min(1, "at least 1 reviewer").max(packetLimits.reviewers, `up to ${packetLimits.reviewers} reviewers`)
+  prs: z32.array(PacketPrSchema).min(1, "at least 1 PR").max(packetLimits.prs, `up to ${packetLimits.prs} PRs`),
+  reviewers: z32.array(GithubLoginSchema).min(1, "at least 1 reviewer").max(packetLimits.reviewers, `up to ${packetLimits.reviewers} reviewers`)
 });
-var PacketUpdateSchema = z31.strictObject({
-  expectedRevision: z31.number().int().nonnegative(),
+var PacketUpdateSchema = z32.strictObject({
+  expectedRevision: z32.number().int().nonnegative(),
   operationId: OperationIdSchema2,
   packet: PacketInputSchema.omit({ id: true })
 });
-var GithubSnapshotSchema = z31.looseObject({ id: z31.union([z31.string(), z31.number()]), login: z31.string() });
-var PacketSchema = z31.looseObject({
-  id: z31.string(),
-  authorId: z31.string(),
-  title: z31.string(),
-  overview: z31.looseObject({ objective: z31.string(), highlights: z31.array(z31.string()) }),
-  prs: z31.array(z31.looseObject({ repo: z31.string(), number: z31.number() })),
-  reviewers: z31.array(z31.looseObject({ id: z31.string(), github: GithubSnapshotSchema })),
-  status: z31.enum(["open", "closed"]),
-  revision: z31.number().int(),
-  createdAt: z31.string(),
-  updatedAt: z31.string()
+var GithubSnapshotSchema = z32.looseObject({ id: z32.union([z32.string(), z32.number()]), login: z32.string() });
+var PacketSchema = z32.looseObject({
+  id: z32.string(),
+  authorId: z32.string(),
+  title: z32.string(),
+  overview: z32.looseObject({ objective: z32.string(), highlights: z32.array(z32.string()) }),
+  prs: z32.array(z32.looseObject({ repo: z32.string(), number: z32.number() })),
+  reviewers: z32.array(z32.looseObject({ id: z32.string(), github: GithubSnapshotSchema })),
+  status: z32.enum(["open", "closed"]),
+  revision: z32.number().int(),
+  createdAt: z32.string(),
+  updatedAt: z32.string()
 });
-var ReviewerSchema = z31.looseObject({ id: z31.string(), name: z31.string(), github: GithubSnapshotSchema });
-var PacketResponseSchema = z31.looseObject({ packet: PacketSchema }).transform((response) => response.packet);
-var ReviewerListResponseSchema = z31.looseObject({ reviewers: z31.array(ReviewerSchema) });
+var ReviewerSchema = z32.looseObject({ id: z32.string(), name: z32.string(), github: GithubSnapshotSchema });
+var PacketResponseSchema = z32.looseObject({ packet: PacketSchema }).transform((response) => response.packet);
+var ReviewerListResponseSchema = z32.looseObject({ reviewers: z32.array(ReviewerSchema) });
 
 // src/shared/ariadne/ariadne-transport.ts
 var FetchAriadneTransport = class {
@@ -4104,10 +4348,10 @@ var AriadneClient = class {
 };
 
 // src/shared/ariadne/board-session-store.ts
-import { z as z32 } from "zod";
+import { z as z33 } from "zod";
 
 // src/shared/ariadne/board-state-files.ts
-import { existsSync as existsSync8, mkdirSync as mkdirSync5, readFileSync as readFileSync9, readdirSync as readdirSync3, rmSync, statSync as statSync4, writeFileSync as writeFileSync5 } from "node:fs";
+import { existsSync as existsSync8, mkdirSync as mkdirSync5, readFileSync as readFileSync9, readdirSync as readdirSync3, rmSync, statSync as statSync5, writeFileSync as writeFileSync5 } from "node:fs";
 import { homedir as homedir4 } from "node:os";
 import { join as join10 } from "node:path";
 var stateIdPattern = /^[A-Za-z0-9_-]{1,80}$/;
@@ -4165,7 +4409,7 @@ var BoardStateFiles = class {
     for (const name of readdirSync3(dir)) {
       const path = join10(dir, name);
       try {
-        if (statSync4(path).mtimeMs < cutoff) rmSync(path, { force: true });
+        if (statSync5(path).mtimeMs < cutoff) rmSync(path, { force: true });
       } catch {
         continue;
       }
@@ -4180,35 +4424,35 @@ var BoardStateFiles = class {
 };
 
 // src/shared/ariadne/board-session-store.ts
-var HeartbeatRecordSchema = z32.object({
-  session: z32.string(),
-  step: z32.string(),
-  state: z32.enum(agentStates),
-  ticket: z32.string().optional(),
-  repo: z32.string().optional(),
-  branch: z32.string().optional(),
-  skill: z32.string().optional(),
-  detail: z32.string().optional()
+var HeartbeatRecordSchema = z33.object({
+  session: z33.string(),
+  step: z33.string(),
+  state: z33.enum(agentStates),
+  ticket: z33.string().optional(),
+  repo: z33.string().optional(),
+  branch: z33.string().optional(),
+  skill: z33.string().optional(),
+  detail: z33.string().optional()
 });
-var SessionRecordSchema = z32.object({
+var SessionRecordSchema = z33.object({
   heartbeat: HeartbeatRecordSchema,
   /** When a skill last posted this heartbeat. */
-  recordedAt: z32.number(),
+  recordedAt: z33.number(),
   /** When any heartbeat for the session was last sent, by a skill or the hook. */
-  sentAt: z32.number()
+  sentAt: z33.number()
 });
-var InferredRecordSchema = z32.object({
+var InferredRecordSchema = z33.object({
   heartbeat: HeartbeatRecordSchema,
   /** When the hook last sent this inferred heartbeat. */
-  sentAt: z32.number()
+  sentAt: z33.number()
 });
-var ThreadRecordSchema = z32.object({
+var ThreadRecordSchema = z33.object({
   /** The board session a skill last posted to by default from this Claude Code session. */
-  board: z32.string().optional(),
+  board: z33.string().optional(),
   /** When the hook last spawned a branch lookup for this Claude Code session's main thread. */
-  branchCheckedAt: z32.number().optional()
+  branchCheckedAt: z33.number().optional()
 });
-var ThreadSkillRecordSchema = z32.object({ skill: z32.string() });
+var ThreadSkillRecordSchema = z33.object({ skill: z33.string() });
 var inferredFolder = "inferred";
 var threadsFolder = "threads";
 var threadSkillsFolder = "thread-skills";
@@ -4879,28 +5123,28 @@ var AriadneTokenStore = class {
 // src/shared/ariadne/board-agent-store.ts
 import { existsSync as existsSync10, readdirSync as readdirSync4 } from "node:fs";
 import { join as join12 } from "node:path";
-import { z as z33 } from "zod";
-var DispatchRecordSchema = z33.object({
+import { z as z34 } from "zod";
+var DispatchRecordSchema = z34.object({
   /** The Jira key the dispatch named, or null when it named none. */
-  ticket: z33.string().nullable(),
-  description: z33.string(),
+  ticket: z34.string().nullable(),
+  description: z34.string(),
   /** The dispatching Claude Code session. */
-  session: z33.string(),
+  session: z34.string(),
   /** A digest of the prompt, so a sub-agent found only through its transcript still finds its dispatch. */
-  promptDigest: z33.string().optional(),
-  at: z33.number()
+  promptDigest: z34.string().optional(),
+  at: z34.number()
 });
-var AgentRecordSchema = z33.object({
+var AgentRecordSchema = z34.object({
   /** The Jira key the sub-agent works on, or null once resolved to none. */
-  ticket: z33.string().nullable(),
-  description: z33.string().optional(),
-  agentType: z33.string().optional(),
-  toolUseId: z33.string().optional(),
+  ticket: z34.string().nullable(),
+  description: z34.string().optional(),
+  agentType: z34.string().optional(),
+  toolUseId: z34.string().optional(),
   /** The Claude Code session the sub-agent runs in. */
-  session: z33.string(),
-  at: z33.number()
+  session: z34.string(),
+  at: z34.number()
 });
-var AgentSkillRecordSchema = z33.object({ skill: z33.string() });
+var AgentSkillRecordSchema = z34.object({ skill: z34.string() });
 var dispatchFolder = "dispatch";
 var agentsFolder = "agents";
 var agentSkillsFolder = "agent-skills";
@@ -5008,14 +5252,14 @@ ${block}`;
 };
 
 // src/tasks/github-task-tracker/github-task-tracker.ts
-import { z as z35 } from "zod";
+import { z as z36 } from "zod";
 
 // src/tasks/task-tracker/unsupported-tracker-operation-error.ts
-import { z as z34 } from "zod";
-var UnsupportedTrackerOperationPropsSchema = z34.object({
-  tracker: z34.string().min(1),
-  operation: z34.string().min(1),
-  remedy: z34.string().min(1).optional()
+import { z as z35 } from "zod";
+var UnsupportedTrackerOperationPropsSchema = z35.object({
+  tracker: z35.string().min(1),
+  operation: z35.string().min(1),
+  remedy: z35.string().min(1).optional()
 });
 var UnsupportedTrackerOperationError = class extends Error {
   tracker;
@@ -5032,9 +5276,9 @@ var UnsupportedTrackerOperationError = class extends Error {
 };
 
 // src/tasks/github-task-tracker/github-task-tracker.ts
-var IssueRefSchema = z35.object({ number: z35.number() });
-var IssueRefListSchema = z35.array(IssueRefSchema);
-var ParentNotFoundSchema = z35.object({ status: z35.literal(404) });
+var IssueRefSchema = z36.object({ number: z36.number() });
+var IssueRefListSchema = z36.array(IssueRefSchema);
+var ParentNotFoundSchema = z36.object({ status: z36.literal(404) });
 var GitHubTaskTracker = class {
   octokit;
   gql;
@@ -5624,10 +5868,10 @@ var GitHubTaskTracker = class {
 // src/tasks/jira-task-tracker/jira-task-tracker.ts
 import { readFileSync as readFileSync11 } from "node:fs";
 import { basename as basename2 } from "node:path";
-import { z as z39 } from "zod";
+import { z as z40 } from "zod";
 
 // src/tasks/jira-task-tracker/jira-client.ts
-import { z as z36 } from "zod";
+import { z as z37 } from "zod";
 
 // src/tasks/jira-task-tracker/jira-api-error.ts
 var JiraApiError = class extends Error {
@@ -5650,11 +5894,11 @@ var defaultRetryAfterSeconds = 2;
 var maxBackoffMs = 3e4;
 var attachmentXsrfHeader = "no-check";
 var redirectStatuses = /* @__PURE__ */ new Set([301, 302, 303, 307, 308]);
-var JiraErrorBodySchema = z36.object({
-  errorMessages: z36.array(z36.string()).optional(),
+var JiraErrorBodySchema = z37.object({
+  errorMessages: z37.array(z37.string()).optional(),
   // Caught per-field so an off-contract `errors` map cannot discard a valid sibling `errorMessages`.
-  errors: z36.record(z36.string(), z36.string()).optional().catch(void 0),
-  message: z36.string().optional()
+  errors: z37.record(z37.string(), z37.string()).optional().catch(void 0),
+  message: z37.string().optional()
 });
 var JiraClient = class {
   baseUrl;
@@ -5726,7 +5970,7 @@ var JiraClient = class {
       const retryAfterSeconds = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : defaultRetryAfterSeconds;
       const jitter = 0.7 + Math.random() * 0.6;
       const delayMs = Math.min(retryAfterSeconds * 1e3 * jitter, maxBackoffMs);
-      await new Promise((resolve12) => setTimeout(resolve12, delayMs));
+      await new Promise((resolve14) => setTimeout(resolve14, delayMs));
       return this.fetchWithRetry(url, init, attempt + 1);
     }
     return res;
@@ -5741,13 +5985,13 @@ var JiraClient = class {
 };
 
 // src/tasks/jira-task-tracker/confluence-client.ts
-import { z as z37 } from "zod";
+import { z as z38 } from "zod";
 var maxRetries2 = 4;
 var defaultRetryAfterSeconds2 = 2;
 var maxBackoffMs2 = 3e4;
-var ConfluenceErrorBodySchema = z37.object({
-  errors: z37.array(z37.object({ title: z37.string().optional(), detail: z37.string().optional() })).optional().catch(void 0),
-  message: z37.string().optional()
+var ConfluenceErrorBodySchema = z38.object({
+  errors: z38.array(z38.object({ title: z38.string().optional(), detail: z38.string().optional() })).optional().catch(void 0),
+  message: z38.string().optional()
 });
 var ConfluenceClient = class {
   siteBaseUrl;
@@ -5779,7 +6023,7 @@ var ConfluenceClient = class {
       const retryAfterSeconds = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : defaultRetryAfterSeconds2;
       const jitter = 0.7 + Math.random() * 0.6;
       const delayMs = Math.min(retryAfterSeconds * 1e3 * jitter, maxBackoffMs2);
-      await new Promise((resolve12) => setTimeout(resolve12, delayMs));
+      await new Promise((resolve14) => setTimeout(resolve14, delayMs));
       return this.fetchWithRetry(url, init, attempt + 1);
     }
     return res;
@@ -5822,14 +6066,14 @@ import { fromMarkdown } from "mdast-util-from-markdown";
 import { gfmFromMarkdown } from "mdast-util-gfm";
 import { gfm } from "micromark-extension-gfm";
 import { decodeString } from "micromark-util-decode-string";
-import { z as z38 } from "zod";
-var MediaRefSchema = z38.object({
-  mediaUuid: z38.string().min(1),
-  collection: z38.string().default(""),
-  width: z38.number().int().positive().optional(),
-  height: z38.number().int().positive().optional()
+import { z as z39 } from "zod";
+var MediaRefSchema = z39.object({
+  mediaUuid: z39.string().min(1),
+  collection: z39.string().default(""),
+  width: z39.number().int().positive().optional(),
+  height: z39.number().int().positive().optional()
 });
-var MediaLookupSchema = z38.record(z38.string(), MediaRefSchema);
+var MediaLookupSchema = z39.record(z39.string(), MediaRefSchema);
 var attachmentPrefix = /^attachment:/;
 var externalTarget = /^[a-zA-Z][a-zA-Z0-9+.-]*:|^\/\//;
 var detailsOpen2 = /^<details>/;
@@ -6822,13 +7066,13 @@ var deliveryLinkOutward = "implements";
 var tddMetadataPropertyKey = "flight-rules-metadata";
 var mediaFilePath = /^\/file\/([0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12})\/binary$/;
 var mediaLocationBase = "https://media.invalid/";
-var JiraUploadedAttachmentSchema = z39.object({
-  id: z39.union([z39.string(), z39.number()]).transform(String),
-  filename: z39.string(),
-  mimeType: z39.string(),
-  size: z39.number().optional()
+var JiraUploadedAttachmentSchema = z40.object({
+  id: z40.union([z40.string(), z40.number()]).transform(String),
+  filename: z40.string(),
+  mimeType: z40.string(),
+  size: z40.number().optional()
 });
-var JiraUploadedAttachmentsSchema = z39.array(JiraUploadedAttachmentSchema);
+var JiraUploadedAttachmentsSchema = z40.array(JiraUploadedAttachmentSchema);
 var JiraTaskTracker = class {
   client;
   confluence;
@@ -7430,20 +7674,20 @@ var JiraTaskTracker = class {
 // src/tasks/tool-probe/tool-probe.ts
 import { execFile as execFile5 } from "node:child_process";
 import { promisify as promisify5 } from "node:util";
-import { z as z41 } from "zod";
+import { z as z42 } from "zod";
 
 // src/tasks/readiness/probe-diagnostics.ts
-import { z as z40 } from "zod";
-var ProbeDiagnosticsPropsSchema = z40.object({ env: z40.record(z40.string(), z40.string().optional()) });
-var ErrorFactsSchema = z40.object({
-  code: z40.union([z40.string(), z40.number()]).nullable().optional(),
-  status: z40.number().optional(),
-  statusCode: z40.number().optional(),
-  killed: z40.boolean().optional(),
-  name: z40.string().optional(),
-  message: z40.string().optional(),
-  stderr: z40.string().optional(),
-  cause: z40.unknown().optional()
+import { z as z41 } from "zod";
+var ProbeDiagnosticsPropsSchema = z41.object({ env: z41.record(z41.string(), z41.string().optional()) });
+var ErrorFactsSchema = z41.object({
+  code: z41.union([z41.string(), z41.number()]).nullable().optional(),
+  status: z41.number().optional(),
+  statusCode: z41.number().optional(),
+  killed: z41.boolean().optional(),
+  name: z41.string().optional(),
+  message: z41.string().optional(),
+  stderr: z41.string().optional(),
+  cause: z41.unknown().optional()
 });
 var RedactedProbeDiagnostics = class {
   secrets;
@@ -7506,7 +7750,7 @@ var RedactedProbeDiagnostics = class {
 // src/tasks/tool-probe/tool-probe.ts
 var minimumGhVersion = [2, 99, 0];
 var ghVersionLine = /gh version (\d+)\.(\d+)\.(\d+)/;
-var NodeToolProbePropsSchema = z41.object({ cwd: z41.string().optional(), env: z41.record(z41.string(), z41.string().optional()).optional(), timeoutMs: z41.int().positive().max(6e4).default(1e4) });
+var NodeToolProbePropsSchema = z42.object({ cwd: z42.string().optional(), env: z42.record(z42.string(), z42.string().optional()).optional(), timeoutMs: z42.int().positive().max(6e4).default(1e4) });
 var NodeToolProbe = class {
   execFile;
   env;
@@ -7608,35 +7852,35 @@ var NodeToolProbe = class {
 var nodeToolProbe = new NodeToolProbe();
 
 // src/tasks/readiness/repository-readiness.ts
-import { z as z45 } from "zod";
+import { z as z46 } from "zod";
 
 // src/tasks/readiness/workflow-preflight.ts
 import { execFile as execFile6 } from "node:child_process";
 import { access, realpath } from "node:fs/promises";
 import { constants } from "node:fs";
-import { resolve as resolve6 } from "node:path";
+import { resolve as resolve7 } from "node:path";
 import { promisify as promisify6 } from "node:util";
-import { z as z44 } from "zod";
+import { z as z45 } from "zod";
 
 // src/orchestration/orchestration-policy.ts
 import { isDeepStrictEqual } from "node:util";
-import { z as z43 } from "zod";
+import { z as z44 } from "zod";
 
 // src/agents/agent-emitter/agent-emitter.schema.ts
-import { z as z42 } from "zod";
-var ModelBindingsSchema = z42.strictObject({
-  standard: z42.string().trim().min(1),
-  escalated: z42.string().trim().min(1),
-  expert: z42.string().trim().min(1)
+import { z as z43 } from "zod";
+var ModelBindingsSchema = z43.strictObject({
+  standard: z43.string().trim().min(1),
+  escalated: z43.string().trim().min(1),
+  expert: z43.string().trim().min(1)
 });
-var AgentDefinitionSchema = z42.strictObject({
+var AgentDefinitionSchema = z43.strictObject({
   frontmatter: AgentRegistrationSchema,
-  body: z42.string().refine((body) => body.trim() !== "", "agent prompt must not be empty")
+  body: z43.string().refine((body) => body.trim() !== "", "agent prompt must not be empty")
 });
 
 // src/orchestration/orchestration-policy.ts
-var RegistryOrchestrationPolicyPropsSchema = z43.strictObject({
-  agents: z43.array(AgentDefinitionSchema).min(1).refine(
+var RegistryOrchestrationPolicyPropsSchema = z44.strictObject({
+  agents: z44.array(AgentDefinitionSchema).min(1).refine(
     (agents) => new Set(agents.map((agent) => agent.frontmatter.name)).size === agents.length,
     "duplicate agent name"
   )
@@ -7790,10 +8034,10 @@ var RegistryOrchestrationPolicy = class {
 };
 
 // src/tasks/readiness/workflow-preflight.ts
-var WorkflowPreflightPropsSchema = z44.object({
-  cwd: z44.string(),
-  env: z44.record(z44.string(), z44.string().optional()),
-  timeoutMs: z44.int().positive().max(6e4).default(1e4)
+var WorkflowPreflightPropsSchema = z45.object({
+  cwd: z45.string(),
+  env: z45.record(z45.string(), z45.string().optional()),
+  timeoutMs: z45.int().positive().max(6e4).default(1e4)
 });
 var NodeWorkflowPreflight = class {
   cwd;
@@ -7815,7 +8059,7 @@ var NodeWorkflowPreflight = class {
     const codeWorkflow = selected === "execute-work" || selected === "execute-wave";
     const requiredAgents = codeWorkflow ? ["code-implementation", "code-implementation-escalated", "code-verifier", "tech-writer"] : selected === "break-down-work" ? ["research-agent"] : [selected === "reproduce-bug" ? "qa-engineer" : "qa-engineer-verify"];
     const checks = [];
-    const contextMatches = parsed !== void 0 && resolve6(parsed.context.cwd) === resolve6(this.cwd);
+    const contextMatches = parsed !== void 0 && resolve7(parsed.context.cwd) === resolve7(this.cwd);
     checks.push({
       name: "host:context",
       ok: contextMatches,
@@ -7975,7 +8219,7 @@ var NodeWorkflowPreflight = class {
   async gitWrite(diagnostics) {
     try {
       const paths = await this.command(["rev-parse", "--git-dir", "--git-common-dir"]);
-      const directories = paths.split("\n").map((path) => resolve6(this.cwd, path));
+      const directories = paths.split("\n").map((path) => resolve7(this.cwd, path));
       if (directories.length !== 2) {
         return {
           name: "local:git-write",
@@ -8001,10 +8245,10 @@ var NodeWorkflowPreflight = class {
 };
 
 // src/tasks/readiness/repository-readiness.ts
-var RepositoryReadinessPropsSchema = z45.object({
-  cwd: z45.string().optional(),
-  env: z45.record(z45.string(), z45.string().optional()).optional(),
-  timeoutMs: z45.int().positive().max(6e4).default(1e4)
+var RepositoryReadinessPropsSchema = z46.object({
+  cwd: z46.string().optional(),
+  env: z46.record(z46.string(), z46.string().optional()).optional(),
+  timeoutMs: z46.int().positive().max(6e4).default(1e4)
 });
 var NodeRepositoryReadiness = class {
   cwd;
@@ -8185,12 +8429,12 @@ var NodeRepositoryReadiness = class {
 };
 
 // src/flight-rules/flight-rules.schema.ts
-import { z as z48 } from "zod";
+import { z as z49 } from "zod";
 
 // src/operations/git-config-operations.ts
-import { existsSync as existsSync11, lstatSync as lstatSync2, realpathSync as realpathSync4 } from "node:fs";
-import { dirname as dirname13, isAbsolute as isAbsolute3, join as join14, parse, relative as relative3, resolve as resolve7, sep as sep3 } from "node:path";
-import { z as z47 } from "zod";
+import { existsSync as existsSync11, lstatSync as lstatSync2, realpathSync as realpathSync5 } from "node:fs";
+import { dirname as dirname13, isAbsolute as isAbsolute4, join as join14, parse, relative as relative4, resolve as resolve8, sep as sep3 } from "node:path";
+import { z as z48 } from "zod";
 
 // src/git/commit-message-builder/commit-message-builder.ts
 import { readFileSync as readFileSync12 } from "node:fs";
@@ -8225,25 +8469,25 @@ ${line.trim()}`) === "";
 };
 
 // src/git/commit-message-builder/commit-message.schema.ts
-import { z as z46 } from "zod";
-var CommitMessageInputSchema = z46.object({
+import { z as z47 } from "zod";
+var CommitMessageInputSchema = z47.object({
   type: SemanticTypeSchema,
   // Bare issue numbers make one-character scopes legitimate; 32 clears a 10-character tracker key plus a six-digit number.
-  scope: z46.string().min(1).max(32),
-  description: z46.string().min(2).max(50),
-  body: z46.string().optional(),
-  model: z46.string().max(72).optional(),
-  footers: z46.array(z46.string().regex(/^[a-zA-Z0-9-]+(: |=).*$/)).default([])
+  scope: z47.string().min(1).max(32),
+  description: z47.string().min(2).max(50),
+  body: z47.string().optional(),
+  model: z47.string().max(72).optional(),
+  footers: z47.array(z47.string().regex(/^[a-zA-Z0-9-]+(: |=).*$/)).default([])
 });
-var CommitMessageHeaderSchema = z46.preprocess(
+var CommitMessageHeaderSchema = z47.preprocess(
   (arg) => {
-    return z46.string({ error: "Git Commit headers should be 72 characters or less" }).max(72).parse(arg);
+    return z47.string({ error: "Git Commit headers should be 72 characters or less" }).max(72).parse(arg);
   },
-  z46.templateLiteral([SemanticTypeSchema, "(", z46.string(), "): ", z46.string()])
+  z47.templateLiteral([SemanticTypeSchema, "(", z47.string(), "): ", z47.string()])
 );
-var CommitMessageBuilderPropsSchema = z46.object({
-  binPath: z46.string().min(1),
-  agentEnv: z46.string().optional()
+var CommitMessageBuilderPropsSchema = z47.object({
+  binPath: z47.string().min(1),
+  agentEnv: z47.string().optional()
 });
 
 // src/git/commit-message-builder/commit-message-builder.ts
@@ -8300,36 +8544,36 @@ var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
 };
 
 // src/operations/git-config-operations.ts
-var ConfigScopeSchema = z47.enum(configScopes);
-var ConfigSetInputSchema = z47.object({
-  key: z47.string().min(1),
-  values: z47.array(z47.string()).min(1),
+var ConfigScopeSchema = z48.enum(configScopes);
+var ConfigSetInputSchema = z48.object({
+  key: z48.string().min(1),
+  values: z48.array(z48.string()).min(1),
   scope: ConfigScopeSchema.optional()
 }).strict();
-var ConfigUnsetInputSchema = z47.object({ key: z47.string().min(1), scope: ConfigScopeSchema.optional() }).strict();
+var ConfigUnsetInputSchema = z48.object({ key: z48.string().min(1), scope: ConfigScopeSchema.optional() }).strict();
 var GitCommitInputSchema = CommitMessageInputSchema.extend({
-  files: z47.array(z47.string()).default([])
+  files: z48.array(z48.string()).default([])
 }).strict();
-var GitCheckoutInputSchema = z47.object({
-  type: z47.string().min(1),
-  scope: z47.string().min(1),
-  description: z47.string().optional(),
-  from: z47.string().optional()
+var GitCheckoutInputSchema = z48.object({
+  type: z48.string().min(1),
+  scope: z48.string().min(1),
+  description: z48.string().optional(),
+  from: z48.string().optional()
 }).strict();
-var GitPushInputSchema = z47.object({ remote: z47.string().min(1).default("origin"), setUpstream: z47.boolean().default(true) }).strict();
-var CommitMessageOutputSchema = z47.object({ message: z47.string() });
-var BranchNameInputSchema = z47.object({ type: z47.string().min(1), scope: z47.string().min(1), description: z47.string().optional() }).strict();
-var ConfigOperationPolicySchema = z47.object({
-  scopes: z47.array(ConfigScopeSchema).default(["project", "local"]),
-  roots: z47.array(z47.string().min(1)).default([])
+var GitPushInputSchema = z48.object({ remote: z48.string().min(1).default("origin"), setUpstream: z48.boolean().default(true) }).strict();
+var CommitMessageOutputSchema = z48.object({ message: z48.string() });
+var BranchNameInputSchema = z48.object({ type: z48.string().min(1), scope: z48.string().min(1), description: z48.string().optional() }).strict();
+var ConfigOperationPolicySchema = z48.object({
+  scopes: z48.array(ConfigScopeSchema).default(["project", "local"]),
+  roots: z48.array(z48.string().min(1)).default([])
 }).strict();
-var GitConfigOperationsPropsSchema = z47.object({
-  cwd: z47.string().min(1),
-  configStore: z47.custom((value) => typeof value === "object" && value !== null),
-  git: z47.custom((value) => typeof value === "object" && value !== null),
+var GitConfigOperationsPropsSchema = z48.object({
+  cwd: z48.string().min(1),
+  configStore: z48.custom((value) => typeof value === "object" && value !== null),
+  git: z48.custom((value) => typeof value === "object" && value !== null),
   configPolicy: ConfigOperationPolicySchema.default({ scopes: ["project", "local"], roots: [] }),
-  binPath: z47.string().default(process.argv[1] ?? ""),
-  agentEnv: z47.string().optional()
+  binPath: z48.string().default(process.argv[1] ?? ""),
+  agentEnv: z48.string().optional()
 });
 var LaunchConfigOperationDeniedError = class extends Error {
   name = "LaunchConfigOperationDeniedError";
@@ -8342,7 +8586,7 @@ var DefaultGitConfigOperations = class {
     this.props = GitConfigOperationsPropsSchema.parse(props);
     this.allowedScopes = new Set(this.props.configPolicy.scopes);
     const roots = this.props.configPolicy.roots.length === 0 ? [this.props.cwd] : this.props.configPolicy.roots;
-    this.allowedRoots = [...new Set(roots.map((root) => realpathSync4(root)))];
+    this.allowedRoots = [...new Set(roots.map((root) => realpathSync5(root)))];
   }
   operations() {
     return [
@@ -8352,11 +8596,11 @@ var DefaultGitConfigOperations = class {
         ["write", "process"],
         ["config", "set"],
         ConfigSetInputSchema,
-        z47.object({
-          key: z47.string(),
+        z48.object({
+          key: z48.string(),
           scope: ConfigScopeSchema,
-          path: z47.string(),
-          warning: z47.string().optional()
+          path: z48.string(),
+          warning: z48.string().optional()
         }),
         (input) => this.setConfig(input)
       ),
@@ -8366,7 +8610,7 @@ var DefaultGitConfigOperations = class {
         ["write", "process"],
         ["config", "unset"],
         ConfigUnsetInputSchema,
-        z47.object({ key: z47.string(), scope: ConfigScopeSchema, path: z47.string() }),
+        z48.object({ key: z48.string(), scope: ConfigScopeSchema, path: z48.string() }),
         (input) => this.unsetConfig(input)
       ),
       this.descriptor(
@@ -8375,7 +8619,7 @@ var DefaultGitConfigOperations = class {
         ["write", "process"],
         ["git", "commit"],
         GitCommitInputSchema,
-        z47.object({ sha: z47.string(), message: z47.string() }),
+        z48.object({ sha: z48.string(), message: z48.string() }),
         (input) => this.commit(input)
       ),
       this.descriptor(
@@ -8384,10 +8628,10 @@ var DefaultGitConfigOperations = class {
         ["write", "process"],
         ["git", "checkout"],
         GitCheckoutInputSchema,
-        z47.object({
-          branch: z47.string(),
-          from: z47.string().nullable(),
-          renamedFrom: z47.string().nullable()
+        z48.object({
+          branch: z48.string(),
+          from: z48.string().nullable(),
+          renamedFrom: z48.string().nullable()
         }),
         (input) => this.checkout(input)
       ),
@@ -8397,7 +8641,7 @@ var DefaultGitConfigOperations = class {
         ["write", "network", "process"],
         ["git", "push"],
         GitPushInputSchema,
-        z47.object({ branch: z47.string(), remote: z47.string(), setUpstream: z47.boolean() }),
+        z48.object({ branch: z48.string(), remote: z48.string(), setUpstream: z48.boolean() }),
         (input) => this.push(input)
       ),
       this.descriptor(
@@ -8415,7 +8659,7 @@ var DefaultGitConfigOperations = class {
         ["read", "process"],
         ["branch-name"],
         BranchNameInputSchema,
-        z47.object({ branch: z47.string() }),
+        z48.object({ branch: z48.string() }),
         (input) => ({
           branch: branchNamer.name({
             type: input.type,
@@ -8463,7 +8707,7 @@ var DefaultGitConfigOperations = class {
         `Configuration scope "${scope}" is not allowed by launch policy`
       );
     const path = this.props.configStore.pathFor(scope);
-    const absolutePath = isAbsolute3(path) ? path : resolve7(this.props.cwd, path);
+    const absolutePath = isAbsolute4(path) ? path : resolve8(this.props.cwd, path);
     this.rejectDanglingSymlinks(absolutePath);
     let existingPath = existsSync11(absolutePath) ? absolutePath : dirname13(absolutePath);
     while (!existsSync11(existingPath)) {
@@ -8474,11 +8718,11 @@ var DefaultGitConfigOperations = class {
         );
       existingPath = parent;
     }
-    const resolvedExistingPath = realpathSync4(existingPath);
-    const target = existsSync11(absolutePath) ? resolvedExistingPath : resolve7(resolvedExistingPath, relative3(existingPath, absolutePath));
+    const resolvedExistingPath = realpathSync5(existingPath);
+    const target = existsSync11(absolutePath) ? resolvedExistingPath : resolve8(resolvedExistingPath, relative4(existingPath, absolutePath));
     if (!this.allowedRoots.some((root) => {
-      const rel = relative3(root, target);
-      return rel === "" || !rel.startsWith("..") && !isAbsolute3(rel);
+      const rel = relative4(root, target);
+      return rel === "" || !rel.startsWith("..") && !isAbsolute4(rel);
     }))
       throw new LaunchConfigOperationDeniedError(
         `Configuration path escapes launch roots: ${path}`
@@ -8496,7 +8740,7 @@ var DefaultGitConfigOperations = class {
         break;
       }
       try {
-        realpathSync4(current);
+        realpathSync5(current);
       } catch {
         throw new LaunchConfigOperationDeniedError(
           `Configuration path contains an unresolved symlink: ${path}`
@@ -8539,33 +8783,33 @@ var DefaultGitConfigOperations = class {
 };
 
 // src/flight-rules/flight-rules.schema.ts
-var FlightRulesPropsSchema = z48.object({
-  cwd: z48.string().optional().describe("Directory used for config discovery; defaults to process.cwd()"),
-  env: z48.record(z48.string(), z48.string().optional()).optional().describe("Live environment record; defaults to process.env"),
-  configPath: z48.string().optional().describe("Explicit config file, taking precedence over FLIGHT_RULES_CONFIG and discovery"),
+var FlightRulesPropsSchema = z49.object({
+  cwd: z49.string().optional().describe("Directory used for config discovery; defaults to process.cwd()"),
+  env: z49.record(z49.string(), z49.string().optional()).optional().describe("Live environment record; defaults to process.env"),
+  configPath: z49.string().optional().describe("Explicit config file, taking precedence over FLIGHT_RULES_CONFIG and discovery"),
   host: NativeHostSchema.optional().describe(
     "Explicit configuration host; otherwise FLIGHT_RULES_HOST, the native package host, or Claude for compatibility"
   ),
-  configWritePolicy: z48.object({
-    scopes: z48.array(ConfigScopeSchema).optional(),
-    roots: z48.array(z48.string().min(1)).optional()
+  configWritePolicy: z49.object({
+    scopes: z49.array(ConfigScopeSchema).optional(),
+    roots: z49.array(z49.string().min(1)).optional()
   }).strict().optional()
 });
 
 // src/operations/tracker-entity-operations.ts
-import { existsSync as existsSync12, realpathSync as realpathSync6, statSync as statSync5 } from "node:fs";
-import { isAbsolute as isAbsolute4, relative as relative4, resolve as resolve8 } from "node:path";
-import { z as z50 } from "zod";
+import { existsSync as existsSync13, realpathSync as realpathSync8, statSync as statSync7 } from "node:fs";
+import { isAbsolute as isAbsolute6, relative as relative6, resolve as resolve10 } from "node:path";
+import { z as z52 } from "zod";
 
 // src/tasks/evidence/evidence.ts
-import { realpathSync as realpathSync5 } from "node:fs";
+import { realpathSync as realpathSync6 } from "node:fs";
 import { basename as basename3 } from "node:path/posix";
-import { z as z49 } from "zod";
+import { z as z50 } from "zod";
 var mediaReference = /(!?)\[([^\]]*)\]\(\s*<?([^\s()<>]+)>?(?:\s+"[^"]*")?\s*\)/g;
 var absoluteTarget = /^[a-zA-Z][a-zA-Z0-9+.-]*:|^\/\/|^#/;
 var localPrefix = /^(?:\.\/)+/;
 var fenceRun2 = /^ {0,3}(`{3,}|~{3,})(.*)$/;
-var AttachmentSpecSchema = z49.string().min(1).transform((spec) => {
+var AttachmentSpecSchema = z50.string().min(1).transform((spec) => {
   const hash = spec.lastIndexOf("#");
   const path = hash > 0 ? spec.slice(0, hash) : spec;
   const caption = hash > 0 ? spec.slice(hash + 1).trim() : "";
@@ -8710,10 +8954,10 @@ var TrackerEvidenceService = class {
     if (absoluteTarget.test(target)) return void 0;
     if (target.startsWith("/") || /^[a-zA-Z]:[\\/]/.test(target)) {
       try {
-        const realTarget = realpathSync5(target);
+        const realTarget = realpathSync6(target);
         return [...byName.values()].find((attachment) => {
           try {
-            return realpathSync5(attachment.path) === realTarget;
+            return realpathSync6(attachment.path) === realTarget;
           } catch {
             return false;
           }
@@ -8770,69 +9014,362 @@ A tracker body must stand on its own for an engineer on a fresh clone. Inline th
 };
 var portableContextGuard = new RegexPortableContextGuard();
 
+// src/operations/ticket-lifecycle-operations.ts
+import { existsSync as existsSync12, realpathSync as realpathSync7, statSync as statSync6 } from "node:fs";
+import { isAbsolute as isAbsolute5, relative as relative5, resolve as resolve9 } from "node:path";
+import { z as z51 } from "zod";
+var propsSchema3 = z51.object({
+  getTracker: z51.custom((value) => typeof value === "function"),
+  cwd: z51.string().min(1),
+  trustedRoots: z51.array(z51.string().min(1)).default([])
+});
+var idSchema = z51.string().min(1);
+var blockInput = z51.object({ ticketId: idSchema, blockerId: idSchema, reason: z51.string().optional() }).strict();
+var ticketPairInput = z51.object({ ticketId: idSchema, blockerId: idSchema }).strict();
+var statusInput = z51.object({ id: idSchema, status: z51.string().min(1) }).strict();
+var commentInput2 = z51.object({
+  id: idSchema,
+  body: z51.string(),
+  attach: z51.array(z51.string().min(1)).default([])
+}).strict();
+var labelInput = z51.object({
+  id: idSchema,
+  add: z51.array(z51.string()).default([]),
+  remove: z51.array(z51.string()).default([])
+}).strict().refine((input) => input.add.length > 0 || input.remove.length > 0, {
+  message: "ticket label needs at least one --add or --remove"
+});
+var blockResult = z51.object({
+  ticketId: idSchema,
+  blockerId: idSchema,
+  ticketEpic: idSchema.nullable(),
+  blockerEpic: idSchema.nullable(),
+  crossEpic: z51.boolean(),
+  reasonRecorded: z51.boolean(),
+  warnings: z51.array(z51.string())
+});
+var blockPartial = z51.object({
+  ticketId: idSchema,
+  blockerId: idSchema,
+  completedSteps: z51.array(z51.string())
+});
+var ticketPairResult = z51.object({ ticketId: idSchema, blockerId: idSchema });
+var statusResult = z51.object({ id: idSchema, status: z51.string() });
+var commentPartial = z51.object({
+  id: idSchema,
+  attachments: z51.array(
+    AttachmentSchema.extend({ path: z51.string(), caption: z51.string(), referenced: z51.boolean() })
+  ),
+  body: z51.string(),
+  completedSteps: z51.array(z51.string())
+});
+var commentResult = z51.union([CommentSchema2, commentPartial]);
+var labelResult = z51.object({
+  id: idSchema,
+  added: z51.array(z51.string()),
+  removed: z51.array(z51.string())
+});
+var labelPartial = z51.object({
+  id: idSchema,
+  added: z51.array(z51.string()),
+  removed: z51.array(z51.string()),
+  requestedAdd: z51.array(z51.string()),
+  requestedRemove: z51.array(z51.string()),
+  completedSteps: z51.array(z51.string())
+});
+var DefaultTicketLifecycleOperations = class {
+  props;
+  roots;
+  constructor(props) {
+    this.props = propsSchema3.parse(props);
+    const roots = this.props.trustedRoots.length === 0 ? [this.props.cwd] : this.props.trustedRoots;
+    this.roots = [...new Set(roots.map((root) => realpathSync7(root)))];
+  }
+  operations() {
+    return [
+      this.descriptor(
+        "ticket-block",
+        "Block a ticket with an epic-boundary justification when needed.",
+        ["write", "network"],
+        ["ticket", "block"],
+        blockInput,
+        z51.union([blockResult, blockPartial]),
+        (input) => this.block(input)
+      ),
+      this.descriptor(
+        "ticket-unblock",
+        "Remove a blocked-by relationship from a ticket.",
+        ["write", "network"],
+        ["ticket", "unblock"],
+        ticketPairInput,
+        ticketPairResult,
+        (input) => this.unblock(input)
+      ),
+      this.descriptor(
+        "ticket-status",
+        "Transition a ticket to a supported tracker status.",
+        ["write", "network"],
+        ["ticket", "status"],
+        statusInput,
+        statusResult,
+        (input) => this.transition(input)
+      ),
+      this.descriptor(
+        "ticket-comment",
+        "Add a ticket comment with trusted evidence attachments.",
+        ["write", "network"],
+        ["ticket", "comment"],
+        commentInput2,
+        commentResult,
+        (input) => this.comment(input)
+      ),
+      this.descriptor(
+        "ticket-label",
+        "Remove and add ticket labels in safe order.",
+        ["write", "network"],
+        ["ticket", "label"],
+        labelInput,
+        z51.union([labelPartial, labelResult]),
+        (input) => this.updateLabels(input)
+      )
+    ];
+  }
+  descriptor(id, description, effects, path, inputSchema, outputSchema, handler) {
+    return {
+      id,
+      description,
+      effects,
+      cli: { path, aliases: [] },
+      inputSchema,
+      outputSchema,
+      handler
+    };
+  }
+  async block(input) {
+    const completedSteps = [];
+    const tracker = this.props.getTracker();
+    const observed = {
+      getTicketEpicId: (ticketId) => tracker.getTicketEpicId(ticketId),
+      blockTicket: async (ticketId, blockerId) => {
+        await tracker.blockTicket(ticketId, blockerId);
+        completedSteps.push("blocked-by-linked");
+      },
+      getTicket: (ticketId) => tracker.getTicket(ticketId),
+      addComment: async (ticketId, body) => {
+        const result = await tracker.addComment(ticketId, body);
+        completedSteps.push("reason-commented");
+        return result;
+      },
+      updateTicketMetadata: async (ticketId, patch) => {
+        await tracker.updateTicketMetadata(ticketId, patch);
+        completedSteps.push("reason-recorded");
+      }
+    };
+    try {
+      const outcome = await new EpicBoundaryGuard(observed).block(input);
+      return {
+        ticketId: input.ticketId,
+        blockerId: input.blockerId,
+        ...outcome
+      };
+    } catch (error) {
+      if (completedSteps.length === 0) throw error;
+      return {
+        status: "partial",
+        data: {
+          ticketId: input.ticketId,
+          blockerId: input.blockerId,
+          completedSteps
+        },
+        error: {
+          name: error instanceof Error ? error.name : "Error",
+          message: error instanceof Error ? error.message : String(error)
+        }
+      };
+    }
+  }
+  async unblock(input) {
+    await this.props.getTracker().unblockTicket(input.ticketId, input.blockerId);
+    return input;
+  }
+  async transition(input) {
+    await this.props.getTracker().transitionTicket(input.id, input.status);
+    return input;
+  }
+  async comment(input) {
+    const tracker = this.props.getTracker();
+    const safeSpecs = input.attach.map((spec) => {
+      const parsed = AttachmentSpecSchema.parse(spec);
+      return `${this.trustedFilePath(parsed.path)}#${parsed.caption}`;
+    });
+    const evidence = new TrackerEvidenceService({ tracker });
+    let body = input.body;
+    let attachments = [];
+    if (safeSpecs.length > 0) {
+      try {
+        const attached = await evidence.attach({ ticketId: input.id, body, specs: safeSpecs });
+        body = attached.body;
+        attachments = attached.attachments;
+      } catch (error) {
+        if (!(error instanceof EvidenceUploadFailure) || error.attachments.length === 0)
+          throw error;
+        const rewritten = evidence.prepareBody({
+          body,
+          specs: error.attachments.map((attachment) => `${attachment.path}#${attachment.caption}`)
+        });
+        return {
+          status: "partial",
+          data: {
+            id: input.id,
+            attachments: error.attachments,
+            body: rewritten,
+            completedSteps: error.attachments.map(
+              (attachment) => `attachment-uploaded:${attachment.id}`
+            )
+          },
+          error: {
+            name: error.cause instanceof Error ? error.cause.name : "Error",
+            message: error.cause instanceof Error ? error.cause.message : String(error.cause)
+          }
+        };
+      }
+    }
+    try {
+      return await tracker.addComment(input.id, body);
+    } catch (error) {
+      if (attachments.length === 0) throw error;
+      return {
+        status: "partial",
+        data: {
+          id: input.id,
+          attachments,
+          body,
+          completedSteps: [
+            "attachments-uploaded",
+            ...attachments.map((attachment) => `attachment-uploaded:${attachment.id}`)
+          ]
+        },
+        error: {
+          name: error instanceof Error ? error.name : "Error",
+          message: error instanceof Error ? error.message : String(error)
+        }
+      };
+    }
+  }
+  async updateLabels(input) {
+    const tracker = this.props.getTracker();
+    const completedSteps = [];
+    const added = [];
+    const removed = [];
+    try {
+      for (const label of input.remove) {
+        await tracker.removeLabel(input.id, label);
+        removed.push(label);
+        completedSteps.push(`removed:${label}`);
+      }
+      for (const label of input.add) {
+        await tracker.addLabel(input.id, label);
+        added.push(label);
+        completedSteps.push(`added:${label}`);
+      }
+      return { id: input.id, added: input.add, removed: input.remove };
+    } catch (error) {
+      if (completedSteps.length === 0) throw error;
+      return {
+        status: "partial",
+        data: {
+          id: input.id,
+          added,
+          removed,
+          requestedAdd: input.add,
+          requestedRemove: input.remove,
+          completedSteps
+        },
+        error: {
+          name: error instanceof Error ? error.name : "Error",
+          message: error instanceof Error ? error.message : String(error)
+        }
+      };
+    }
+  }
+  trustedFilePath(path) {
+    const absolute = isAbsolute5(path) ? path : resolve9(this.props.cwd, path);
+    if (!existsSync12(absolute)) throw new Error(`Attachment file does not exist: ${path}`);
+    const realPath = realpathSync7(absolute);
+    const stat = statSync6(realPath);
+    const contained = this.roots.some((root) => {
+      const fromRoot = relative5(root, realPath);
+      return fromRoot === "" || !fromRoot.startsWith("..") && !isAbsolute5(fromRoot);
+    });
+    if (!contained || !stat.isFile())
+      throw new Error(`Attachment file is outside trusted roots: ${path}`);
+    return realPath;
+  }
+};
+
 // src/operations/tracker-entity-operations.ts
-var labelListSchema = z50.array(z50.string()).transform((labels) => [...new Set(labels.map((label) => label.trim()).filter(Boolean))]);
+var labelListSchema = z52.array(z52.string()).transform((labels) => [...new Set(labels.map((label) => label.trim()).filter(Boolean))]);
 var labelsSchema = labelListSchema.default([]);
-var createEpicInput = z50.object({
+var createEpicInput = z52.object({
   ...CreateEpicInputSchema.shape,
   labels: labelsSchema,
-  allowLocalPaths: z50.boolean().default(false)
+  allowLocalPaths: z52.boolean().default(false)
 }).strict();
-var updateEpicInput = z50.object({
+var updateEpicInput = z52.object({
   ...UpdateEpicInputSchema.shape,
   labels: labelListSchema.optional(),
-  allowLocalPaths: z50.boolean().default(false)
+  allowLocalPaths: z52.boolean().default(false)
 }).strict();
 var createInitiativeInput = CreateInitiativeInputSchema.extend({
-  allowLocalPaths: z50.boolean().default(false)
+  allowLocalPaths: z52.boolean().default(false)
 }).strict();
 var updateInitiativeInput = UpdateInitiativeInputSchema.extend({
-  allowLocalPaths: z50.boolean().default(false)
+  allowLocalPaths: z52.boolean().default(false)
 }).strict();
-var createTicketInput = z50.object({
+var createTicketInput = z52.object({
   ...CreateTicketInputSchema.shape,
   labels: labelsSchema,
-  allowLocalPaths: z50.boolean().default(false)
+  allowLocalPaths: z52.boolean().default(false)
 }).strict();
-var updateTicketInput = z50.object({
+var updateTicketInput = z52.object({
   ...UpdateTicketInputSchema.shape,
   labels: labelListSchema.optional(),
-  allowLocalPaths: z50.boolean().default(false),
-  attach: z50.array(z50.string().min(1)).default([])
+  allowLocalPaths: z52.boolean().default(false),
+  attach: z52.array(z52.string().min(1)).default([])
 }).strict();
 var createTddInput = CreateTechnicalDesignInputSchema.extend({
-  allowLocalPaths: z50.boolean().default(false)
+  allowLocalPaths: z52.boolean().default(false)
 }).strict();
-var entityId = z50.string().min(1);
-var linkInput = z50.object({ epicId: entityId, initiativeId: entityId }).strict();
-var partialTicketEdit = z50.object({
+var entityId = z52.string().min(1);
+var linkInput = z52.object({ epicId: entityId, initiativeId: entityId }).strict();
+var partialTicketEdit = z52.object({
   id: entityId,
-  attachments: z50.array(AttachmentSchema),
-  body: z50.string()
+  attachments: z52.array(AttachmentSchema),
+  body: z52.string()
 });
-var ticketEditResult = z50.union([TicketSchema, partialTicketEdit]);
-var partialTicketCreate = z50.object({ id: entityId, title: z50.string() });
-var ticketCreateResult = z50.union([TicketSchema, partialTicketCreate]);
-var partialEntityWrite = z50.object({
+var ticketEditResult = z52.union([TicketSchema, partialTicketEdit]);
+var partialTicketCreate = z52.object({ id: entityId, title: z52.string() });
+var ticketCreateResult = z52.union([TicketSchema, partialTicketCreate]);
+var partialEntityWrite = z52.object({
   id: entityId,
-  title: z50.string().optional(),
-  body: z50.string().optional()
+  title: z52.string().optional(),
+  body: z52.string().optional()
 });
-var partialTddCreate = z50.object({ id: entityId, epicId: entityId, body: z50.string() });
-var propsSchema2 = z50.object({
-  getTracker: z50.custom((value) => typeof value === "function"),
-  getPrHost: z50.custom((value) => typeof value === "function").optional(),
-  getConfig: z50.custom((value) => typeof value === "function").optional(),
-  cwd: z50.string().min(1),
-  trustedRoots: z50.array(z50.string().min(1)).default([])
+var partialTddCreate = z52.object({ id: entityId, epicId: entityId, body: z52.string() });
+var propsSchema4 = z52.object({
+  getTracker: z52.custom((value) => typeof value === "function"),
+  getPrHost: z52.custom((value) => typeof value === "function").optional(),
+  getConfig: z52.custom((value) => typeof value === "function").optional(),
+  cwd: z52.string().min(1),
+  trustedRoots: z52.array(z52.string().min(1)).default([])
 });
 var DefaultTrackerEntityOperations = class {
   props;
   roots;
   constructor(props) {
-    this.props = propsSchema2.parse(props);
+    this.props = propsSchema4.parse(props);
     const roots = this.props.trustedRoots.length === 0 ? [this.props.cwd] : this.props.trustedRoots;
-    this.roots = [...new Set(roots.map((root) => realpathSync6(root)))];
+    this.roots = [...new Set(roots.map((root) => realpathSync8(root)))];
   }
   operations() {
     return [
@@ -8841,13 +9378,18 @@ var DefaultTrackerEntityOperations = class {
         ...this.props.getPrHost === void 0 ? {} : { getPrHost: this.props.getPrHost },
         ...this.props.getConfig === void 0 ? {} : { getConfig: this.props.getConfig }
       }).operations(),
+      ...new DefaultTicketLifecycleOperations({
+        getTracker: this.props.getTracker,
+        cwd: this.props.cwd,
+        trustedRoots: this.props.trustedRoots
+      }).operations(),
       this.descriptor(
         "epic-create",
         "Create an epic with portable context and labels.",
         ["write", "network"],
         ["epic", "create"],
         createEpicInput,
-        z50.union([EpicSchema, partialEntityWrite]),
+        z52.union([EpicSchema, partialEntityWrite]),
         (input) => this.createEpic(input)
       ),
       this.descriptor(
@@ -8855,8 +9397,8 @@ var DefaultTrackerEntityOperations = class {
         "Update an epic description, title, or labels.",
         ["write", "network"],
         ["epic", "edit"],
-        z50.object({ id: entityId, ...updateEpicInput.shape }).strict(),
-        z50.union([EpicSchema, partialEntityWrite]),
+        z52.object({ id: entityId, ...updateEpicInput.shape }).strict(),
+        z52.union([EpicSchema, partialEntityWrite]),
         ({ id, ...input }) => this.editEpic(id, input)
       ),
       this.descriptor(
@@ -8865,7 +9407,7 @@ var DefaultTrackerEntityOperations = class {
         ["write", "network"],
         ["epic", "link-initiative"],
         linkInput,
-        z50.object({ epicId: entityId, initiativeId: entityId }),
+        z52.object({ epicId: entityId, initiativeId: entityId }),
         async ({ epicId, initiativeId }) => {
           await this.props.getTracker().linkEpicToInitiative(epicId, initiativeId);
           return { epicId, initiativeId };
@@ -8877,7 +9419,7 @@ var DefaultTrackerEntityOperations = class {
         ["write", "network"],
         ["initiative", "create"],
         createInitiativeInput,
-        z50.union([InitiativeSchema, partialEntityWrite]),
+        z52.union([InitiativeSchema, partialEntityWrite]),
         (input) => this.createInitiative(input)
       ),
       this.descriptor(
@@ -8885,8 +9427,8 @@ var DefaultTrackerEntityOperations = class {
         "Update an initiative description or title.",
         ["write", "network"],
         ["initiative", "edit"],
-        z50.object({ id: entityId, ...updateInitiativeInput.shape }).strict(),
-        z50.union([InitiativeSchema, partialEntityWrite]),
+        z52.object({ id: entityId, ...updateInitiativeInput.shape }).strict(),
+        z52.union([InitiativeSchema, partialEntityWrite]),
         ({ id, ...input }) => this.editInitiative(id, input)
       ),
       this.descriptor(
@@ -8903,7 +9445,7 @@ var DefaultTrackerEntityOperations = class {
         "Update a ticket and attach local evidence files.",
         ["write", "network"],
         ["ticket", "edit"],
-        z50.object({ id: entityId, ...updateTicketInput.shape }).strict(),
+        z52.object({ id: entityId, ...updateTicketInput.shape }).strict(),
         ticketEditResult,
         ({ id, ...input }) => this.editTicket(id, input)
       ),
@@ -8913,7 +9455,7 @@ var DefaultTrackerEntityOperations = class {
         ["write", "network"],
         ["tdd", "create"],
         createTddInput,
-        z50.union([TechnicalDesignSchema, partialTddCreate]),
+        z52.union([TechnicalDesignSchema, partialTddCreate]),
         (input) => this.createTdd(input)
       )
     ];
@@ -9085,13 +9627,13 @@ var DefaultTrackerEntityOperations = class {
     portableContextGuard.assertPortable(body, { allowLocalPaths });
   }
   trustedFilePath(path) {
-    const absolute = isAbsolute4(path) ? path : resolve8(this.props.cwd, path);
-    if (!existsSync12(absolute)) throw new Error(`Attachment file does not exist: ${path}`);
-    const realPath = realpathSync6(absolute);
-    const stat = statSync5(realPath);
+    const absolute = isAbsolute6(path) ? path : resolve10(this.props.cwd, path);
+    if (!existsSync13(absolute)) throw new Error(`Attachment file does not exist: ${path}`);
+    const realPath = realpathSync8(absolute);
+    const stat = statSync7(realPath);
     const contained = this.roots.some((root) => {
-      const fromRoot = relative4(root, realPath);
-      return fromRoot === "" || !fromRoot.startsWith("..") && !isAbsolute4(fromRoot);
+      const fromRoot = relative6(root, realPath);
+      return fromRoot === "" || !fromRoot.startsWith("..") && !isAbsolute6(fromRoot);
     });
     if (!contained || !stat.isFile())
       throw new Error(`Attachment file is outside trusted roots: ${path}`);
@@ -9103,6 +9645,7 @@ var DefaultTrackerEntityOperations = class {
 var DefaultFlightRules = class {
   cwd;
   env;
+  launchEnv;
   gitEnv;
   explicitConfigPath;
   hostSettings;
@@ -9114,8 +9657,9 @@ var DefaultFlightRules = class {
       ...props,
       env: props.env === void 0 ? void 0 : { ...props.env }
     });
-    this.cwd = resolve9(parsed.cwd ?? process.cwd());
+    this.cwd = resolve11(parsed.cwd ?? process.cwd());
     this.env = props.env ?? process.env;
+    this.launchEnv = { ...props.env ?? process.env };
     this.gitEnv = { ...props.env ?? process.env };
     this.explicitConfigPath = parsed.configPath;
     this.hostSettings = props.hostSettings;
@@ -9201,7 +9745,7 @@ var DefaultFlightRules = class {
     if (config.repo === void 0) {
       throw new Error("repo (owner/repo) is required in config to create pull requests");
     }
-    return new GhPullRequestHost({ repo: config.repo });
+    return new GhPullRequestHost({ repo: config.repo, cwd: this.cwd, env: this.launchEnv });
   }
   git() {
     return new NodeGitExecutor({ cwd: this.cwd, env: this.gitEnv });
@@ -9280,15 +9824,15 @@ var DefaultFlightRules = class {
 };
 
 // src/sdk/instruction-catalog-core.ts
-import { existsSync as existsSync13, readFileSync as readFileSync14, readdirSync as readdirSync6, realpathSync as realpathSync7, statSync as statSync6 } from "node:fs";
-import { basename as basename5, dirname as dirname14, isAbsolute as isAbsolute5, join as join16, relative as relative5, resolve as resolve10, sep as sep4 } from "node:path";
+import { existsSync as existsSync14, readFileSync as readFileSync14, readdirSync as readdirSync6, realpathSync as realpathSync9, statSync as statSync8 } from "node:fs";
+import { basename as basename5, dirname as dirname14, isAbsolute as isAbsolute7, join as join16, relative as relative7, resolve as resolve12, sep as sep4 } from "node:path";
 import { fileURLToPath as fileURLToPath4 } from "node:url";
-import { z as z52 } from "zod";
+import { z as z54 } from "zod";
 
 // src/agents/agent-registry/agent-registry.ts
 import { readFileSync as readFileSync13, readdirSync as readdirSync5 } from "node:fs";
 import { basename as basename4, join as join15 } from "node:path";
-import { z as z51 } from "zod";
+import { z as z53 } from "zod";
 
 // src/agents/agent-frontmatter/agent-frontmatter.ts
 import { parse as parseYaml4 } from "yaml";
@@ -9312,14 +9856,14 @@ var agentFrontmatterParser = new YamlAgentFrontmatterParser();
 
 // src/agents/agent-registry/agent-registry.ts
 var AgentNameSchema = AgentFrontmatterSchema.shape.name;
-var AgentVariantSchema = z51.strictObject({
+var AgentVariantSchema = z53.strictObject({
   name: AgentNameSchema,
   extends: AgentNameSchema,
   description: AgentFrontmatterSchema.shape.description,
   model: ModelTierSchema,
-  modelReason: z51.string().trim().min(1).optional()
+  modelReason: z53.string().trim().min(1).optional()
 });
-var AgentVariantsSchema = z51.array(AgentVariantSchema);
+var AgentVariantsSchema = z53.array(AgentVariantSchema);
 var InvalidAgentDefinitionError = class extends Error {
   name = "InvalidAgentDefinitionError";
 };
@@ -9358,11 +9902,11 @@ var FileAgentRegistry = class {
 };
 
 // src/sdk/instruction-catalog-core.ts
-var CatalogPropsSchema = z52.strictObject({
-  moduleUrl: z52.string().min(1),
-  env: z52.record(z52.string(), z52.string().optional())
+var CatalogPropsSchema = z54.strictObject({
+  moduleUrl: z54.string().min(1),
+  env: z54.record(z54.string(), z54.string().optional())
 });
-var ResourceNameSchema = z52.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
+var ResourceNameSchema = z54.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
 var UnknownInstructionError = class extends Error {
   name = "UnknownInstructionError";
 };
@@ -9380,7 +9924,7 @@ var FileInstructionCatalog = class {
     const parsed = CatalogPropsSchema.parse({ ...props, env: { ...props.env } });
     const override = parsed.env["FLIGHT_RULES_HOME"]?.trim();
     const moduleDirectory = dirname14(fileURLToPath4(parsed.moduleUrl));
-    const home = override || resolve10(moduleDirectory, basename5(moduleDirectory) === "sdk" ? "../.." : "..");
+    const home = override || resolve12(moduleDirectory, basename5(moduleDirectory) === "sdk" ? "../.." : "..");
     this.skillDir = this.findResourceDirectory(home, ["skills"]);
     this.agentDir = this.findResourceDirectory(home, [
       "bin/resources/agents",
@@ -9393,7 +9937,7 @@ var FileInstructionCatalog = class {
     );
   }
   listSkills() {
-    return readdirSync6(this.skillDir, { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile() && entry.name === "SKILL.md").map((entry) => relative5(this.skillDir, join16(entry.parentPath, entry.name)).split(sep4)[0]).filter((name) => name !== void 0).sort();
+    return readdirSync6(this.skillDir, { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile() && entry.name === "SKILL.md").map((entry) => relative7(this.skillDir, join16(entry.parentPath, entry.name)).split(sep4)[0]).filter((name) => name !== void 0).sort();
   }
   loadSkill(name) {
     const parsed = ResourceNameSchema.safeParse(name);
@@ -9416,18 +9960,18 @@ var FileInstructionCatalog = class {
     return agent;
   }
   findResourceDirectory(home, candidates) {
-    if (!existsSync13(home) || !statSync6(home).isDirectory()) {
+    if (!existsSync14(home) || !statSync8(home).isDirectory()) {
       throw new InstructionsUnavailableError(
         `The flight-rules installation directory is unavailable: ${home}`
       );
     }
-    const installationRoot = realpathSync7(home);
+    const installationRoot = realpathSync9(home);
     for (const candidate of candidates) {
-      const path = resolve10(installationRoot, candidate);
-      if (!existsSync13(path) || !statSync6(path).isDirectory()) continue;
-      const realPath = realpathSync7(path);
-      const relativePath = relative5(installationRoot, realPath);
-      if (relativePath === ".." || relativePath.startsWith(`..${sep4}`) || isAbsolute5(relativePath)) {
+      const path = resolve12(installationRoot, candidate);
+      if (!existsSync14(path) || !statSync8(path).isDirectory()) continue;
+      const realPath = realpathSync9(path);
+      const relativePath = relative7(installationRoot, realPath);
+      if (relativePath === ".." || relativePath.startsWith(`..${sep4}`) || isAbsolute7(relativePath)) {
         throw new UnsafeInstructionPathError(
           `Instruction directory escapes its installation home: ${path}`
         );
@@ -9437,11 +9981,11 @@ var FileInstructionCatalog = class {
     throw new InstructionsUnavailableError(`Canonical resources are unavailable under ${home}`);
   }
   safePath(path, root) {
-    if (!isAbsolute5(path) || !existsSync13(path) || !statSync6(path).isFile())
+    if (!isAbsolute7(path) || !existsSync14(path) || !statSync8(path).isFile())
       throw new UnknownInstructionError(`Unknown instruction resource: ${path}`);
-    const realPath = realpathSync7(path);
-    const relativePath = relative5(root, realPath);
-    if (relativePath === ".." || relativePath.startsWith(`..${sep4}`) || isAbsolute5(relativePath)) {
+    const realPath = realpathSync9(path);
+    const relativePath = relative7(root, realPath);
+    if (relativePath === ".." || relativePath.startsWith(`..${sep4}`) || isAbsolute7(relativePath)) {
       throw new UnsafeInstructionPathError(
         `Instruction resource escapes its installation directory: ${path}`
       );
@@ -9451,20 +9995,20 @@ var FileInstructionCatalog = class {
 };
 
 // src/mcp/mcp-server.ts
-var McpLaunchPropsSchema = z53.strictObject({
-  cwd: z53.string().min(1),
-  env: z53.record(z53.string(), z53.string().optional()),
-  allowedOperationIds: z53.array(z53.string()).default([]),
-  allowedEffects: z53.array(z53.enum(["read", "write", "network", "process"])).default(["read", "process", "network"]),
-  allowedConfigScopes: z53.array(z53.enum(configScopes)).default([]),
+var McpLaunchPropsSchema = z55.strictObject({
+  cwd: z55.string().min(1),
+  env: z55.record(z55.string(), z55.string().optional()),
+  allowedOperationIds: z55.array(z55.string()).default([]),
+  allowedEffects: z55.array(z55.enum(["read", "write", "network", "process"])).default(["read", "process", "network"]),
+  allowedConfigScopes: z55.array(z55.enum(configScopes)).default([]),
   ...ReviewOperationsLaunchPropsSchema.pick({
     trustedRef: true,
     owners: true,
     requireMapping: true
   }).shape
 });
-var resourceId = z53.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
-var LaunchBoundQaFileSystemPropsSchema = z53.object({ root: z53.string().min(1) });
+var resourceId = z55.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
+var LaunchBoundQaFileSystemPropsSchema = z55.object({ root: z55.string().min(1) });
 var LaunchCheckoutChangedError = class extends Error {
   name = "LaunchCheckoutChangedError";
 };
@@ -9475,31 +10019,31 @@ var LaunchBoundQaFileSystem = class {
   root;
   constructor(props) {
     const parsed = LaunchBoundQaFileSystemPropsSchema.parse(props);
-    this.root = realpathSync8(parsed.root);
+    this.root = realpathSync10(parsed.root);
   }
   exists(path) {
     if (!this.isInsideLaunch(path)) return false;
-    return existsSync14(path);
+    return existsSync15(path);
   }
   isFile(path) {
     this.requireInsideLaunch(path);
-    return existsSync14(path) && statSync7(path).isFile();
+    return existsSync15(path) && statSync9(path).isFile();
   }
   readFile(path) {
     this.requireInsideLaunch(path);
     return readFileSync15(path, "utf8");
   }
   isInsideLaunch(path) {
-    const absolute = resolve11(path);
+    const absolute = resolve13(path);
     let existing = absolute;
-    while (!existsSync14(existing)) {
+    while (!existsSync15(existing)) {
       const parent = dirname15(existing);
       if (parent === existing) return false;
       existing = parent;
     }
-    const realPath = realpathSync8(existing);
-    const relativePath = relative6(this.root, realPath);
-    return relativePath === "" || relativePath !== ".." && !relativePath.startsWith(`..${sep5}`) && !isAbsolute6(relativePath);
+    const realPath = realpathSync10(existing);
+    const relativePath = relative8(this.root, realPath);
+    return relativePath === "" || relativePath !== ".." && !relativePath.startsWith(`..${sep5}`) && !isAbsolute8(relativePath);
   }
   requireInsideLaunch(path) {
     if (!this.isInsideLaunch(path)) {
@@ -9520,8 +10064,8 @@ var FlightRulesMcpServer = class {
   instructions;
   constructor(props) {
     this.props = McpLaunchPropsSchema.parse(props);
-    this.cwd = realpathSync8(this.props.cwd);
-    const directory = statSync7(this.cwd);
+    this.cwd = realpathSync10(this.props.cwd);
+    const directory = statSync9(this.cwd);
     this.launchDevice = directory.dev;
     this.launchInode = directory.ino;
     this.qaFileSystem = new LaunchBoundQaFileSystem({ root: this.cwd });
@@ -9536,7 +10080,7 @@ var FlightRulesMcpServer = class {
     const server = new McpServer({ name: "flight-rules", version: "1.0.0" });
     for (const operation of registry.list()) {
       const descriptor = this.findOperation(operation.id);
-      if (!(descriptor.inputSchema instanceof z53.ZodObject)) {
+      if (!(descriptor.inputSchema instanceof z55.ZodObject)) {
         throw new Error(`MCP operation input must be an object schema: ${operation.id}`);
       }
       server.registerTool(
@@ -9665,6 +10209,7 @@ var FlightRulesMcpServer = class {
         getPrHost: () => core.prHost(),
         getConfig: () => core.config()
       }).operations(),
+      ...new DefaultPrOperations({ cwd, getHost: () => core.prHost() }).operations(),
       ...core.gitConfigOperations({ scopes: this.props.allowedConfigScopes, roots: [cwd] }).operations(),
       ...core.reviewOperations({
         cwd,
@@ -9681,8 +10226,8 @@ var FlightRulesMcpServer = class {
   }
   /** Pathnames can be reused after a rename; the launch grant belongs to the original directory. */
   requireOriginalLaunchCheckout() {
-    const directory = existsSync14(this.cwd) ? statSync7(this.cwd) : void 0;
-    if (directory === void 0 || realpathSync8(this.cwd) !== this.cwd || directory.dev !== this.launchDevice || directory.ino !== this.launchInode) {
+    const directory = existsSync15(this.cwd) ? statSync9(this.cwd) : void 0;
+    if (directory === void 0 || realpathSync10(this.cwd) !== this.cwd || directory.dev !== this.launchDevice || directory.ino !== this.launchInode) {
       throw new LaunchCheckoutChangedError(
         `The launch checkout was moved or replaced: ${this.cwd}`
       );
@@ -9690,15 +10235,15 @@ var FlightRulesMcpServer = class {
   }
   validateLocalPaths(id, input) {
     if (id !== "qa-instructions") return;
-    const parsedInput = z53.object({ from: z53.string().optional() }).safeParse(input);
+    const parsedInput = z55.object({ from: z55.string().optional() }).safeParse(input);
     if (!parsedInput.success) return;
     const from = parsedInput.data.from;
     if (typeof from !== "string") return;
-    const candidate = isAbsolute6(from) ? from : resolve11(this.cwd, from);
-    if (!existsSync14(candidate)) throw new Error(`QA instructions path does not exist: ${from}`);
-    const realPath = realpathSync8(candidate);
-    const relativePath = relative6(this.cwd, realPath);
-    if (relativePath === ".." || relativePath.startsWith(`..${sep5}`) || isAbsolute6(relativePath)) {
+    const candidate = isAbsolute8(from) ? from : resolve13(this.cwd, from);
+    if (!existsSync15(candidate)) throw new Error(`QA instructions path does not exist: ${from}`);
+    const realPath = realpathSync10(candidate);
+    const relativePath = relative8(this.cwd, realPath);
+    if (relativePath === ".." || relativePath.startsWith(`..${sep5}`) || isAbsolute8(relativePath)) {
       throw new UnsafeQaInstructionsPathError(
         `QA instructions path escapes the launch checkout: ${from}`
       );
@@ -9708,10 +10253,10 @@ var FlightRulesMcpServer = class {
 
 // src/mcp/stdio.ts
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
-import { z as z54 } from "zod";
+import { z as z56 } from "zod";
 var StdioLaunchPropsSchema = McpLaunchPropsSchema.extend({
-  cwd: z54.string().min(1).default(process.cwd()),
-  env: z54.record(z54.string(), z54.string().optional()).default(() => ({ ...process.env }))
+  cwd: z56.string().min(1).default(process.cwd()),
+  env: z56.record(z56.string(), z56.string().optional()).default(() => ({ ...process.env }))
 });
 var StdioFlightRulesMcpTransport = class {
   launch;

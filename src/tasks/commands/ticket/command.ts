@@ -2,8 +2,6 @@ import { Command } from "commander";
 import type { TaskTracker } from "../../task-tracker/task-tracker.js";
 import { resolveBody } from "../resolve-body.js";
 import { collect } from "../../../shared/collect.js";
-import { EpicBoundaryGuard } from "../../epic-boundary/epic-boundary.js";
-import { TrackerEvidenceService } from "../../evidence/evidence.js";
 import { z } from "zod";
 import { RegistryCommandOperationClient } from "../../../operations/command-operation-client.js";
 import { DefaultTrackerEntityOperations } from "../../../operations/tracker-entity-operations.js";
@@ -130,11 +128,15 @@ export function createTicketCommand(
       "one-line justification, required when the two tickets sit in different epics (see docs/epic-boundaries.md)",
     )
     .action(async (id: string, opts: { by: string; crossEpicReason?: string }) => {
-      const outcome = await new EpicBoundaryGuard(getTracker()).block({
-        ticketId: id,
-        blockerId: opts.by,
-        reason: opts.crossEpicReason,
-      });
+      const outcome = await operations.invoke(
+        "ticket-block",
+        {
+          ticketId: id,
+          blockerId: opts.by,
+          ...(opts.crossEpicReason === undefined ? {} : { reason: opts.crossEpicReason }),
+        },
+        z.object({ warnings: z.array(z.string()) }).passthrough(),
+      );
       for (const warning of outcome.warnings) process.stderr.write(`warning: ${warning}\n`);
     });
 
@@ -144,7 +146,7 @@ export function createTicketCommand(
     .argument("<id>", "ticket id to unblock")
     .requiredOption("--by <blockerId>", "id of the blocking ticket to remove")
     .action(async (id: string, opts: { by: string }) => {
-      await getTracker().unblockTicket(id, opts.by);
+      await operations.invoke("ticket-unblock", { ticketId: id, blockerId: opts.by }, z.unknown());
     });
 
   ticket
@@ -153,8 +155,8 @@ export function createTicketCommand(
     .argument("<id>", "ticket id to transition")
     .requiredOption("--to <status>", 'target status, e.g. "In Progress" or "In Review"')
     .action(async (id: string, opts: { to: string }) => {
-      await getTracker().transitionTicket(id, opts.to);
-      process.stdout.write(JSON.stringify({ id, status: opts.to }) + "\n");
+      const result = await operations.invoke("ticket-status", { id, status: opts.to }, z.unknown());
+      process.stdout.write(JSON.stringify(result) + "\n");
     });
 
   ticket
@@ -174,19 +176,12 @@ export function createTicketCommand(
     .option("--body-file <path>", "read the comment body from a file")
     .option("--attach <spec>", "file to attach, as <path>#<caption> (repeatable)", collect, [])
     .action(async (id: string, opts: { body?: string; bodyFile?: string; attach: string[] }) => {
-      const tracker = getTracker();
       const raw = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
-      const body =
-        opts.attach.length === 0
-          ? raw
-          : (
-              await new TrackerEvidenceService({ tracker }).attach({
-                ticketId: id,
-                body: raw,
-                specs: opts.attach,
-              })
-            ).body;
-      const comment = await tracker.addComment(id, body);
+      const comment = await operations.invoke(
+        "ticket-comment",
+        { id, body: raw, attach: opts.attach },
+        z.unknown(),
+      );
       process.stdout.write(JSON.stringify(comment) + "\n");
     });
 
@@ -197,14 +192,12 @@ export function createTicketCommand(
     .option("--add <label>", "label to add (repeatable)", collect, [])
     .option("--remove <label>", "label to remove (repeatable)", collect, [])
     .action(async (id: string, opts: { add: string[]; remove: string[] }) => {
-      if (opts.add.length === 0 && opts.remove.length === 0) {
-        throw new Error("ticket label needs at least one --add or --remove");
-      }
-      const tracker = getTracker();
-      // Removals run first so a swap never leaves both lifecycle labels present if the addition fails.
-      for (const label of opts.remove) await tracker.removeLabel(id, label);
-      for (const label of opts.add) await tracker.addLabel(id, label);
-      process.stdout.write(JSON.stringify({ id, added: opts.add, removed: opts.remove }) + "\n");
+      const result = await operations.invoke(
+        "ticket-label",
+        { id, add: opts.add, remove: opts.remove },
+        z.unknown(),
+      );
+      process.stdout.write(JSON.stringify(result) + "\n");
     });
 
   return ticket;

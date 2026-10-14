@@ -49,6 +49,7 @@ export interface FlightRules {
 export declare class DefaultFlightRules implements FlightRules {
     private readonly cwd;
     private readonly env;
+    private readonly launchEnv;
     private readonly gitEnv;
     private readonly explicitConfigPath;
     private readonly hostSettings;

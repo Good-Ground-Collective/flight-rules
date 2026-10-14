@@ -235,9 +235,7 @@ describe("shared operations", () => {
     expect(excluded.find((item) => item.route.path.join(" ") === "mcp")).toMatchObject({
       reason: expect.stringContaining("local stdio transport"),
     });
-    expect(() => cliRouteCoverage.assertComplete(program, registry)).toThrow(
-      /remain pending migration/,
-    );
+    expect(() => cliRouteCoverage.assertComplete(program, registry)).not.toThrow();
     expect(registry.list().map((operation) => operation.id)).toEqual([
       "doc",
       "charter",
@@ -273,6 +271,11 @@ describe("shared operations", () => {
       "epic-review-plan",
       "initiative-plan",
       "initiative-review-plan",
+      "ticket-block",
+      "ticket-unblock",
+      "ticket-status",
+      "ticket-comment",
+      "ticket-label",
       "epic-create",
       "epic-edit",
       "epic-link-initiative",

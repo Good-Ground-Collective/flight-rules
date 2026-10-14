@@ -19,3 +19,18 @@ export type {
   WorkerCapability,
   WorkerToolGrants,
 } from "./tool-policy.js";
+export {
+  DeepAgentsSkillRuntime,
+  LangChainDeepAgentsSkillRuntime,
+  InvalidSkillResumeError,
+  DeepAgentsSkillConfigurationError,
+} from "./skill-runtime.js";
+export type {
+  DeepAgentsSkillRuntimeProps,
+  DeepAgentsSkillRuntimeObserver,
+  DeepAgentsSkillRuntimeContract,
+  DeepAgentsSkillResult,
+  PausedSkillResult,
+  SkillInvocationOptions,
+  SkillResumeRequest,
+} from "./skill-runtime.js";

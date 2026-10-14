@@ -22,6 +22,8 @@ export { ManifestCliRouteCoverage, CliRouteCoverageError, cliRouteCoverage, } fr
 export type { RouteDisposition, CliRouteCoverage } from "../operations/cli-coverage.js";
 export { DefaultTrackerEntityOperations } from "../operations/tracker-entity-operations.js";
 export type { TrackerEntityOperations } from "../operations/tracker-entity-operations.js";
+export { DefaultTicketLifecycleOperations } from "../operations/ticket-lifecycle-operations.js";
+export type { TicketLifecycleOperations } from "../operations/ticket-lifecycle-operations.js";
 export interface OrderedDispatch<T> {
     index: number;
     request: DispatchRequest;
