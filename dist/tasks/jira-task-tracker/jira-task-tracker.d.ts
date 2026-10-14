@@ -1,5 +1,5 @@
-import type { JiraTrackerConfig } from './jira-interfaces.js';
-import type { Attachment, Comment, CreateEpicInput, CreateInitiativeInput, CreateTechnicalDesignInput, CreateTicketInput, EntityMetadata, Epic, Initiative, TaskTracker, TechnicalDesign, Ticket, TrackerUser, UpdateEpicInput, UpdateInitiativeInput, UpdateTicketInput } from '../task-tracker/task-tracker.js';
+import type { JiraTrackerConfig } from "./jira-interfaces.js";
+import type { Attachment, Comment, CreateEpicInput, CreateInitiativeInput, CreateTechnicalDesignInput, CreateTicketInput, EntityMetadata, Epic, Initiative, TaskTracker, TechnicalDesign, Ticket, TrackerUser, UpdateEpicInput, UpdateInitiativeInput, UpdateTicketInput } from "../task-tracker/task-tracker.js";
 /**
  * The Jira / Jira Product Discovery backend. Epics map to the Epic issue type
  * and tickets to Story; parentage rides the native `parent` field, and entity

@@ -2,6 +2,8 @@ export { createFlightRules, DefaultFlightRules } from "./flight-rules/flight-rul
 export type { FlightRules } from "./flight-rules/flight-rules.js";
 export type { FlightRulesProps } from "./flight-rules/flight-rules.schema.js";
 export type { ReviewOperations } from "./operations/review-operations.js";
+export { DefaultTrackerEntityOperations } from "./operations/tracker-entity-operations.js";
+export type { TrackerEntityOperations } from "./operations/tracker-entity-operations.js";
 export { GitHubTaskTracker } from "./tasks/github-task-tracker/github-task-tracker.js";
 export type { GitHubTrackerConfig } from "./tasks/github-task-tracker/github-task-tracker.js";
 export { JiraTaskTracker } from "./tasks/jira-task-tracker/jira-task-tracker.js";
@@ -34,7 +36,7 @@ export type { BodyFormatDetector } from "./tasks/body-sections/body-format-detec
 export { LayeredBodyAdfConverter, markdownAdfConverter, MediaRefSchema, MediaLookupSchema, } from "./tasks/jira-task-tracker/markdown-adf.js";
 export type { MarkdownAdfConverter, MediaRef, MediaLookup, } from "./tasks/jira-task-tracker/markdown-adf.js";
 export type { AdfDocNode } from "./tasks/jira-task-tracker/adf.js";
-export { TrackerEvidenceService, DuplicateEvidenceNameError, AttachmentSpecSchema, } from "./tasks/evidence/evidence.js";
+export { TrackerEvidenceService, DuplicateEvidenceNameError, EvidenceUploadFailure, AttachmentSpecSchema, } from "./tasks/evidence/evidence.js";
 export type { EvidenceService, EvidenceRequest, AttachedEvidence, } from "./tasks/evidence/evidence.js";
 export { NodeToolProbe, nodeToolProbe } from "./tasks/tool-probe/tool-probe.js";
 export type { ToolProbe, ToolCheck } from "./tasks/tool-probe/tool-probe.js";

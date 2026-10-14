@@ -61,7 +61,7 @@ var FileDocResolver = class _FileDocResolver {
 };
 
 // src/flight-rules/flight-rules.ts
-import { resolve as resolve8 } from "node:path";
+import { resolve as resolve9 } from "node:path";
 
 // src/git/git-executor/git-executor.ts
 import { execFile } from "node:child_process";
@@ -1282,7 +1282,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.88.0";
+var appVersion = false ? "0.0.0-dev" : "1.89.0";
 
 // src/shared/ariadne/review-packet.schema.ts
 import { z as z14 } from "zod";
@@ -2503,6 +2503,25 @@ var CreateInitiativeInputSchema = z17.object({
   title: z17.string(),
   body: z17.string()
 });
+var partialWriteErrorSchema = z17.object({
+  name: z17.literal("TaskTrackerPartialWriteError"),
+  id: z17.string().min(1),
+  message: z17.string()
+});
+var TaskTrackerPartialWriteError = class extends Error {
+  name = "TaskTrackerPartialWriteError";
+  id;
+  constructor(props) {
+    super(props.cause instanceof Error ? props.cause.message : String(props.cause), {
+      cause: props.cause
+    });
+    this.id = props.id;
+  }
+  /** Recognizes adapter failures across independently bundled package entry points. */
+  static isPartialWrite(error) {
+    return error instanceof Error && partialWriteErrorSchema.safeParse(error).success;
+  }
+};
 
 // src/tasks/body-metadata/body-metadata.ts
 var sentinelComment = "<!-- flight-rules:metadata -->";
@@ -2664,8 +2683,16 @@ var GitHubTaskTracker = class {
   async getEpic(id) {
     const issueNumber = parseInt(id, 10);
     const [issueResponse, commentsResponse, subIssuesResponse] = await Promise.all([
-      this.octokit.rest.issues.get({ owner: this.owner, repo: this.repo, issue_number: issueNumber }),
-      this.octokit.rest.issues.listComments({ owner: this.owner, repo: this.repo, issue_number: issueNumber }),
+      this.octokit.rest.issues.get({
+        owner: this.owner,
+        repo: this.repo,
+        issue_number: issueNumber
+      }),
+      this.octokit.rest.issues.listComments({
+        owner: this.owner,
+        repo: this.repo,
+        issue_number: issueNumber
+      }),
       this.octokit.request("GET /repos/{owner}/{repo}/issues/{issue_number}/sub_issues", {
         owner: this.owner,
         repo: this.repo,
@@ -2675,7 +2702,9 @@ var GitHubTaskTracker = class {
     const issue = issueResponse.data;
     const body = issue.body ?? "";
     const metadata = this.bodyMetadata.parse(body);
-    const childNumbers = IssueRefListSchema.parse(subIssuesResponse.data).map((ref) => String(ref.number));
+    const childNumbers = IssueRefListSchema.parse(subIssuesResponse.data).map(
+      (ref) => String(ref.number)
+    );
     const childIssues = await Promise.all(childNumbers.map((n) => this.getTicket(n)));
     let tdd;
     if (metadata.tddId !== void 0) {
@@ -2705,29 +2734,53 @@ var GitHubTaskTracker = class {
       labels: ["ticket", ...input.labels],
       ...input.assignee !== void 0 ? { assignee: input.assignee } : {}
     });
-    if (input.epicId !== void 0) await this.linkTicketToEpic(String(data.number), input.epicId);
+    if (input.epicId !== void 0) {
+      try {
+        await this.linkTicketToEpic(String(data.number), input.epicId);
+      } catch (cause) {
+        throw new TaskTrackerPartialWriteError({ id: String(data.number), cause });
+      }
+    }
     return this.mapTicket(data, [], [], [], this.bodyMetadata.parse(data.body ?? ""));
   }
   async getTicket(id) {
     const issueNumber = parseInt(id, 10);
     const [issueResponse, commentsResponse, blockedByResponse, blockingResponse] = await Promise.all([
-      this.octokit.rest.issues.get({ owner: this.owner, repo: this.repo, issue_number: issueNumber }),
-      this.octokit.rest.issues.listComments({ owner: this.owner, repo: this.repo, issue_number: issueNumber }),
-      this.octokit.request("GET /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocked_by", {
+      this.octokit.rest.issues.get({
         owner: this.owner,
         repo: this.repo,
         issue_number: issueNumber
       }),
-      this.octokit.request("GET /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocking", {
+      this.octokit.rest.issues.listComments({
         owner: this.owner,
         repo: this.repo,
         issue_number: issueNumber
-      })
+      }),
+      this.octokit.request(
+        "GET /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocked_by",
+        {
+          owner: this.owner,
+          repo: this.repo,
+          issue_number: issueNumber
+        }
+      ),
+      this.octokit.request(
+        "GET /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocking",
+        {
+          owner: this.owner,
+          repo: this.repo,
+          issue_number: issueNumber
+        }
+      )
     ]);
     const body = issueResponse.data.body ?? "";
     const metadata = this.bodyMetadata.parse(body);
-    const blockedBy = IssueRefListSchema.parse(blockedByResponse.data).map((ref) => String(ref.number));
-    const blocking = IssueRefListSchema.parse(blockingResponse.data).map((ref) => String(ref.number));
+    const blockedBy = IssueRefListSchema.parse(blockedByResponse.data).map(
+      (ref) => String(ref.number)
+    );
+    const blocking = IssueRefListSchema.parse(blockingResponse.data).map(
+      (ref) => String(ref.number)
+    );
     return this.mapTicket(issueResponse.data, commentsResponse.data, blockedBy, blocking, metadata);
   }
   async linkTicketToEpic(ticketId, epicId) {
@@ -2749,11 +2802,14 @@ var GitHubTaskTracker = class {
   }
   async getTicketEpicId(ticketId) {
     try {
-      const { data } = await this.octokit.request("GET /repos/{owner}/{repo}/issues/{issue_number}/parent", {
-        owner: this.owner,
-        repo: this.repo,
-        issue_number: parseInt(ticketId, 10)
-      });
+      const { data } = await this.octokit.request(
+        "GET /repos/{owner}/{repo}/issues/{issue_number}/parent",
+        {
+          owner: this.owner,
+          repo: this.repo,
+          issue_number: parseInt(ticketId, 10)
+        }
+      );
       return String(IssueRefSchema.parse(data).number);
     } catch (error) {
       if (ParentNotFoundSchema.safeParse(error).success) return null;
@@ -2794,11 +2850,14 @@ var GitHubTaskTracker = class {
       repo: this.repo,
       issue_number: issueNumber
     });
-    const stale = issue.labels.map((l) => this.labelName(l)).filter(
-      (name) => name.startsWith("status:") && name.toLowerCase() !== label.toLowerCase()
-    );
+    const stale = issue.labels.map((l) => this.labelName(l)).filter((name) => name.startsWith("status:") && name.toLowerCase() !== label.toLowerCase());
     for (const name of stale) {
-      await this.octokit.rest.issues.removeLabel({ owner: this.owner, repo: this.repo, issue_number: issueNumber, name });
+      await this.octokit.rest.issues.removeLabel({
+        owner: this.owner,
+        repo: this.repo,
+        issue_number: issueNumber,
+        name
+      });
     }
     await this.octokit.rest.issues.addLabels({
       owner: this.owner,
@@ -2865,11 +2924,19 @@ var GitHubTaskTracker = class {
   }
   async updateEpicDescription(epicId, input) {
     await this.replaceIssueBody(epicId, "epic", input);
-    return this.getEpic(epicId);
+    try {
+      return await this.getEpic(epicId);
+    } catch (cause) {
+      throw new TaskTrackerPartialWriteError({ id: epicId, cause });
+    }
   }
   async updateTicketDescription(ticketId, input) {
     await this.replaceIssueBody(ticketId, "ticket", input);
-    return this.getTicket(ticketId);
+    try {
+      return await this.getTicket(ticketId);
+    } catch (cause) {
+      throw new TaskTrackerPartialWriteError({ id: ticketId, cause });
+    }
   }
   async updateInitiativeDescription(initiativeId, input) {
     await this.octokit.rest.issues.updateMilestone({
@@ -2879,7 +2946,11 @@ var GitHubTaskTracker = class {
       description: input.body,
       ...input.title !== void 0 ? { title: input.title } : {}
     });
-    return this.getInitiative(initiativeId);
+    try {
+      return await this.getInitiative(initiativeId);
+    } catch (cause) {
+      throw new TaskTrackerPartialWriteError({ id: initiativeId, cause });
+    }
   }
   async updateTddMetadata(tddId, patch) {
     const fetchData = await this.gql(
@@ -2916,7 +2987,9 @@ var GitHubTaskTracker = class {
     );
     const categoryId = repoData.repository.discussionCategory?.id;
     if (categoryId === void 0) {
-      throw new Error(`No "TDDs" discussion category found. Create it in the repo's GitHub Discussions settings.`);
+      throw new Error(
+        `No "TDDs" discussion category found. Create it in the repo's GitHub Discussions settings.`
+      );
     }
     const body = this.bodyMetadata.splice(input.body, {
       epicId: parseInt(input.epicId, 10),
@@ -2931,7 +3004,11 @@ var GitHubTaskTracker = class {
       { repositoryId: repoData.repository.id, categoryId, title: input.title, body }
     );
     const discussion = createData.createDiscussion.discussion;
-    await this.updateEpicMetadata(input.epicId, { tddId: discussion.number });
+    try {
+      await this.updateEpicMetadata(input.epicId, { tddId: discussion.number });
+    } catch (cause) {
+      throw new TaskTrackerPartialWriteError({ id: String(discussion.number), cause });
+    }
     return {
       id: String(discussion.number),
       epicId: input.epicId,
@@ -2978,11 +3055,11 @@ var GitHubTaskTracker = class {
       updatedAt: discussion.updatedAt
     };
   }
-  async addComment(entityId, body) {
+  async addComment(entityId2, body) {
     const { data } = await this.octokit.rest.issues.createComment({
       owner: this.owner,
       repo: this.repo,
-      issue_number: parseInt(entityId, 10),
+      issue_number: parseInt(entityId2, 10),
       body
     });
     return {
@@ -3009,7 +3086,11 @@ var GitHubTaskTracker = class {
     return data.map((member) => ({ accountId: member.login, displayName: member.login }));
   }
   async ping(options) {
-    await this.octokit.rest.repos.get({ owner: this.owner, repo: this.repo, ...options?.signal === void 0 ? {} : { request: { signal: options.signal } } });
+    await this.octokit.rest.repos.get({
+      owner: this.owner,
+      repo: this.repo,
+      ...options?.signal === void 0 ? {} : { request: { signal: options.signal } }
+    });
   }
   async replaceIssueBody(id, role, input) {
     const issueNumber = parseInt(id, 10);
@@ -3057,10 +3138,11 @@ var GitHubTaskTracker = class {
    * which is why `listTransitions` ignores the ticket id it is handed.
    */
   async statusLabelNames() {
-    const labels = await this.octokit.paginate(
-      this.octokit.rest.issues.listLabelsForRepo,
-      { owner: this.owner, repo: this.repo, per_page: 100 }
-    );
+    const labels = await this.octokit.paginate(this.octokit.rest.issues.listLabelsForRepo, {
+      owner: this.owner,
+      repo: this.repo,
+      per_page: 100
+    });
     return labels.map((label) => this.labelName(label)).filter((name) => name.startsWith("status:"));
   }
   labelName(label) {
@@ -3204,7 +3286,7 @@ var JiraClient = class {
       const retryAfterSeconds = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : defaultRetryAfterSeconds;
       const jitter = 0.7 + Math.random() * 0.6;
       const delayMs = Math.min(retryAfterSeconds * 1e3 * jitter, maxBackoffMs);
-      await new Promise((resolve10) => setTimeout(resolve10, delayMs));
+      await new Promise((resolve11) => setTimeout(resolve11, delayMs));
       return this.fetchWithRetry(url, init, attempt + 1);
     }
     return res;
@@ -3257,7 +3339,7 @@ var ConfluenceClient = class {
       const retryAfterSeconds = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : defaultRetryAfterSeconds2;
       const jitter = 0.7 + Math.random() * 0.6;
       const delayMs = Math.min(retryAfterSeconds * 1e3 * jitter, maxBackoffMs2);
-      await new Promise((resolve10) => setTimeout(resolve10, delayMs));
+      await new Promise((resolve11) => setTimeout(resolve11, delayMs));
       return this.fetchWithRetry(url, init, attempt + 1);
     }
     return res;
@@ -4323,14 +4405,21 @@ var JiraTaskTracker = class {
   jpdProjectVerified = false;
   constructor(config) {
     this.client = new JiraClient({ host: config.host, email: config.email, token: config.token });
-    this.confluence = new ConfluenceClient({ host: config.host, email: config.email, token: config.token });
+    this.confluence = new ConfluenceClient({
+      host: config.host,
+      email: config.email,
+      token: config.token
+    });
     this.project = config.project;
     this.jpdProject = config.jpdProject;
     this.confluenceSpaceKey = config.confluenceSpaceKey;
   }
   async createEpic(input) {
     const issuetype = await this.resolveIssueType("Epic");
-    const description = this.metadata.splice(this.bodyFormat.toAdf(input.body), input.metadata ?? {});
+    const description = this.metadata.splice(
+      this.bodyFormat.toAdf(input.body),
+      input.metadata ?? {}
+    );
     const created = await this.client.request("POST", "/issue", {
       fields: {
         project: { key: this.project },
@@ -4340,10 +4429,16 @@ var JiraTaskTracker = class {
         labels: input.labels
       }
     });
-    return this.getEpic(created.key);
+    try {
+      return await this.getEpic(created.key);
+    } catch (cause) {
+      throw new TaskTrackerPartialWriteError({ id: created.key, cause });
+    }
   }
   async getEpic(id) {
-    const issue = await this.client.request("GET", `/issue/${id}`, void 0, { fields: issueFields });
+    const issue = await this.client.request("GET", `/issue/${id}`, void 0, {
+      fields: issueFields
+    });
     const childIssues = await this.searchChildren(issue.key);
     return {
       id: issue.key,
@@ -4360,7 +4455,10 @@ var JiraTaskTracker = class {
   }
   async createTicket(input) {
     const issuetype = await this.resolveIssueType("Story");
-    const description = this.metadata.splice(this.bodyFormat.toAdf(input.body), input.metadata ?? {});
+    const description = this.metadata.splice(
+      this.bodyFormat.toAdf(input.body),
+      input.metadata ?? {}
+    );
     const created = await this.client.request("POST", "/issue", {
       fields: {
         project: { key: this.project },
@@ -4372,7 +4470,11 @@ var JiraTaskTracker = class {
         ...input.assignee !== void 0 ? { assignee: { accountId: input.assignee } } : {}
       }
     });
-    return this.getTicket(created.key);
+    try {
+      return await this.getTicket(created.key);
+    } catch (cause) {
+      throw new TaskTrackerPartialWriteError({ id: created.key, cause });
+    }
   }
   async getTicket(id) {
     const [issue, blocksLinkType] = await Promise.all([
@@ -4382,12 +4484,16 @@ var JiraTaskTracker = class {
     return this.mapTicket(issue, blocksLinkType);
   }
   async linkTicketToEpic(ticketId, epicId) {
-    const issue = await this.client.request("GET", `/issue/${ticketId}`, void 0, { fields: "parent" });
+    const issue = await this.client.request("GET", `/issue/${ticketId}`, void 0, {
+      fields: "parent"
+    });
     if (issue.fields.parent?.key === epicId) return;
     await this.client.request("PUT", `/issue/${ticketId}`, { fields: { parent: { key: epicId } } });
   }
   async getTicketEpicId(ticketId) {
-    const issue = await this.client.request("GET", `/issue/${ticketId}`, void 0, { fields: "parent" });
+    const issue = await this.client.request("GET", `/issue/${ticketId}`, void 0, {
+      fields: "parent"
+    });
     return issue.fields.parent?.key ?? null;
   }
   async blockTicket(ticketId, blockedById) {
@@ -4415,14 +4521,18 @@ var JiraTaskTracker = class {
   }
   async transitionTicket(ticketId, status) {
     const response = await this.fetchTransitions(ticketId);
-    const match = response.transitions.find((transition) => transition.to.name.toLowerCase() === status.toLowerCase());
+    const match = response.transitions.find(
+      (transition) => transition.to.name.toLowerCase() === status.toLowerCase()
+    );
     if (match === void 0) {
       const available = response.transitions.map((transition) => transition.to.name).join(", ");
       throw new Error(
         `No transition to status "${status}" is available for ${ticketId} from its current status (available: ${available})`
       );
     }
-    await this.client.request("POST", `/issue/${ticketId}/transitions`, { transition: { id: match.id } });
+    await this.client.request("POST", `/issue/${ticketId}/transitions`, {
+      transition: { id: match.id }
+    });
   }
   async listTransitions(ticketId) {
     const response = await this.fetchTransitions(ticketId);
@@ -4433,10 +4543,14 @@ var JiraTaskTracker = class {
    * atomic against whatever labels the issue already has — no read first.
    */
   async addLabel(ticketId, label) {
-    await this.client.request("PUT", `/issue/${ticketId}`, { update: { labels: [{ add: label }] } });
+    await this.client.request("PUT", `/issue/${ticketId}`, {
+      update: { labels: [{ add: label }] }
+    });
   }
   async removeLabel(ticketId, label) {
-    await this.client.request("PUT", `/issue/${ticketId}`, { update: { labels: [{ remove: label }] } });
+    await this.client.request("PUT", `/issue/${ticketId}`, {
+      update: { labels: [{ remove: label }] }
+    });
   }
   async updateEpicMetadata(epicId, patch) {
     await this.spliceDescriptionMetadata(epicId, patch);
@@ -4465,17 +4579,29 @@ var JiraTaskTracker = class {
   }
   async updateEpicDescription(epicId, input) {
     await this.replaceIssueBody(epicId, input);
-    return this.getEpic(epicId);
+    try {
+      return await this.getEpic(epicId);
+    } catch (cause) {
+      throw new TaskTrackerPartialWriteError({ id: epicId, cause });
+    }
   }
   async updateTicketDescription(ticketId, input) {
     await this.replaceIssueBody(ticketId, input);
-    return this.getTicket(ticketId);
+    try {
+      return await this.getTicket(ticketId);
+    } catch (cause) {
+      throw new TaskTrackerPartialWriteError({ id: ticketId, cause });
+    }
   }
   async updateInitiativeDescription(initiativeId, input) {
     const fields = { description: this.bodyFormat.toAdf(input.body) };
     if (input.title !== void 0) fields["summary"] = input.title;
     await this.client.request("PUT", `/issue/${initiativeId}`, { fields });
-    return this.getInitiative(initiativeId);
+    try {
+      return await this.getInitiative(initiativeId);
+    } catch (cause) {
+      throw new TaskTrackerPartialWriteError({ id: initiativeId, cause });
+    }
   }
   async createInitiative(input) {
     const projectKey = await this.ensureJpdProject();
@@ -4487,7 +4613,11 @@ var JiraTaskTracker = class {
         description: this.bodyFormat.toAdf(input.body)
       }
     });
-    return this.getInitiative(created.key);
+    try {
+      return await this.getInitiative(created.key);
+    } catch (cause) {
+      throw new TaskTrackerPartialWriteError({ id: created.key, cause });
+    }
   }
   async getInitiative(id) {
     const idea = await this.client.request("GET", `/issue/${id}`, void 0, {
@@ -4497,7 +4627,9 @@ var JiraTaskTracker = class {
     const epicKeys = this.deliveryLinkedKeys(idea.fields.issuelinks ?? [], deliveryLinkType);
     const epics = await Promise.all(
       epicKeys.map(async (key) => {
-        const epic = await this.client.request("GET", `/issue/${key}`, void 0, { fields: "summary" });
+        const epic = await this.client.request("GET", `/issue/${key}`, void 0, {
+          fields: "summary"
+        });
         return { id: epic.key, title: epic.fields.summary };
       })
     );
@@ -4531,22 +4663,28 @@ var JiraTaskTracker = class {
       title: input.title,
       body: { representation: "storage", value: input.body }
     });
-    await this.confluence.request("POST", `/pages/${page.id}/properties`, {
-      key: tddMetadataPropertyKey,
-      value: propertyValue
-    });
-    await this.updateEpicMetadata(input.epicId, { tddId: Number(page.id) });
+    try {
+      await this.confluence.request("POST", `/pages/${page.id}/properties`, {
+        key: tddMetadataPropertyKey,
+        value: propertyValue
+      });
+      await this.updateEpicMetadata(input.epicId, { tddId: Number(page.id) });
+    } catch (cause) {
+      throw new TaskTrackerPartialWriteError({ id: page.id, cause });
+    }
     return this.mapTechnicalDesign(page, input.body, propertyValue);
   }
   async getTechnicalDesign(id) {
     const [page, property] = await Promise.all([
-      this.confluence.request("GET", `/pages/${id}`, void 0, { "body-format": "storage" }),
+      this.confluence.request("GET", `/pages/${id}`, void 0, {
+        "body-format": "storage"
+      }),
       this.tddMetadataProperty(id)
     ]);
     return this.mapTechnicalDesign(page, page.body?.storage?.value ?? "", property?.value ?? {});
   }
-  async addComment(entityId, body) {
-    const comment = await this.client.request("POST", `/issue/${entityId}/comment`, {
+  async addComment(entityId2, body) {
+    const comment = await this.client.request("POST", `/issue/${entityId2}/comment`, {
       body: this.bodyFormat.toAdf(body)
     });
     return {
@@ -4564,21 +4702,30 @@ var JiraTaskTracker = class {
    */
   async addAttachment(ticketId, filePath) {
     const filename = basename2(filePath);
-    const file = new File([readFileSync9(filePath)], filename, { type: this.mimeTypes.forFilename(filename) });
+    const file = new File([readFileSync9(filePath)], filename, {
+      type: this.mimeTypes.forFilename(filename)
+    });
     const uploaded = JiraUploadedAttachmentsSchema.parse(
       await this.client.upload(`/issue/${ticketId}/attachments`, [file])
     );
     const attachment = uploaded[0];
     if (attachment === void 0) {
-      throw new Error(`Jira accepted the upload of ${filename} to ${ticketId} but returned no attachment`);
+      throw new Error(
+        `Jira accepted the upload of ${filename} to ${ticketId} but returned no attachment`
+      );
     }
     return this.mapAttachment(attachment, await this.resolveMediaUuid(attachment.id));
   }
   async getUsers() {
-    const users = await this.client.request("GET", "/user/assignable/search", void 0, {
-      project: this.project,
-      maxResults: 100
-    });
+    const users = await this.client.request(
+      "GET",
+      "/user/assignable/search",
+      void 0,
+      {
+        project: this.project,
+        maxResults: 100
+      }
+    );
     return users.map((user) => ({ accountId: user.accountId, displayName: user.displayName }));
   }
   async ping(options) {
@@ -4597,7 +4744,10 @@ var JiraTaskTracker = class {
     return page.issues.map((issue) => this.mapTicket(issue, blocksLinkType));
   }
   mapTicket(issue, blocksLinkType) {
-    const { blockedBy, blocking } = this.blockingLinks(issue.fields.issuelinks ?? [], blocksLinkType);
+    const { blockedBy, blocking } = this.blockingLinks(
+      issue.fields.issuelinks ?? [],
+      blocksLinkType
+    );
     return {
       id: issue.key,
       size: "ticket",
@@ -4644,15 +4794,22 @@ var JiraTaskTracker = class {
     return { blockedBy, blocking };
   }
   async replaceIssueBody(key, input) {
-    const issue = await this.client.request("GET", `/issue/${key}`, void 0, { fields: "description" });
-    const description = this.metadata.splice(this.bodyFormat.toAdf(input.body), this.parseMetadata(issue));
+    const issue = await this.client.request("GET", `/issue/${key}`, void 0, {
+      fields: "description"
+    });
+    const description = this.metadata.splice(
+      this.bodyFormat.toAdf(input.body),
+      this.parseMetadata(issue)
+    );
     const fields = { description };
     if (input.title !== void 0) fields["summary"] = input.title;
     if (input.labels !== void 0) fields["labels"] = input.labels;
     await this.client.request("PUT", `/issue/${key}`, { fields });
   }
   async spliceDescriptionMetadata(key, patch) {
-    const issue = await this.client.request("GET", `/issue/${key}`, void 0, { fields: "description" });
+    const issue = await this.client.request("GET", `/issue/${key}`, void 0, {
+      fields: "description"
+    });
     const current = issue.fields.description ?? this.bodyFormat.toAdf("");
     const next = this.metadata.splice(current, patch);
     await this.client.request("PUT", `/issue/${key}`, { fields: { description: next } });
@@ -4715,11 +4872,16 @@ var JiraTaskTracker = class {
   }
   async resolveBlocksLinkType() {
     if (this.blocksLinkType === void 0) {
-      const response = await this.client.request("GET", "/issueLinkType");
+      const response = await this.client.request(
+        "GET",
+        "/issueLinkType"
+      );
       const match = response.issueLinkTypes.find((type) => type.name.toLowerCase() === "blocks");
       if (match === void 0) {
         const names = response.issueLinkTypes.map((type) => type.name).join(", ");
-        throw new Error(`No "Blocks" issue link type is configured in this Jira instance (found: ${names})`);
+        throw new Error(
+          `No "Blocks" issue link type is configured in this Jira instance (found: ${names})`
+        );
       }
       this.blocksLinkType = match.name;
     }
@@ -4727,8 +4889,13 @@ var JiraTaskTracker = class {
   }
   async resolveDeliveryLinkType() {
     if (this.deliveryLinkType === void 0) {
-      const response = await this.client.request("GET", "/issueLinkType");
-      const match = response.issueLinkTypes.find((type) => type.outward.toLowerCase() === deliveryLinkOutward);
+      const response = await this.client.request(
+        "GET",
+        "/issueLinkType"
+      );
+      const match = response.issueLinkTypes.find(
+        (type) => type.outward.toLowerCase() === deliveryLinkOutward
+      );
       if (match === void 0) {
         const names = response.issueLinkTypes.map((type) => type.name).join(", ");
         throw new Error(
@@ -4776,14 +4943,22 @@ var JiraTaskTracker = class {
   }
   async resolveConfluenceSpaceId() {
     if (this.confluenceSpaceKey === void 0) {
-      throw new Error("No Confluence space is configured; set confluenceSpaceKey to create or fetch technical designs");
+      throw new Error(
+        "No Confluence space is configured; set confluenceSpaceKey to create or fetch technical designs"
+      );
     }
     if (this.confluenceSpaceId === void 0) {
-      const response = await this.confluence.request("GET", "/spaces", void 0, {
-        keys: this.confluenceSpaceKey
-      });
+      const response = await this.confluence.request(
+        "GET",
+        "/spaces",
+        void 0,
+        {
+          keys: this.confluenceSpaceKey
+        }
+      );
       const space = response.results[0];
-      if (space === void 0) throw new Error(`Confluence space "${this.confluenceSpaceKey}" was not found`);
+      if (space === void 0)
+        throw new Error(`Confluence space "${this.confluenceSpaceKey}" was not found`);
       this.confluenceSpaceId = space.id;
     }
     return this.confluenceSpaceId;
@@ -7536,180 +7711,426 @@ var DefaultReviewOperations = class {
   }
 };
 
-// src/flight-rules/flight-rules.ts
-var DefaultFlightRules = class {
-  cwd;
-  env;
-  gitEnv;
-  explicitConfigPath;
-  hostSettings;
-  host;
-  configWritePolicy;
-  untrackedRoot;
-  constructor(props = {}) {
-    const parsed = FlightRulesPropsSchema.parse({
-      ...props,
-      env: props.env === void 0 ? void 0 : { ...props.env }
-    });
-    this.cwd = resolve8(parsed.cwd ?? process.cwd());
-    this.env = props.env ?? process.env;
-    this.gitEnv = { ...props.env ?? process.env };
-    this.explicitConfigPath = parsed.configPath;
-    this.hostSettings = props.hostSettings;
-    this.host = parsed.host;
-    this.configWritePolicy = parsed.configWritePolicy;
-  }
-  configPath() {
-    return this.configStore().filePath();
-  }
-  configStore() {
-    const env = this.explicitConfigPath === void 0 ? this.env : { ...this.env, FLIGHT_RULES_CONFIG: this.explicitConfigPath };
-    const untrackedRoot = this.mainCheckout();
-    return new ConfigStore({
-      cwd: this.cwd,
-      env,
-      host: NativeHostSchema.parse(
-        this.host ?? env["FLIGHT_RULES_HOST"] ?? this.installation().host() ?? "claude"
-      ),
-      ...this.hostSettings !== void 0 ? { hostSettings: this.hostSettings } : {},
-      ...untrackedRoot !== void 0 ? { untrackedRoot } : {}
-    });
-  }
-  installation() {
-    return FileNativeInstallation.fromInstall({
-      moduleUrl: import.meta.url,
-      cwd: this.cwd,
-      env: this.env
-    });
-  }
-  /** Looked up once per instance. */
-  mainCheckout() {
-    this.untrackedRoot ??= { value: new WorktreeLocator().mainCheckoutFor(this.cwd) };
-    return this.untrackedRoot.value;
-  }
-  evidence() {
-    return new EvidenceLocation({ cwd: this.cwd, mainCheckout: this.mainCheckout() });
-  }
-  config(overrideTracker) {
-    const config = this.configStore().load();
-    if (overrideTracker === void 0) return config;
-    if (overrideTracker !== "github" && overrideTracker !== "jira") {
-      throw new Error(`Invalid --tracker "${overrideTracker}" \u2014 expected "github" or "jira"`);
-    }
-    return { ...config, tracker: overrideTracker };
-  }
-  tracker(overrideTracker) {
-    const config = this.config(overrideTracker);
-    const env = new EnvLoader().load(this.env);
-    if (config.tracker === "github") {
-      if (env.githubToken === void 0)
-        throw new Error("GITHUB_TOKEN environment variable is required");
-      if (config.repo === void 0) throw new Error("repo is required when tracker is github");
-      const [owner, repo] = config.repo.split("/");
-      if (owner === void 0 || repo === void 0) {
-        throw new Error(`Invalid repo format "${config.repo}" \u2014 expected "owner/repo"`);
-      }
-      return new GitHubTaskTracker({ token: env.githubToken, owner, repo });
-    }
-    if (env.jiraToken === void 0) {
-      throw new Error(
-        "JIRA_TOKEN (or JIRA_API_TOKEN / JIRA_API_KEY) environment variable is required"
-      );
-    }
-    const email = env.jiraEmail ?? config.jiraEmail;
-    if (email === void 0)
-      throw new Error("JIRA_EMAIL environment variable or jiraEmail config is required");
-    const host = env.jiraHost ?? config.jiraHost;
-    if (host === void 0)
-      throw new Error("JIRA_HOST environment variable or jiraHost config is required");
-    if (config.jiraProject === void 0)
-      throw new Error("jiraProject is required when tracker is jira");
-    return new JiraTaskTracker({
-      token: env.jiraToken,
-      host,
-      email,
-      project: config.jiraProject,
-      ...config.jpdProject !== void 0 ? { jpdProject: config.jpdProject } : {},
-      ...config.confluenceSpaceKey !== void 0 ? { confluenceSpaceKey: config.confluenceSpaceKey } : {}
-    });
-  }
-  prHost(overrideTracker) {
-    const config = this.config(overrideTracker);
-    if (config.repo === void 0) {
-      throw new Error("repo (owner/repo) is required in config to create pull requests");
-    }
-    return new GhPullRequestHost({ repo: config.repo });
-  }
-  git() {
-    return new NodeGitExecutor({ cwd: this.cwd, env: this.gitEnv });
-  }
-  gitConfigOperations(policy) {
-    return new DefaultGitConfigOperations({
-      cwd: this.cwd,
-      configStore: this.configStore(),
-      git: this.git(),
-      agentEnv: this.gitEnv["AI_AGENT"],
-      configPolicy: policy ?? this.configWritePolicy
-    });
-  }
-  probe() {
-    return new NodeToolProbe({ cwd: this.cwd, env: this.env });
-  }
-  readiness() {
-    return new NodeRepositoryReadiness({ cwd: this.cwd, env: this.env });
-  }
-  docs() {
-    return FileDocResolver.fromInstall({ moduleUrl: import.meta.url, env: this.env });
-  }
-  localOperations() {
-    return new DefaultLocalDiscoveryOperations({
-      cwd: this.cwd,
-      getConfig: () => this.config(),
-      getConfigStore: () => this.configStore(),
-      getCharters: () => new DocCharterCatalog({ docs: this.docs() }),
-      getRepositoryPaths: () => new GitRepositoryPaths({ cwd: this.cwd }),
-      getEvidence: () => this.evidence(),
-      getReadiness: () => this.readiness(),
-      getProbe: () => this.probe(),
-      getTracker: () => this.tracker(),
-      getConfigPath: () => this.configPath()
-    });
-  }
-  reviewOperations(props = {}) {
-    const launch = ReviewOperationsLaunchPropsSchema.parse(props);
-    return new DefaultReviewOperations({
-      ...launch,
-      cwd: launch.cwd ?? this.cwd,
-      env: this.env
-    });
-  }
-  board() {
-    return new AriadneBoard({
-      readLayers: () => this.configStore().layers(),
-      tokens: this.ariadneTokens(),
-      env: this.env,
-      sessions: this.boardSessions()
-    });
-  }
-  packets() {
-    return new AriadnePackets({
-      readLayers: () => this.configStore().layers(),
-      tokens: this.ariadneTokens()
-    });
-  }
-  ariadneTokens() {
-    return new AriadneTokenStore({ env: this.env });
-  }
-  boardSessions() {
-    return new BoardSessionStore({ env: this.env });
-  }
-  boardAgents() {
-    return new BoardAgentStore({ env: this.env });
+// src/operations/tracker-entity-operations.ts
+import { existsSync as existsSync12, realpathSync as realpathSync6, statSync as statSync5 } from "node:fs";
+import { isAbsolute as isAbsolute4, relative as relative4, resolve as resolve8 } from "node:path";
+import { z as z49 } from "zod";
+
+// src/tasks/evidence/evidence.ts
+import { realpathSync as realpathSync5 } from "node:fs";
+import { basename as basename3 } from "node:path/posix";
+import { z as z45 } from "zod";
+var mediaReference = /(!?)\[([^\]]*)\]\(\s*<?([^\s()<>]+)>?(?:\s+"[^"]*")?\s*\)/g;
+var absoluteTarget = /^[a-zA-Z][a-zA-Z0-9+.-]*:|^\/\/|^#/;
+var localPrefix = /^(?:\.\/)+/;
+var fenceRun2 = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+var AttachmentSpecSchema = z45.string().min(1).transform((spec) => {
+  const hash = spec.lastIndexOf("#");
+  const path = hash > 0 ? spec.slice(0, hash) : spec;
+  const caption = hash > 0 ? spec.slice(hash + 1).trim() : "";
+  return { path, caption: caption.length > 0 ? caption : basename3(path) };
+});
+var DuplicateEvidenceNameError = class extends Error {
+  name = "DuplicateEvidenceNameError";
+  constructor(props) {
+    super(`Two attachments share the filename "${props.filename}": ${props.paths.join(", ")}`);
   }
 };
-function createFlightRules(props = {}) {
-  return new DefaultFlightRules(props);
-}
+var EvidenceUploadFailure = class extends Error {
+  name = "EvidenceUploadFailure";
+  attachments;
+  constructor(props) {
+    super(
+      props.attachments.length === 0 && props.cause instanceof Error ? props.cause.message : "One or more attachments could not be uploaded",
+      { cause: props.cause }
+    );
+    this.attachments = props.attachments;
+  }
+};
+var TrackerEvidenceService = class {
+  tracker;
+  constructor(props) {
+    this.tracker = props.tracker;
+  }
+  async attach(input) {
+    const specs = this.parseSpecs(input.specs);
+    const attachments = [];
+    for (const spec of specs) {
+      try {
+        const uploaded = await this.tracker.addAttachment(input.ticketId, spec.path);
+        attachments.push({
+          ...uploaded,
+          path: spec.path,
+          caption: spec.caption,
+          referenced: false
+        });
+      } catch (cause) {
+        throw new EvidenceUploadFailure({ cause, attachments });
+      }
+    }
+    const byName = /* @__PURE__ */ new Map();
+    for (const attachment of attachments) byName.set(basename3(attachment.path), attachment);
+    const rewritten = this.rewriteReferences(input.body, byName);
+    return { body: this.appendUnreferenced(rewritten, attachments), attachments };
+  }
+  prepareBody(input) {
+    const specs = this.parseSpecs(input.specs);
+    const attachments = specs.map((spec) => ({
+      id: "pending",
+      filename: basename3(spec.path),
+      mimeType: "application/octet-stream",
+      path: spec.path,
+      caption: spec.caption,
+      referenced: false
+    }));
+    const byName = /* @__PURE__ */ new Map();
+    for (const attachment of attachments) byName.set(basename3(attachment.path), attachment);
+    const rewritten = this.rewriteReferences(input.body, byName);
+    return this.appendUnreferenced(rewritten, attachments);
+  }
+  parseSpecs(specs) {
+    const parsed = specs.map((spec) => AttachmentSpecSchema.parse(spec));
+    this.rejectDuplicateNames(parsed);
+    return parsed;
+  }
+  rejectDuplicateNames(specs) {
+    const paths = /* @__PURE__ */ new Map();
+    for (const spec of specs) {
+      const name = basename3(spec.path);
+      paths.set(name, [...paths.get(name) ?? [], spec.path]);
+    }
+    for (const [filename, group] of paths) {
+      if (group.length > 1) throw new DuplicateEvidenceNameError({ filename, paths: group });
+    }
+  }
+  rewriteReferences(body, byName) {
+    let fence;
+    return body.split("\n").map((line) => {
+      if (fence === void 0) {
+        const opened = this.openingFence(line);
+        if (opened !== void 0) {
+          fence = opened;
+          return line;
+        }
+        return this.rewriteLine(line, byName);
+      }
+      if (this.closesFence(line, fence)) fence = void 0;
+      return line;
+    }).join("\n");
+  }
+  /**
+   * A line opens a fence when it is a run of >=3 backticks or tildes; a backtick
+   * fence's info string may not itself contain a backtick, which keeps inline
+   * code from being read as a fence.
+   */
+  openingFence(line) {
+    const match = fenceRun2.exec(line);
+    if (match === null) return void 0;
+    const run2 = match[1];
+    const rest = match[2];
+    if (run2 === void 0 || rest === void 0) return void 0;
+    if (run2.charAt(0) === "`" && rest.includes("`")) return void 0;
+    return { char: run2.charAt(0), length: run2.length };
+  }
+  /**
+   * A line closes an open fence only when it is a run of the SAME character, at
+   * least as long as the opening run, with nothing but whitespace after it.
+   */
+  closesFence(line, fence) {
+    const match = fenceRun2.exec(line);
+    if (match === null) return false;
+    const run2 = match[1];
+    const rest = match[2];
+    if (run2 === void 0 || rest === void 0) return false;
+    return run2.charAt(0) === fence.char && run2.length >= fence.length && rest.trim().length === 0;
+  }
+  rewriteLine(line, byName) {
+    let result = "";
+    let last = 0;
+    mediaReference.lastIndex = 0;
+    for (let match = mediaReference.exec(line); match !== null; match = mediaReference.exec(line)) {
+      const whole = match[0];
+      const bang = match[1];
+      const label = match[2];
+      const target = match[3];
+      result += line.slice(last, match.index);
+      const attachment = bang !== void 0 && label !== void 0 && target !== void 0 ? this.resolve(target, byName) : void 0;
+      if (attachment === void 0 || bang === void 0 || label === void 0) {
+        result += whole;
+      } else {
+        attachment.referenced = true;
+        result += `${bang}[${label}](attachment:${attachment.filename})`;
+      }
+      last = match.index + whole.length;
+    }
+    return result + line.slice(last);
+  }
+  resolve(target, byName) {
+    if (absoluteTarget.test(target)) return void 0;
+    if (target.startsWith("/") || /^[a-zA-Z]:[\\/]/.test(target)) {
+      try {
+        const realTarget = realpathSync5(target);
+        return [...byName.values()].find((attachment) => {
+          try {
+            return realpathSync5(attachment.path) === realTarget;
+          } catch {
+            return false;
+          }
+        });
+      } catch {
+        return void 0;
+      }
+    }
+    return byName.get(basename3(target.replace(localPrefix, "")));
+  }
+  appendUnreferenced(body, attachments) {
+    let result = body;
+    for (const attachment of attachments) {
+      if (!attachment.referenced)
+        result += `
+
+![${attachment.caption}](attachment:${attachment.filename})`;
+    }
+    return result;
+  }
+};
+
+// src/tasks/portable-context/portable-context.ts
+var tokenStart = String.raw`(?:^|(?<=[\s(\[<{"'\x60=,:;|]))`;
+var localReferencePatterns = [
+  /file:\/\/\S*/g,
+  new RegExp(`${tokenStart}/(?:Users|home)/[^\\s/)\\]>"'\\x60]+\\S*`, "g"),
+  new RegExp(`${tokenStart}~/\\S*`, "g"),
+  /\b[A-Za-z]:\\Users\\\S*/g
+];
+var trailingPunctuation = /[`.,;:!?)\]>"']+$/;
+var maxReported = 5;
+var RegexPortableContextGuard = class {
+  find(body) {
+    return body.split("\n").flatMap(
+      (text, index) => localReferencePatterns.flatMap(
+        (pattern) => [...text.matchAll(pattern)].map((m) => ({ line: index + 1, match: m[0].replace(trailingPunctuation, "") }))
+      )
+    );
+  }
+  assertPortable(body, opts = {}) {
+    if (opts.allowLocalPaths === true) return;
+    const found = this.find(body);
+    if (found.length === 0) return;
+    const listed = found.slice(0, maxReported).map((ref) => `  line ${ref.line}: ${ref.match}`).join("\n");
+    const more = found.length > maxReported ? `
+  \u2026and ${found.length - maxReported} more` : "";
+    throw new Error(
+      `body references files on this machine, which nobody else can open:
+${listed}${more}
+A tracker body must stand on its own for an engineer on a fresh clone. Inline the content, link a published artifact (\`flight-rules tdd create\`, a tracker issue, or a file on the default branch by URL), or use a repo-relative path for code that exists on the default branch. Pass --allow-local-paths only when the path is the subject of the work, not a pointer to context.`
+    );
+  }
+};
+var portableContextGuard = new RegexPortableContextGuard();
+
+// src/operations/operation-registry.ts
+import { z as z47 } from "zod";
+
+// src/operations/operation.schema.ts
+import { z as z46 } from "zod";
+var OperationEffectSchema = z46.enum(["read", "write", "network", "process"]);
+var OperationIdSchema2 = z46.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
+var CliRouteSchema = z46.object({
+  path: z46.array(z46.string().min(1)).min(1),
+  aliases: z46.array(z46.string().min(1)).default([])
+});
+var OperationErrorSchema = z46.object({
+  name: z46.string().min(1),
+  message: z46.string()
+});
+var OperationEnvelopeSchema = z46.discriminatedUnion("status", [
+  z46.object({ status: z46.literal("success"), data: z46.unknown() }),
+  z46.object({ status: z46.literal("error"), error: OperationErrorSchema }),
+  z46.object({ status: z46.literal("partial"), data: z46.unknown(), error: OperationErrorSchema })
+]);
+
+// src/operations/operation-registry.ts
+var OperationDescriptorSchema = z47.object({
+  id: OperationIdSchema2,
+  description: z47.string().min(1),
+  inputSchema: z47.custom((value) => value instanceof z47.ZodType),
+  outputSchema: z47.custom((value) => value instanceof z47.ZodType),
+  effects: z47.array(OperationEffectSchema),
+  cli: CliRouteSchema,
+  handler: z47.custom((value) => typeof value === "function")
+});
+var OperationRegistryPropsSchema = z47.object({
+  operations: z47.array(z47.custom()),
+  policy: z47.custom().optional()
+});
+var AccessPolicyPropsSchema = z47.object({
+  allowedOperationIds: z47.array(OperationIdSchema2).default([]),
+  allowedEffects: z47.array(OperationEffectSchema).default([])
+});
+var LaunchOperationAccessPolicy = class {
+  operationIds;
+  effects;
+  constructor(props = {}) {
+    const grants = AccessPolicyPropsSchema.parse(props);
+    this.operationIds = new Set(grants.allowedOperationIds);
+    this.effects = new Set(grants.allowedEffects);
+  }
+  allows(operation) {
+    return this.operationIds.has(operation.id) || operation.effects.every((effect) => this.effects.has(effect));
+  }
+};
+var OperationInputError = class extends Error {
+  name = "OperationInputError";
+};
+var OperationOutputError = class extends Error {
+  name = "OperationOutputError";
+};
+var UnknownOperationError = class extends Error {
+  name = "UnknownOperationError";
+};
+var DuplicateOperationIdError = class extends Error {
+  name = "DuplicateOperationIdError";
+  constructor(operationId) {
+    super(`Duplicate operation id: ${operationId}`);
+  }
+};
+var MapOperationRegistry = class {
+  operations;
+  policy;
+  constructor(props) {
+    const parsed = OperationRegistryPropsSchema.parse(props);
+    this.policy = parsed.policy ?? new LaunchOperationAccessPolicy();
+    this.operations = /* @__PURE__ */ new Map();
+    for (const descriptor of parsed.operations) {
+      const valid = OperationDescriptorSchema.parse(descriptor);
+      if (this.operations.has(valid.id)) throw new DuplicateOperationIdError(valid.id);
+      const registered = Object.freeze({
+        id: valid.id,
+        description: valid.description,
+        inputSchema: valid.inputSchema,
+        outputSchema: valid.outputSchema,
+        effects: Object.freeze([...valid.effects]),
+        cli: Object.freeze({
+          path: [...valid.cli.path],
+          aliases: [...valid.cli.aliases]
+        }),
+        handler: descriptor.handler.bind(descriptor)
+      });
+      this.operations.set(registered.id, registered);
+    }
+  }
+  list() {
+    return [...this.operations.values()].map(({ id, description, effects, cli }) => ({
+      id,
+      description,
+      effects: [...effects],
+      cli: { path: [...cli.path], aliases: [...cli.aliases] }
+    }));
+  }
+  async invoke(id, input) {
+    const operation = this.operations.get(id);
+    if (operation === void 0) throw new UnknownOperationError(`Unknown operation: ${id}`);
+    const parsedInput = operation.inputSchema.safeParse(input);
+    if (!parsedInput.success)
+      throw new OperationInputError(`Invalid input for ${id}: ${parsedInput.error.message}`);
+    if (!this.policy.allows(operation)) {
+      return OperationEnvelopeSchema.parse({
+        status: "error",
+        error: {
+          name: "OperationAccessDeniedError",
+          message: `Access denied for operation: ${id}`
+        }
+      });
+    }
+    try {
+      const output = await operation.handler(parsedInput.data);
+      const partial = z47.object({
+        status: z47.literal("partial"),
+        data: z47.unknown(),
+        error: z47.object({ name: z47.string().min(1), message: z47.string() })
+      }).safeParse(output);
+      if (partial.success) {
+        const parsedPartial = operation.outputSchema.safeParse(partial.data.data);
+        if (!parsedPartial.success)
+          throw new OperationOutputError(
+            `Invalid partial output for ${id}: ${parsedPartial.error.message}`
+          );
+        return OperationEnvelopeSchema.parse({
+          status: "partial",
+          data: parsedPartial.data,
+          error: partial.data.error
+        });
+      }
+      const parsedOutput = operation.outputSchema.safeParse(output);
+      if (!parsedOutput.success)
+        throw new OperationOutputError(`Invalid output for ${id}: ${parsedOutput.error.message}`);
+      return OperationEnvelopeSchema.parse({ status: "success", data: parsedOutput.data });
+    } catch (error) {
+      return OperationEnvelopeSchema.parse({
+        status: "error",
+        error: {
+          name: error instanceof Error ? error.name : "Error",
+          message: error instanceof Error ? error.message : String(error)
+        }
+      });
+    }
+  }
+};
+
+// src/operations/tracker-read-operations.ts
+import { z as z48 } from "zod";
+
+// src/tasks/epic-boundary/epic-boundary.ts
+var TrackerRefFormatter = class {
+  format(id) {
+    return /^\d+$/.test(id) ? `#${id}` : id;
+  }
+};
+var refs = new TrackerRefFormatter();
+var CrossEpicEdgeFinder = class {
+  constructor(tracker) {
+    this.tracker = tracker;
+  }
+  tracker;
+  async find(epics) {
+    const epicOf = /* @__PURE__ */ new Map();
+    for (const epic of epics) for (const ticket of epic.childIssues) epicOf.set(ticket.id, epic.id);
+    const external = [
+      ...new Set(
+        epics.flatMap(
+          (epic) => epic.childIssues.flatMap((ticket) => ticket.blockedBy.filter((id) => !epicOf.has(id)))
+        )
+      )
+    ];
+    const resolved = await Promise.all(
+      external.map(
+        async (id) => [id, await this.tracker.getTicketEpicId(id).catch(() => null)]
+      )
+    );
+    for (const [id, epic] of resolved)
+      if (epic !== null && epic !== void 0) epicOf.set(id, epic);
+    return epics.flatMap(
+      (epic) => epic.childIssues.filter((ticket) => ticket.status !== "closed").flatMap(
+        (ticket) => ticket.blockedBy.filter((blockerId) => epicOf.get(blockerId) !== epic.id).map((blockerId) => ({
+          ticket: ticket.id,
+          ticketEpic: epic.id,
+          blockedBy: blockerId,
+          blockerEpic: epicOf.get(blockerId) ?? null,
+          justification: ticket.metadata.crossEpicReasons?.[blockerId] ?? null
+        }))
+      )
+    );
+  }
+  /** One human-readable warning line per edge, for stderr. */
+  warnings(edges) {
+    return edges.map((edge) => {
+      const blockerEpic = edge.blockerEpic === null ? "epic unknown" : `epic ${refs.format(edge.blockerEpic)}`;
+      const why = edge.justification === null ? "no justification recorded" : `justification: ${edge.justification}`;
+      return `warning: cross-epic dependency: ${refs.format(edge.ticket)} (epic ${refs.format(edge.ticketEpic)}) is blocked by ${refs.format(edge.blockedBy)} (${blockerEpic}); ${why}`;
+    });
+  }
+};
 
 // src/tasks/dependency-planner/dependency-planner.ts
 var DependencyPlannerService = class {
@@ -7746,6 +8167,88 @@ var DependencyPlannerService = class {
       (_, i) => scheduled.filter((t) => waveOf.get(t.id) === i)
     );
     return { waves, cycles };
+  }
+};
+
+// src/tasks/review-plan/review-plan.ts
+var maxSimplePrCount = 4;
+var ReviewRouteClassifier = class {
+  classify(blocked, defaultBranch) {
+    const reasons = [];
+    const pullRequests = blocked.flatMap((entry) => entry.pr === null ? [] : [entry.pr]);
+    const waveCount = new Set(blocked.map((entry) => entry.wave)).size;
+    if (waveCount > 1) {
+      reasons.push(`spans more than one wave (${waveCount} waves)`);
+    }
+    const stacked = pullRequests.filter((pr) => pr.baseRefName !== defaultBranch);
+    if (stacked.length > 0) {
+      const bases = [...new Set(stacked.map((pr) => pr.baseRefName))].join(", ");
+      reasons.push(`stacked base: a PR targets ${bases} instead of ${defaultBranch}`);
+    }
+    if (pullRequests.length > maxSimplePrCount) {
+      reasons.push(`more than ${maxSimplePrCount} PRs (${pullRequests.length} PRs)`);
+    }
+    return { route: reasons.length > 0 ? "complex" : "simple", reasons };
+  }
+};
+var ReviewPlanService = class {
+  classifier = new ReviewRouteClassifier();
+  /** Tracker statuses are display names on some trackers, so "In Review" and "in-review" must match. */
+  normalizeStatus(status) {
+    return status.trim().toLowerCase().replace(/[\s-]+/g, "-");
+  }
+  isInReview(status, inReviewStatus) {
+    const normalized = this.normalizeStatus(status);
+    return normalized === "in-review" || inReviewStatus !== void 0 && normalized === this.normalizeStatus(inReviewStatus);
+  }
+  /** Ids of open tickets in review, in plan order. */
+  inReviewTicketIds(plan, inReviewStatus) {
+    return plan.waves.flat().filter((t) => this.isInReview(t.status, inReviewStatus)).map((t) => t.id);
+  }
+  build(input) {
+    const titles = new Map(input.tickets.map((ticket) => [ticket.id, ticket.title]));
+    const blocked = [];
+    const missingPrReasons = [];
+    input.plan.waves.forEach((wave, waveIndex) => {
+      for (const planned of wave) {
+        if (!this.isInReview(planned.status, input.inReviewStatus)) continue;
+        const found = input.pullRequests.find((pr) => pr.ticket === planned.id);
+        blocked.push({
+          ticketId: planned.id,
+          title: titles.get(planned.id) ?? "",
+          wave: waveIndex,
+          blockedBy: planned.blockedBy,
+          pr: found === void 0 ? null : { number: found.number, url: found.url, headRefName: found.headRefName, baseRefName: found.baseRefName }
+        });
+        if (found === void 0) missingPrReasons.push(`ticket ${planned.id} is in review but has no open PR`);
+      }
+    });
+    const missing = blocked.filter((entry) => entry.pr === null).map((entry) => entry.ticketId);
+    if (missing.length > 0) {
+      return {
+        route: "incomplete",
+        reasons: missingPrReasons,
+        missing,
+        blocked,
+        unblocksOnMerge: this.unblockedOnMerge(input.plan, blocked)
+      };
+    }
+    const decision = this.classifier.classify(blocked, input.defaultBranch);
+    return {
+      route: decision.route,
+      reasons: decision.reasons,
+      missing,
+      blocked,
+      unblocksOnMerge: this.unblockedOnMerge(input.plan, blocked)
+    };
+  }
+  unblockedOnMerge(plan, blocked) {
+    const blockedIds = new Set(blocked.map((entry) => entry.ticketId));
+    const openIds = new Set(plan.waves.flat().map((t) => t.id));
+    return plan.waves.flat().filter((t) => !blockedIds.has(t.id)).filter((t) => {
+      const openBlockers = t.blockedBy.filter((id) => openIds.has(id));
+      return openBlockers.some((id) => blockedIds.has(id)) && openBlockers.every((id) => blockedIds.has(id));
+    }).map((t) => t.id);
   }
 };
 
@@ -7946,130 +8449,814 @@ var PrecedenceBodyFormatDetector = class {
 };
 var bodyFormatDetector = new PrecedenceBodyFormatDetector();
 
-// src/tasks/evidence/evidence.ts
-import { basename as basename3 } from "node:path/posix";
-import { z as z45 } from "zod";
-var mediaReference = /(!?)\[([^\]]*)\]\(\s*<?([^\s()<>]+)>?(?:\s+"[^"]*")?\s*\)/g;
-var absoluteTarget = /^[a-zA-Z][a-zA-Z0-9+.-]*:|^\/\/|^#/;
-var localPrefix = /^(?:\.\/)+/;
-var fenceRun2 = /^ {0,3}(`{3,}|~{3,})(.*)$/;
-var AttachmentSpecSchema = z45.string().min(1).transform((spec) => {
-  const hash = spec.lastIndexOf("#");
-  const path = hash > 0 ? spec.slice(0, hash) : spec;
-  const caption = hash > 0 ? spec.slice(hash + 1).trim() : "";
-  return { path, caption: caption.length > 0 ? caption : basename3(path) };
+// src/operations/tracker-read-operations.ts
+var propsSchema = z48.object({
+  getTracker: z48.custom((value) => typeof value === "function"),
+  getPrHost: z48.custom((value) => typeof value === "function").optional(),
+  getConfig: z48.custom((value) => typeof value === "function").optional()
 });
-var DuplicateEvidenceNameError = class extends Error {
-  name = "DuplicateEvidenceNameError";
+var sectionNames = [
+  "problem-statement",
+  "solution",
+  "acceptance-criteria",
+  "technical-writeup",
+  "guided-walkthrough",
+  "symptom",
+  "environment",
+  "steps-to-reproduce",
+  "expected-vs-actual",
+  "root-cause",
+  "fixed-when",
+  "evidence",
+  "reproduction-notes"
+];
+var sectionNameSet = new Set(sectionNames);
+var sectionName = z48.string().refine(
+  (value) => sectionNameSet.has(value),
+  `unknown section \u2014 expected one of: ${sectionNames.join(", ")}`
+);
+var entityInput = z48.strictObject({ id: z48.string().min(1) });
+var ticketInput = entityInput.extend({
+  section: sectionName.optional()
+});
+var ticketResult = TicketSchema.passthrough();
+var epicResult = EpicSchema.extend({ childIssues: z48.array(ticketResult) }).passthrough();
+var initiativeResult = InitiativeSchema.extend({
+  epics: z48.array(z48.object({ id: z48.string(), title: z48.string() }).passthrough())
+}).passthrough();
+var tddResult = TechnicalDesignSchema.passthrough();
+var sectionResult = z48.object({
+  id: z48.string(),
+  section: z48.string(),
+  format: z48.enum(["layered-body", "bug-report"]),
+  markdown: z48.string().nullable(),
+  items: z48.array(z48.object({ text: z48.string(), done: z48.boolean() })).optional()
+});
+var edgeResult = z48.object({
+  ticket: z48.string(),
+  ticketEpic: z48.string(),
+  blockedBy: z48.string(),
+  blockerEpic: z48.string().nullable(),
+  justification: z48.string().nullable()
+});
+var planTicket = z48.object({
+  id: z48.string(),
+  status: z48.string(),
+  blockedBy: z48.array(z48.string()),
+  epicId: z48.string().optional()
+});
+var dependencyPlan = z48.object({
+  waves: z48.array(z48.array(planTicket)),
+  cycles: z48.array(z48.string())
+});
+var TrackerDependencyPlanSchema = dependencyPlan.extend({
+  crossEpicEdges: z48.array(edgeResult),
+  warnings: z48.array(z48.string())
+});
+var TrackerReviewPlanSchema = z48.object({
+  epic: z48.object({ id: z48.string(), title: z48.string() }).optional(),
+  initiative: z48.object({ id: z48.string(), title: z48.string() }).optional(),
+  defaultBranch: z48.string(),
+  route: z48.enum(["simple", "complex", "incomplete"]),
+  reasons: z48.array(z48.string()),
+  missing: z48.array(z48.string()),
+  blocked: z48.array(
+    z48.object({
+      ticketId: z48.string(),
+      title: z48.string(),
+      wave: z48.number(),
+      blockedBy: z48.array(z48.string()),
+      pr: z48.object({
+        number: z48.number(),
+        url: z48.string(),
+        headRefName: z48.string(),
+        baseRefName: z48.string()
+      }).nullable()
+    })
+  ),
+  unblocksOnMerge: z48.array(z48.string()),
+  crossEpicEdges: z48.array(edgeResult),
+  warnings: z48.array(z48.string()),
+  cycles: z48.array(z48.string())
+});
+var DefaultTrackerReadOperations = class {
+  props;
   constructor(props) {
-    super(`Two attachments share the filename "${props.filename}": ${props.paths.join(", ")}`);
+    this.props = propsSchema.parse(props);
   }
-};
-var TrackerEvidenceService = class {
-  tracker;
-  constructor(props) {
-    this.tracker = props.tracker;
+  operations() {
+    return [
+      this.descriptor(
+        "ticket-get",
+        "Read a ticket and optionally select one body section.",
+        ["read", "network"],
+        ["ticket", "get"],
+        ticketInput,
+        z48.union([ticketResult, sectionResult]),
+        (input) => this.getTicket(input)
+      ),
+      this.descriptor(
+        "ticket-transitions",
+        "List available status transitions for a ticket.",
+        ["read", "network"],
+        ["ticket", "transitions"],
+        entityInput,
+        z48.object({ id: z48.string(), transitions: z48.array(z48.string()) }),
+        async ({ id }) => ({ id, transitions: await this.props.getTracker().listTransitions(id) })
+      ),
+      this.descriptor(
+        "users-get",
+        "List users available for tracker assignment.",
+        ["read", "network"],
+        ["users", "get"],
+        z48.strictObject({}),
+        z48.array(TrackerUserSchema.passthrough()),
+        () => this.props.getTracker().getUsers()
+      ),
+      this.descriptor(
+        "tdd-get",
+        "Read a technical design by its tracker identifier.",
+        ["read", "network"],
+        ["tdd", "get"],
+        entityInput,
+        tddResult,
+        ({ id }) => this.props.getTracker().getTechnicalDesign(id)
+      ),
+      this.descriptor(
+        "epic-get",
+        "Read an epic and its tracker fields.",
+        ["read", "network"],
+        ["epic", "get"],
+        entityInput,
+        epicResult,
+        ({ id }) => this.props.getTracker().getEpic(id)
+      ),
+      this.descriptor(
+        "initiative-get",
+        "Read an initiative and its linked epics.",
+        ["read", "network"],
+        ["initiative", "get"],
+        entityInput,
+        initiativeResult,
+        ({ id }) => this.props.getTracker().getInitiative(id)
+      ),
+      this.descriptor(
+        "epic-plan",
+        "Plan dependency waves and cross-epic edges for an epic.",
+        ["read", "network", "process"],
+        ["epic", "plan"],
+        entityInput,
+        TrackerDependencyPlanSchema,
+        ({ id }) => this.planEpic(id)
+      ),
+      this.descriptor(
+        "epic-review-plan",
+        "Build the review hand-off for an epic's open pull requests.",
+        ["read", "network", "process"],
+        ["epic", "review-plan"],
+        entityInput,
+        TrackerReviewPlanSchema,
+        ({ id }) => this.reviewEpic(id)
+      ),
+      this.descriptor(
+        "initiative-plan",
+        "Plan dependency waves across every epic in an initiative.",
+        ["read", "network", "process"],
+        ["initiative", "plan"],
+        entityInput,
+        TrackerDependencyPlanSchema,
+        ({ id }) => this.planInitiative(id)
+      ),
+      this.descriptor(
+        "initiative-review-plan",
+        "Build the review hand-off across an initiative's epics.",
+        ["read", "network", "process"],
+        ["initiative", "review-plan"],
+        entityInput,
+        TrackerReviewPlanSchema,
+        ({ id }) => this.reviewInitiative(id)
+      )
+    ];
   }
-  async attach(input) {
-    const specs = input.specs.map((spec) => AttachmentSpecSchema.parse(spec));
-    this.rejectDuplicateNames(specs);
-    const attachments = await Promise.all(
-      specs.map(async (spec) => {
-        const uploaded = await this.tracker.addAttachment(input.ticketId, spec.path);
-        return { ...uploaded, path: spec.path, caption: spec.caption, referenced: false };
-      })
+  registry() {
+    return new MapOperationRegistry({
+      operations: this.operations(),
+      policy: new LaunchOperationAccessPolicy({ allowedEffects: ["read", "network", "process"] })
+    });
+  }
+  descriptor(id, description, effects, path, inputSchema, outputSchema, handler) {
+    return {
+      id,
+      description,
+      effects,
+      cli: { path, aliases: [] },
+      inputSchema,
+      outputSchema,
+      handler
+    };
+  }
+  async getTicket(input) {
+    const ticket = await this.props.getTracker().getTicket(input.id);
+    if (input.section === void 0) return ticket;
+    const format = bodyFormatDetector.detect({
+      body: ticket.body,
+      metadata: ticket.metadata,
+      issueType: ticket.issueType
+    });
+    return sectionSelector.select(
+      input.id,
+      blobSectionSource.read({ body: ticket.body, format }),
+      input.section
     );
-    const byName = /* @__PURE__ */ new Map();
-    for (const attachment of attachments) byName.set(basename3(attachment.path), attachment);
-    const rewritten = this.rewriteReferences(input.body, byName);
-    return { body: this.appendUnreferenced(rewritten, attachments), attachments };
   }
-  rejectDuplicateNames(specs) {
-    const paths = /* @__PURE__ */ new Map();
-    for (const spec of specs) {
-      const name = basename3(spec.path);
-      paths.set(name, [...paths.get(name) ?? [], spec.path]);
-    }
-    for (const [filename, group] of paths) {
-      if (group.length > 1) throw new DuplicateEvidenceNameError({ filename, paths: group });
-    }
+  async planEpic(id) {
+    const tracker = this.props.getTracker();
+    const epic = await tracker.getEpic(id);
+    const plan = new DependencyPlannerService().plan(this.plannerTickets(epic.childIssues));
+    const edges = new CrossEpicEdgeFinder(tracker);
+    const crossEpicEdges = await edges.find([epic]);
+    return { ...plan, crossEpicEdges, warnings: edges.warnings(crossEpicEdges) };
   }
-  rewriteReferences(body, byName) {
-    let fence;
-    return body.split("\n").map((line) => {
-      if (fence === void 0) {
-        const opened = this.openingFence(line);
-        if (opened !== void 0) {
-          fence = opened;
-          return line;
-        }
-        return this.rewriteLine(line, byName);
-      }
-      if (this.closesFence(line, fence)) fence = void 0;
-      return line;
-    }).join("\n");
+  async planInitiative(id) {
+    const tracker = this.props.getTracker();
+    const initiative = await tracker.getInitiative(id);
+    const epics = await Promise.all(initiative.epics.map((epic) => tracker.getEpic(epic.id)));
+    const tickets = epics.flatMap(
+      (epic) => epic.childIssues.map((ticket) => ({ ticket, epicId: epic.id }))
+    );
+    const plan = new DependencyPlannerService().plan(
+      tickets.map(({ ticket, epicId }) => ({
+        id: ticket.id,
+        status: ticket.status,
+        blockedBy: ticket.blockedBy,
+        epicId
+      }))
+    );
+    const edges = new CrossEpicEdgeFinder(tracker);
+    const crossEpicEdges = await edges.find(epics);
+    return { ...plan, crossEpicEdges, warnings: edges.warnings(crossEpicEdges) };
   }
-  /**
-   * A line opens a fence when it is a run of >=3 backticks or tildes; a backtick
-   * fence's info string may not itself contain a backtick, which keeps inline
-   * code from being read as a fence.
-   */
-  openingFence(line) {
-    const match = fenceRun2.exec(line);
-    if (match === null) return void 0;
-    const run2 = match[1];
-    const rest = match[2];
-    if (run2 === void 0 || rest === void 0) return void 0;
-    if (run2.charAt(0) === "`" && rest.includes("`")) return void 0;
-    return { char: run2.charAt(0), length: run2.length };
+  async reviewEpic(id) {
+    const tracker = this.props.getTracker();
+    const epic = await tracker.getEpic(id);
+    return this.reviewPlan({ epic, epics: [epic] });
   }
-  /**
-   * A line closes an open fence only when it is a run of the SAME character, at
-   * least as long as the opening run, with nothing but whitespace after it.
-   */
-  closesFence(line, fence) {
-    const match = fenceRun2.exec(line);
-    if (match === null) return false;
-    const run2 = match[1];
-    const rest = match[2];
-    if (run2 === void 0 || rest === void 0) return false;
-    return run2.charAt(0) === fence.char && run2.length >= fence.length && rest.trim().length === 0;
+  async reviewInitiative(id) {
+    const tracker = this.props.getTracker();
+    const initiative = await tracker.getInitiative(id);
+    const epics = await Promise.all(initiative.epics.map((epic) => tracker.getEpic(epic.id)));
+    return this.reviewPlan({ initiative, epics });
   }
-  rewriteLine(line, byName) {
-    let result = "";
-    let last = 0;
-    mediaReference.lastIndex = 0;
-    for (let match = mediaReference.exec(line); match !== null; match = mediaReference.exec(line)) {
-      const whole = match[0];
-      const bang = match[1];
-      const label = match[2];
-      const target = match[3];
-      result += line.slice(last, match.index);
-      const attachment = bang !== void 0 && label !== void 0 && target !== void 0 ? this.resolve(target, byName) : void 0;
-      if (attachment === void 0 || bang === void 0 || label === void 0) {
-        result += whole;
-      } else {
-        attachment.referenced = true;
-        result += `${bang}[${label}](attachment:${attachment.filename})`;
-      }
-      last = match.index + whole.length;
-    }
-    return result + line.slice(last);
+  async reviewPlan(input) {
+    const tracker = this.props.getTracker();
+    const tickets = input.epics.flatMap((epic) => epic.childIssues);
+    const plan = new DependencyPlannerService().plan(this.plannerTickets(tickets));
+    const { inReviewStatus } = this.props.getConfig?.() ?? {};
+    const service = new ReviewPlanService();
+    const ids = service.inReviewTicketIds(plan, inReviewStatus);
+    const host = this.props.getPrHost?.();
+    if (host === void 0)
+      throw new PullRequestHostUnavailableError(
+        "pull request host is unavailable for review planning"
+      );
+    const pullRequests = ids.length > 0 ? await host.listOpenPullRequestsForTickets(ids) : [];
+    const defaultBranch = await host.defaultBranch();
+    const result = service.build({ plan, tickets, pullRequests, defaultBranch, inReviewStatus });
+    const edges = new CrossEpicEdgeFinder(tracker);
+    const crossEpicEdges = await edges.find(input.epics);
+    return {
+      ...input.epic === void 0 ? {} : { epic: { id: input.epic.id, title: input.epic.title } },
+      ...input.initiative === void 0 ? {} : { initiative: input.initiative },
+      defaultBranch,
+      ...result,
+      crossEpicEdges,
+      warnings: edges.warnings(crossEpicEdges),
+      cycles: plan.cycles
+    };
   }
-  resolve(target, byName) {
-    if (absoluteTarget.test(target)) return void 0;
-    return byName.get(basename3(target.replace(localPrefix, "")));
-  }
-  appendUnreferenced(body, attachments) {
-    let result = body;
-    for (const attachment of attachments) {
-      if (!attachment.referenced) result += `
-
-![${attachment.caption}](attachment:${attachment.filename})`;
-    }
-    return result;
+  plannerTickets(tickets) {
+    return tickets.map((ticket) => ({
+      id: ticket.id,
+      status: ticket.status,
+      blockedBy: ticket.blockedBy
+    }));
   }
 };
+var PullRequestHostUnavailableError = class extends Error {
+  name = "PullRequestHostUnavailableError";
+};
+
+// src/operations/tracker-entity-operations.ts
+var labelListSchema = z49.array(z49.string()).transform((labels) => [...new Set(labels.map((label) => label.trim()).filter(Boolean))]);
+var labelsSchema = labelListSchema.default([]);
+var createEpicInput = z49.object({
+  ...CreateEpicInputSchema.shape,
+  labels: labelsSchema,
+  allowLocalPaths: z49.boolean().default(false)
+}).strict();
+var updateEpicInput = z49.object({
+  ...UpdateEpicInputSchema.shape,
+  labels: labelListSchema.optional(),
+  allowLocalPaths: z49.boolean().default(false)
+}).strict();
+var createInitiativeInput = CreateInitiativeInputSchema.extend({
+  allowLocalPaths: z49.boolean().default(false)
+}).strict();
+var updateInitiativeInput = UpdateInitiativeInputSchema.extend({
+  allowLocalPaths: z49.boolean().default(false)
+}).strict();
+var createTicketInput = z49.object({
+  ...CreateTicketInputSchema.shape,
+  labels: labelsSchema,
+  allowLocalPaths: z49.boolean().default(false)
+}).strict();
+var updateTicketInput = z49.object({
+  ...UpdateTicketInputSchema.shape,
+  labels: labelListSchema.optional(),
+  allowLocalPaths: z49.boolean().default(false),
+  attach: z49.array(z49.string().min(1)).default([])
+}).strict();
+var createTddInput = CreateTechnicalDesignInputSchema.extend({
+  allowLocalPaths: z49.boolean().default(false)
+}).strict();
+var entityId = z49.string().min(1);
+var linkInput = z49.object({ epicId: entityId, initiativeId: entityId }).strict();
+var partialTicketEdit = z49.object({
+  id: entityId,
+  attachments: z49.array(AttachmentSchema),
+  body: z49.string()
+});
+var ticketEditResult = z49.union([TicketSchema, partialTicketEdit]);
+var partialTicketCreate = z49.object({ id: entityId, title: z49.string() });
+var ticketCreateResult = z49.union([TicketSchema, partialTicketCreate]);
+var partialEntityWrite = z49.object({
+  id: entityId,
+  title: z49.string().optional(),
+  body: z49.string().optional()
+});
+var partialTddCreate = z49.object({ id: entityId, epicId: entityId, body: z49.string() });
+var propsSchema2 = z49.object({
+  getTracker: z49.custom((value) => typeof value === "function"),
+  getPrHost: z49.custom((value) => typeof value === "function").optional(),
+  getConfig: z49.custom((value) => typeof value === "function").optional(),
+  cwd: z49.string().min(1),
+  trustedRoots: z49.array(z49.string().min(1)).default([])
+});
+var DefaultTrackerEntityOperations = class {
+  props;
+  roots;
+  constructor(props) {
+    this.props = propsSchema2.parse(props);
+    const roots = this.props.trustedRoots.length === 0 ? [this.props.cwd] : this.props.trustedRoots;
+    this.roots = [...new Set(roots.map((root) => realpathSync6(root)))];
+  }
+  operations() {
+    return [
+      ...new DefaultTrackerReadOperations({
+        getTracker: this.props.getTracker,
+        ...this.props.getPrHost === void 0 ? {} : { getPrHost: this.props.getPrHost },
+        ...this.props.getConfig === void 0 ? {} : { getConfig: this.props.getConfig }
+      }).operations(),
+      this.descriptor(
+        "epic-create",
+        "Create an epic with portable context and labels.",
+        ["write", "network"],
+        ["epic", "create"],
+        createEpicInput,
+        z49.union([EpicSchema, partialEntityWrite]),
+        (input) => this.createEpic(input)
+      ),
+      this.descriptor(
+        "epic-edit",
+        "Update an epic description, title, or labels.",
+        ["write", "network"],
+        ["epic", "edit"],
+        z49.object({ id: entityId, ...updateEpicInput.shape }).strict(),
+        z49.union([EpicSchema, partialEntityWrite]),
+        ({ id, ...input }) => this.editEpic(id, input)
+      ),
+      this.descriptor(
+        "epic-link-initiative",
+        "Link an epic to an initiative.",
+        ["write", "network"],
+        ["epic", "link-initiative"],
+        linkInput,
+        z49.object({ epicId: entityId, initiativeId: entityId }),
+        async ({ epicId, initiativeId }) => {
+          await this.props.getTracker().linkEpicToInitiative(epicId, initiativeId);
+          return { epicId, initiativeId };
+        }
+      ),
+      this.descriptor(
+        "initiative-create",
+        "Create an initiative with portable context.",
+        ["write", "network"],
+        ["initiative", "create"],
+        createInitiativeInput,
+        z49.union([InitiativeSchema, partialEntityWrite]),
+        (input) => this.createInitiative(input)
+      ),
+      this.descriptor(
+        "initiative-edit",
+        "Update an initiative description or title.",
+        ["write", "network"],
+        ["initiative", "edit"],
+        z49.object({ id: entityId, ...updateInitiativeInput.shape }).strict(),
+        z49.union([InitiativeSchema, partialEntityWrite]),
+        ({ id, ...input }) => this.editInitiative(id, input)
+      ),
+      this.descriptor(
+        "ticket-create",
+        "Create a ticket with its parent, labels, and assignee.",
+        ["write", "network"],
+        ["ticket", "create"],
+        createTicketInput,
+        ticketCreateResult,
+        (input) => this.createTicket(input)
+      ),
+      this.descriptor(
+        "ticket-edit",
+        "Update a ticket and attach local evidence files.",
+        ["write", "network"],
+        ["ticket", "edit"],
+        z49.object({ id: entityId, ...updateTicketInput.shape }).strict(),
+        ticketEditResult,
+        ({ id, ...input }) => this.editTicket(id, input)
+      ),
+      this.descriptor(
+        "tdd-create",
+        "Create a technical design under its parent epic.",
+        ["write", "network"],
+        ["tdd", "create"],
+        createTddInput,
+        z49.union([TechnicalDesignSchema, partialTddCreate]),
+        (input) => this.createTdd(input)
+      )
+    ];
+  }
+  registry(policy) {
+    return new MapOperationRegistry({
+      operations: this.operations(),
+      policy: policy ?? new LaunchOperationAccessPolicy({ allowedEffects: ["read", "network", "process"] })
+    });
+  }
+  descriptor(id, description, effects, path, inputSchema, outputSchema, handler) {
+    return {
+      id,
+      description,
+      effects,
+      cli: { path, aliases: [] },
+      inputSchema,
+      outputSchema,
+      handler
+    };
+  }
+  async createEpic(input) {
+    this.assertPortable(input.body, input.allowLocalPaths);
+    const fields = CreateEpicInputSchema.parse(input);
+    try {
+      return await this.props.getTracker().createEpic(fields);
+    } catch (error) {
+      if (!TaskTrackerPartialWriteError.isPartialWrite(error)) throw error;
+      return {
+        status: "partial",
+        data: { id: error.id, title: fields.title, body: fields.body },
+        error: { name: error.name, message: error.message }
+      };
+    }
+  }
+  async editEpic(id, input) {
+    this.assertPortable(input.body, input.allowLocalPaths);
+    const fields = UpdateEpicInputSchema.parse(input);
+    try {
+      return await this.props.getTracker().updateEpicDescription(id, fields);
+    } catch (error) {
+      if (!TaskTrackerPartialWriteError.isPartialWrite(error)) throw error;
+      return {
+        status: "partial",
+        data: {
+          id,
+          ...fields.title === void 0 ? {} : { title: fields.title },
+          body: fields.body
+        },
+        error: { name: error.name, message: error.message }
+      };
+    }
+  }
+  async createInitiative(input) {
+    this.assertPortable(input.body, input.allowLocalPaths);
+    const fields = CreateInitiativeInputSchema.parse(input);
+    try {
+      return await this.props.getTracker().createInitiative(fields);
+    } catch (error) {
+      if (!TaskTrackerPartialWriteError.isPartialWrite(error)) throw error;
+      return {
+        status: "partial",
+        data: { id: error.id, title: fields.title, body: fields.body },
+        error: { name: error.name, message: error.message }
+      };
+    }
+  }
+  async editInitiative(id, input) {
+    this.assertPortable(input.body, input.allowLocalPaths);
+    const fields = UpdateInitiativeInputSchema.parse(input);
+    try {
+      return await this.props.getTracker().updateInitiativeDescription(id, fields);
+    } catch (error) {
+      if (!TaskTrackerPartialWriteError.isPartialWrite(error)) throw error;
+      return {
+        status: "partial",
+        data: {
+          id,
+          ...fields.title === void 0 ? {} : { title: fields.title },
+          body: fields.body
+        },
+        error: { name: error.name, message: error.message }
+      };
+    }
+  }
+  async createTicket(input) {
+    this.assertPortable(input.body, input.allowLocalPaths);
+    const fields = CreateTicketInputSchema.parse(input);
+    try {
+      return await this.props.getTracker().createTicket(fields);
+    } catch (error) {
+      if (!TaskTrackerPartialWriteError.isPartialWrite(error)) throw error;
+      return {
+        status: "partial",
+        data: { id: error.id, title: fields.title },
+        error: { name: error.name, message: error.message }
+      };
+    }
+  }
+  async editTicket(id, input) {
+    const specs = input.attach;
+    const safeSpecs = specs.map((spec) => {
+      const parsed = AttachmentSpecSchema.parse(spec);
+      return `${this.trustedFilePath(parsed.path)}#${parsed.caption}`;
+    });
+    const tracker = this.props.getTracker();
+    const evidence = new TrackerEvidenceService({ tracker });
+    let body = input.body;
+    let attachments = [];
+    if (safeSpecs.length > 0) {
+      body = evidence.prepareBody({ body, specs: safeSpecs });
+      this.assertPortable(body, input.allowLocalPaths);
+      try {
+        const result = await evidence.attach({
+          ticketId: id,
+          body: input.body,
+          specs: safeSpecs
+        });
+        body = result.body;
+        attachments = result.attachments;
+      } catch (error) {
+        if (!(error instanceof EvidenceUploadFailure) || error.attachments.length === 0) {
+          if (error instanceof EvidenceUploadFailure) throw error.cause;
+          throw error;
+        }
+        return {
+          status: "partial",
+          data: { id, attachments: error.attachments, body: input.body },
+          error: {
+            name: error.cause instanceof Error ? error.cause.name : "Error",
+            message: error.cause instanceof Error ? error.cause.message : String(error.cause)
+          }
+        };
+      }
+    } else {
+      this.assertPortable(body, input.allowLocalPaths);
+    }
+    try {
+      const fields = UpdateTicketInputSchema.parse(input);
+      return await tracker.updateTicketDescription(id, { ...fields, body });
+    } catch (error) {
+      if (attachments.length === 0 && !TaskTrackerPartialWriteError.isPartialWrite(error))
+        throw error;
+      return {
+        status: "partial",
+        data: { id, attachments, body },
+        error: {
+          name: error instanceof Error ? error.name : "Error",
+          message: error instanceof Error ? error.message : String(error)
+        }
+      };
+    }
+  }
+  async createTdd(input) {
+    this.assertPortable(input.body, input.allowLocalPaths);
+    const fields = CreateTechnicalDesignInputSchema.parse(input);
+    try {
+      return await this.props.getTracker().createTechnicalDesign(fields);
+    } catch (error) {
+      if (!TaskTrackerPartialWriteError.isPartialWrite(error)) throw error;
+      return {
+        status: "partial",
+        data: { id: error.id, epicId: fields.epicId, body: fields.body },
+        error: { name: error.name, message: error.message }
+      };
+    }
+  }
+  assertPortable(body, allowLocalPaths = false) {
+    portableContextGuard.assertPortable(body, { allowLocalPaths });
+  }
+  trustedFilePath(path) {
+    const absolute = isAbsolute4(path) ? path : resolve8(this.props.cwd, path);
+    if (!existsSync12(absolute)) throw new Error(`Attachment file does not exist: ${path}`);
+    const realPath = realpathSync6(absolute);
+    const stat = statSync5(realPath);
+    const contained = this.roots.some((root) => {
+      const fromRoot = relative4(root, realPath);
+      return fromRoot === "" || !fromRoot.startsWith("..") && !isAbsolute4(fromRoot);
+    });
+    if (!contained || !stat.isFile())
+      throw new Error(`Attachment file is outside trusted roots: ${path}`);
+    return realPath;
+  }
+};
+
+// src/flight-rules/flight-rules.ts
+var DefaultFlightRules = class {
+  cwd;
+  env;
+  gitEnv;
+  explicitConfigPath;
+  hostSettings;
+  host;
+  configWritePolicy;
+  untrackedRoot;
+  constructor(props = {}) {
+    const parsed = FlightRulesPropsSchema.parse({
+      ...props,
+      env: props.env === void 0 ? void 0 : { ...props.env }
+    });
+    this.cwd = resolve9(parsed.cwd ?? process.cwd());
+    this.env = props.env ?? process.env;
+    this.gitEnv = { ...props.env ?? process.env };
+    this.explicitConfigPath = parsed.configPath;
+    this.hostSettings = props.hostSettings;
+    this.host = parsed.host;
+    this.configWritePolicy = parsed.configWritePolicy;
+  }
+  configPath() {
+    return this.configStore().filePath();
+  }
+  configStore() {
+    const env = this.explicitConfigPath === void 0 ? this.env : { ...this.env, FLIGHT_RULES_CONFIG: this.explicitConfigPath };
+    const untrackedRoot = this.mainCheckout();
+    return new ConfigStore({
+      cwd: this.cwd,
+      env,
+      host: NativeHostSchema.parse(
+        this.host ?? env["FLIGHT_RULES_HOST"] ?? this.installation().host() ?? "claude"
+      ),
+      ...this.hostSettings !== void 0 ? { hostSettings: this.hostSettings } : {},
+      ...untrackedRoot !== void 0 ? { untrackedRoot } : {}
+    });
+  }
+  installation() {
+    return FileNativeInstallation.fromInstall({
+      moduleUrl: import.meta.url,
+      cwd: this.cwd,
+      env: this.env
+    });
+  }
+  /** Looked up once per instance. */
+  mainCheckout() {
+    this.untrackedRoot ??= { value: new WorktreeLocator().mainCheckoutFor(this.cwd) };
+    return this.untrackedRoot.value;
+  }
+  evidence() {
+    return new EvidenceLocation({ cwd: this.cwd, mainCheckout: this.mainCheckout() });
+  }
+  config(overrideTracker) {
+    const config = this.configStore().load();
+    if (overrideTracker === void 0) return config;
+    if (overrideTracker !== "github" && overrideTracker !== "jira") {
+      throw new Error(`Invalid --tracker "${overrideTracker}" \u2014 expected "github" or "jira"`);
+    }
+    return { ...config, tracker: overrideTracker };
+  }
+  tracker(overrideTracker) {
+    const config = this.config(overrideTracker);
+    const env = new EnvLoader().load(this.env);
+    if (config.tracker === "github") {
+      if (env.githubToken === void 0)
+        throw new Error("GITHUB_TOKEN environment variable is required");
+      if (config.repo === void 0) throw new Error("repo is required when tracker is github");
+      const [owner, repo] = config.repo.split("/");
+      if (owner === void 0 || repo === void 0) {
+        throw new Error(`Invalid repo format "${config.repo}" \u2014 expected "owner/repo"`);
+      }
+      return new GitHubTaskTracker({ token: env.githubToken, owner, repo });
+    }
+    if (env.jiraToken === void 0) {
+      throw new Error(
+        "JIRA_TOKEN (or JIRA_API_TOKEN / JIRA_API_KEY) environment variable is required"
+      );
+    }
+    const email = env.jiraEmail ?? config.jiraEmail;
+    if (email === void 0)
+      throw new Error("JIRA_EMAIL environment variable or jiraEmail config is required");
+    const host = env.jiraHost ?? config.jiraHost;
+    if (host === void 0)
+      throw new Error("JIRA_HOST environment variable or jiraHost config is required");
+    if (config.jiraProject === void 0)
+      throw new Error("jiraProject is required when tracker is jira");
+    return new JiraTaskTracker({
+      token: env.jiraToken,
+      host,
+      email,
+      project: config.jiraProject,
+      ...config.jpdProject !== void 0 ? { jpdProject: config.jpdProject } : {},
+      ...config.confluenceSpaceKey !== void 0 ? { confluenceSpaceKey: config.confluenceSpaceKey } : {}
+    });
+  }
+  prHost(overrideTracker) {
+    const config = this.config(overrideTracker);
+    if (config.repo === void 0) {
+      throw new Error("repo (owner/repo) is required in config to create pull requests");
+    }
+    return new GhPullRequestHost({ repo: config.repo });
+  }
+  git() {
+    return new NodeGitExecutor({ cwd: this.cwd, env: this.gitEnv });
+  }
+  gitConfigOperations(policy) {
+    return new DefaultGitConfigOperations({
+      cwd: this.cwd,
+      configStore: this.configStore(),
+      git: this.git(),
+      agentEnv: this.gitEnv["AI_AGENT"],
+      configPolicy: policy ?? this.configWritePolicy
+    });
+  }
+  probe() {
+    return new NodeToolProbe({ cwd: this.cwd, env: this.env });
+  }
+  readiness() {
+    return new NodeRepositoryReadiness({ cwd: this.cwd, env: this.env });
+  }
+  docs() {
+    return FileDocResolver.fromInstall({ moduleUrl: import.meta.url, env: this.env });
+  }
+  localOperations() {
+    return new DefaultLocalDiscoveryOperations({
+      cwd: this.cwd,
+      getConfig: () => this.config(),
+      getConfigStore: () => this.configStore(),
+      getCharters: () => new DocCharterCatalog({ docs: this.docs() }),
+      getRepositoryPaths: () => new GitRepositoryPaths({ cwd: this.cwd }),
+      getEvidence: () => this.evidence(),
+      getReadiness: () => this.readiness(),
+      getProbe: () => this.probe(),
+      getTracker: () => this.tracker(),
+      getConfigPath: () => this.configPath()
+    });
+  }
+  reviewOperations(props = {}) {
+    const launch = ReviewOperationsLaunchPropsSchema.parse(props);
+    return new DefaultReviewOperations({
+      ...launch,
+      cwd: launch.cwd ?? this.cwd,
+      env: this.env
+    });
+  }
+  trackerEntityOperations() {
+    return new DefaultTrackerEntityOperations({
+      getTracker: () => this.tracker(),
+      getPrHost: () => this.prHost(),
+      getConfig: () => this.config(),
+      cwd: this.cwd
+    });
+  }
+  board() {
+    return new AriadneBoard({
+      readLayers: () => this.configStore().layers(),
+      tokens: this.ariadneTokens(),
+      env: this.env,
+      sessions: this.boardSessions()
+    });
+  }
+  packets() {
+    return new AriadnePackets({
+      readLayers: () => this.configStore().layers(),
+      tokens: this.ariadneTokens()
+    });
+  }
+  ariadneTokens() {
+    return new AriadneTokenStore({ env: this.env });
+  }
+  boardSessions() {
+    return new BoardSessionStore({ env: this.env });
+  }
+  boardAgents() {
+    return new BoardAgentStore({ env: this.env });
+  }
+};
+function createFlightRules(props = {}) {
+  return new DefaultFlightRules(props);
+}
 
 // src/shared/host-settings/host-settings-source.ts
 var settingsScopes = ["user", "project", "local"];
@@ -8097,16 +9284,16 @@ var agentFrontmatterParser = new YamlAgentFrontmatterParser();
 // src/agents/agent-registry/agent-registry.ts
 import { readFileSync as readFileSync13, readdirSync as readdirSync5 } from "node:fs";
 import { basename as basename4, join as join15 } from "node:path";
-import { z as z46 } from "zod";
+import { z as z50 } from "zod";
 var AgentNameSchema = AgentFrontmatterSchema.shape.name;
-var AgentVariantSchema = z46.strictObject({
+var AgentVariantSchema = z50.strictObject({
   name: AgentNameSchema,
   extends: AgentNameSchema,
   description: AgentFrontmatterSchema.shape.description,
   model: ModelTierSchema,
-  modelReason: z46.string().trim().min(1).optional()
+  modelReason: z50.string().trim().min(1).optional()
 });
-var AgentVariantsSchema = z46.array(AgentVariantSchema);
+var AgentVariantsSchema = z50.array(AgentVariantSchema);
 var InvalidAgentDefinitionError = class extends Error {
   name = "InvalidAgentDefinitionError";
 };
@@ -8146,7 +9333,7 @@ var FileAgentRegistry = class {
 
 // src/agents/agent-emitter/claude-agent-emitter.ts
 import { stringify as stringifyYaml3 } from "yaml";
-import { z as z47 } from "zod";
+import { z as z51 } from "zod";
 
 // src/agents/agent-emitter/agent-emitter.ts
 var UnsupportedAgentSettingError = class extends Error {
@@ -8154,7 +9341,7 @@ var UnsupportedAgentSettingError = class extends Error {
 };
 
 // src/agents/agent-emitter/claude-agent-emitter.ts
-var ClaudeAgentEmitterPropsSchema = z47.strictObject({ models: ModelBindingsSchema });
+var ClaudeAgentEmitterPropsSchema = z51.strictObject({ models: ModelBindingsSchema });
 var MarkdownClaudeAgentEmitter = class {
   models;
   constructor(props) {
@@ -8187,13 +9374,13 @@ ${body}`;
 };
 
 // src/agents/agent-emitter/codex-agent-emitter.ts
-import { z as z48 } from "zod";
-var ReasoningBindingsSchema = z48.strictObject({
-  standard: z48.enum(reasoningLevels),
-  escalated: z48.enum(reasoningLevels),
-  expert: z48.enum(reasoningLevels)
+import { z as z52 } from "zod";
+var ReasoningBindingsSchema = z52.strictObject({
+  standard: z52.enum(reasoningLevels),
+  escalated: z52.enum(reasoningLevels),
+  expert: z52.enum(reasoningLevels)
 });
-var CodexAgentEmitterPropsSchema = z48.strictObject({
+var CodexAgentEmitterPropsSchema = z52.strictObject({
   models: ModelBindingsSchema,
   reasoning: ReasoningBindingsSchema
 });
@@ -8236,27 +9423,27 @@ var TomlCodexAgentEmitter = class {
 import {
   chmodSync as chmodSync2,
   copyFileSync,
-  existsSync as existsSync12,
+  existsSync as existsSync13,
   lstatSync as lstatSync3,
   mkdirSync as mkdirSync7,
   readFileSync as readFileSync14,
   readdirSync as readdirSync6,
-  realpathSync as realpathSync5,
+  realpathSync as realpathSync7,
   rmSync as rmSync3,
   writeFileSync as writeFileSync7
 } from "node:fs";
-import { join as join16, resolve as resolve9 } from "node:path";
+import { join as join16, resolve as resolve10 } from "node:path";
 import { createHash as createHash3 } from "node:crypto";
-import { z as z49 } from "zod";
-var NativePluginCompilerPropsSchema = z49.strictObject({ sourceDir: z49.string().min(1) });
-var PluginHostSchema = z49.enum(["claude", "codex"]);
-var PackageVersionSchema = z49.object({ version: z49.string().min(1) });
-var PluginIdentitySchema = z49.strictObject({
-  name: z49.string().regex(/^[a-z][a-z0-9-]*$/),
-  description: z49.string().min(1),
-  repository: z49.url(),
-  author: z49.strictObject({ name: z49.string().min(1) }),
-  license: z49.string().min(1)
+import { z as z53 } from "zod";
+var NativePluginCompilerPropsSchema = z53.strictObject({ sourceDir: z53.string().min(1) });
+var PluginHostSchema = z53.enum(["claude", "codex"]);
+var PackageVersionSchema = z53.object({ version: z53.string().min(1) });
+var PluginIdentitySchema = z53.strictObject({
+  name: z53.string().regex(/^[a-z][a-z0-9-]*$/),
+  description: z53.string().min(1),
+  repository: z53.url(),
+  author: z53.strictObject({ name: z53.string().min(1) }),
+  license: z53.string().min(1)
 });
 var InvalidPluginSourceError = class extends Error {
   name = "InvalidPluginSourceError";
@@ -8264,7 +9451,7 @@ var InvalidPluginSourceError = class extends Error {
 var NativePluginCompiler = class {
   sourceDir;
   constructor(props) {
-    this.sourceDir = realpathSync5(resolve9(NativePluginCompilerPropsSchema.parse(props).sourceDir));
+    this.sourceDir = realpathSync7(resolve10(NativePluginCompilerPropsSchema.parse(props).sourceDir));
   }
   compile(host = "claude") {
     const target = PluginHostSchema.parse(host);
@@ -8307,14 +9494,14 @@ var NativePluginCompiler = class {
         "Claude commit and Ariadne hooks are omitted; this target emits no Codex hooks."
       );
     for (const executable of ["flight-rules", "flight-rules.mjs"]) {
-      if (!existsSync12(join16(this.sourceDir, "bin", executable))) {
+      if (!existsSync13(join16(this.sourceDir, "bin", executable))) {
         throw new InvalidPluginSourceError(
           `Build the CLI before native assembly: missing bin/${executable}`
         );
       }
     }
     const directory = join16(this.sourceDir, "dist", target);
-    if (existsSync12(join16(this.sourceDir, "dist")) && lstatSync3(join16(this.sourceDir, "dist")).isSymbolicLink()) {
+    if (existsSync13(join16(this.sourceDir, "dist")) && lstatSync3(join16(this.sourceDir, "dist")).isSymbolicLink()) {
       throw new InvalidPluginSourceError("Native output cannot use a symlinked dist directory");
     }
     rmSync3(directory, { recursive: true, force: true });
@@ -8457,46 +9644,46 @@ var ValidatedReportHandoff = class {
 };
 
 // src/orchestration/implementation-loop.schema.ts
-import { z as z50 } from "zod";
-var ImplementationReportSchema = z50.strictObject({
+import { z as z54 } from "zod";
+var ImplementationReportSchema = z54.strictObject({
   summary: OrchestrationTextSchema,
-  filesChanged: z50.array(
-    z50.strictObject({ path: OrchestrationTextSchema, why: OrchestrationTextSchema })
+  filesChanged: z54.array(
+    z54.strictObject({ path: OrchestrationTextSchema, why: OrchestrationTextSchema })
   ),
-  testsRun: z50.array(
-    z50.strictObject({ command: OrchestrationTextSchema, result: OrchestrationTextSchema })
+  testsRun: z54.array(
+    z54.strictObject({ command: OrchestrationTextSchema, result: OrchestrationTextSchema })
   ),
   approach: OrchestrationTextSchema,
-  openQuestions: z50.array(OrchestrationTextSchema).optional()
+  openQuestions: z54.array(OrchestrationTextSchema).optional()
 });
-var CriterionResultSchema = z50.strictObject({
+var CriterionResultSchema = z54.strictObject({
   criterion: OrchestrationTextSchema,
-  verdict: z50.enum(["PASS", "FAIL", "UNVERIFIABLE"]),
+  verdict: z54.enum(["PASS", "FAIL", "UNVERIFIABLE"]),
   evidence: OrchestrationTextSchema
 });
-var VerificationReportSchema = z50.strictObject({
+var VerificationReportSchema = z54.strictObject({
   summary: OrchestrationTextSchema,
-  criteria: z50.array(CriterionResultSchema).min(1),
-  charterConcerns: z50.array(OrchestrationTextSchema).optional(),
-  openQuestions: z50.array(OrchestrationTextSchema).optional(),
-  verified: z50.boolean()
+  criteria: z54.array(CriterionResultSchema).min(1),
+  charterConcerns: z54.array(OrchestrationTextSchema).optional(),
+  openQuestions: z54.array(OrchestrationTextSchema).optional(),
+  verified: z54.boolean()
 }).refine(
   (report) => report.verified === report.criteria.every((criterion) => criterion.verdict === "PASS"),
   "verified must agree with every itemized verdict"
 );
-var HandoffRecordSchema = z50.strictObject({
+var HandoffRecordSchema = z54.strictObject({
   request: DispatchRequestSchema,
-  outcome: z50.unknown()
+  outcome: z54.unknown()
 });
-var ImplementationRunSchema = z50.strictObject({
+var ImplementationRunSchema = z54.strictObject({
   context: RunContextSchema,
-  criteria: z50.array(OrchestrationTextSchema).min(1).refine((criteria) => new Set(criteria).size === criteria.length, "criteria must be distinct"),
-  implementationInput: z50.record(z50.string(), z50.json()).refine(
+  criteria: z54.array(OrchestrationTextSchema).min(1).refine((criteria) => new Set(criteria).size === criteria.length, "criteria must be distinct"),
+  implementationInput: z54.record(z54.string(), z54.json()).refine(
     (input) => !Object.hasOwn(input, "verifierFailures"),
     "verifierFailures is reserved for validated retry evidence"
   ),
-  history: z50.array(
-    z50.strictObject({ implementation: HandoffRecordSchema, verification: HandoffRecordSchema })
+  history: z54.array(
+    z54.strictObject({ implementation: HandoffRecordSchema, verification: HandoffRecordSchema })
   ).max(3)
 });
 
@@ -8679,16 +9866,16 @@ var VerifiedImplementationLoop = class {
 };
 
 // src/orchestration/dispatch-queue.ts
-import { z as z51 } from "zod";
-var DispatchQueuePropsSchema = z51.strictObject({
-  agents: z51.array(AgentDefinitionSchema).min(1),
-  requests: z51.array(DispatchRequestSchema).refine(
+import { z as z55 } from "zod";
+var DispatchQueuePropsSchema = z55.strictObject({
+  agents: z55.array(AgentDefinitionSchema).min(1),
+  requests: z55.array(DispatchRequestSchema).refine(
     (requests) => new Set(requests.map((request) => request.id)).size === requests.length,
     "dispatch IDs must be unique"
   ),
-  maxConcurrent: z51.int().positive()
+  maxConcurrent: z55.int().positive()
 });
-var ObservedDispatchIdsSchema = z51.array(z51.string().min(1)).refine((ids) => new Set(ids).size === ids.length, "observed dispatch IDs must be unique");
+var ObservedDispatchIdsSchema = z55.array(z55.string().min(1)).refine((ids) => new Set(ids).size === ids.length, "observed dispatch IDs must be unique");
 var InvalidDispatchQueueStateError = class extends Error {
   name = "InvalidDispatchQueueStateError";
 };
@@ -8823,6 +10010,7 @@ export {
   DefaultFlightRules,
   DefaultGitConfigOperations,
   DefaultPullRequestBuilder,
+  DefaultTrackerEntityOperations,
   DependencyPlannerService,
   DispatchOutcomeSchema,
   DispatchRequestSchema,
@@ -8832,6 +10020,7 @@ export {
   EntityMetadataSchema,
   EnvLoader,
   EpicSchema,
+  EvidenceUploadFailure,
   FileAgentRegistry,
   FileDocResolver,
   FileNativeInstallation,

@@ -1,8 +1,8 @@
 // src/mcp/mcp-server.ts
-import { existsSync as existsSync13, readFileSync as readFileSync15, realpathSync as realpathSync6, statSync as statSync6 } from "node:fs";
-import { dirname as dirname15, isAbsolute as isAbsolute5, relative as relative5, resolve as resolve10, sep as sep5 } from "node:path";
+import { existsSync as existsSync14, readFileSync as readFileSync15, realpathSync as realpathSync8, statSync as statSync7 } from "node:fs";
+import { dirname as dirname15, isAbsolute as isAbsolute6, relative as relative6, resolve as resolve11, sep as sep5 } from "node:path";
 import { McpServer } from "@modelcontextprotocol/server";
-import { z as z51 } from "zod";
+import { z as z53 } from "zod";
 
 // src/bundled-docs/charter-catalog/charter-catalog.ts
 import { matchesGlob } from "node:path";
@@ -2644,6 +2644,25 @@ var CreateInitiativeInputSchema = z21.object({
   title: z21.string(),
   body: z21.string()
 });
+var partialWriteErrorSchema = z21.object({
+  name: z21.literal("TaskTrackerPartialWriteError"),
+  id: z21.string().min(1),
+  message: z21.string()
+});
+var TaskTrackerPartialWriteError = class extends Error {
+  name = "TaskTrackerPartialWriteError";
+  id;
+  constructor(props) {
+    super(props.cause instanceof Error ? props.cause.message : String(props.cause), {
+      cause: props.cause
+    });
+    this.id = props.id;
+  }
+  /** Recognizes adapter failures across independently bundled package entry points. */
+  static isPartialWrite(error) {
+    return error instanceof Error && partialWriteErrorSchema.safeParse(error).success;
+  }
+};
 
 // src/operations/tracker-read-operations.ts
 var propsSchema = z22.object({
@@ -2943,7 +2962,7 @@ var PullRequestHostUnavailableError = class extends Error {
 };
 
 // src/flight-rules/flight-rules.ts
-import { resolve as resolve8 } from "node:path";
+import { resolve as resolve9 } from "node:path";
 
 // src/git/git-executor/git-executor.ts
 import { execFile as execFile3 } from "node:child_process";
@@ -5104,8 +5123,16 @@ var GitHubTaskTracker = class {
   async getEpic(id) {
     const issueNumber = parseInt(id, 10);
     const [issueResponse, commentsResponse, subIssuesResponse] = await Promise.all([
-      this.octokit.rest.issues.get({ owner: this.owner, repo: this.repo, issue_number: issueNumber }),
-      this.octokit.rest.issues.listComments({ owner: this.owner, repo: this.repo, issue_number: issueNumber }),
+      this.octokit.rest.issues.get({
+        owner: this.owner,
+        repo: this.repo,
+        issue_number: issueNumber
+      }),
+      this.octokit.rest.issues.listComments({
+        owner: this.owner,
+        repo: this.repo,
+        issue_number: issueNumber
+      }),
       this.octokit.request("GET /repos/{owner}/{repo}/issues/{issue_number}/sub_issues", {
         owner: this.owner,
         repo: this.repo,
@@ -5115,7 +5142,9 @@ var GitHubTaskTracker = class {
     const issue = issueResponse.data;
     const body = issue.body ?? "";
     const metadata = this.bodyMetadata.parse(body);
-    const childNumbers = IssueRefListSchema.parse(subIssuesResponse.data).map((ref) => String(ref.number));
+    const childNumbers = IssueRefListSchema.parse(subIssuesResponse.data).map(
+      (ref) => String(ref.number)
+    );
     const childIssues = await Promise.all(childNumbers.map((n) => this.getTicket(n)));
     let tdd;
     if (metadata.tddId !== void 0) {
@@ -5145,29 +5174,53 @@ var GitHubTaskTracker = class {
       labels: ["ticket", ...input.labels],
       ...input.assignee !== void 0 ? { assignee: input.assignee } : {}
     });
-    if (input.epicId !== void 0) await this.linkTicketToEpic(String(data.number), input.epicId);
+    if (input.epicId !== void 0) {
+      try {
+        await this.linkTicketToEpic(String(data.number), input.epicId);
+      } catch (cause) {
+        throw new TaskTrackerPartialWriteError({ id: String(data.number), cause });
+      }
+    }
     return this.mapTicket(data, [], [], [], this.bodyMetadata.parse(data.body ?? ""));
   }
   async getTicket(id) {
     const issueNumber = parseInt(id, 10);
     const [issueResponse, commentsResponse, blockedByResponse, blockingResponse] = await Promise.all([
-      this.octokit.rest.issues.get({ owner: this.owner, repo: this.repo, issue_number: issueNumber }),
-      this.octokit.rest.issues.listComments({ owner: this.owner, repo: this.repo, issue_number: issueNumber }),
-      this.octokit.request("GET /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocked_by", {
+      this.octokit.rest.issues.get({
         owner: this.owner,
         repo: this.repo,
         issue_number: issueNumber
       }),
-      this.octokit.request("GET /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocking", {
+      this.octokit.rest.issues.listComments({
         owner: this.owner,
         repo: this.repo,
         issue_number: issueNumber
-      })
+      }),
+      this.octokit.request(
+        "GET /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocked_by",
+        {
+          owner: this.owner,
+          repo: this.repo,
+          issue_number: issueNumber
+        }
+      ),
+      this.octokit.request(
+        "GET /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocking",
+        {
+          owner: this.owner,
+          repo: this.repo,
+          issue_number: issueNumber
+        }
+      )
     ]);
     const body = issueResponse.data.body ?? "";
     const metadata = this.bodyMetadata.parse(body);
-    const blockedBy = IssueRefListSchema.parse(blockedByResponse.data).map((ref) => String(ref.number));
-    const blocking = IssueRefListSchema.parse(blockingResponse.data).map((ref) => String(ref.number));
+    const blockedBy = IssueRefListSchema.parse(blockedByResponse.data).map(
+      (ref) => String(ref.number)
+    );
+    const blocking = IssueRefListSchema.parse(blockingResponse.data).map(
+      (ref) => String(ref.number)
+    );
     return this.mapTicket(issueResponse.data, commentsResponse.data, blockedBy, blocking, metadata);
   }
   async linkTicketToEpic(ticketId, epicId) {
@@ -5189,11 +5242,14 @@ var GitHubTaskTracker = class {
   }
   async getTicketEpicId(ticketId) {
     try {
-      const { data } = await this.octokit.request("GET /repos/{owner}/{repo}/issues/{issue_number}/parent", {
-        owner: this.owner,
-        repo: this.repo,
-        issue_number: parseInt(ticketId, 10)
-      });
+      const { data } = await this.octokit.request(
+        "GET /repos/{owner}/{repo}/issues/{issue_number}/parent",
+        {
+          owner: this.owner,
+          repo: this.repo,
+          issue_number: parseInt(ticketId, 10)
+        }
+      );
       return String(IssueRefSchema.parse(data).number);
     } catch (error) {
       if (ParentNotFoundSchema.safeParse(error).success) return null;
@@ -5234,11 +5290,14 @@ var GitHubTaskTracker = class {
       repo: this.repo,
       issue_number: issueNumber
     });
-    const stale = issue.labels.map((l) => this.labelName(l)).filter(
-      (name) => name.startsWith("status:") && name.toLowerCase() !== label.toLowerCase()
-    );
+    const stale = issue.labels.map((l) => this.labelName(l)).filter((name) => name.startsWith("status:") && name.toLowerCase() !== label.toLowerCase());
     for (const name of stale) {
-      await this.octokit.rest.issues.removeLabel({ owner: this.owner, repo: this.repo, issue_number: issueNumber, name });
+      await this.octokit.rest.issues.removeLabel({
+        owner: this.owner,
+        repo: this.repo,
+        issue_number: issueNumber,
+        name
+      });
     }
     await this.octokit.rest.issues.addLabels({
       owner: this.owner,
@@ -5305,11 +5364,19 @@ var GitHubTaskTracker = class {
   }
   async updateEpicDescription(epicId, input) {
     await this.replaceIssueBody(epicId, "epic", input);
-    return this.getEpic(epicId);
+    try {
+      return await this.getEpic(epicId);
+    } catch (cause) {
+      throw new TaskTrackerPartialWriteError({ id: epicId, cause });
+    }
   }
   async updateTicketDescription(ticketId, input) {
     await this.replaceIssueBody(ticketId, "ticket", input);
-    return this.getTicket(ticketId);
+    try {
+      return await this.getTicket(ticketId);
+    } catch (cause) {
+      throw new TaskTrackerPartialWriteError({ id: ticketId, cause });
+    }
   }
   async updateInitiativeDescription(initiativeId, input) {
     await this.octokit.rest.issues.updateMilestone({
@@ -5319,7 +5386,11 @@ var GitHubTaskTracker = class {
       description: input.body,
       ...input.title !== void 0 ? { title: input.title } : {}
     });
-    return this.getInitiative(initiativeId);
+    try {
+      return await this.getInitiative(initiativeId);
+    } catch (cause) {
+      throw new TaskTrackerPartialWriteError({ id: initiativeId, cause });
+    }
   }
   async updateTddMetadata(tddId, patch) {
     const fetchData = await this.gql(
@@ -5356,7 +5427,9 @@ var GitHubTaskTracker = class {
     );
     const categoryId = repoData.repository.discussionCategory?.id;
     if (categoryId === void 0) {
-      throw new Error(`No "TDDs" discussion category found. Create it in the repo's GitHub Discussions settings.`);
+      throw new Error(
+        `No "TDDs" discussion category found. Create it in the repo's GitHub Discussions settings.`
+      );
     }
     const body = this.bodyMetadata.splice(input.body, {
       epicId: parseInt(input.epicId, 10),
@@ -5371,7 +5444,11 @@ var GitHubTaskTracker = class {
       { repositoryId: repoData.repository.id, categoryId, title: input.title, body }
     );
     const discussion = createData.createDiscussion.discussion;
-    await this.updateEpicMetadata(input.epicId, { tddId: discussion.number });
+    try {
+      await this.updateEpicMetadata(input.epicId, { tddId: discussion.number });
+    } catch (cause) {
+      throw new TaskTrackerPartialWriteError({ id: String(discussion.number), cause });
+    }
     return {
       id: String(discussion.number),
       epicId: input.epicId,
@@ -5418,11 +5495,11 @@ var GitHubTaskTracker = class {
       updatedAt: discussion.updatedAt
     };
   }
-  async addComment(entityId, body) {
+  async addComment(entityId2, body) {
     const { data } = await this.octokit.rest.issues.createComment({
       owner: this.owner,
       repo: this.repo,
-      issue_number: parseInt(entityId, 10),
+      issue_number: parseInt(entityId2, 10),
       body
     });
     return {
@@ -5449,7 +5526,11 @@ var GitHubTaskTracker = class {
     return data.map((member) => ({ accountId: member.login, displayName: member.login }));
   }
   async ping(options) {
-    await this.octokit.rest.repos.get({ owner: this.owner, repo: this.repo, ...options?.signal === void 0 ? {} : { request: { signal: options.signal } } });
+    await this.octokit.rest.repos.get({
+      owner: this.owner,
+      repo: this.repo,
+      ...options?.signal === void 0 ? {} : { request: { signal: options.signal } }
+    });
   }
   async replaceIssueBody(id, role, input) {
     const issueNumber = parseInt(id, 10);
@@ -5497,10 +5578,11 @@ var GitHubTaskTracker = class {
    * which is why `listTransitions` ignores the ticket id it is handed.
    */
   async statusLabelNames() {
-    const labels = await this.octokit.paginate(
-      this.octokit.rest.issues.listLabelsForRepo,
-      { owner: this.owner, repo: this.repo, per_page: 100 }
-    );
+    const labels = await this.octokit.paginate(this.octokit.rest.issues.listLabelsForRepo, {
+      owner: this.owner,
+      repo: this.repo,
+      per_page: 100
+    });
     return labels.map((label) => this.labelName(label)).filter((name) => name.startsWith("status:"));
   }
   labelName(label) {
@@ -5644,7 +5726,7 @@ var JiraClient = class {
       const retryAfterSeconds = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : defaultRetryAfterSeconds;
       const jitter = 0.7 + Math.random() * 0.6;
       const delayMs = Math.min(retryAfterSeconds * 1e3 * jitter, maxBackoffMs);
-      await new Promise((resolve11) => setTimeout(resolve11, delayMs));
+      await new Promise((resolve12) => setTimeout(resolve12, delayMs));
       return this.fetchWithRetry(url, init, attempt + 1);
     }
     return res;
@@ -5697,7 +5779,7 @@ var ConfluenceClient = class {
       const retryAfterSeconds = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : defaultRetryAfterSeconds2;
       const jitter = 0.7 + Math.random() * 0.6;
       const delayMs = Math.min(retryAfterSeconds * 1e3 * jitter, maxBackoffMs2);
-      await new Promise((resolve11) => setTimeout(resolve11, delayMs));
+      await new Promise((resolve12) => setTimeout(resolve12, delayMs));
       return this.fetchWithRetry(url, init, attempt + 1);
     }
     return res;
@@ -5905,8 +5987,8 @@ var LayeredBodyAdfConverter = class {
   }
   /** Looks up a target's basename as an OWN entry, so inherited names (`constructor`, `__proto__`) never resolve. */
   mediaByName(target, media) {
-    const basename5 = target.slice(target.lastIndexOf("/") + 1);
-    return Object.hasOwn(media, basename5) ? media[basename5] : void 0;
+    const basename6 = target.slice(target.lastIndexOf("/") + 1);
+    return Object.hasOwn(media, basename6) ? media[basename6] : void 0;
   }
   /** The ADF block type an mdast node maps to, or `''` when it only degrades to literal text. */
   adfType(node) {
@@ -6763,14 +6845,21 @@ var JiraTaskTracker = class {
   jpdProjectVerified = false;
   constructor(config) {
     this.client = new JiraClient({ host: config.host, email: config.email, token: config.token });
-    this.confluence = new ConfluenceClient({ host: config.host, email: config.email, token: config.token });
+    this.confluence = new ConfluenceClient({
+      host: config.host,
+      email: config.email,
+      token: config.token
+    });
     this.project = config.project;
     this.jpdProject = config.jpdProject;
     this.confluenceSpaceKey = config.confluenceSpaceKey;
   }
   async createEpic(input) {
     const issuetype = await this.resolveIssueType("Epic");
-    const description = this.metadata.splice(this.bodyFormat.toAdf(input.body), input.metadata ?? {});
+    const description = this.metadata.splice(
+      this.bodyFormat.toAdf(input.body),
+      input.metadata ?? {}
+    );
     const created = await this.client.request("POST", "/issue", {
       fields: {
         project: { key: this.project },
@@ -6780,10 +6869,16 @@ var JiraTaskTracker = class {
         labels: input.labels
       }
     });
-    return this.getEpic(created.key);
+    try {
+      return await this.getEpic(created.key);
+    } catch (cause) {
+      throw new TaskTrackerPartialWriteError({ id: created.key, cause });
+    }
   }
   async getEpic(id) {
-    const issue = await this.client.request("GET", `/issue/${id}`, void 0, { fields: issueFields });
+    const issue = await this.client.request("GET", `/issue/${id}`, void 0, {
+      fields: issueFields
+    });
     const childIssues = await this.searchChildren(issue.key);
     return {
       id: issue.key,
@@ -6800,7 +6895,10 @@ var JiraTaskTracker = class {
   }
   async createTicket(input) {
     const issuetype = await this.resolveIssueType("Story");
-    const description = this.metadata.splice(this.bodyFormat.toAdf(input.body), input.metadata ?? {});
+    const description = this.metadata.splice(
+      this.bodyFormat.toAdf(input.body),
+      input.metadata ?? {}
+    );
     const created = await this.client.request("POST", "/issue", {
       fields: {
         project: { key: this.project },
@@ -6812,7 +6910,11 @@ var JiraTaskTracker = class {
         ...input.assignee !== void 0 ? { assignee: { accountId: input.assignee } } : {}
       }
     });
-    return this.getTicket(created.key);
+    try {
+      return await this.getTicket(created.key);
+    } catch (cause) {
+      throw new TaskTrackerPartialWriteError({ id: created.key, cause });
+    }
   }
   async getTicket(id) {
     const [issue, blocksLinkType] = await Promise.all([
@@ -6822,12 +6924,16 @@ var JiraTaskTracker = class {
     return this.mapTicket(issue, blocksLinkType);
   }
   async linkTicketToEpic(ticketId, epicId) {
-    const issue = await this.client.request("GET", `/issue/${ticketId}`, void 0, { fields: "parent" });
+    const issue = await this.client.request("GET", `/issue/${ticketId}`, void 0, {
+      fields: "parent"
+    });
     if (issue.fields.parent?.key === epicId) return;
     await this.client.request("PUT", `/issue/${ticketId}`, { fields: { parent: { key: epicId } } });
   }
   async getTicketEpicId(ticketId) {
-    const issue = await this.client.request("GET", `/issue/${ticketId}`, void 0, { fields: "parent" });
+    const issue = await this.client.request("GET", `/issue/${ticketId}`, void 0, {
+      fields: "parent"
+    });
     return issue.fields.parent?.key ?? null;
   }
   async blockTicket(ticketId, blockedById) {
@@ -6855,14 +6961,18 @@ var JiraTaskTracker = class {
   }
   async transitionTicket(ticketId, status) {
     const response = await this.fetchTransitions(ticketId);
-    const match = response.transitions.find((transition) => transition.to.name.toLowerCase() === status.toLowerCase());
+    const match = response.transitions.find(
+      (transition) => transition.to.name.toLowerCase() === status.toLowerCase()
+    );
     if (match === void 0) {
       const available = response.transitions.map((transition) => transition.to.name).join(", ");
       throw new Error(
         `No transition to status "${status}" is available for ${ticketId} from its current status (available: ${available})`
       );
     }
-    await this.client.request("POST", `/issue/${ticketId}/transitions`, { transition: { id: match.id } });
+    await this.client.request("POST", `/issue/${ticketId}/transitions`, {
+      transition: { id: match.id }
+    });
   }
   async listTransitions(ticketId) {
     const response = await this.fetchTransitions(ticketId);
@@ -6873,10 +6983,14 @@ var JiraTaskTracker = class {
    * atomic against whatever labels the issue already has — no read first.
    */
   async addLabel(ticketId, label) {
-    await this.client.request("PUT", `/issue/${ticketId}`, { update: { labels: [{ add: label }] } });
+    await this.client.request("PUT", `/issue/${ticketId}`, {
+      update: { labels: [{ add: label }] }
+    });
   }
   async removeLabel(ticketId, label) {
-    await this.client.request("PUT", `/issue/${ticketId}`, { update: { labels: [{ remove: label }] } });
+    await this.client.request("PUT", `/issue/${ticketId}`, {
+      update: { labels: [{ remove: label }] }
+    });
   }
   async updateEpicMetadata(epicId, patch) {
     await this.spliceDescriptionMetadata(epicId, patch);
@@ -6905,17 +7019,29 @@ var JiraTaskTracker = class {
   }
   async updateEpicDescription(epicId, input) {
     await this.replaceIssueBody(epicId, input);
-    return this.getEpic(epicId);
+    try {
+      return await this.getEpic(epicId);
+    } catch (cause) {
+      throw new TaskTrackerPartialWriteError({ id: epicId, cause });
+    }
   }
   async updateTicketDescription(ticketId, input) {
     await this.replaceIssueBody(ticketId, input);
-    return this.getTicket(ticketId);
+    try {
+      return await this.getTicket(ticketId);
+    } catch (cause) {
+      throw new TaskTrackerPartialWriteError({ id: ticketId, cause });
+    }
   }
   async updateInitiativeDescription(initiativeId, input) {
     const fields = { description: this.bodyFormat.toAdf(input.body) };
     if (input.title !== void 0) fields["summary"] = input.title;
     await this.client.request("PUT", `/issue/${initiativeId}`, { fields });
-    return this.getInitiative(initiativeId);
+    try {
+      return await this.getInitiative(initiativeId);
+    } catch (cause) {
+      throw new TaskTrackerPartialWriteError({ id: initiativeId, cause });
+    }
   }
   async createInitiative(input) {
     const projectKey = await this.ensureJpdProject();
@@ -6927,7 +7053,11 @@ var JiraTaskTracker = class {
         description: this.bodyFormat.toAdf(input.body)
       }
     });
-    return this.getInitiative(created.key);
+    try {
+      return await this.getInitiative(created.key);
+    } catch (cause) {
+      throw new TaskTrackerPartialWriteError({ id: created.key, cause });
+    }
   }
   async getInitiative(id) {
     const idea = await this.client.request("GET", `/issue/${id}`, void 0, {
@@ -6937,7 +7067,9 @@ var JiraTaskTracker = class {
     const epicKeys = this.deliveryLinkedKeys(idea.fields.issuelinks ?? [], deliveryLinkType);
     const epics = await Promise.all(
       epicKeys.map(async (key) => {
-        const epic = await this.client.request("GET", `/issue/${key}`, void 0, { fields: "summary" });
+        const epic = await this.client.request("GET", `/issue/${key}`, void 0, {
+          fields: "summary"
+        });
         return { id: epic.key, title: epic.fields.summary };
       })
     );
@@ -6971,22 +7103,28 @@ var JiraTaskTracker = class {
       title: input.title,
       body: { representation: "storage", value: input.body }
     });
-    await this.confluence.request("POST", `/pages/${page.id}/properties`, {
-      key: tddMetadataPropertyKey,
-      value: propertyValue
-    });
-    await this.updateEpicMetadata(input.epicId, { tddId: Number(page.id) });
+    try {
+      await this.confluence.request("POST", `/pages/${page.id}/properties`, {
+        key: tddMetadataPropertyKey,
+        value: propertyValue
+      });
+      await this.updateEpicMetadata(input.epicId, { tddId: Number(page.id) });
+    } catch (cause) {
+      throw new TaskTrackerPartialWriteError({ id: page.id, cause });
+    }
     return this.mapTechnicalDesign(page, input.body, propertyValue);
   }
   async getTechnicalDesign(id) {
     const [page, property] = await Promise.all([
-      this.confluence.request("GET", `/pages/${id}`, void 0, { "body-format": "storage" }),
+      this.confluence.request("GET", `/pages/${id}`, void 0, {
+        "body-format": "storage"
+      }),
       this.tddMetadataProperty(id)
     ]);
     return this.mapTechnicalDesign(page, page.body?.storage?.value ?? "", property?.value ?? {});
   }
-  async addComment(entityId, body) {
-    const comment = await this.client.request("POST", `/issue/${entityId}/comment`, {
+  async addComment(entityId2, body) {
+    const comment = await this.client.request("POST", `/issue/${entityId2}/comment`, {
       body: this.bodyFormat.toAdf(body)
     });
     return {
@@ -7004,21 +7142,30 @@ var JiraTaskTracker = class {
    */
   async addAttachment(ticketId, filePath) {
     const filename = basename2(filePath);
-    const file = new File([readFileSync11(filePath)], filename, { type: this.mimeTypes.forFilename(filename) });
+    const file = new File([readFileSync11(filePath)], filename, {
+      type: this.mimeTypes.forFilename(filename)
+    });
     const uploaded = JiraUploadedAttachmentsSchema.parse(
       await this.client.upload(`/issue/${ticketId}/attachments`, [file])
     );
     const attachment = uploaded[0];
     if (attachment === void 0) {
-      throw new Error(`Jira accepted the upload of ${filename} to ${ticketId} but returned no attachment`);
+      throw new Error(
+        `Jira accepted the upload of ${filename} to ${ticketId} but returned no attachment`
+      );
     }
     return this.mapAttachment(attachment, await this.resolveMediaUuid(attachment.id));
   }
   async getUsers() {
-    const users = await this.client.request("GET", "/user/assignable/search", void 0, {
-      project: this.project,
-      maxResults: 100
-    });
+    const users = await this.client.request(
+      "GET",
+      "/user/assignable/search",
+      void 0,
+      {
+        project: this.project,
+        maxResults: 100
+      }
+    );
     return users.map((user) => ({ accountId: user.accountId, displayName: user.displayName }));
   }
   async ping(options) {
@@ -7037,7 +7184,10 @@ var JiraTaskTracker = class {
     return page.issues.map((issue) => this.mapTicket(issue, blocksLinkType));
   }
   mapTicket(issue, blocksLinkType) {
-    const { blockedBy, blocking } = this.blockingLinks(issue.fields.issuelinks ?? [], blocksLinkType);
+    const { blockedBy, blocking } = this.blockingLinks(
+      issue.fields.issuelinks ?? [],
+      blocksLinkType
+    );
     return {
       id: issue.key,
       size: "ticket",
@@ -7084,15 +7234,22 @@ var JiraTaskTracker = class {
     return { blockedBy, blocking };
   }
   async replaceIssueBody(key, input) {
-    const issue = await this.client.request("GET", `/issue/${key}`, void 0, { fields: "description" });
-    const description = this.metadata.splice(this.bodyFormat.toAdf(input.body), this.parseMetadata(issue));
+    const issue = await this.client.request("GET", `/issue/${key}`, void 0, {
+      fields: "description"
+    });
+    const description = this.metadata.splice(
+      this.bodyFormat.toAdf(input.body),
+      this.parseMetadata(issue)
+    );
     const fields = { description };
     if (input.title !== void 0) fields["summary"] = input.title;
     if (input.labels !== void 0) fields["labels"] = input.labels;
     await this.client.request("PUT", `/issue/${key}`, { fields });
   }
   async spliceDescriptionMetadata(key, patch) {
-    const issue = await this.client.request("GET", `/issue/${key}`, void 0, { fields: "description" });
+    const issue = await this.client.request("GET", `/issue/${key}`, void 0, {
+      fields: "description"
+    });
     const current = issue.fields.description ?? this.bodyFormat.toAdf("");
     const next = this.metadata.splice(current, patch);
     await this.client.request("PUT", `/issue/${key}`, { fields: { description: next } });
@@ -7155,11 +7312,16 @@ var JiraTaskTracker = class {
   }
   async resolveBlocksLinkType() {
     if (this.blocksLinkType === void 0) {
-      const response = await this.client.request("GET", "/issueLinkType");
+      const response = await this.client.request(
+        "GET",
+        "/issueLinkType"
+      );
       const match = response.issueLinkTypes.find((type) => type.name.toLowerCase() === "blocks");
       if (match === void 0) {
         const names = response.issueLinkTypes.map((type) => type.name).join(", ");
-        throw new Error(`No "Blocks" issue link type is configured in this Jira instance (found: ${names})`);
+        throw new Error(
+          `No "Blocks" issue link type is configured in this Jira instance (found: ${names})`
+        );
       }
       this.blocksLinkType = match.name;
     }
@@ -7167,8 +7329,13 @@ var JiraTaskTracker = class {
   }
   async resolveDeliveryLinkType() {
     if (this.deliveryLinkType === void 0) {
-      const response = await this.client.request("GET", "/issueLinkType");
-      const match = response.issueLinkTypes.find((type) => type.outward.toLowerCase() === deliveryLinkOutward);
+      const response = await this.client.request(
+        "GET",
+        "/issueLinkType"
+      );
+      const match = response.issueLinkTypes.find(
+        (type) => type.outward.toLowerCase() === deliveryLinkOutward
+      );
       if (match === void 0) {
         const names = response.issueLinkTypes.map((type) => type.name).join(", ");
         throw new Error(
@@ -7216,14 +7383,22 @@ var JiraTaskTracker = class {
   }
   async resolveConfluenceSpaceId() {
     if (this.confluenceSpaceKey === void 0) {
-      throw new Error("No Confluence space is configured; set confluenceSpaceKey to create or fetch technical designs");
+      throw new Error(
+        "No Confluence space is configured; set confluenceSpaceKey to create or fetch technical designs"
+      );
     }
     if (this.confluenceSpaceId === void 0) {
-      const response = await this.confluence.request("GET", "/spaces", void 0, {
-        keys: this.confluenceSpaceKey
-      });
+      const response = await this.confluence.request(
+        "GET",
+        "/spaces",
+        void 0,
+        {
+          keys: this.confluenceSpaceKey
+        }
+      );
       const space = response.results[0];
-      if (space === void 0) throw new Error(`Confluence space "${this.confluenceSpaceKey}" was not found`);
+      if (space === void 0)
+        throw new Error(`Confluence space "${this.confluenceSpaceKey}" was not found`);
       this.confluenceSpaceId = space.id;
     }
     return this.confluenceSpaceId;
@@ -8377,6 +8552,553 @@ var FlightRulesPropsSchema = z48.object({
   }).strict().optional()
 });
 
+// src/operations/tracker-entity-operations.ts
+import { existsSync as existsSync12, realpathSync as realpathSync6, statSync as statSync5 } from "node:fs";
+import { isAbsolute as isAbsolute4, relative as relative4, resolve as resolve8 } from "node:path";
+import { z as z50 } from "zod";
+
+// src/tasks/evidence/evidence.ts
+import { realpathSync as realpathSync5 } from "node:fs";
+import { basename as basename3 } from "node:path/posix";
+import { z as z49 } from "zod";
+var mediaReference = /(!?)\[([^\]]*)\]\(\s*<?([^\s()<>]+)>?(?:\s+"[^"]*")?\s*\)/g;
+var absoluteTarget = /^[a-zA-Z][a-zA-Z0-9+.-]*:|^\/\/|^#/;
+var localPrefix = /^(?:\.\/)+/;
+var fenceRun2 = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+var AttachmentSpecSchema = z49.string().min(1).transform((spec) => {
+  const hash = spec.lastIndexOf("#");
+  const path = hash > 0 ? spec.slice(0, hash) : spec;
+  const caption = hash > 0 ? spec.slice(hash + 1).trim() : "";
+  return { path, caption: caption.length > 0 ? caption : basename3(path) };
+});
+var DuplicateEvidenceNameError = class extends Error {
+  name = "DuplicateEvidenceNameError";
+  constructor(props) {
+    super(`Two attachments share the filename "${props.filename}": ${props.paths.join(", ")}`);
+  }
+};
+var EvidenceUploadFailure = class extends Error {
+  name = "EvidenceUploadFailure";
+  attachments;
+  constructor(props) {
+    super(
+      props.attachments.length === 0 && props.cause instanceof Error ? props.cause.message : "One or more attachments could not be uploaded",
+      { cause: props.cause }
+    );
+    this.attachments = props.attachments;
+  }
+};
+var TrackerEvidenceService = class {
+  tracker;
+  constructor(props) {
+    this.tracker = props.tracker;
+  }
+  async attach(input) {
+    const specs = this.parseSpecs(input.specs);
+    const attachments = [];
+    for (const spec of specs) {
+      try {
+        const uploaded = await this.tracker.addAttachment(input.ticketId, spec.path);
+        attachments.push({
+          ...uploaded,
+          path: spec.path,
+          caption: spec.caption,
+          referenced: false
+        });
+      } catch (cause) {
+        throw new EvidenceUploadFailure({ cause, attachments });
+      }
+    }
+    const byName = /* @__PURE__ */ new Map();
+    for (const attachment of attachments) byName.set(basename3(attachment.path), attachment);
+    const rewritten = this.rewriteReferences(input.body, byName);
+    return { body: this.appendUnreferenced(rewritten, attachments), attachments };
+  }
+  prepareBody(input) {
+    const specs = this.parseSpecs(input.specs);
+    const attachments = specs.map((spec) => ({
+      id: "pending",
+      filename: basename3(spec.path),
+      mimeType: "application/octet-stream",
+      path: spec.path,
+      caption: spec.caption,
+      referenced: false
+    }));
+    const byName = /* @__PURE__ */ new Map();
+    for (const attachment of attachments) byName.set(basename3(attachment.path), attachment);
+    const rewritten = this.rewriteReferences(input.body, byName);
+    return this.appendUnreferenced(rewritten, attachments);
+  }
+  parseSpecs(specs) {
+    const parsed = specs.map((spec) => AttachmentSpecSchema.parse(spec));
+    this.rejectDuplicateNames(parsed);
+    return parsed;
+  }
+  rejectDuplicateNames(specs) {
+    const paths = /* @__PURE__ */ new Map();
+    for (const spec of specs) {
+      const name = basename3(spec.path);
+      paths.set(name, [...paths.get(name) ?? [], spec.path]);
+    }
+    for (const [filename, group] of paths) {
+      if (group.length > 1) throw new DuplicateEvidenceNameError({ filename, paths: group });
+    }
+  }
+  rewriteReferences(body, byName) {
+    let fence;
+    return body.split("\n").map((line) => {
+      if (fence === void 0) {
+        const opened = this.openingFence(line);
+        if (opened !== void 0) {
+          fence = opened;
+          return line;
+        }
+        return this.rewriteLine(line, byName);
+      }
+      if (this.closesFence(line, fence)) fence = void 0;
+      return line;
+    }).join("\n");
+  }
+  /**
+   * A line opens a fence when it is a run of >=3 backticks or tildes; a backtick
+   * fence's info string may not itself contain a backtick, which keeps inline
+   * code from being read as a fence.
+   */
+  openingFence(line) {
+    const match = fenceRun2.exec(line);
+    if (match === null) return void 0;
+    const run2 = match[1];
+    const rest = match[2];
+    if (run2 === void 0 || rest === void 0) return void 0;
+    if (run2.charAt(0) === "`" && rest.includes("`")) return void 0;
+    return { char: run2.charAt(0), length: run2.length };
+  }
+  /**
+   * A line closes an open fence only when it is a run of the SAME character, at
+   * least as long as the opening run, with nothing but whitespace after it.
+   */
+  closesFence(line, fence) {
+    const match = fenceRun2.exec(line);
+    if (match === null) return false;
+    const run2 = match[1];
+    const rest = match[2];
+    if (run2 === void 0 || rest === void 0) return false;
+    return run2.charAt(0) === fence.char && run2.length >= fence.length && rest.trim().length === 0;
+  }
+  rewriteLine(line, byName) {
+    let result = "";
+    let last = 0;
+    mediaReference.lastIndex = 0;
+    for (let match = mediaReference.exec(line); match !== null; match = mediaReference.exec(line)) {
+      const whole = match[0];
+      const bang = match[1];
+      const label = match[2];
+      const target = match[3];
+      result += line.slice(last, match.index);
+      const attachment = bang !== void 0 && label !== void 0 && target !== void 0 ? this.resolve(target, byName) : void 0;
+      if (attachment === void 0 || bang === void 0 || label === void 0) {
+        result += whole;
+      } else {
+        attachment.referenced = true;
+        result += `${bang}[${label}](attachment:${attachment.filename})`;
+      }
+      last = match.index + whole.length;
+    }
+    return result + line.slice(last);
+  }
+  resolve(target, byName) {
+    if (absoluteTarget.test(target)) return void 0;
+    if (target.startsWith("/") || /^[a-zA-Z]:[\\/]/.test(target)) {
+      try {
+        const realTarget = realpathSync5(target);
+        return [...byName.values()].find((attachment) => {
+          try {
+            return realpathSync5(attachment.path) === realTarget;
+          } catch {
+            return false;
+          }
+        });
+      } catch {
+        return void 0;
+      }
+    }
+    return byName.get(basename3(target.replace(localPrefix, "")));
+  }
+  appendUnreferenced(body, attachments) {
+    let result = body;
+    for (const attachment of attachments) {
+      if (!attachment.referenced)
+        result += `
+
+![${attachment.caption}](attachment:${attachment.filename})`;
+    }
+    return result;
+  }
+};
+
+// src/tasks/portable-context/portable-context.ts
+var tokenStart = String.raw`(?:^|(?<=[\s(\[<{"'\x60=,:;|]))`;
+var localReferencePatterns = [
+  /file:\/\/\S*/g,
+  new RegExp(`${tokenStart}/(?:Users|home)/[^\\s/)\\]>"'\\x60]+\\S*`, "g"),
+  new RegExp(`${tokenStart}~/\\S*`, "g"),
+  /\b[A-Za-z]:\\Users\\\S*/g
+];
+var trailingPunctuation = /[`.,;:!?)\]>"']+$/;
+var maxReported = 5;
+var RegexPortableContextGuard = class {
+  find(body) {
+    return body.split("\n").flatMap(
+      (text, index) => localReferencePatterns.flatMap(
+        (pattern) => [...text.matchAll(pattern)].map((m) => ({ line: index + 1, match: m[0].replace(trailingPunctuation, "") }))
+      )
+    );
+  }
+  assertPortable(body, opts = {}) {
+    if (opts.allowLocalPaths === true) return;
+    const found = this.find(body);
+    if (found.length === 0) return;
+    const listed = found.slice(0, maxReported).map((ref) => `  line ${ref.line}: ${ref.match}`).join("\n");
+    const more = found.length > maxReported ? `
+  \u2026and ${found.length - maxReported} more` : "";
+    throw new Error(
+      `body references files on this machine, which nobody else can open:
+${listed}${more}
+A tracker body must stand on its own for an engineer on a fresh clone. Inline the content, link a published artifact (\`flight-rules tdd create\`, a tracker issue, or a file on the default branch by URL), or use a repo-relative path for code that exists on the default branch. Pass --allow-local-paths only when the path is the subject of the work, not a pointer to context.`
+    );
+  }
+};
+var portableContextGuard = new RegexPortableContextGuard();
+
+// src/operations/tracker-entity-operations.ts
+var labelListSchema = z50.array(z50.string()).transform((labels) => [...new Set(labels.map((label) => label.trim()).filter(Boolean))]);
+var labelsSchema = labelListSchema.default([]);
+var createEpicInput = z50.object({
+  ...CreateEpicInputSchema.shape,
+  labels: labelsSchema,
+  allowLocalPaths: z50.boolean().default(false)
+}).strict();
+var updateEpicInput = z50.object({
+  ...UpdateEpicInputSchema.shape,
+  labels: labelListSchema.optional(),
+  allowLocalPaths: z50.boolean().default(false)
+}).strict();
+var createInitiativeInput = CreateInitiativeInputSchema.extend({
+  allowLocalPaths: z50.boolean().default(false)
+}).strict();
+var updateInitiativeInput = UpdateInitiativeInputSchema.extend({
+  allowLocalPaths: z50.boolean().default(false)
+}).strict();
+var createTicketInput = z50.object({
+  ...CreateTicketInputSchema.shape,
+  labels: labelsSchema,
+  allowLocalPaths: z50.boolean().default(false)
+}).strict();
+var updateTicketInput = z50.object({
+  ...UpdateTicketInputSchema.shape,
+  labels: labelListSchema.optional(),
+  allowLocalPaths: z50.boolean().default(false),
+  attach: z50.array(z50.string().min(1)).default([])
+}).strict();
+var createTddInput = CreateTechnicalDesignInputSchema.extend({
+  allowLocalPaths: z50.boolean().default(false)
+}).strict();
+var entityId = z50.string().min(1);
+var linkInput = z50.object({ epicId: entityId, initiativeId: entityId }).strict();
+var partialTicketEdit = z50.object({
+  id: entityId,
+  attachments: z50.array(AttachmentSchema),
+  body: z50.string()
+});
+var ticketEditResult = z50.union([TicketSchema, partialTicketEdit]);
+var partialTicketCreate = z50.object({ id: entityId, title: z50.string() });
+var ticketCreateResult = z50.union([TicketSchema, partialTicketCreate]);
+var partialEntityWrite = z50.object({
+  id: entityId,
+  title: z50.string().optional(),
+  body: z50.string().optional()
+});
+var partialTddCreate = z50.object({ id: entityId, epicId: entityId, body: z50.string() });
+var propsSchema2 = z50.object({
+  getTracker: z50.custom((value) => typeof value === "function"),
+  getPrHost: z50.custom((value) => typeof value === "function").optional(),
+  getConfig: z50.custom((value) => typeof value === "function").optional(),
+  cwd: z50.string().min(1),
+  trustedRoots: z50.array(z50.string().min(1)).default([])
+});
+var DefaultTrackerEntityOperations = class {
+  props;
+  roots;
+  constructor(props) {
+    this.props = propsSchema2.parse(props);
+    const roots = this.props.trustedRoots.length === 0 ? [this.props.cwd] : this.props.trustedRoots;
+    this.roots = [...new Set(roots.map((root) => realpathSync6(root)))];
+  }
+  operations() {
+    return [
+      ...new DefaultTrackerReadOperations({
+        getTracker: this.props.getTracker,
+        ...this.props.getPrHost === void 0 ? {} : { getPrHost: this.props.getPrHost },
+        ...this.props.getConfig === void 0 ? {} : { getConfig: this.props.getConfig }
+      }).operations(),
+      this.descriptor(
+        "epic-create",
+        "Create an epic with portable context and labels.",
+        ["write", "network"],
+        ["epic", "create"],
+        createEpicInput,
+        z50.union([EpicSchema, partialEntityWrite]),
+        (input) => this.createEpic(input)
+      ),
+      this.descriptor(
+        "epic-edit",
+        "Update an epic description, title, or labels.",
+        ["write", "network"],
+        ["epic", "edit"],
+        z50.object({ id: entityId, ...updateEpicInput.shape }).strict(),
+        z50.union([EpicSchema, partialEntityWrite]),
+        ({ id, ...input }) => this.editEpic(id, input)
+      ),
+      this.descriptor(
+        "epic-link-initiative",
+        "Link an epic to an initiative.",
+        ["write", "network"],
+        ["epic", "link-initiative"],
+        linkInput,
+        z50.object({ epicId: entityId, initiativeId: entityId }),
+        async ({ epicId, initiativeId }) => {
+          await this.props.getTracker().linkEpicToInitiative(epicId, initiativeId);
+          return { epicId, initiativeId };
+        }
+      ),
+      this.descriptor(
+        "initiative-create",
+        "Create an initiative with portable context.",
+        ["write", "network"],
+        ["initiative", "create"],
+        createInitiativeInput,
+        z50.union([InitiativeSchema, partialEntityWrite]),
+        (input) => this.createInitiative(input)
+      ),
+      this.descriptor(
+        "initiative-edit",
+        "Update an initiative description or title.",
+        ["write", "network"],
+        ["initiative", "edit"],
+        z50.object({ id: entityId, ...updateInitiativeInput.shape }).strict(),
+        z50.union([InitiativeSchema, partialEntityWrite]),
+        ({ id, ...input }) => this.editInitiative(id, input)
+      ),
+      this.descriptor(
+        "ticket-create",
+        "Create a ticket with its parent, labels, and assignee.",
+        ["write", "network"],
+        ["ticket", "create"],
+        createTicketInput,
+        ticketCreateResult,
+        (input) => this.createTicket(input)
+      ),
+      this.descriptor(
+        "ticket-edit",
+        "Update a ticket and attach local evidence files.",
+        ["write", "network"],
+        ["ticket", "edit"],
+        z50.object({ id: entityId, ...updateTicketInput.shape }).strict(),
+        ticketEditResult,
+        ({ id, ...input }) => this.editTicket(id, input)
+      ),
+      this.descriptor(
+        "tdd-create",
+        "Create a technical design under its parent epic.",
+        ["write", "network"],
+        ["tdd", "create"],
+        createTddInput,
+        z50.union([TechnicalDesignSchema, partialTddCreate]),
+        (input) => this.createTdd(input)
+      )
+    ];
+  }
+  registry(policy) {
+    return new MapOperationRegistry({
+      operations: this.operations(),
+      policy: policy ?? new LaunchOperationAccessPolicy({ allowedEffects: ["read", "network", "process"] })
+    });
+  }
+  descriptor(id, description, effects, path, inputSchema, outputSchema, handler) {
+    return {
+      id,
+      description,
+      effects,
+      cli: { path, aliases: [] },
+      inputSchema,
+      outputSchema,
+      handler
+    };
+  }
+  async createEpic(input) {
+    this.assertPortable(input.body, input.allowLocalPaths);
+    const fields = CreateEpicInputSchema.parse(input);
+    try {
+      return await this.props.getTracker().createEpic(fields);
+    } catch (error) {
+      if (!TaskTrackerPartialWriteError.isPartialWrite(error)) throw error;
+      return {
+        status: "partial",
+        data: { id: error.id, title: fields.title, body: fields.body },
+        error: { name: error.name, message: error.message }
+      };
+    }
+  }
+  async editEpic(id, input) {
+    this.assertPortable(input.body, input.allowLocalPaths);
+    const fields = UpdateEpicInputSchema.parse(input);
+    try {
+      return await this.props.getTracker().updateEpicDescription(id, fields);
+    } catch (error) {
+      if (!TaskTrackerPartialWriteError.isPartialWrite(error)) throw error;
+      return {
+        status: "partial",
+        data: {
+          id,
+          ...fields.title === void 0 ? {} : { title: fields.title },
+          body: fields.body
+        },
+        error: { name: error.name, message: error.message }
+      };
+    }
+  }
+  async createInitiative(input) {
+    this.assertPortable(input.body, input.allowLocalPaths);
+    const fields = CreateInitiativeInputSchema.parse(input);
+    try {
+      return await this.props.getTracker().createInitiative(fields);
+    } catch (error) {
+      if (!TaskTrackerPartialWriteError.isPartialWrite(error)) throw error;
+      return {
+        status: "partial",
+        data: { id: error.id, title: fields.title, body: fields.body },
+        error: { name: error.name, message: error.message }
+      };
+    }
+  }
+  async editInitiative(id, input) {
+    this.assertPortable(input.body, input.allowLocalPaths);
+    const fields = UpdateInitiativeInputSchema.parse(input);
+    try {
+      return await this.props.getTracker().updateInitiativeDescription(id, fields);
+    } catch (error) {
+      if (!TaskTrackerPartialWriteError.isPartialWrite(error)) throw error;
+      return {
+        status: "partial",
+        data: {
+          id,
+          ...fields.title === void 0 ? {} : { title: fields.title },
+          body: fields.body
+        },
+        error: { name: error.name, message: error.message }
+      };
+    }
+  }
+  async createTicket(input) {
+    this.assertPortable(input.body, input.allowLocalPaths);
+    const fields = CreateTicketInputSchema.parse(input);
+    try {
+      return await this.props.getTracker().createTicket(fields);
+    } catch (error) {
+      if (!TaskTrackerPartialWriteError.isPartialWrite(error)) throw error;
+      return {
+        status: "partial",
+        data: { id: error.id, title: fields.title },
+        error: { name: error.name, message: error.message }
+      };
+    }
+  }
+  async editTicket(id, input) {
+    const specs = input.attach;
+    const safeSpecs = specs.map((spec) => {
+      const parsed = AttachmentSpecSchema.parse(spec);
+      return `${this.trustedFilePath(parsed.path)}#${parsed.caption}`;
+    });
+    const tracker = this.props.getTracker();
+    const evidence = new TrackerEvidenceService({ tracker });
+    let body = input.body;
+    let attachments = [];
+    if (safeSpecs.length > 0) {
+      body = evidence.prepareBody({ body, specs: safeSpecs });
+      this.assertPortable(body, input.allowLocalPaths);
+      try {
+        const result = await evidence.attach({
+          ticketId: id,
+          body: input.body,
+          specs: safeSpecs
+        });
+        body = result.body;
+        attachments = result.attachments;
+      } catch (error) {
+        if (!(error instanceof EvidenceUploadFailure) || error.attachments.length === 0) {
+          if (error instanceof EvidenceUploadFailure) throw error.cause;
+          throw error;
+        }
+        return {
+          status: "partial",
+          data: { id, attachments: error.attachments, body: input.body },
+          error: {
+            name: error.cause instanceof Error ? error.cause.name : "Error",
+            message: error.cause instanceof Error ? error.cause.message : String(error.cause)
+          }
+        };
+      }
+    } else {
+      this.assertPortable(body, input.allowLocalPaths);
+    }
+    try {
+      const fields = UpdateTicketInputSchema.parse(input);
+      return await tracker.updateTicketDescription(id, { ...fields, body });
+    } catch (error) {
+      if (attachments.length === 0 && !TaskTrackerPartialWriteError.isPartialWrite(error))
+        throw error;
+      return {
+        status: "partial",
+        data: { id, attachments, body },
+        error: {
+          name: error instanceof Error ? error.name : "Error",
+          message: error instanceof Error ? error.message : String(error)
+        }
+      };
+    }
+  }
+  async createTdd(input) {
+    this.assertPortable(input.body, input.allowLocalPaths);
+    const fields = CreateTechnicalDesignInputSchema.parse(input);
+    try {
+      return await this.props.getTracker().createTechnicalDesign(fields);
+    } catch (error) {
+      if (!TaskTrackerPartialWriteError.isPartialWrite(error)) throw error;
+      return {
+        status: "partial",
+        data: { id: error.id, epicId: fields.epicId, body: fields.body },
+        error: { name: error.name, message: error.message }
+      };
+    }
+  }
+  assertPortable(body, allowLocalPaths = false) {
+    portableContextGuard.assertPortable(body, { allowLocalPaths });
+  }
+  trustedFilePath(path) {
+    const absolute = isAbsolute4(path) ? path : resolve8(this.props.cwd, path);
+    if (!existsSync12(absolute)) throw new Error(`Attachment file does not exist: ${path}`);
+    const realPath = realpathSync6(absolute);
+    const stat = statSync5(realPath);
+    const contained = this.roots.some((root) => {
+      const fromRoot = relative4(root, realPath);
+      return fromRoot === "" || !fromRoot.startsWith("..") && !isAbsolute4(fromRoot);
+    });
+    if (!contained || !stat.isFile())
+      throw new Error(`Attachment file is outside trusted roots: ${path}`);
+    return realPath;
+  }
+};
+
 // src/flight-rules/flight-rules.ts
 var DefaultFlightRules = class {
   cwd;
@@ -8392,7 +9114,7 @@ var DefaultFlightRules = class {
       ...props,
       env: props.env === void 0 ? void 0 : { ...props.env }
     });
-    this.cwd = resolve8(parsed.cwd ?? process.cwd());
+    this.cwd = resolve9(parsed.cwd ?? process.cwd());
     this.env = props.env ?? process.env;
     this.gitEnv = { ...props.env ?? process.env };
     this.explicitConfigPath = parsed.configPath;
@@ -8524,6 +9246,14 @@ var DefaultFlightRules = class {
       env: this.env
     });
   }
+  trackerEntityOperations() {
+    return new DefaultTrackerEntityOperations({
+      getTracker: () => this.tracker(),
+      getPrHost: () => this.prHost(),
+      getConfig: () => this.config(),
+      cwd: this.cwd
+    });
+  }
   board() {
     return new AriadneBoard({
       readLayers: () => this.configStore().layers(),
@@ -8550,15 +9280,15 @@ var DefaultFlightRules = class {
 };
 
 // src/sdk/instruction-catalog-core.ts
-import { existsSync as existsSync12, readFileSync as readFileSync14, readdirSync as readdirSync6, realpathSync as realpathSync5, statSync as statSync5 } from "node:fs";
-import { basename as basename4, dirname as dirname14, isAbsolute as isAbsolute4, join as join16, relative as relative4, resolve as resolve9, sep as sep4 } from "node:path";
+import { existsSync as existsSync13, readFileSync as readFileSync14, readdirSync as readdirSync6, realpathSync as realpathSync7, statSync as statSync6 } from "node:fs";
+import { basename as basename5, dirname as dirname14, isAbsolute as isAbsolute5, join as join16, relative as relative5, resolve as resolve10, sep as sep4 } from "node:path";
 import { fileURLToPath as fileURLToPath4 } from "node:url";
-import { z as z50 } from "zod";
+import { z as z52 } from "zod";
 
 // src/agents/agent-registry/agent-registry.ts
 import { readFileSync as readFileSync13, readdirSync as readdirSync5 } from "node:fs";
-import { basename as basename3, join as join15 } from "node:path";
-import { z as z49 } from "zod";
+import { basename as basename4, join as join15 } from "node:path";
+import { z as z51 } from "zod";
 
 // src/agents/agent-frontmatter/agent-frontmatter.ts
 import { parse as parseYaml4 } from "yaml";
@@ -8582,14 +9312,14 @@ var agentFrontmatterParser = new YamlAgentFrontmatterParser();
 
 // src/agents/agent-registry/agent-registry.ts
 var AgentNameSchema = AgentFrontmatterSchema.shape.name;
-var AgentVariantSchema = z49.strictObject({
+var AgentVariantSchema = z51.strictObject({
   name: AgentNameSchema,
   extends: AgentNameSchema,
   description: AgentFrontmatterSchema.shape.description,
   model: ModelTierSchema,
-  modelReason: z49.string().trim().min(1).optional()
+  modelReason: z51.string().trim().min(1).optional()
 });
-var AgentVariantsSchema = z49.array(AgentVariantSchema);
+var AgentVariantsSchema = z51.array(AgentVariantSchema);
 var InvalidAgentDefinitionError = class extends Error {
   name = "InvalidAgentDefinitionError";
 };
@@ -8599,7 +9329,7 @@ var FileAgentRegistry = class {
       const markdown = readFileSync13(join15(directory, entry.name), "utf8");
       const frontmatter = AgentRegistrationSchema.parse(agentFrontmatterParser.parse(markdown));
       const body = markdown.replace(/^---\r?\n[\s\S]*?^---(?:\r?\n|$)/m, "");
-      if (frontmatter.name !== basename3(entry.name, ".md") || body.trim() === "") {
+      if (frontmatter.name !== basename4(entry.name, ".md") || body.trim() === "") {
         throw new InvalidAgentDefinitionError(`Agent ${entry.name} needs a matching name and a nonempty prompt`);
       }
       return { frontmatter, body };
@@ -8628,11 +9358,11 @@ var FileAgentRegistry = class {
 };
 
 // src/sdk/instruction-catalog-core.ts
-var CatalogPropsSchema = z50.strictObject({
-  moduleUrl: z50.string().min(1),
-  env: z50.record(z50.string(), z50.string().optional())
+var CatalogPropsSchema = z52.strictObject({
+  moduleUrl: z52.string().min(1),
+  env: z52.record(z52.string(), z52.string().optional())
 });
-var ResourceNameSchema = z50.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
+var ResourceNameSchema = z52.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
 var UnknownInstructionError = class extends Error {
   name = "UnknownInstructionError";
 };
@@ -8650,7 +9380,7 @@ var FileInstructionCatalog = class {
     const parsed = CatalogPropsSchema.parse({ ...props, env: { ...props.env } });
     const override = parsed.env["FLIGHT_RULES_HOME"]?.trim();
     const moduleDirectory = dirname14(fileURLToPath4(parsed.moduleUrl));
-    const home = override || resolve9(moduleDirectory, basename4(moduleDirectory) === "sdk" ? "../.." : "..");
+    const home = override || resolve10(moduleDirectory, basename5(moduleDirectory) === "sdk" ? "../.." : "..");
     this.skillDir = this.findResourceDirectory(home, ["skills"]);
     this.agentDir = this.findResourceDirectory(home, [
       "bin/resources/agents",
@@ -8663,7 +9393,7 @@ var FileInstructionCatalog = class {
     );
   }
   listSkills() {
-    return readdirSync6(this.skillDir, { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile() && entry.name === "SKILL.md").map((entry) => relative4(this.skillDir, join16(entry.parentPath, entry.name)).split(sep4)[0]).filter((name) => name !== void 0).sort();
+    return readdirSync6(this.skillDir, { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile() && entry.name === "SKILL.md").map((entry) => relative5(this.skillDir, join16(entry.parentPath, entry.name)).split(sep4)[0]).filter((name) => name !== void 0).sort();
   }
   loadSkill(name) {
     const parsed = ResourceNameSchema.safeParse(name);
@@ -8686,18 +9416,18 @@ var FileInstructionCatalog = class {
     return agent;
   }
   findResourceDirectory(home, candidates) {
-    if (!existsSync12(home) || !statSync5(home).isDirectory()) {
+    if (!existsSync13(home) || !statSync6(home).isDirectory()) {
       throw new InstructionsUnavailableError(
         `The flight-rules installation directory is unavailable: ${home}`
       );
     }
-    const installationRoot = realpathSync5(home);
+    const installationRoot = realpathSync7(home);
     for (const candidate of candidates) {
-      const path = resolve9(installationRoot, candidate);
-      if (!existsSync12(path) || !statSync5(path).isDirectory()) continue;
-      const realPath = realpathSync5(path);
-      const relativePath = relative4(installationRoot, realPath);
-      if (relativePath === ".." || relativePath.startsWith(`..${sep4}`) || isAbsolute4(relativePath)) {
+      const path = resolve10(installationRoot, candidate);
+      if (!existsSync13(path) || !statSync6(path).isDirectory()) continue;
+      const realPath = realpathSync7(path);
+      const relativePath = relative5(installationRoot, realPath);
+      if (relativePath === ".." || relativePath.startsWith(`..${sep4}`) || isAbsolute5(relativePath)) {
         throw new UnsafeInstructionPathError(
           `Instruction directory escapes its installation home: ${path}`
         );
@@ -8707,11 +9437,11 @@ var FileInstructionCatalog = class {
     throw new InstructionsUnavailableError(`Canonical resources are unavailable under ${home}`);
   }
   safePath(path, root) {
-    if (!isAbsolute4(path) || !existsSync12(path) || !statSync5(path).isFile())
+    if (!isAbsolute5(path) || !existsSync13(path) || !statSync6(path).isFile())
       throw new UnknownInstructionError(`Unknown instruction resource: ${path}`);
-    const realPath = realpathSync5(path);
-    const relativePath = relative4(root, realPath);
-    if (relativePath === ".." || relativePath.startsWith(`..${sep4}`) || isAbsolute4(relativePath)) {
+    const realPath = realpathSync7(path);
+    const relativePath = relative5(root, realPath);
+    if (relativePath === ".." || relativePath.startsWith(`..${sep4}`) || isAbsolute5(relativePath)) {
       throw new UnsafeInstructionPathError(
         `Instruction resource escapes its installation directory: ${path}`
       );
@@ -8721,20 +9451,20 @@ var FileInstructionCatalog = class {
 };
 
 // src/mcp/mcp-server.ts
-var McpLaunchPropsSchema = z51.strictObject({
-  cwd: z51.string().min(1),
-  env: z51.record(z51.string(), z51.string().optional()),
-  allowedOperationIds: z51.array(z51.string()).default([]),
-  allowedEffects: z51.array(z51.enum(["read", "write", "network", "process"])).default(["read", "process", "network"]),
-  allowedConfigScopes: z51.array(z51.enum(configScopes)).default([]),
+var McpLaunchPropsSchema = z53.strictObject({
+  cwd: z53.string().min(1),
+  env: z53.record(z53.string(), z53.string().optional()),
+  allowedOperationIds: z53.array(z53.string()).default([]),
+  allowedEffects: z53.array(z53.enum(["read", "write", "network", "process"])).default(["read", "process", "network"]),
+  allowedConfigScopes: z53.array(z53.enum(configScopes)).default([]),
   ...ReviewOperationsLaunchPropsSchema.pick({
     trustedRef: true,
     owners: true,
     requireMapping: true
   }).shape
 });
-var resourceId = z51.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
-var LaunchBoundQaFileSystemPropsSchema = z51.object({ root: z51.string().min(1) });
+var resourceId = z53.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
+var LaunchBoundQaFileSystemPropsSchema = z53.object({ root: z53.string().min(1) });
 var LaunchCheckoutChangedError = class extends Error {
   name = "LaunchCheckoutChangedError";
 };
@@ -8745,31 +9475,31 @@ var LaunchBoundQaFileSystem = class {
   root;
   constructor(props) {
     const parsed = LaunchBoundQaFileSystemPropsSchema.parse(props);
-    this.root = realpathSync6(parsed.root);
+    this.root = realpathSync8(parsed.root);
   }
   exists(path) {
     if (!this.isInsideLaunch(path)) return false;
-    return existsSync13(path);
+    return existsSync14(path);
   }
   isFile(path) {
     this.requireInsideLaunch(path);
-    return existsSync13(path) && statSync6(path).isFile();
+    return existsSync14(path) && statSync7(path).isFile();
   }
   readFile(path) {
     this.requireInsideLaunch(path);
     return readFileSync15(path, "utf8");
   }
   isInsideLaunch(path) {
-    const absolute = resolve10(path);
+    const absolute = resolve11(path);
     let existing = absolute;
-    while (!existsSync13(existing)) {
+    while (!existsSync14(existing)) {
       const parent = dirname15(existing);
       if (parent === existing) return false;
       existing = parent;
     }
-    const realPath = realpathSync6(existing);
-    const relativePath = relative5(this.root, realPath);
-    return relativePath === "" || relativePath !== ".." && !relativePath.startsWith(`..${sep5}`) && !isAbsolute5(relativePath);
+    const realPath = realpathSync8(existing);
+    const relativePath = relative6(this.root, realPath);
+    return relativePath === "" || relativePath !== ".." && !relativePath.startsWith(`..${sep5}`) && !isAbsolute6(relativePath);
   }
   requireInsideLaunch(path) {
     if (!this.isInsideLaunch(path)) {
@@ -8790,8 +9520,8 @@ var FlightRulesMcpServer = class {
   instructions;
   constructor(props) {
     this.props = McpLaunchPropsSchema.parse(props);
-    this.cwd = realpathSync6(this.props.cwd);
-    const directory = statSync6(this.cwd);
+    this.cwd = realpathSync8(this.props.cwd);
+    const directory = statSync7(this.cwd);
     this.launchDevice = directory.dev;
     this.launchInode = directory.ino;
     this.qaFileSystem = new LaunchBoundQaFileSystem({ root: this.cwd });
@@ -8806,7 +9536,7 @@ var FlightRulesMcpServer = class {
     const server = new McpServer({ name: "flight-rules", version: "1.0.0" });
     for (const operation of registry.list()) {
       const descriptor = this.findOperation(operation.id);
-      if (!(descriptor.inputSchema instanceof z51.ZodObject)) {
+      if (!(descriptor.inputSchema instanceof z53.ZodObject)) {
         throw new Error(`MCP operation input must be an object schema: ${operation.id}`);
       }
       server.registerTool(
@@ -8951,8 +9681,8 @@ var FlightRulesMcpServer = class {
   }
   /** Pathnames can be reused after a rename; the launch grant belongs to the original directory. */
   requireOriginalLaunchCheckout() {
-    const directory = existsSync13(this.cwd) ? statSync6(this.cwd) : void 0;
-    if (directory === void 0 || realpathSync6(this.cwd) !== this.cwd || directory.dev !== this.launchDevice || directory.ino !== this.launchInode) {
+    const directory = existsSync14(this.cwd) ? statSync7(this.cwd) : void 0;
+    if (directory === void 0 || realpathSync8(this.cwd) !== this.cwd || directory.dev !== this.launchDevice || directory.ino !== this.launchInode) {
       throw new LaunchCheckoutChangedError(
         `The launch checkout was moved or replaced: ${this.cwd}`
       );
@@ -8960,15 +9690,15 @@ var FlightRulesMcpServer = class {
   }
   validateLocalPaths(id, input) {
     if (id !== "qa-instructions") return;
-    const parsedInput = z51.object({ from: z51.string().optional() }).safeParse(input);
+    const parsedInput = z53.object({ from: z53.string().optional() }).safeParse(input);
     if (!parsedInput.success) return;
     const from = parsedInput.data.from;
     if (typeof from !== "string") return;
-    const candidate = isAbsolute5(from) ? from : resolve10(this.cwd, from);
-    if (!existsSync13(candidate)) throw new Error(`QA instructions path does not exist: ${from}`);
-    const realPath = realpathSync6(candidate);
-    const relativePath = relative5(this.cwd, realPath);
-    if (relativePath === ".." || relativePath.startsWith(`..${sep5}`) || isAbsolute5(relativePath)) {
+    const candidate = isAbsolute6(from) ? from : resolve11(this.cwd, from);
+    if (!existsSync14(candidate)) throw new Error(`QA instructions path does not exist: ${from}`);
+    const realPath = realpathSync8(candidate);
+    const relativePath = relative6(this.cwd, realPath);
+    if (relativePath === ".." || relativePath.startsWith(`..${sep5}`) || isAbsolute6(relativePath)) {
       throw new UnsafeQaInstructionsPathError(
         `QA instructions path escapes the launch checkout: ${from}`
       );
@@ -8978,10 +9708,10 @@ var FlightRulesMcpServer = class {
 
 // src/mcp/stdio.ts
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
-import { z as z52 } from "zod";
+import { z as z54 } from "zod";
 var StdioLaunchPropsSchema = McpLaunchPropsSchema.extend({
-  cwd: z52.string().min(1).default(process.cwd()),
-  env: z52.record(z52.string(), z52.string().optional()).default(() => ({ ...process.env }))
+  cwd: z54.string().min(1).default(process.cwd()),
+  env: z54.record(z54.string(), z54.string().optional()).default(() => ({ ...process.env }))
 });
 var StdioFlightRulesMcpTransport = class {
   launch;

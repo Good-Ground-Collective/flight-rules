@@ -72,10 +72,12 @@ export declare class OperationCliError extends Error {
     name: string;
     readonly operationId: string;
     readonly operationErrorName: string;
+    readonly partialData: unknown | undefined;
     constructor(props: {
         operationId: string;
         errorName: string;
         message: string;
+        partialData?: unknown;
     });
 }
 /** Validates shared operation boundaries before and after executing application behavior. */
