@@ -1,5 +1,13 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -146,6 +154,30 @@ describe("git and configuration operations", () => {
       status: "error",
       error: { name: "LaunchConfigOperationDeniedError" },
     });
+  });
+
+  it("rejects a dangling settings symlink before creating its outside target", async () => {
+    const settingsDirectory = join(repo, ".agents");
+    const outsideTarget = join(root, "outside", "settings.json");
+    mkdirSync(settingsDirectory);
+    symlinkSync(outsideTarget, join(settingsDirectory, "flight-rules.settings.local.json"));
+    const core = createFlightRules({
+      cwd: repo,
+      env,
+      configWritePolicy: { scopes: ["local"], roots: [repo] },
+    });
+    const registry = new MapOperationRegistry({
+      operations: core.gitConfigOperations().operations(),
+      policy: new LaunchOperationAccessPolicy({ allowedEffects: ["write", "process"] }),
+    });
+
+    await expect(
+      registry.invoke("config-set", { key: "repo", values: ["acme/project"], scope: "local" }),
+    ).resolves.toMatchObject({
+      status: "error",
+      error: { name: "LaunchConfigOperationDeniedError" },
+    });
+    expect(existsSync(outsideTarget)).toBe(false);
   });
 
   it("runs concurrent git instances from their own launch checkout", async () => {

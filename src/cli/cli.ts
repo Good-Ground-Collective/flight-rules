@@ -1,5 +1,7 @@
 import { createFlightRules, type FlightRules } from "../flight-rules/flight-rules.js";
 import { Command } from "commander";
+import { parse } from "node:path";
+import { configScopes } from "../shared/config-store.js";
 import { createDocCommand } from "../bundled-docs/commands/doc/command.js";
 import { DocOperation } from "../operations/doc-operation.js";
 import { DefaultLocalDiscoveryOperations } from "../operations/local-discovery-operations.js";
@@ -76,9 +78,6 @@ export function buildProgram(
   program.addCommand(createInitiativeCommand(tracker, prHost, config));
   program.addCommand(createTicketCommand(tracker));
   program.addCommand(createTddCommand(tracker));
-  program.addCommand(createGitCommand(() => services.git()));
-  program.addCommand(createCommitMessageCommand());
-  program.addCommand(createBranchNameCommand());
   program.addCommand(createPrCommand(prHost));
   program.addCommand(createUsersCommand(tracker));
   program.addCommand(createAgentsCommand(() => services.installation()));
@@ -115,14 +114,24 @@ export function buildProgram(
       docOperation,
       ...localOperations.operations(),
       ...(
-        services.gitConfigOperations?.() ??
-        createFlightRules({ cwd: launchCwd }).gitConfigOperations()
+        services.gitConfigOperations?.({
+          scopes: [...configScopes],
+          roots: [parse(launchCwd).root],
+        }) ??
+        createFlightRules({ cwd: launchCwd }).gitConfigOperations({
+          scopes: [...configScopes],
+          roots: [parse(launchCwd).root],
+        })
       ).operations(),
     ],
-    policy: new LaunchOperationAccessPolicy({ allowedEffects: ["read", "process", "network"] }),
+    policy: new LaunchOperationAccessPolicy({
+      allowedEffects: ["read", "write", "process", "network"],
+    }),
   });
+  program.addCommand(createGitCommand(operationRegistry));
+  program.addCommand(createCommitMessageCommand(operationRegistry));
+  program.addCommand(createBranchNameCommand(operationRegistry));
   new CommanderLocalDiscoveryCli({
-    operations: localOperations,
     registry: operationRegistry,
   }).addTo(program);
   program.addCommand(

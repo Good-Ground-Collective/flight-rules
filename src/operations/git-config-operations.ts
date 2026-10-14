@@ -1,5 +1,5 @@
-import { existsSync, realpathSync } from "node:fs";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { existsSync, lstatSync, realpathSync } from "node:fs";
+import { dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 import { z } from "zod";
 import { branchNamer } from "../git/branch-namer/branch-namer.js";
 import { DefaultCommitMessageBuilder } from "../git/commit-message-builder/commit-message-builder.js";
@@ -78,7 +78,7 @@ export class DefaultGitConfigOperations implements GitConfigOperations {
     this.allowedScopes = new Set(this.props.configPolicy.scopes);
     const roots =
       this.props.configPolicy.roots.length === 0 ? [this.props.cwd] : this.props.configPolicy.roots;
-    this.allowedRoots = [...new Set(roots)].map((root) => realpathSync(root));
+    this.allowedRoots = [...new Set(roots)];
   }
 
   operations(): OperationDescriptor[] {
@@ -215,6 +215,7 @@ export class DefaultGitConfigOperations implements GitConfigOperations {
       );
     const path = this.props.configStore.pathFor(scope);
     const absolutePath = isAbsolute(path) ? path : resolve(this.props.cwd, path);
+    this.rejectDanglingSymlinks(absolutePath);
     let existingPath = existsSync(absolutePath) ? absolutePath : dirname(absolutePath);
     while (!existsSync(existingPath)) {
       const parent = dirname(existingPath);
@@ -228,8 +229,9 @@ export class DefaultGitConfigOperations implements GitConfigOperations {
     const target = existsSync(absolutePath)
       ? resolvedExistingPath
       : resolve(resolvedExistingPath, relative(existingPath, absolutePath));
+    const authorizedRoots = this.allowedRoots.map((root) => realpathSync(root));
     if (
-      !this.allowedRoots.some((root) => {
+      !authorizedRoots.some((root) => {
         const rel = relative(root, target);
         return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
       })
@@ -238,6 +240,26 @@ export class DefaultGitConfigOperations implements GitConfigOperations {
         `Configuration path escapes launch roots: ${path}`,
       );
     return path;
+  }
+
+  private rejectDanglingSymlinks(path: string): void {
+    const root = parse(path).root;
+    let current = root;
+    for (const part of path.slice(root.length).split(sep).filter(Boolean)) {
+      current = join(current, part);
+      try {
+        if (!lstatSync(current).isSymbolicLink()) continue;
+      } catch {
+        break;
+      }
+      try {
+        realpathSync(current);
+      } catch {
+        throw new LaunchConfigOperationDeniedError(
+          `Configuration path contains an unresolved symlink: ${path}`,
+        );
+      }
+    }
   }
 
   private async commit(input: z.infer<typeof GitCommitInputSchema>) {

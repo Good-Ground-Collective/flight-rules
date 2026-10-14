@@ -371,6 +371,18 @@ describe("local discovery operations", () => {
           status: "success",
         });
       }
+      await program.parseAsync(["config", "set", "repo", "acme/cli", "--scope", "local"], {
+        from: "user",
+      });
+      expect(output).toHaveBeenLastCalledWith(
+        expect.stringMatching(/^\{"key":"repo","scope":"local","path":.+\}\n$/),
+      );
+      await program.parseAsync(["config", "unset", "repo", "--scope", "local"], {
+        from: "user",
+      });
+      expect(output).toHaveBeenLastCalledWith(
+        expect.stringMatching(/^\{"key":"repo","scope":"local","path":.+\}\n$/),
+      );
       expect(errors).toHaveBeenCalledWith(expect.stringContaining("deprecated"));
       await expect(program.parseAsync(["check"], { from: "user" })).rejects.toMatchObject({
         name: "ReadinessFailedError",

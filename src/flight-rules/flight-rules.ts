@@ -37,6 +37,7 @@ import { DocCharterCatalog } from "../bundled-docs/charter-catalog/charter-catal
 import { GitRepositoryPaths } from "../bundled-docs/charter-catalog/repository-paths.js";
 import {
   DefaultGitConfigOperations,
+  type ConfigOperationPolicy,
   type GitConfigOperations,
 } from "../operations/git-config-operations.js";
 
@@ -55,7 +56,7 @@ export interface FlightRules {
   readiness(): RepositoryReadiness;
   docs(): DocResolver;
   localOperations(): LocalDiscoveryOperations;
-  gitConfigOperations(): GitConfigOperations;
+  gitConfigOperations(policy?: ConfigOperationPolicy): GitConfigOperations;
   /** Ariadne's Agents page reporter; reads only the `ariadne.*` keys from user and local scope, so it works without a valid tracker config. */
   board(): AriadneBoard;
   packets(): AriadnePackets;
@@ -84,7 +85,7 @@ export class DefaultFlightRules implements FlightRules {
     });
     this.cwd = resolve(parsed.cwd ?? process.cwd());
     // Keep the validated input reference: Zod clones records, hiding later environment changes.
-    this.env = props.env ?? { ...process.env };
+    this.env = props.env ?? process.env;
     this.gitEnv = { ...(props.env ?? process.env) };
     this.explicitConfigPath = parsed.configPath;
     this.hostSettings = props.hostSettings;
@@ -200,12 +201,13 @@ export class DefaultFlightRules implements FlightRules {
     return new NodeGitExecutor({ cwd: this.cwd, env: this.gitEnv });
   }
 
-  gitConfigOperations(): GitConfigOperations {
+  gitConfigOperations(policy?: ConfigOperationPolicy): GitConfigOperations {
     return new DefaultGitConfigOperations({
       cwd: this.cwd,
       configStore: this.configStore(),
       git: this.git(),
-      configPolicy: this.configWritePolicy,
+      agentEnv: this.gitEnv["AI_AGENT"],
+      configPolicy: policy ?? this.configWritePolicy,
     });
   }
 
