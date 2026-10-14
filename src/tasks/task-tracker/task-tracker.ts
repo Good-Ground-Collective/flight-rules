@@ -1,14 +1,14 @@
-import { z } from 'zod'
+import { z } from "zod";
 
-export const entitySizes = ['ticket', 'epic', 'initiative'] as const
-export type EntitySize = (typeof entitySizes)[number]
+export const entitySizes = ["ticket", "epic", "initiative"] as const;
+export type EntitySize = (typeof entitySizes)[number];
 
 export const TrackerUserSchema = z.object({
   accountId: z.string(),
   displayName: z.string(),
-})
+});
 
-export type TrackerUser = z.infer<typeof TrackerUserSchema>
+export type TrackerUser = z.infer<typeof TrackerUserSchema>;
 
 export const EntityMetadataSchema = z
   .object({
@@ -16,13 +16,13 @@ export const EntityMetadataSchema = z
     epicId: z.number().optional(),
     notes: z.string().optional(),
     /** Explicit body-format override read first by BodyFormatDetector (docs/bug-report-format.md). */
-    kind: z.enum(['bug', 'story']).optional(),
+    kind: z.enum(["bug", "story"]).optional(),
     /** Why a blocked-by edge leaves this ticket's epic, keyed by blocker id (docs/epic-boundaries.md). */
     crossEpicReasons: z.record(z.string(), z.string()).optional(),
   })
-  .passthrough()
+  .passthrough();
 
-export type EntityMetadata = z.infer<typeof EntityMetadataSchema>
+export type EntityMetadata = z.infer<typeof EntityMetadataSchema>;
 
 export const CommentSchema = z.object({
   id: z.string(),
@@ -30,7 +30,7 @@ export const CommentSchema = z.object({
   author: z.string(),
   createdAt: z.string(),
   updatedAt: z.string(),
-})
+});
 
 export const AttachmentSchema = z.object({
   id: z.string(),
@@ -38,7 +38,7 @@ export const AttachmentSchema = z.object({
   mimeType: z.string(),
   size: z.number().optional(),
   mediaUuid: z.string().optional(),
-})
+});
 
 export const TechnicalDesignSchema = z.object({
   id: z.string(),
@@ -48,11 +48,11 @@ export const TechnicalDesignSchema = z.object({
   comments: z.array(CommentSchema),
   metadata: EntityMetadataSchema.default({}),
   updatedAt: z.string(),
-})
+});
 
 export const TicketSchema = z.object({
   id: z.string(),
-  size: z.literal('ticket'),
+  size: z.literal("ticket"),
   status: z.string(),
   labels: z.array(z.string()),
   title: z.string(),
@@ -61,16 +61,16 @@ export const TicketSchema = z.object({
   assignee: z.string().nullable(),
   attachments: z.array(AttachmentSchema).default([]),
   reporter: z.string().nullable().default(null),
-  issueType: z.string().default('unknown'),
+  issueType: z.string().default("unknown"),
   blockedBy: z.array(z.string()).default([]),
   blocking: z.array(z.string()).default([]),
   metadata: EntityMetadataSchema.default({}),
   updatedAt: z.string(),
-})
+});
 
 export const EpicSchema = z.object({
   id: z.string(),
-  size: z.literal('epic'),
+  size: z.literal("epic"),
   status: z.string(),
   labels: z.array(z.string()),
   title: z.string(),
@@ -80,14 +80,14 @@ export const EpicSchema = z.object({
   tdd: TechnicalDesignSchema.optional(),
   metadata: EntityMetadataSchema.default({}),
   updatedAt: z.string(),
-})
+});
 
 export const CreateEpicInputSchema = z.object({
   title: z.string(),
   body: z.string(),
   labels: z.array(z.string()).default([]),
   metadata: EntityMetadataSchema.partial().optional(),
-})
+});
 
 export const CreateTicketInputSchema = z.object({
   title: z.string(),
@@ -97,14 +97,14 @@ export const CreateTicketInputSchema = z.object({
   labels: z.array(z.string()).default([]),
   assignee: z.string().optional(),
   metadata: EntityMetadataSchema.partial().optional(),
-})
+});
 
 export const CreateTechnicalDesignInputSchema = z.object({
   title: z.string(),
   body: z.string(),
   epicId: z.string(),
   metadata: EntityMetadataSchema.partial().optional(),
-})
+});
 
 /**
  * A body-replacing edit. `body` is required (an edit always rewrites the
@@ -116,73 +116,100 @@ export const UpdateEpicInputSchema = z.object({
   body: z.string(),
   title: z.string().optional(),
   labels: z.array(z.string()).optional(),
-})
+});
 
 export const UpdateTicketInputSchema = z.object({
   body: z.string(),
   title: z.string().optional(),
   labels: z.array(z.string()).optional(),
-})
+});
 
 export const UpdateInitiativeInputSchema = z.object({
   body: z.string(),
   title: z.string().optional(),
-})
+});
 
 export const InitiativeSchema = z.object({
   id: z.string(),
-  size: z.literal('initiative'),
+  size: z.literal("initiative"),
   title: z.string(),
   body: z.string(),
   epics: z.array(z.object({ id: z.string(), title: z.string() })).default([]),
-})
+});
 
 export const CreateInitiativeInputSchema = z.object({
   title: z.string(),
   body: z.string(),
-})
+});
 
-export type Comment = z.infer<typeof CommentSchema>
-export type Attachment = z.infer<typeof AttachmentSchema>
-export type TechnicalDesign = z.infer<typeof TechnicalDesignSchema>
-export type Ticket = z.infer<typeof TicketSchema>
-export type Epic = z.infer<typeof EpicSchema>
-export type CreateEpicInput = z.infer<typeof CreateEpicInputSchema>
-export type CreateTicketInput = z.infer<typeof CreateTicketInputSchema>
-export type CreateTechnicalDesignInput = z.infer<typeof CreateTechnicalDesignInputSchema>
-export type Initiative = z.infer<typeof InitiativeSchema>
-export type CreateInitiativeInput = z.infer<typeof CreateInitiativeInputSchema>
-export type UpdateEpicInput = z.infer<typeof UpdateEpicInputSchema>
-export type UpdateTicketInput = z.infer<typeof UpdateTicketInputSchema>
-export type UpdateInitiativeInput = z.infer<typeof UpdateInitiativeInputSchema>
+export type Comment = z.infer<typeof CommentSchema>;
+export type Attachment = z.infer<typeof AttachmentSchema>;
+export type TechnicalDesign = z.infer<typeof TechnicalDesignSchema>;
+export type Ticket = z.infer<typeof TicketSchema>;
+export type Epic = z.infer<typeof EpicSchema>;
+export type CreateEpicInput = z.infer<typeof CreateEpicInputSchema>;
+export type CreateTicketInput = z.infer<typeof CreateTicketInputSchema>;
+export type CreateTechnicalDesignInput = z.infer<typeof CreateTechnicalDesignInputSchema>;
+export type Initiative = z.infer<typeof InitiativeSchema>;
+export type CreateInitiativeInput = z.infer<typeof CreateInitiativeInputSchema>;
+export type UpdateEpicInput = z.infer<typeof UpdateEpicInputSchema>;
+export type UpdateTicketInput = z.infer<typeof UpdateTicketInputSchema>;
+export type UpdateInitiativeInput = z.infer<typeof UpdateInitiativeInputSchema>;
+
+const partialWriteErrorSchema = z.object({
+  name: z.literal("TaskTrackerPartialWriteError"),
+  id: z.string().min(1),
+  message: z.string(),
+});
+
+/** A tracker write completed, but a follow-up step failed; callers can reconcile by id. */
+export class TaskTrackerPartialWriteError extends Error {
+  override name = "TaskTrackerPartialWriteError";
+  readonly id: string;
+
+  constructor(props: { id: string; cause: unknown }) {
+    super(props.cause instanceof Error ? props.cause.message : String(props.cause), {
+      cause: props.cause,
+    });
+    this.id = props.id;
+  }
+
+  /** Recognizes adapter failures across independently bundled package entry points. */
+  static isPartialWrite(error: unknown): error is TaskTrackerPartialWriteError {
+    return error instanceof Error && partialWriteErrorSchema.safeParse(error).success;
+  }
+}
 
 export interface TaskTracker {
-  createEpic(input: CreateEpicInput): Promise<Epic>
-  getEpic(id: string): Promise<Epic>
-  createTicket(input: CreateTicketInput): Promise<Ticket>
-  getTicket(id: string): Promise<Ticket>
-  linkTicketToEpic(ticketId: string, epicId: string): Promise<void>
+  createEpic(input: CreateEpicInput): Promise<Epic>;
+  getEpic(id: string): Promise<Epic>;
+  createTicket(input: CreateTicketInput): Promise<Ticket>;
+  getTicket(id: string): Promise<Ticket>;
+  linkTicketToEpic(ticketId: string, epicId: string): Promise<void>;
   /** The ticket's parent epic id, or null when the ticket has no parent. */
-  getTicketEpicId(ticketId: string): Promise<string | null>
-  blockTicket(ticketId: string, blockedById: string): Promise<void>
-  unblockTicket(ticketId: string, blockedById: string): Promise<void>
-  transitionTicket(ticketId: string, status: string): Promise<void>
-  listTransitions(ticketId: string): Promise<string[]>
-  addLabel(ticketId: string, label: string): Promise<void>
-  removeLabel(ticketId: string, label: string): Promise<void>
-  updateEpicMetadata(epicId: string, patch: Partial<EntityMetadata>): Promise<void>
-  updateTicketMetadata(ticketId: string, patch: Partial<EntityMetadata>): Promise<void>
-  updateTddMetadata(tddId: string, patch: Partial<EntityMetadata>): Promise<void>
-  updateEpicDescription(epicId: string, input: UpdateEpicInput): Promise<Epic>
-  updateTicketDescription(ticketId: string, input: UpdateTicketInput): Promise<Ticket>
-  updateInitiativeDescription(initiativeId: string, input: UpdateInitiativeInput): Promise<Initiative>
-  createInitiative(input: CreateInitiativeInput): Promise<Initiative>
-  getInitiative(id: string): Promise<Initiative>
-  linkEpicToInitiative(epicId: string, initiativeId: string): Promise<void>
-  createTechnicalDesign(input: CreateTechnicalDesignInput): Promise<TechnicalDesign>
-  getTechnicalDesign(id: string): Promise<TechnicalDesign>
-  addComment(entityId: string, body: string): Promise<Comment>
-  addAttachment(ticketId: string, filePath: string): Promise<Attachment>
-  getUsers(): Promise<TrackerUser[]>
-  ping(options?: { signal?: AbortSignal }): Promise<void>
+  getTicketEpicId(ticketId: string): Promise<string | null>;
+  blockTicket(ticketId: string, blockedById: string): Promise<void>;
+  unblockTicket(ticketId: string, blockedById: string): Promise<void>;
+  transitionTicket(ticketId: string, status: string): Promise<void>;
+  listTransitions(ticketId: string): Promise<string[]>;
+  addLabel(ticketId: string, label: string): Promise<void>;
+  removeLabel(ticketId: string, label: string): Promise<void>;
+  updateEpicMetadata(epicId: string, patch: Partial<EntityMetadata>): Promise<void>;
+  updateTicketMetadata(ticketId: string, patch: Partial<EntityMetadata>): Promise<void>;
+  updateTddMetadata(tddId: string, patch: Partial<EntityMetadata>): Promise<void>;
+  updateEpicDescription(epicId: string, input: UpdateEpicInput): Promise<Epic>;
+  updateTicketDescription(ticketId: string, input: UpdateTicketInput): Promise<Ticket>;
+  updateInitiativeDescription(
+    initiativeId: string,
+    input: UpdateInitiativeInput,
+  ): Promise<Initiative>;
+  createInitiative(input: CreateInitiativeInput): Promise<Initiative>;
+  getInitiative(id: string): Promise<Initiative>;
+  linkEpicToInitiative(epicId: string, initiativeId: string): Promise<void>;
+  createTechnicalDesign(input: CreateTechnicalDesignInput): Promise<TechnicalDesign>;
+  getTechnicalDesign(id: string): Promise<TechnicalDesign>;
+  addComment(entityId: string, body: string): Promise<Comment>;
+  addAttachment(ticketId: string, filePath: string): Promise<Attachment>;
+  getUsers(): Promise<TrackerUser[]>;
+  ping(options?: { signal?: AbortSignal }): Promise<void>;
 }

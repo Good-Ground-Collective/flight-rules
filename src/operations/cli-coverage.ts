@@ -182,14 +182,6 @@ export class ManifestCliRouteCoverage implements CliRouteCoverage {
 }
 
 const pendingRoutes = [
-  "tdd create",
-  "epic create",
-  "epic edit",
-  "epic link-initiative",
-  "initiative create",
-  "initiative edit",
-  "ticket create",
-  "ticket edit",
   "ticket block",
   "ticket unblock",
   "ticket status",
@@ -256,6 +248,14 @@ export const cliRouteCoverage: CliRouteCoverage = new ManifestCliRouteCoverage({
   entries: [
     { status: "supported", route: { path: ["doc"], aliases: [] }, operationId: "doc" },
     ...[
+      ["tdd create", "tdd-create"],
+      ["epic create", "epic-create"],
+      ["epic edit", "epic-edit"],
+      ["epic link-initiative", "epic-link-initiative"],
+      ["initiative create", "initiative-create"],
+      ["initiative edit", "initiative-edit"],
+      ["ticket create", "ticket-create"],
+      ["ticket edit", "ticket-edit"],
       ["ticket get", "ticket-get"],
       ["ticket transitions", "ticket-transitions"],
       ["users get", "users-get"],

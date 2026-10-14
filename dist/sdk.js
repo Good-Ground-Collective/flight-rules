@@ -1,4 +1,4 @@
-// src/sdk/instruction-catalog.ts
+// src/sdk/instruction-catalog-core.ts
 import { existsSync, readFileSync as readFileSync2, readdirSync as readdirSync2, realpathSync, statSync } from "node:fs";
 import { basename as basename2, dirname, isAbsolute, join as join2, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -111,7 +111,7 @@ var FileAgentRegistry = class {
   }
 };
 
-// src/sdk/instruction-catalog.ts
+// src/sdk/instruction-catalog-core.ts
 var CatalogPropsSchema = z3.strictObject({
   moduleUrl: z3.string().min(1),
   env: z3.record(z3.string(), z3.string().optional())
@@ -203,6 +203,8 @@ var FileInstructionCatalog = class {
     return realPath;
   }
 };
+
+// src/sdk/instruction-catalog.ts
 var instructionCatalog = new FileInstructionCatalog({
   moduleUrl: import.meta.url,
   env: process.env
@@ -1871,6 +1873,11 @@ var pendingRoutes = [
   "packet reviewers"
 ];
 var excludedRoutes = [
+  {
+    path: ["mcp"],
+    aliases: [],
+    reason: "Starts a local stdio transport whose operations are registered from the shared catalog."
+  },
   {
     path: ["hook", "pre-bash"],
     aliases: ["guard-commit"],

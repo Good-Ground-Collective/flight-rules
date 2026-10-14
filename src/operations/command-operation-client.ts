@@ -26,6 +26,7 @@ export class RegistryCommandOperationClient implements CommandOperationClient {
         operationId: id,
         errorName: result.error.name,
         message: result.error.message,
+        ...(result.status === "partial" ? { partialData: result.data } : {}),
       });
     }
     return outputSchema.parse(result.data);
