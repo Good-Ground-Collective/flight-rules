@@ -15772,7 +15772,7 @@ var recursive = /* @__PURE__ */ new WeakMap();
 var NONE = 0;
 var ASSUMED = 1;
 var PROVEN = 2;
-function isRecursive(inst, stack, resolve7) {
+function isRecursive(inst, stack, resolve8) {
   const cached2 = recursive.get(inst);
   if (cached2 !== void 0)
     return cached2 ? PROVEN : NONE;
@@ -15782,7 +15782,7 @@ function isRecursive(inst, stack, resolve7) {
   let result = NONE;
   const check2 = (child) => {
     if (result !== PROVEN && child?._zod) {
-      const answer = isRecursive(child, stack, resolve7);
+      const answer = isRecursive(child, stack, resolve8);
       if (answer > result)
         result = answer;
     }
@@ -15793,7 +15793,7 @@ function isRecursive(inst, stack, resolve7) {
       const desc = Object.getOwnPropertyDescriptor(sh, key);
       if (spread && !desc.enumerable)
         continue;
-      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve7) : NONE;
+      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve8) : NONE;
       if (child > answer)
         answer = child;
     }
@@ -15860,7 +15860,7 @@ function isRecursive(inst, stack, resolve7) {
       break;
     // `$ZodLazy` caches its inner on the def, so a resolved edge is followed exactly
     case "lazy": {
-      const inner = def._cachedInner ?? (resolve7 ? inst._zod.innerType : void 0);
+      const inner = def._cachedInner ?? (resolve8 ? inst._zod.innerType : void 0);
       merge3(inner ? isRecursive(inner, stack, false) : ASSUMED);
       break;
     }
@@ -31653,7 +31653,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.82.0";
+var appVersion = false ? "0.0.0-dev" : "1.85.0";
 
 // src/shared/ariadne/review-packet.schema.ts
 var packetLimits = {
@@ -37607,7 +37607,7 @@ var JiraClient = class {
       const retryAfterSeconds = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : defaultRetryAfterSeconds;
       const jitter = 0.7 + Math.random() * 0.6;
       const delayMs = Math.min(retryAfterSeconds * 1e3 * jitter, maxBackoffMs);
-      await new Promise((resolve7) => setTimeout(resolve7, delayMs));
+      await new Promise((resolve8) => setTimeout(resolve8, delayMs));
       return this.fetchWithRetry(url2, init, attempt + 1);
     }
     return res;
@@ -37659,7 +37659,7 @@ var ConfluenceClient = class {
       const retryAfterSeconds = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : defaultRetryAfterSeconds2;
       const jitter = 0.7 + Math.random() * 0.6;
       const delayMs = Math.min(retryAfterSeconds * 1e3 * jitter, maxBackoffMs2);
-      await new Promise((resolve7) => setTimeout(resolve7, delayMs));
+      await new Promise((resolve8) => setTimeout(resolve8, delayMs));
       return this.fetchWithRetry(url2, init, attempt + 1);
     }
     return res;
@@ -40267,10 +40267,10 @@ function resolveAll(constructs2, events, context) {
   const called = [];
   let index2 = -1;
   while (++index2 < constructs2.length) {
-    const resolve7 = constructs2[index2].resolveAll;
-    if (resolve7 && !called.includes(resolve7)) {
-      events = resolve7(events, context);
-      called.push(resolve7);
+    const resolve8 = constructs2[index2].resolveAll;
+    if (resolve8 && !called.includes(resolve8)) {
+      events = resolve8(events, context);
+      called.push(resolve8);
     }
   }
   return events;
@@ -48988,6 +48988,1460 @@ var FlightRulesPropsSchema = external_exports.object({
   host: NativeHostSchema.optional().describe("Explicit configuration host; otherwise FLIGHT_RULES_HOST, the native package host, or Claude for compatibility")
 });
 
+// src/operations/local-discovery-operations.ts
+import { readdirSync as readdirSync4 } from "node:fs";
+import { resolve as resolve6 } from "node:path";
+
+// src/tasks/qa-instructions/qa-instructions.ts
+import { existsSync as existsSync10, readFileSync as readFileSync10, statSync as statSync4 } from "node:fs";
+import { dirname as dirname10, join as join11, resolve as resolve5 } from "node:path";
+var atxHeading = /^ {0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$/;
+var fenceRun = /^ {0,3}(`{3,}|~{3,})/;
+var legacyHint = 'Legacy QA recipe in use. Move its content into a QA.md at the repo root (or a "QA" section of AGENTS.md); see docs/qa-instructions.md.';
+var nodeFileSystem = {
+  isFile: (path3) => existsSync10(path3) && statSync4(path3).isFile(),
+  exists: (path3) => existsSync10(path3),
+  readFile: (path3) => readFileSync10(path3, "utf8")
+};
+var QaInstructionsFinder = class {
+  fs;
+  constructor(props = {}) {
+    this.fs = props.fs ?? nodeFileSystem;
+  }
+  discover(input2) {
+    const sources = this.levels(input2.from).map((dir) => this.sourceAt(dir)).filter((source) => source !== void 0);
+    if (sources.length > 0) return { found: true, sources };
+    const legacy = this.legacySource(input2.legacyRecipePath);
+    if (legacy !== void 0) return { found: true, sources: [legacy] };
+    return { found: false, sources: [] };
+  }
+  /**
+   * Extracts the body of the first heading whose text is exactly "QA" (any
+   * case, any level), up to the next heading of the same or a higher level.
+   * Headings inside fenced code blocks are ignored. Returns undefined when the
+   * section is absent or empty.
+   */
+  extractQaSection(markdown) {
+    const lines = markdown.split("\n");
+    let openFence = null;
+    let sectionLevel = null;
+    const body = [];
+    for (const line of lines) {
+      const fence = fenceRun.exec(line)?.[1];
+      if (fence !== void 0) {
+        if (openFence === null) openFence = fence;
+        else if (fence[0] === openFence[0] && fence.length >= openFence.length) openFence = null;
+        if (sectionLevel !== null) body.push(line);
+        continue;
+      }
+      const heading = openFence === null ? atxHeading.exec(line) : null;
+      if (heading !== null) {
+        const level = heading[1]?.length ?? 0;
+        if (sectionLevel !== null && level <= sectionLevel) break;
+        if (sectionLevel === null && (heading[2] ?? "").trim().toLowerCase() === "qa") {
+          sectionLevel = level;
+          continue;
+        }
+      }
+      if (sectionLevel !== null) body.push(line);
+    }
+    const content3 = body.join("\n").trim();
+    return content3.length > 0 ? content3 : void 0;
+  }
+  /** The start directory and each parent up to the repository root; only the start when no root is found. */
+  levels(from) {
+    const absolute = resolve5(from);
+    const start = this.fs.isFile(absolute) ? dirname10(absolute) : absolute;
+    const levels = [];
+    let current = start;
+    for (; ; ) {
+      levels.push(current);
+      if (this.fs.exists(join11(current, ".git"))) return levels;
+      const parent = dirname10(current);
+      if (parent === current) return [start];
+      current = parent;
+    }
+  }
+  sourceAt(dir) {
+    const agentsMd = join11(dir, "AGENTS.md");
+    if (this.fs.isFile(agentsMd)) {
+      const section = this.extractQaSection(this.fs.readFile(agentsMd));
+      if (section !== void 0)
+        return { path: agentsMd, kind: "agents-md-section", dir, content: section };
+    }
+    return this.fileSource(join11(dir, "QA.md"), "qa-md", dir) ?? this.fileSource(join11(dir, ".agents", "QA.md"), "agents-dir-qa-md", dir);
+  }
+  fileSource(path3, kind, dir) {
+    if (!this.fs.isFile(path3)) return void 0;
+    const content3 = this.fs.readFile(path3).trim();
+    return content3.length > 0 ? { path: path3, kind, dir, content: content3 } : void 0;
+  }
+  legacySource(path3) {
+    if (path3 === void 0) return void 0;
+    const source = this.fileSource(path3, "legacy-recipe", dirname10(path3));
+    return source === void 0 ? void 0 : { ...source, legacy: true, hint: legacyHint };
+  }
+};
+
+// src/operations/local-discovery-operations.ts
+var QaSourceSchema = external_exports.object({
+  path: external_exports.string(),
+  kind: external_exports.enum(["agents-md-section", "qa-md", "agents-dir-qa-md", "legacy-recipe"]),
+  dir: external_exports.string(),
+  content: external_exports.string(),
+  legacy: external_exports.literal(true).optional(),
+  hint: external_exports.string().optional()
+});
+var QaInstructionsSchema = external_exports.object({ found: external_exports.boolean(), sources: external_exports.array(QaSourceSchema) });
+var ReadinessCheckSchema = external_exports.object({
+  name: external_exports.string(),
+  ok: external_exports.boolean(),
+  detail: external_exports.string(),
+  required: external_exports.boolean().optional(),
+  code: external_exports.string().optional(),
+  remedy: external_exports.string().optional()
+});
+var ReadinessReportSchema = external_exports.object({
+  tracker: external_exports.string().nullable(),
+  repo: external_exports.string().nullable().optional(),
+  checks: external_exports.array(ReadinessCheckSchema),
+  ok: external_exports.boolean(),
+  workflow: WorkflowSchema.optional(),
+  scope: external_exports.enum(["environment", "workflow"])
+});
+var ConfigInspectionSchema = external_exports.object({
+  host: external_exports.string(),
+  valid: external_exports.boolean(),
+  error: external_exports.string().optional(),
+  values: external_exports.record(external_exports.string(), external_exports.unknown()),
+  sources: external_exports.record(
+    external_exports.string(),
+    external_exports.object({ scope: external_exports.enum(["user", "project", "local", "file"]), path: external_exports.string() })
+  ),
+  layers: external_exports.array(
+    external_exports.object({
+      scope: external_exports.enum(["user", "project", "local", "file"]),
+      path: external_exports.string(),
+      present: external_exports.boolean()
+    })
+  )
+});
+var CharterInputSchema = external_exports.object({
+  paths: external_exports.array(external_exports.string()).optional(),
+  diff: external_exports.string().optional(),
+  repository: external_exports.boolean().default(false),
+  pathOutput: external_exports.boolean().default(false)
+}).strict().refine(
+  (input2) => Number(input2.paths !== void 0 && input2.paths.length > 0) + Number(input2.diff !== void 0) + Number(input2.repository) <= 1,
+  "Choose one charter selection source"
+);
+var QaInstructionsInputSchema = external_exports.object({ from: external_exports.string().optional() }).strict();
+var RfcDirectoryOutputSchema = external_exports.object({ path: external_exports.string() });
+var RfcNextIdOutputSchema = external_exports.object({
+  id: external_exports.string().regex(/^RFC-\d+$/),
+  directory: external_exports.string()
+});
+var QaRecipeOutputSchema = external_exports.object({ path: external_exports.string() });
+var EvidenceDirectoryOutputSchema = external_exports.object({
+  path: external_exports.string(),
+  gitignored: external_exports.boolean().nullable()
+});
+var rfcIdPattern = /^RFC-(\d+)\.md$/;
+var LocalDiscoveryPropsSchema = external_exports.object({
+  cwd: external_exports.string().min(1),
+  getConfig: external_exports.custom((value) => typeof value === "function"),
+  getConfigStore: external_exports.custom((value) => typeof value === "function"),
+  getCharters: external_exports.custom((value) => typeof value === "function"),
+  getRepositoryPaths: external_exports.custom((value) => typeof value === "function"),
+  getEvidence: external_exports.custom((value) => typeof value === "function"),
+  getReadiness: external_exports.custom((value) => typeof value === "function"),
+  getProbe: external_exports.custom((value) => typeof value === "function"),
+  getTracker: external_exports.custom((value) => typeof value === "function"),
+  getConfigPath: external_exports.custom((value) => typeof value === "function"),
+  getQaFinder: external_exports.custom((value) => typeof value === "function").optional()
+});
+var DefaultLocalDiscoveryOperations = class {
+  props;
+  constructor(props) {
+    this.props = LocalDiscoveryPropsSchema.parse(props);
+  }
+  operations() {
+    return [
+      this.descriptor(
+        "charter",
+        "Print the core and applicable language charters.",
+        ["read", "process"],
+        ["charter"],
+        CharterInputSchema,
+        external_exports.object({
+          charters: external_exports.array(
+            external_exports.object({ path: external_exports.string(), contents: external_exports.string(), language: external_exports.string().nullable() })
+          ),
+          unmatched: external_exports.boolean()
+        }),
+        (input2) => this.charter(input2)
+      ),
+      this.descriptor(
+        "competencies",
+        "Read the configured worker competencies.",
+        ["read", "process"],
+        ["competencies"],
+        external_exports.object({}),
+        external_exports.array(external_exports.string()),
+        () => this.props.getConfig().competencies
+      ),
+      this.descriptor(
+        "rfc-dir",
+        "Resolve the RFC directory for this checkout.",
+        ["read", "process"],
+        ["rfc", "dir"],
+        external_exports.object({}),
+        RfcDirectoryOutputSchema,
+        () => ({ path: getRfcDir(this.props.getConfig(), this.props.cwd) })
+      ),
+      this.descriptor(
+        "rfc-next-id",
+        "Find the next RFC number in the configured RFC directory.",
+        ["read", "process"],
+        ["rfc", "next-id"],
+        external_exports.object({}),
+        RfcNextIdOutputSchema,
+        () => this.nextRfcId()
+      ),
+      this.descriptor(
+        "qa-instructions",
+        "Find QA instructions that apply to a directory.",
+        ["read", "process"],
+        ["qa", "instructions"],
+        QaInstructionsInputSchema,
+        QaInstructionsSchema,
+        (input2) => this.qaInstructions(input2)
+      ),
+      this.descriptor(
+        "qa-evidence-dir",
+        "Resolve the persistent evidence directory for a ticket.",
+        ["read", "process"],
+        ["qa", "evidence-dir"],
+        external_exports.object({ ticket: external_exports.string().min(1) }),
+        EvidenceDirectoryOutputSchema,
+        (input2) => this.props.getEvidence().dirFor(input2.ticket)
+      ),
+      this.descriptor(
+        "qa-recipe",
+        "Resolve the nearest QA instruction path (deprecated CLI route).",
+        ["read", "process"],
+        ["qa", "recipe"],
+        external_exports.object({}),
+        QaRecipeOutputSchema,
+        () => this.qaRecipe()
+      ),
+      this.descriptor(
+        "config-path",
+        "Resolve the config file path for this checkout.",
+        ["read", "process"],
+        ["config", "path"],
+        external_exports.object({}),
+        external_exports.object({ path: external_exports.string() }),
+        () => ({ path: this.props.getConfigStore().filePath() })
+      ),
+      this.descriptor(
+        "config-show",
+        "Inspect merged configuration and its sources.",
+        ["read", "process"],
+        ["config", "show"],
+        external_exports.object({}),
+        ConfigInspectionSchema,
+        () => this.props.getConfigStore().inspect()
+      ),
+      this.descriptor(
+        "check",
+        "Check local configuration, tools, and optional workflow readiness.",
+        ["read", "process", "network"],
+        ["check"],
+        ReadinessOptionsSchema,
+        ReadinessReportSchema,
+        (input2) => this.check(input2)
+      )
+    ];
+  }
+  configStore() {
+    return this.props.getConfigStore();
+  }
+  descriptor(id, description, effects, path3, inputSchema, outputSchema, handler2) {
+    return {
+      id,
+      description,
+      effects,
+      cli: { path: path3, aliases: [] },
+      inputSchema,
+      outputSchema,
+      handler: handler2
+    };
+  }
+  async charter(input2) {
+    let paths = input2.paths ?? [];
+    if (input2.diff !== void 0)
+      paths = await this.props.getRepositoryPaths().changedSince(input2.diff);
+    else if (input2.repository || input2.paths === void 0)
+      paths = await this.props.getRepositoryPaths().inventory();
+    const selected = this.props.getCharters().select(paths);
+    return {
+      charters: selected.map(({ path: path3, contents, language }) => ({ path: path3, contents, language })),
+      unmatched: selected.every((charter) => charter.language === null)
+    };
+  }
+  nextRfcId() {
+    const directory = getRfcDir(this.props.getConfig(), this.props.cwd);
+    let files;
+    try {
+      files = readdirSync4(directory);
+    } catch {
+      return { id: "RFC-001", directory };
+    }
+    const ids = files.map((file2) => file2.match(rfcIdPattern)).filter((match) => match !== null).map((match) => Number(match[1] ?? 0));
+    return {
+      id: `RFC-${String(ids.length === 0 ? 1 : Math.max(...ids) + 1).padStart(3, "0")}`,
+      directory
+    };
+  }
+  qaInstructions(input2) {
+    const config2 = this.safeConfig();
+    if (config2?.qaRecipe !== void 0 && config2.qaRecipe.trim() === "")
+      throw new BlankQaRecipeError(
+        "qaRecipe is set to a blank value \u2014 remove the key and move the recipe into a QA.md (see docs/qa-instructions.md)"
+      );
+    return (this.props.getQaFinder?.() ?? new QaInstructionsFinder()).discover({
+      from: input2.from === void 0 ? this.props.cwd : resolve6(this.props.cwd, input2.from),
+      ...config2 === void 0 ? {} : { legacyRecipePath: getQaRecipePath(config2, this.props.getConfigPath()) }
+    });
+  }
+  qaRecipe() {
+    const result = this.qaInstructions({});
+    const nearest = result.sources[0];
+    if (nearest === void 0)
+      throw new QaInstructionsNotFoundError(
+        "No QA instructions found \u2014 add a QA.md at the repo root or a QA section in AGENTS.md (see docs/qa-instructions.md)"
+      );
+    return { path: nearest.path };
+  }
+  check(input2) {
+    return this.props.getReadiness().inspect({
+      config: this.props.getConfig,
+      tracker: this.props.getTracker,
+      configPath: this.props.getConfigPath,
+      probe: this.props.getProbe(),
+      finder: this.props.getQaFinder?.() ?? new QaInstructionsFinder(),
+      options: input2
+    });
+  }
+  safeConfig() {
+    try {
+      return this.props.getConfig();
+    } catch {
+      return void 0;
+    }
+  }
+};
+var QaInstructionsNotFoundError = class extends Error {
+  name = "QaInstructionsNotFoundError";
+};
+var BlankQaRecipeError = class extends Error {
+  name = "BlankQaRecipeError";
+};
+
+// src/bundled-docs/charter-catalog/charter-catalog.ts
+var import_yaml3 = __toESM(require_dist(), 1);
+import { matchesGlob } from "node:path";
+var coreCharterId = "coding-charter";
+var languageCharterPrefix = `${coreCharterId}-`;
+var LanguageFrontmatterSchema = external_exports.strictObject({
+  language: external_exports.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+  "applies-to": external_exports.array(external_exports.string().min(1)).min(1)
+}).transform(({ language, "applies-to": appliesTo }) => ({ language, appliesTo }));
+var FrontmatterSchema = external_exports.string().transform((contents, ctx) => {
+  const block = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/.exec(contents)?.[1];
+  if (block === void 0) {
+    ctx.addIssue({ code: "custom", message: "missing YAML frontmatter" });
+    return external_exports.NEVER;
+  }
+  return (0, import_yaml3.parse)(block);
+}).pipe(LanguageFrontmatterSchema);
+var DocCharterCatalog = class {
+  docs;
+  constructor(props) {
+    this.docs = props.docs;
+  }
+  all() {
+    const core = this.docs.resolve(coreCharterId);
+    const languages = this.docs.list().filter((id) => id.startsWith(languageCharterPrefix)).map((id) => this.languageCharter(this.docs.resolve(id)));
+    return [
+      { id: core.id, language: null, appliesTo: [], tierA: this.tierA(core.contents), path: core.path, contents: core.contents },
+      ...languages
+    ];
+  }
+  select(paths) {
+    const normalized = paths.map((path3) => path3.trim().replace(/^\.\//, "")).filter((path3) => path3.length > 0);
+    return this.all().filter(
+      (charter) => charter.language === null || normalized.some((path3) => charter.appliesTo.some((glob) => matchesGlob(path3, glob)))
+    );
+  }
+  languageCharter(doc) {
+    const parsed = FrontmatterSchema.safeParse(doc.contents);
+    if (!parsed.success) {
+      throw new CharterFormatError(`Charter "${doc.id}" has invalid frontmatter: ${external_exports.prettifyError(parsed.error)}`);
+    }
+    const expectedId = `${languageCharterPrefix}${parsed.data.language}`;
+    if (doc.id !== expectedId) {
+      throw new CharterFormatError(`Charter "${doc.id}" declares language "${parsed.data.language}"; its file must be ${expectedId}.md`);
+    }
+    return { id: doc.id, ...parsed.data, tierA: this.tierA(doc.contents), path: doc.path, contents: doc.contents };
+  }
+  tierA(contents) {
+    const tiers = contents.split(/^## Review tiers\r?$/m)[1]?.split(/^## /m)[0] ?? "";
+    const table = tiers.split(/^\*\*Tier B/m)[0] ?? "";
+    return [...new Set([...table.matchAll(/^\|\s*([A-Z]+-\d+)\b/gm)].flatMap((match) => match[1] ?? []))];
+  }
+};
+var CharterFormatError = class extends Error {
+  name = "CharterFormatError";
+};
+
+// src/bundled-docs/charter-catalog/repository-paths.ts
+import { execFile as execFile5 } from "node:child_process";
+import { promisify as promisify5 } from "node:util";
+var run = promisify5(execFile5);
+var BaseRefSchema = external_exports.string().regex(/^[^\s-]\S*$/, 'base must be a git ref or commit, and cannot start with "-"');
+var GitRepositoryPathsPropsSchema = external_exports.object({ cwd: external_exports.string().min(1) });
+var GitRepositoryPaths = class {
+  cwd;
+  constructor(props) {
+    this.cwd = GitRepositoryPathsPropsSchema.parse(props).cwd;
+  }
+  async inventory() {
+    const root = await this.root();
+    return this.paths(root, ["ls-files", "-z", "--cached", "--others", "--exclude-standard"]);
+  }
+  async changedSince(base) {
+    const ref = BaseRefSchema.parse(base);
+    const root = await this.root();
+    const mergeBase = (await this.git(root, ["merge-base", ref, "HEAD"])).trim();
+    if (mergeBase.length === 0) throw new RepositoryPathsError(`No merge base between ${ref} and HEAD`);
+    const changed = await this.paths(root, ["diff", "-z", "--name-only", mergeBase]);
+    const untracked = await this.paths(root, ["ls-files", "-z", "--others", "--exclude-standard"]);
+    return [.../* @__PURE__ */ new Set([...changed, ...untracked])];
+  }
+  // Path queries run from the top level so the result never depends on which subdirectory the caller is in.
+  async root() {
+    return (await this.git(this.cwd, ["rev-parse", "--show-toplevel"])).replace(/\r?\n$/, "");
+  }
+  // NUL-delimited output keeps paths verbatim; newline output quotes non-ASCII and special characters.
+  async paths(root, args) {
+    return (await this.git(root, args)).split("\0").filter((path3) => path3.length > 0);
+  }
+  async git(cwd, args) {
+    try {
+      const { stdout } = await run("git", args, { cwd, maxBuffer: 64 * 1024 * 1024 });
+      return stdout;
+    } catch (cause) {
+      throw new RepositoryPathsError(`git ${args[0]} failed in ${cwd}`, { cause });
+    }
+  }
+};
+var RepositoryPathsError = class extends Error {
+  name = "RepositoryPathsError";
+};
+
+// src/code-review/review-policy.ts
+import { execFileSync as execFileSync3 } from "node:child_process";
+import { readFileSync as readFileSync11, realpathSync as realpathSync3 } from "node:fs";
+import { dirname as dirname11, join as join12, relative as relative2 } from "node:path";
+import { fileURLToPath as fileURLToPath3 } from "node:url";
+
+// src/code-review/review.schema.ts
+var reviewContractVersion = 1;
+var reviewSchemaRevision = 1;
+var ReviewOutcomeSchema = external_exports.enum(["APPROVED", "CHANGES_NEEDED", "ESCALATE", "INCOMPLETE"]);
+var FindingIdSchema = external_exports.string().regex(/^f-[a-f0-9]{10}$/);
+var HeadShaSchema2 = external_exports.string().regex(/^[a-f0-9]{40}$/);
+var ReviewPathSchema = external_exports.string().max(400).regex(/^(?!\/)(?!.*\\)(?!.*(?:^|\/)\.{1,2}(?:\/|$))[^\p{Cc}]*$/u);
+var TextSchema = external_exports.string().min(1).max(16e3);
+var LineTextSchema = external_exports.string().min(1).max(400).regex(/^[^\r\n]+$/);
+var PositiveIdSchema = external_exports.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+var HttpsUrlSchema = external_exports.url().regex(/^https:\/\//);
+var CategorySchema = external_exports.enum([
+  "security",
+  "correctness",
+  "data",
+  "deployment",
+  "design",
+  "testing",
+  "performance",
+  "readability",
+  "docs"
+]);
+var ActionLabelSchema = external_exports.enum([
+  "issue",
+  "todo",
+  "suggestion",
+  "question",
+  "chore",
+  "nitpick",
+  "typo",
+  "polish"
+]);
+var InformationLabelSchema = external_exports.enum(["praise", "note", "thought"]);
+var SeveritySchema = external_exports.enum(["critical", "major", "minor", "trivial"]);
+var DecisionOptionsSchema = external_exports.array(
+  external_exports.strictObject({ id: external_exports.string().regex(/^[a-z][a-z0-9-]{0,79}$/), description: TextSchema })
+).min(2);
+var findingFields = {
+  path: ReviewPathSchema,
+  line: external_exports.number().int().nonnegative(),
+  start_line: external_exports.number().int().positive().optional(),
+  category: CategorySchema.optional(),
+  subject: LineTextSchema,
+  discussion: TextSchema,
+  related_finding_id: FindingIdSchema.optional()
+};
+var actionFields = {
+  ...findingFields,
+  label: ActionLabelSchema,
+  type: external_exports.enum(["fix", "clarify"]),
+  blocking: external_exports.boolean(),
+  severity: SeveritySchema,
+  details: TextSchema,
+  resolved_when: TextSchema
+};
+var decisionFields = {
+  ...actionFields,
+  type: external_exports.literal("decide"),
+  decision_owner: LineTextSchema,
+  decision_options: DecisionOptionsSchema
+};
+var informationFields = {
+  ...findingFields,
+  label: InformationLabelSchema,
+  blocking: external_exports.literal(false),
+  details: TextSchema.optional()
+};
+var NewFindingSchema = external_exports.union([
+  external_exports.strictObject(actionFields),
+  external_exports.strictObject(decisionFields),
+  external_exports.strictObject(informationFields)
+]);
+var ActionableFindingSchema = external_exports.union([
+  external_exports.strictObject({ ...actionFields, id: FindingIdSchema }),
+  external_exports.strictObject({ ...decisionFields, id: FindingIdSchema })
+]);
+var StoredFindingSchema = external_exports.union([
+  ...ActionableFindingSchema.options,
+  external_exports.strictObject({ ...informationFields, id: FindingIdSchema })
+]);
+var ReviewEvidenceSchema = external_exports.discriminatedUnion("kind", [
+  external_exports.strictObject({
+    kind: external_exports.literal("github_comment"),
+    comment_id: PositiveIdSchema,
+    url: HttpsUrlSchema
+  }),
+  external_exports.strictObject({
+    kind: external_exports.literal("code"),
+    commit_sha: HeadShaSchema2,
+    path: ReviewPathSchema.min(1),
+    line: external_exports.number().int().positive()
+  }),
+  external_exports.strictObject({ kind: external_exports.literal("commit"), sha: HeadShaSchema2 }),
+  external_exports.strictObject({
+    kind: external_exports.literal("check_run"),
+    check_run_id: PositiveIdSchema,
+    commit_sha: HeadShaSchema2
+  }),
+  external_exports.strictObject({ kind: external_exports.literal("document"), url: HttpsUrlSchema }),
+  external_exports.strictObject({
+    kind: external_exports.literal("verification"),
+    commit_sha: HeadShaSchema2,
+    command: TextSchema,
+    result: external_exports.literal("passed"),
+    report_url: HttpsUrlSchema
+  }),
+  external_exports.strictObject({
+    kind: external_exports.literal("thread_resolution"),
+    thread_id: external_exports.string().min(1),
+    author_id: PositiveIdSchema
+  })
+]);
+var DecisionAnswerSchema = external_exports.strictObject({
+  comment_id: PositiveIdSchema,
+  author_id: PositiveIdSchema,
+  option_id: external_exports.string().min(1)
+});
+var transitionFields = {
+  id: FindingIdSchema,
+  reason: TextSchema,
+  reply: TextSchema.optional(),
+  decision: DecisionAnswerSchema.optional()
+};
+var PriorFindingSchema = external_exports.union([
+  external_exports.strictObject({
+    ...transitionFields,
+    status: external_exports.literal("resolved"),
+    evidence: external_exports.array(ReviewEvidenceSchema).min(1)
+  }),
+  external_exports.strictObject({
+    ...transitionFields,
+    status: external_exports.literal("withdrawn"),
+    evidence: external_exports.array(ReviewEvidenceSchema).min(1),
+    withdrawal_basis: external_exports.enum(["incorrect", "no_longer_applicable", "dismissed"])
+  }),
+  external_exports.strictObject({
+    ...transitionFields,
+    status: external_exports.literal("still_open"),
+    evidence: external_exports.array(ReviewEvidenceSchema).optional(),
+    updated_finding: ActionableFindingSchema.optional()
+  })
+]);
+var reviewFields = {
+  contract_version: external_exports.literal(reviewContractVersion),
+  schema_revision: external_exports.literal(reviewSchemaRevision),
+  head_sha: HeadShaSchema2,
+  review_complete: external_exports.boolean(),
+  incomplete_reason: external_exports.string().max(16e3).optional(),
+  summary: TextSchema,
+  outcome: ReviewOutcomeSchema,
+  outcome_reason: TextSchema,
+  remaining_risk: TextSchema,
+  extensions: external_exports.record(external_exports.string(), external_exports.json()).optional()
+};
+var ReviewSchema = external_exports.strictObject({
+  ...reviewFields,
+  findings: external_exports.array(NewFindingSchema),
+  prior_findings: external_exports.array(PriorFindingSchema)
+});
+var FindingRecordSchema = external_exports.strictObject({
+  v: external_exports.literal(reviewContractVersion),
+  schema_revision: external_exports.literal(reviewSchemaRevision),
+  finding: ActionableFindingSchema,
+  status: external_exports.enum(["open", "resolved", "withdrawn"]),
+  evidence: external_exports.array(ReviewEvidenceSchema),
+  decision: DecisionAnswerSchema.optional()
+});
+var ReviewStateSchema = external_exports.strictObject({
+  v: external_exports.literal(reviewContractVersion),
+  schema_revision: external_exports.literal(reviewSchemaRevision),
+  sha: HeadShaSchema2,
+  outcome: ReviewOutcomeSchema,
+  records: external_exports.array(
+    external_exports.union([
+      external_exports.strictObject({
+        id: FindingIdSchema,
+        status: external_exports.enum(["open", "resolved", "withdrawn"]),
+        location: external_exports.union([
+          external_exports.strictObject({ kind: external_exports.literal("review_comment"), comment_id: PositiveIdSchema }),
+          external_exports.strictObject({ kind: external_exports.literal("review_body"), review_id: PositiveIdSchema })
+        ])
+      }),
+      external_exports.strictObject({
+        id: FindingIdSchema,
+        status: external_exports.literal("informational"),
+        fingerprint: external_exports.string().min(1),
+        finding: external_exports.strictObject({ ...informationFields, id: FindingIdSchema }).optional()
+      })
+    ])
+  )
+});
+var TransportReviewSchema = external_exports.strictObject({
+  ...reviewFields,
+  findings: external_exports.array(
+    external_exports.strictObject({
+      ...actionFields,
+      type: external_exports.enum(["fix", "clarify", "decide"]).optional(),
+      label: external_exports.enum([...ActionLabelSchema.options, ...InformationLabelSchema.options]),
+      severity: SeveritySchema.optional(),
+      details: TextSchema.optional(),
+      resolved_when: TextSchema.optional(),
+      decision_owner: LineTextSchema.optional(),
+      decision_options: DecisionOptionsSchema.optional()
+    })
+  ),
+  prior_findings: external_exports.array(
+    external_exports.strictObject({
+      ...transitionFields,
+      status: external_exports.enum(["resolved", "still_open", "withdrawn"]),
+      evidence: external_exports.array(ReviewEvidenceSchema).optional(),
+      withdrawal_basis: external_exports.enum(["incorrect", "no_longer_applicable", "dismissed"]).optional(),
+      updated_finding: StoredFindingSchema.optional()
+    })
+  )
+});
+
+// src/code-review/review-policy.ts
+var ReviewPolicyPropsSchema = external_exports.strictObject({
+  home: external_exports.string().min(1).optional(),
+  env: external_exports.custom(
+    (value) => typeof value === "object" && value !== null && !Array.isArray(value)
+  ).optional()
+});
+var LoadPolicyPropsSchema = external_exports.strictObject({ paths: external_exports.array(external_exports.string()).optional() });
+var RepositoryContextPropsSchema = external_exports.strictObject({
+  cwd: external_exports.string().min(1),
+  trustedRef: HeadShaSchema2,
+  contextPath: ReviewPathSchema.min(1).default("CODE-REVIEW.md")
+});
+var FileReviewPolicy = class {
+  home;
+  env;
+  constructor(props = {}) {
+    const parsed = ReviewPolicyPropsSchema.parse(props);
+    this.home = parsed.home ?? join12(dirname11(fileURLToPath3(import.meta.url)), "..");
+    this.env = props.env ?? process.env;
+  }
+  load(input2 = {}) {
+    const { paths } = LoadPolicyPropsSchema.parse(input2);
+    const docs = realpathSync3(join12(this.home, "docs"));
+    const read = (id) => {
+      const path3 = realpathSync3(join12(docs, `${id}.md`));
+      if (relative2(docs, path3).startsWith(".."))
+        throw new ReviewPolicyError("review policy path leaves the installed docs directory");
+      return readFileSync11(path3, "utf8");
+    };
+    const catalog = new DocCharterCatalog({ docs: new FileDocResolver({ docsDir: docs }) });
+    const charters = (paths === void 0 ? catalog.all() : catalog.select(paths)).map(
+      ({ id, language, appliesTo, tierA, contents }) => ({
+        id,
+        language,
+        appliesTo,
+        tierA,
+        contents
+      })
+    );
+    return {
+      method: read("autonomous-review-method"),
+      charter: charters.map(({ contents }) => contents.endsWith("\n") ? contents : `${contents}
+`).join("\n"),
+      charters,
+      tierA: [...new Set(charters.flatMap(({ tierA }) => tierA))],
+      contract: read("code-review-findings-contract")
+    };
+  }
+  repository(input2) {
+    const props = RepositoryContextPropsSchema.parse(input2);
+    const paths = [
+      .../* @__PURE__ */ new Set([
+        props.contextPath,
+        "AGENTS.md",
+        "CLAUDE.md",
+        ".github/CODEOWNERS",
+        "CODEOWNERS",
+        "docs/CODEOWNERS"
+      ])
+    ];
+    const sources = [];
+    const missing = [];
+    for (const path3 of paths) {
+      const tree = execFileSync3("git", ["ls-tree", "-z", props.trustedRef, "--", path3], {
+        cwd: props.cwd,
+        env: this.env,
+        encoding: "utf8"
+      });
+      if (!tree) {
+        missing.push(path3);
+        continue;
+      }
+      if (!/^100(?:644|755) blob [a-f0-9]+\t/.test(tree))
+        throw new ReviewPolicyError(`review rules must be a regular file: ${path3}`);
+      sources.push({
+        path: path3,
+        contents: execFileSync3("git", ["show", `${props.trustedRef}:${path3}`], {
+          cwd: props.cwd,
+          env: this.env,
+          encoding: "utf8",
+          maxBuffer: 1e7
+        })
+      });
+    }
+    return { trustedRef: props.trustedRef, contextPath: props.contextPath, sources, missing };
+  }
+};
+var ReviewPolicyError = class extends Error {
+  name = "ReviewPolicyError";
+};
+
+// src/code-review/github-review-verifier.ts
+import { execFile as execFile6 } from "node:child_process";
+import { promisify as promisify6 } from "node:util";
+var GhReviewGitHubApiPropsSchema = external_exports.strictObject({
+  cwd: external_exports.string().min(1).optional(),
+  env: external_exports.custom(
+    (value) => typeof value === "object" && value !== null && !Array.isArray(value)
+  ).optional()
+});
+var GhReviewGitHubApi = class {
+  cwd;
+  env;
+  constructor(props = {}) {
+    const parsed = GhReviewGitHubApiPropsSchema.parse(props);
+    this.cwd = parsed.cwd ?? process.cwd();
+    this.env = props.env ?? process.env;
+  }
+  async get(path3) {
+    return this.run(["api", path3]);
+  }
+  async graphql(query, variables) {
+    return this.run([
+      "api",
+      "graphql",
+      "-f",
+      `query=${query}`,
+      ...Object.entries(variables).flatMap(([key, value]) => [
+        typeof value === "number" ? "-F" : "-f",
+        `${key}=${value}`
+      ])
+    ]);
+  }
+  async run(args) {
+    const { stdout } = await promisify6(execFile6)("gh", args, {
+      maxBuffer: 2e7,
+      cwd: this.cwd,
+      env: this.env
+    });
+    return JSON.parse(stdout);
+  }
+};
+var GitHubReviewVerifierPropsSchema = external_exports.strictObject({
+  repo: external_exports.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
+  prNumber: external_exports.number().int().positive(),
+  prAuthorId: external_exports.number().int().positive(),
+  owners: external_exports.record(external_exports.string(), external_exports.array(external_exports.string().min(1))).default({}),
+  requireMapping: external_exports.boolean().default(false)
+});
+var UserSchema = external_exports.looseObject({ id: external_exports.number(), login: external_exports.string(), type: external_exports.string() });
+var CommentSchema2 = external_exports.looseObject({
+  id: external_exports.number(),
+  user: UserSchema,
+  issue_url: external_exports.string().optional(),
+  pull_request_url: external_exports.string().optional(),
+  body: external_exports.string()
+});
+var GitHubReviewVerifier = class {
+  props;
+  api;
+  constructor(props) {
+    const { api, ...values } = props;
+    this.props = GitHubReviewVerifierPropsSchema.parse(values);
+    this.api = api ?? new GhReviewGitHubApi();
+  }
+  async verify(evidence, headSha) {
+    if (evidence.kind === "document") return true;
+    if (evidence.kind === "verification") return false;
+    if (evidence.kind === "github_comment") {
+      const comment = await this.comment(evidence.comment_id, evidence.url);
+      return comment !== void 0;
+    }
+    if (evidence.kind === "thread_resolution") return this.dismissal(evidence);
+    if (evidence.kind === "commit") return this.reaches(evidence.sha, headSha);
+    if (evidence.kind === "check_run") {
+      if (evidence.commit_sha !== headSha) return false;
+      const check2 = external_exports.looseObject({
+        head_sha: external_exports.string(),
+        status: external_exports.string(),
+        conclusion: external_exports.string().nullable()
+      }).parse(await this.api.get(`/repos/${this.props.repo}/check-runs/${evidence.check_run_id}`));
+      return check2.head_sha === headSha && check2.status === "completed" && check2.conclusion === "success";
+    }
+    if (!await this.reaches(evidence.commit_sha, headSha)) return false;
+    return (evidence.commit_sha === headSha || await this.hasLine(evidence.path, evidence.line, evidence.commit_sha)) && await this.hasLine(evidence.path, evidence.line, headSha);
+  }
+  async authorize(answer, finding) {
+    if (finding.type !== "decide" || !finding.decision_options.some((option) => option.id === answer.option_id))
+      return false;
+    const comment = await this.comment(answer.comment_id);
+    if (comment === void 0 || comment.user.id !== answer.author_id || comment.user.type !== "User" || !comment.body.trim())
+      return false;
+    const owners = this.props.owners[finding.decision_owner];
+    if (owners !== void 0)
+      return owners.some((login) => login.toLowerCase() === comment.user.login.toLowerCase());
+    if (this.props.requireMapping || comment.user.id === this.props.prAuthorId) return false;
+    const permission = external_exports.looseObject({ permission: external_exports.string() }).parse(
+      await this.api.get(
+        `/repos/${this.props.repo}/collaborators/${encodeURIComponent(comment.user.login)}/permission`
+      )
+    );
+    return ["write", "maintain", "admin"].includes(permission.permission);
+  }
+  async dismissal(evidence) {
+    if (evidence.kind !== "thread_resolution" || evidence.author_id === this.props.prAuthorId)
+      return false;
+    const result = external_exports.looseObject({
+      data: external_exports.looseObject({
+        node: external_exports.looseObject({
+          isResolved: external_exports.boolean(),
+          resolvedBy: external_exports.looseObject({ databaseId: external_exports.number(), actorType: external_exports.string() }).nullable(),
+          pullRequest: external_exports.looseObject({
+            number: external_exports.number(),
+            repository: external_exports.looseObject({ nameWithOwner: external_exports.string() })
+          })
+        }).nullable()
+      })
+    }).parse(
+      await this.api.graphql(
+        "query($id: ID!) { node(id: $id) { ... on PullRequestReviewThread { isResolved resolvedBy { actorType: __typename ... on User { databaseId } } pullRequest { number repository { nameWithOwner } } } } }",
+        { id: evidence.thread_id }
+      )
+    );
+    const thread = result.data.node;
+    return thread !== null && thread.isResolved && thread.resolvedBy?.actorType === "User" && thread.resolvedBy.databaseId === evidence.author_id && thread.pullRequest.number === this.props.prNumber && thread.pullRequest.repository.nameWithOwner.toLowerCase() === this.props.repo.toLowerCase();
+  }
+  /** True when `sha` is the head or an ancestor of it, so the head contains that commit. */
+  async reaches(sha, headSha) {
+    if (sha === headSha) return true;
+    const comparison = external_exports.looseObject({ status: external_exports.string() }).parse(await this.api.get(`/repos/${this.props.repo}/compare/${sha}...${headSha}`));
+    return ["ahead", "identical"].includes(comparison.status);
+  }
+  /** True when `ref` has `path` as a file with at least `line` lines. */
+  async hasLine(path3, line, ref) {
+    const file2 = external_exports.looseObject({ type: external_exports.string(), encoding: external_exports.string(), content: external_exports.string() }).parse(
+      await this.api.get(
+        `/repos/${this.props.repo}/contents/${path3.split("/").map(encodeURIComponent).join("/")}?ref=${ref}`
+      )
+    );
+    if (file2.type !== "file" || file2.encoding !== "base64") return false;
+    const text7 = Buffer.from(file2.content, "base64").toString("utf8");
+    const lines = text7 === "" ? 0 : text7.split("\n").length - (text7.endsWith("\n") ? 1 : 0);
+    return line <= lines;
+  }
+  async comment(id, url2) {
+    if (url2 !== void 0 && !url2.toLowerCase().startsWith(
+      `https://github.com/${this.props.repo.toLowerCase()}/pull/${this.props.prNumber}#`
+    ))
+      return void 0;
+    const endpoints = url2?.includes("#discussion_r") ? ["pulls/comments"] : url2?.includes("#issuecomment-") ? ["issues/comments"] : ["issues/comments", "pulls/comments"];
+    for (const endpoint2 of endpoints) {
+      try {
+        const comment = CommentSchema2.parse(
+          await this.api.get(`/repos/${this.props.repo}/${endpoint2}/${id}`)
+        );
+        const expected = `https://api.github.com/repos/${this.props.repo.toLowerCase()}`;
+        if (comment.id === id && (comment.issue_url?.toLowerCase() === `${expected}/issues/${this.props.prNumber}` || comment.pull_request_url?.toLowerCase() === `${expected}/pulls/${this.props.prNumber}`))
+          return comment;
+      } catch {
+        continue;
+      }
+    }
+    return void 0;
+  }
+};
+
+// src/code-review/review-planner.ts
+import { randomBytes as randomBytes2 } from "node:crypto";
+
+// src/code-review/review-contract.ts
+var InvalidReviewError = class extends Error {
+  name = "InvalidReviewError";
+};
+var ZodReviewContract = class {
+  parse(value) {
+    const result = ReviewSchema.parse(value);
+    const ids = result.prior_findings.map((finding) => finding.id);
+    if (new Set(ids).size !== ids.length)
+      throw new InvalidReviewError("duplicate prior finding IDs");
+    if (!result.review_complete && !result.incomplete_reason?.trim()) {
+      throw new InvalidReviewError("an incomplete review must explain what could not be reviewed");
+    }
+    const findings = result.findings.map((finding) => this.normalize(finding));
+    const priorFindings = result.prior_findings.map((transition) => {
+      if (transition.status !== "still_open") return transition;
+      if ((transition.decision !== void 0 || transition.updated_finding !== void 0) && !transition.evidence?.length) {
+        throw new InvalidReviewError(`transition ${transition.id} requires evidence`);
+      }
+      if (transition.updated_finding === void 0) return transition;
+      if (transition.id !== transition.updated_finding.id)
+        throw new InvalidReviewError("a replacement must preserve the finding ID");
+      return {
+        ...transition,
+        updated_finding: this.normalizeActionable(transition.updated_finding)
+      };
+    });
+    for (const transition of priorFindings) {
+      if (transition.decision !== void 0 && !transition.evidence?.some(
+        (evidence) => evidence.kind === "github_comment" && evidence.comment_id === transition.decision?.comment_id
+      )) {
+        throw new InvalidReviewError(
+          `decision ${transition.id} must reference its human comment in evidence`
+        );
+      }
+    }
+    return { ...result, findings, prior_findings: priorFindings };
+  }
+  record(value) {
+    const result = FindingRecordSchema.parse(value);
+    if (result.status !== "open" && result.evidence.length === 0)
+      throw new InvalidReviewError("closed records require evidence");
+    return { ...result, finding: this.normalizeActionable(result.finding) };
+  }
+  state(value) {
+    const result = ReviewStateSchema.parse(value);
+    const ids = result.records.map((record2) => record2.id);
+    if (new Set(ids).size !== ids.length)
+      throw new InvalidReviewError("duplicate finding IDs in state");
+    for (const record2 of result.records) {
+      if (record2.status === "informational" && record2.finding !== void 0 && record2.id !== record2.finding.id) {
+        throw new InvalidReviewError("informational index ID does not match its finding");
+      }
+    }
+    return result;
+  }
+  schemas() {
+    return {
+      full: external_exports.toJSONSchema(ReviewSchema, { target: "draft-07" }),
+      transport: external_exports.toJSONSchema(TransportReviewSchema, { target: "draft-07" })
+    };
+  }
+  normalize(finding) {
+    this.checkRange(finding);
+    if (!("type" in finding)) return finding;
+    if (finding.type === "decide") this.checkOptions(finding);
+    const blocking = finding.blocking || finding.severity === "critical" || finding.severity === "major";
+    const label = blocking && ["nitpick", "typo", "polish"].includes(finding.label) ? "issue" : finding.label;
+    return { ...finding, blocking, label };
+  }
+  normalizeActionable(finding) {
+    return ActionableFindingSchema.parse({ ...this.normalize(finding), id: finding.id });
+  }
+  checkRange(finding) {
+    if (finding.start_line !== void 0 && (finding.line === 0 || finding.start_line > finding.line)) {
+      throw new InvalidReviewError("start_line must not exceed a positive line anchor");
+    }
+  }
+  checkOptions(finding) {
+    const ids = finding.decision_options.map((option) => option.id);
+    if (new Set(ids).size !== ids.length)
+      throw new InvalidReviewError("decision option IDs must be unique");
+  }
+};
+var reviewContract = new ZodReviewContract();
+
+// src/code-review/review-planner.ts
+var EvidenceReviewPlanner = class {
+  verifier;
+  constructor(props) {
+    this.verifier = props.verifier;
+  }
+  async plan(input2) {
+    const headSha = HeadShaSchema2.parse(input2.headSha);
+    const review = reviewContract.parse(input2.review);
+    const records = input2.records.map((record2) => reviewContract.record(record2));
+    const known = new Map(records.map((record2) => [record2.finding.id, record2]));
+    if (known.size !== records.length) throw new InvalidReviewError("duplicate stored finding IDs");
+    if (review.head_sha !== headSha)
+      throw new InvalidReviewError("reviewed head is stale; rerun against the current PR head");
+    for (const entry of review.prior_findings) {
+      if (known.get(entry.id)?.status !== "open")
+        throw new InvalidReviewError(`unknown or closed prior finding: ${entry.id}`);
+    }
+    const problems = [];
+    const updates = new Map(review.prior_findings.map((entry) => [entry.id, entry]));
+    const retained = [];
+    for (const record2 of records) {
+      if (record2.status !== "open") {
+        retained.push(record2);
+        continue;
+      }
+      const entry = updates.get(record2.finding.id);
+      if (entry === void 0) {
+        problems.push(`omitted open finding ${record2.finding.id}`);
+        retained.push(record2);
+        continue;
+      }
+      const evidence = entry.evidence ?? [];
+      let valid = true;
+      for (const reference of evidence) {
+        try {
+          if (!await this.verifier.verify(reference, headSha)) valid = false;
+        } catch {
+          valid = false;
+        }
+      }
+      const changed = entry.status !== "still_open" || entry.updated_finding !== void 0 || entry.decision !== void 0;
+      if (!valid && changed) {
+        problems.push(`evidence could not be validated for ${entry.id}`);
+        retained.push(record2);
+        continue;
+      }
+      let authorized = false;
+      if (entry.decision !== void 0) {
+        try {
+          authorized = await this.verifier.authorize(entry.decision, record2.finding);
+        } catch {
+          authorized = false;
+        }
+        if (!authorized) {
+          problems.push(`decision authorization was not verified for ${entry.id}`);
+          retained.push(record2);
+          continue;
+        }
+      }
+      if (entry.status === "withdrawn" && entry.withdrawal_basis === "dismissed") {
+        let dismissed = false;
+        for (const reference of evidence) {
+          try {
+            if (await this.verifier.dismissal(reference)) dismissed = true;
+          } catch {
+            continue;
+          }
+        }
+        if (record2.finding.blocking || record2.finding.type === "decide" || !dismissed) {
+          problems.push(`manual dismissal cannot close ${entry.id}`);
+          retained.push(record2);
+          continue;
+        }
+      }
+      const withdrawal = entry.status === "withdrawn" && entry.withdrawal_basis !== "dismissed";
+      const decisionChanged = record2.finding.type === "decide" && changed;
+      if (decisionChanged && !authorized && !withdrawal) {
+        problems.push(`decision ${entry.id} still needs an authorized human answer`);
+        retained.push(record2);
+        continue;
+      }
+      const finding = entry.status === "still_open" && entry.updated_finding !== void 0 ? entry.updated_finding : record2.finding;
+      retained.push(
+        FindingRecordSchema.parse({
+          ...record2,
+          finding,
+          status: entry.status === "still_open" ? "open" : entry.status,
+          evidence: changed ? evidence : record2.evidence,
+          ...entry.decision !== void 0 ? { decision: entry.decision } : {}
+        })
+      );
+    }
+    const ids = new Set(known.keys());
+    const informational = [];
+    for (const finding of review.findings) {
+      const id = this.newId(ids);
+      if (!("type" in finding)) {
+        informational.push({ ...finding, id });
+        continue;
+      }
+      retained.push(
+        FindingRecordSchema.parse({
+          v: 1,
+          schema_revision: 1,
+          finding: { ...finding, id },
+          status: "open",
+          evidence: []
+        })
+      );
+    }
+    const outcome = this.outcome(review, retained, problems);
+    return { review, records: retained, informational, outcome, problems };
+  }
+  newId(ids) {
+    let id = `f-${randomBytes2(5).toString("hex")}`;
+    while (ids.has(id)) id = `f-${randomBytes2(5).toString("hex")}`;
+    ids.add(id);
+    return id;
+  }
+  outcome(review, records, problems) {
+    if (!review.review_complete || problems.length > 0 || review.outcome === "INCOMPLETE")
+      return "INCOMPLETE";
+    const blockers = records.filter(
+      (record2) => record2.status === "open" && record2.finding.blocking
+    );
+    if (blockers.some((record2) => record2.finding.type === "decide")) return "ESCALATE";
+    if (review.outcome === "ESCALATE") {
+      problems.push("claimed escalation has no matching open blocking decision");
+      return "INCOMPLETE";
+    }
+    if (blockers.length > 0) return "CHANGES_NEEDED";
+    if (review.outcome !== "APPROVED") {
+      problems.push("claimed outcome has no matching open blocking finding");
+      return "INCOMPLETE";
+    }
+    return "APPROVED";
+  }
+};
+var ValidatedEvidencePropsSchema = external_exports.strictObject({
+  verified: external_exports.array(external_exports.string()),
+  authorizedDecisions: external_exports.array(external_exports.string()),
+  dismissals: external_exports.array(external_exports.string())
+});
+
+// src/code-review/review-codec.ts
+import { createHash as createHash2 } from "node:crypto";
+var MarkerInputSchema = external_exports.strictObject({
+  body: external_exports.string(),
+  authorId: external_exports.number().int().positive(),
+  trustedAuthorIds: external_exports.array(external_exports.number().int().positive())
+});
+var JsonReviewCodec = class {
+  finding(record2) {
+    return this.marker("finding", reviewContract.record(record2));
+  }
+  state(state) {
+    return this.marker("state", reviewContract.state(state));
+  }
+  readFindings(input2) {
+    const parsed = MarkerInputSchema.parse(input2);
+    if (!parsed.trustedAuthorIds.includes(parsed.authorId)) return [];
+    return this.readMarkers(parsed.body, "finding").map((value) => reviewContract.record(value));
+  }
+  readState(input2) {
+    const parsed = MarkerInputSchema.parse(input2);
+    if (!parsed.trustedAuthorIds.includes(parsed.authorId)) return void 0;
+    const states = this.readMarkers(parsed.body, "state");
+    if (states.length > 1)
+      throw new InvalidReviewError("multiple review state markers in one summary");
+    return states.length === 0 ? void 0 : reviewContract.state(states[0]);
+  }
+  render(record2) {
+    const validated = reviewContract.record(record2);
+    const finding = validated.finding;
+    const decorations = [
+      ...["nitpick", "typo", "polish"].includes(finding.label) ? [] : [finding.blocking ? "blocking" : "non-blocking"],
+      finding.type
+    ];
+    if (finding.category !== void 0) decorations.push(finding.category);
+    const owner = finding.type === "decide" ? `
+
+**Decision owner:** ${finding.decision_owner}
+**Decision options:** ${finding.decision_options.map((option) => `\`${option.id}\`: ${option.description}`).join("; ")}` : "";
+    return `**${finding.label} (${decorations.join(", ")}):** ${finding.subject}
+
+${finding.discussion}
+
+<details>
+<summary>Details For LLM</summary>
+
+${finding.details}${owner}
+
+**Resolved when:** ${finding.resolved_when}
+</details>
+
+${this.finding(validated)}`;
+  }
+  fingerprint(finding) {
+    return createHash2("sha256").update(`${finding.path}|${finding.label}|${finding.subject.trim().toLowerCase()}`).digest("hex");
+  }
+  marker(kind, value) {
+    return `<!-- code-review:${kind} ${JSON.stringify(value).replaceAll(">", "\\u003e")} -->`;
+  }
+  readMarkers(body, kind) {
+    const prefix = `<!-- code-review:${kind} `;
+    const matches = [...body.matchAll(new RegExp(`${prefix}([\\s\\S]*?) -->`, "g"))];
+    if (body.split(prefix).length - 1 !== matches.length)
+      throw new InvalidReviewError("unterminated review marker");
+    return matches.map((match) => {
+      try {
+        return JSON.parse(match[1] ?? "");
+      } catch {
+        throw new InvalidReviewError(
+          "review marker contains invalid JSON; recover state before approving"
+        );
+      }
+    });
+  }
+};
+
+// src/operations/review-operations.ts
+var ReviewOperationsLaunchPropsSchema = external_exports.strictObject({
+  cwd: external_exports.string().min(1).optional(),
+  trustedRef: HeadShaSchema2.optional(),
+  owners: external_exports.record(external_exports.string(), external_exports.array(external_exports.string().min(1))).default({}),
+  requireMapping: external_exports.boolean().default(false)
+});
+var ReviewOperationsPropsSchema = ReviewOperationsLaunchPropsSchema.extend({
+  cwd: external_exports.string().min(1),
+  env: external_exports.custom(
+    (value) => typeof value === "object" && value !== null && !Array.isArray(value)
+  ).optional(),
+  policy: external_exports.custom(
+    (value) => typeof value === "object" && value !== null && "repository" in value && "load" in value
+  ).optional(),
+  api: external_exports.custom(
+    (value) => typeof value === "object" && value !== null && "get" in value && "graphql" in value
+  ).optional()
+});
+var JsonValueSchema = external_exports.json();
+var schemaInput = external_exports.strictObject({ transport: external_exports.boolean().default(false) });
+var reviewInput = external_exports.strictObject({ review: JsonValueSchema });
+var reviewOutput = ReviewSchema;
+var stateInput = external_exports.strictObject({ state: JsonValueSchema });
+var stateOutput = external_exports.string();
+var contextInput = external_exports.strictObject({
+  contextPath: external_exports.string().min(1).default("CODE-REVIEW.md")
+});
+var contextOutput = external_exports.object({
+  trustedRef: HeadShaSchema2,
+  contextPath: external_exports.string(),
+  sources: external_exports.array(external_exports.object({ path: external_exports.string(), contents: external_exports.string() })),
+  missing: external_exports.array(external_exports.string())
+});
+var planInput = external_exports.strictObject({
+  number: external_exports.number().int().positive(),
+  repo: external_exports.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
+  review: JsonValueSchema,
+  records: external_exports.array(JsonValueSchema)
+});
+var renderInput = external_exports.strictObject({
+  review: JsonValueSchema,
+  records: external_exports.array(FindingRecordSchema),
+  outcome: external_exports.string(),
+  problems: external_exports.array(external_exports.string())
+});
+var renderOutput = external_exports.object({
+  headSha: external_exports.string(),
+  outcome: external_exports.string(),
+  problems: external_exports.array(external_exports.string()),
+  findings: external_exports.array(
+    external_exports.object({
+      id: external_exports.string(),
+      status: external_exports.string(),
+      path: external_exports.string(),
+      line: external_exports.number(),
+      body: external_exports.string()
+    })
+  )
+});
+var planOutput = external_exports.object({
+  review: ReviewSchema,
+  records: external_exports.array(FindingRecordSchema),
+  informational: external_exports.array(StoredFindingSchema),
+  outcome: external_exports.enum(["APPROVED", "CHANGES_NEEDED", "ESCALATE", "INCOMPLETE"]),
+  problems: external_exports.array(external_exports.string())
+});
+var MissingTrustedReviewRefError = class extends Error {
+  name = "MissingTrustedReviewRefError";
+};
+var DefaultReviewOperations = class {
+  cwd;
+  policy;
+  api;
+  trustedRef;
+  owners;
+  requireMapping;
+  constructor(props) {
+    const parsed = ReviewOperationsPropsSchema.parse(props);
+    this.cwd = parsed.cwd ?? process.cwd();
+    this.trustedRef = parsed.trustedRef;
+    this.owners = parsed.owners;
+    this.requireMapping = parsed.requireMapping;
+    const env = props.env ?? process.env;
+    this.policy = parsed.policy ?? new FileReviewPolicy({ env });
+    this.api = parsed.api ?? new GhReviewGitHubApi({ cwd: this.cwd, env });
+  }
+  operations() {
+    return [
+      this.descriptor(
+        "review-schema",
+        "Return the canonical full or model-facing review contract schema.",
+        ["read", "process"],
+        ["review", "schema"],
+        schemaInput,
+        JsonValueSchema,
+        ({ transport }) => {
+          const schemas = reviewContract.schemas();
+          return JsonValueSchema.parse(
+            JSON.parse(JSON.stringify(transport ? schemas.transport : schemas.full))
+          );
+        }
+      ),
+      this.descriptor(
+        "review-validate",
+        "Validate and normalize a review against the canonical contract.",
+        ["read", "process"],
+        ["review", "validate"],
+        reviewInput,
+        reviewOutput,
+        ({ review }) => reviewContract.parse(review)
+      ),
+      this.descriptor(
+        "review-render",
+        "Render persisted findings from a validated review plan.",
+        ["read", "process"],
+        ["review", "render"],
+        renderInput,
+        renderOutput,
+        ({ review, records, outcome, problems }) => {
+          const parsedReview = reviewContract.parse(review);
+          const codec2 = new JsonReviewCodec();
+          return {
+            headSha: parsedReview.head_sha,
+            outcome,
+            problems,
+            findings: records.map((record2) => ({
+              id: record2.finding.id,
+              status: record2.status,
+              path: record2.finding.path,
+              line: record2.finding.line,
+              body: codec2.render(record2)
+            }))
+          };
+        }
+      ),
+      this.descriptor(
+        "review-state",
+        "Validate a persisted review state index and return its canonical marker.",
+        ["read", "process"],
+        ["review", "state"],
+        stateInput,
+        stateOutput,
+        ({ state }) => new JsonReviewCodec().state(ReviewStateSchema.parse(state))
+      ),
+      this.descriptor(
+        "review-context",
+        "Read repository review rules from a pinned commit in the launch checkout.",
+        ["read", "process"],
+        ["review", "context"],
+        contextInput,
+        contextOutput,
+        ({ contextPath }) => {
+          if (this.trustedRef === void 0)
+            throw new MissingTrustedReviewRefError("trusted review ref was not bound at launch");
+          return this.policy.repository({
+            cwd: this.cwd,
+            trustedRef: this.trustedRef,
+            contextPath
+          });
+        }
+      ),
+      this.descriptor(
+        "review-plan",
+        "Plan review transitions after checking current GitHub head and evidence authority.",
+        ["read", "network", "process"],
+        ["review", "plan"],
+        planInput,
+        planOutput,
+        async ({ number: number4, repo, review, records }) => {
+          const pullRequest = external_exports.looseObject({
+            head: external_exports.looseObject({ sha: HeadShaSchema2 }),
+            user: external_exports.looseObject({ id: external_exports.number().int().positive() })
+          }).parse(await this.api.get(`/repos/${repo}/pulls/${number4}`));
+          const planner = new EvidenceReviewPlanner({
+            verifier: new GitHubReviewVerifier({
+              api: this.api,
+              repo,
+              prNumber: number4,
+              prAuthorId: pullRequest.user.id,
+              owners: this.owners,
+              requireMapping: this.requireMapping
+            })
+          });
+          return planner.plan({ review, records, headSha: pullRequest.head.sha });
+        }
+      )
+    ];
+  }
+  descriptor(id, description, effects, path3, inputSchema, outputSchema, handler2) {
+    return {
+      id,
+      description,
+      effects,
+      cli: { path: path3, aliases: [] },
+      inputSchema,
+      outputSchema,
+      handler: handler2
+    };
+  }
+};
+
 // src/flight-rules/flight-rules.ts
 var DefaultFlightRules = class {
   cwd;
@@ -48997,7 +50451,10 @@ var DefaultFlightRules = class {
   host;
   untrackedRoot;
   constructor(props = {}) {
-    const parsed = FlightRulesPropsSchema.parse({ ...props, env: props.env === void 0 ? void 0 : { ...props.env } });
+    const parsed = FlightRulesPropsSchema.parse({
+      ...props,
+      env: props.env === void 0 ? void 0 : { ...props.env }
+    });
     this.cwd = parsed.cwd ?? process.cwd();
     this.env = props.env ?? process.env;
     this.explicitConfigPath = parsed.configPath;
@@ -49013,13 +50470,19 @@ var DefaultFlightRules = class {
     return new ConfigStore({
       cwd: this.cwd,
       env,
-      host: NativeHostSchema.parse(this.host ?? env["FLIGHT_RULES_HOST"] ?? this.installation().host() ?? "claude"),
+      host: NativeHostSchema.parse(
+        this.host ?? env["FLIGHT_RULES_HOST"] ?? this.installation().host() ?? "claude"
+      ),
       ...this.hostSettings !== void 0 ? { hostSettings: this.hostSettings } : {},
       ...untrackedRoot !== void 0 ? { untrackedRoot } : {}
     });
   }
   installation() {
-    return FileNativeInstallation.fromInstall({ moduleUrl: import.meta.url, cwd: this.cwd, env: this.env });
+    return FileNativeInstallation.fromInstall({
+      moduleUrl: import.meta.url,
+      cwd: this.cwd,
+      env: this.env
+    });
   }
   /** Looked up once per instance. */
   mainCheckout() {
@@ -49041,7 +50504,8 @@ var DefaultFlightRules = class {
     const config2 = this.config(overrideTracker);
     const env = new EnvLoader().load(this.env);
     if (config2.tracker === "github") {
-      if (env.githubToken === void 0) throw new Error("GITHUB_TOKEN environment variable is required");
+      if (env.githubToken === void 0)
+        throw new Error("GITHUB_TOKEN environment variable is required");
       if (config2.repo === void 0) throw new Error("repo is required when tracker is github");
       const [owner, repo] = config2.repo.split("/");
       if (owner === void 0 || repo === void 0) {
@@ -49050,13 +50514,18 @@ var DefaultFlightRules = class {
       return new GitHubTaskTracker({ token: env.githubToken, owner, repo });
     }
     if (env.jiraToken === void 0) {
-      throw new Error("JIRA_TOKEN (or JIRA_API_TOKEN / JIRA_API_KEY) environment variable is required");
+      throw new Error(
+        "JIRA_TOKEN (or JIRA_API_TOKEN / JIRA_API_KEY) environment variable is required"
+      );
     }
     const email3 = env.jiraEmail ?? config2.jiraEmail;
-    if (email3 === void 0) throw new Error("JIRA_EMAIL environment variable or jiraEmail config is required");
+    if (email3 === void 0)
+      throw new Error("JIRA_EMAIL environment variable or jiraEmail config is required");
     const host = env.jiraHost ?? config2.jiraHost;
-    if (host === void 0) throw new Error("JIRA_HOST environment variable or jiraHost config is required");
-    if (config2.jiraProject === void 0) throw new Error("jiraProject is required when tracker is jira");
+    if (host === void 0)
+      throw new Error("JIRA_HOST environment variable or jiraHost config is required");
+    if (config2.jiraProject === void 0)
+      throw new Error("jiraProject is required when tracker is jira");
     return new JiraTaskTracker({
       token: env.jiraToken,
       host,
@@ -49084,6 +50553,28 @@ var DefaultFlightRules = class {
   }
   docs() {
     return FileDocResolver.fromInstall({ moduleUrl: import.meta.url, env: this.env });
+  }
+  localOperations() {
+    return new DefaultLocalDiscoveryOperations({
+      cwd: this.cwd,
+      getConfig: () => this.config(),
+      getConfigStore: () => this.configStore(),
+      getCharters: () => new DocCharterCatalog({ docs: this.docs() }),
+      getRepositoryPaths: () => new GitRepositoryPaths({ cwd: this.cwd }),
+      getEvidence: () => this.evidence(),
+      getReadiness: () => this.readiness(),
+      getProbe: () => this.probe(),
+      getTracker: () => this.tracker(),
+      getConfigPath: () => this.configPath()
+    });
+  }
+  reviewOperations(props = {}) {
+    const launch = ReviewOperationsLaunchPropsSchema.parse(props);
+    return new DefaultReviewOperations({
+      ...launch,
+      cwd: launch.cwd ?? this.cwd,
+      env: this.env
+    });
   }
   board() {
     return new AriadneBoard({
@@ -49323,1021 +50814,370 @@ function createDocCommand(props) {
   return doc;
 }
 
-// src/bundled-docs/commands/charter/command.ts
+// src/operations/local-discovery-cli.ts
+import { readFileSync as readFileSync12 } from "node:fs";
 import { text as text4 } from "node:stream/consumers";
-function createCharterCommand(getCatalog, getPaths, readStdin = () => text4(process.stdin)) {
-  const charter = new Command("charter");
-  charter.exitOverride().description("print the core coding charter and the language charters for a set of files").argument("[paths...]", "repository-relative files to select charters for").option("--stdin", "read newline-separated paths from stdin").option("--diff <base>", "select for files changed since the merge base with <base>, including uncommitted work").option("--repo", "select for every file in the repository (the default)").option("--path", "print absolute paths, one per line, instead of the contents").action(async (paths, opts) => {
-    const sources = [paths.length > 0, opts.stdin === true, opts.diff !== void 0, opts.repo === true];
-    if (sources.filter(Boolean).length > 1) {
-      throw new CharterSelectionError("Choose one of: paths, --stdin, --diff <base>, --repo");
-    }
-    let selection = paths;
-    if (opts.stdin) selection = (await readStdin()).split("\n");
-    else if (opts.diff !== void 0) selection = await getPaths().changedSince(opts.diff);
-    else if (paths.length === 0) selection = await getPaths().inventory();
-    const selected = getCatalog().select(selection);
-    if (selected.every((item) => item.language === null)) {
-      process.stderr.write("No language charter matched these files; printing the core charter only.\n");
-    }
-    const output2 = opts.path ? selected.map((item) => `${item.path}
-`) : selected.map((item) => item.contents.endsWith("\n") ? item.contents : `${item.contents}
+
+// src/tasks/commands/check/command.ts
+var ReadinessFailedError = class extends Error {
+  name = "ReadinessFailedError";
+};
+
+// src/operations/local-discovery-cli.ts
+var RuntimeFailureReportSchema = external_exports.object({
+  tracker: external_exports.null(),
+  repo: external_exports.null(),
+  checks: external_exports.array(
+    external_exports.object({
+      name: external_exports.string(),
+      ok: external_exports.boolean(),
+      required: external_exports.boolean(),
+      code: external_exports.string(),
+      detail: external_exports.string(),
+      remedy: external_exports.string()
+    })
+  ),
+  ok: external_exports.literal(false),
+  scope: external_exports.literal("workflow")
+});
+var CharterResultSchema = external_exports.object({
+  charters: external_exports.array(
+    external_exports.object({ path: external_exports.string(), contents: external_exports.string(), language: external_exports.string().nullable() })
+  ),
+  unmatched: external_exports.boolean()
+});
+var ConfigPathResultSchema = external_exports.object({ path: external_exports.string() });
+var RfcIdResultSchema = external_exports.object({ id: external_exports.string() });
+var CompetenciesResultSchema = external_exports.array(external_exports.string());
+var ConfigInspectionResultSchema = external_exports.object({
+  host: external_exports.string(),
+  valid: external_exports.boolean(),
+  values: external_exports.record(external_exports.string(), external_exports.unknown()),
+  sources: external_exports.record(external_exports.string(), external_exports.unknown()),
+  layers: external_exports.array(external_exports.unknown()),
+  error: external_exports.string().optional()
+});
+var ReadinessResultSchema = external_exports.object({
+  tracker: external_exports.string().nullable(),
+  repo: external_exports.string().nullable().optional(),
+  checks: external_exports.array(external_exports.unknown()),
+  ok: external_exports.boolean(),
+  workflow: WorkflowSchema.optional(),
+  scope: external_exports.enum(["environment", "workflow"])
+});
+var LocalDiscoveryCliPropsSchema = external_exports.object({
+  operations: external_exports.custom(
+    (value) => typeof value === "object" && value !== null && "operations" in value && typeof value.operations === "function" && "configStore" in value && typeof value.configStore === "function"
+  ),
+  registry: external_exports.custom(
+    (value) => typeof value === "object" && value !== null && "invoke" in value
+  ),
+  readStdin: external_exports.custom((value) => typeof value === "function").optional()
+});
+var CommanderLocalDiscoveryCli = class {
+  operations;
+  registry;
+  readStdin;
+  constructor(props) {
+    const parsed = LocalDiscoveryCliPropsSchema.parse(props);
+    this.operations = parsed.operations;
+    this.registry = parsed.registry;
+    this.readStdin = parsed.readStdin ?? (() => text4(process.stdin));
+  }
+  addTo(program2) {
+    this.addCharter(program2);
+    this.addCompetencies(program2);
+    this.addRfc(program2);
+    this.addQa(program2);
+    this.addConfig(program2);
+    this.addCheck(program2);
+  }
+  addCharter(program2) {
+    program2.command("charter").description("print the core coding charter and language charters for selected files").argument("[paths...]").option("--stdin").option("--diff <base>").option("--repo").option("--path").exitOverride().action(
+      async (paths, opts) => {
+        const selectedSources = [
+          paths.length > 0,
+          opts.stdin === true,
+          opts.diff !== void 0,
+          opts.repo === true
+        ];
+        if (selectedSources.filter(Boolean).length > 1)
+          throw new CharterSelectionError("Choose one of: paths, --stdin, --diff <base>, --repo");
+        const selectedPaths = opts.stdin ? (await this.readStdin()).split("\n") : paths;
+        const input2 = {
+          ...opts.stdin || paths.length > 0 ? { paths: selectedPaths } : {},
+          ...opts.diff === void 0 ? {} : { diff: opts.diff },
+          repository: opts.repo ?? false,
+          pathOutput: opts.path ?? false
+        };
+        const result = await this.invoke("charter", input2, CharterResultSchema);
+        if (result.unmatched)
+          process.stderr.write(
+            "No language charter matched these files; printing the core charter only.\n"
+          );
+        const output2 = opts.path ? result.charters.map((charter) => `${charter.path}
+`).join("") : result.charters.map(
+          (charter) => charter.contents.endsWith("\n") ? charter.contents : `${charter.contents}
+`
+        ).join("\n");
+        process.stdout.write(output2);
+      }
+    );
+  }
+  addCompetencies(program2) {
+    program2.command("competencies").exitOverride().action(async () => {
+      process.stdout.write(
+        `${JSON.stringify(await this.invoke("competencies", {}, CompetenciesResultSchema))}
+`
+      );
+    });
+  }
+  addRfc(program2) {
+    const rfc = program2.command("rfc");
+    rfc.command("dir").exitOverride().action(async () => {
+      process.stdout.write(
+        `${(await this.invoke("rfc-dir", {}, ConfigPathResultSchema)).path}
+`
+      );
+    });
+    rfc.command("next-id").exitOverride().action(async () => {
+      process.stdout.write(`${(await this.invoke("rfc-next-id", {}, RfcIdResultSchema)).id}
 `);
-    process.stdout.write(output2.join(opts.path ? "" : "\n"));
-  });
-  return charter;
-}
+    });
+  }
+  addQa(program2) {
+    const qa = program2.command("qa");
+    qa.command("instructions").description("print the QA instructions that apply to a directory, nearest first, as JSON").option("--from <dir>").exitOverride().action(async (opts) => {
+      process.stdout.write(
+        `${JSON.stringify(await this.invoke("qa-instructions", opts.from === void 0 ? {} : { from: opts.from }, external_exports.object({ found: external_exports.boolean(), sources: external_exports.array(external_exports.unknown()) })))}
+`
+      );
+    });
+    qa.command("evidence-dir").description(
+      "print where QA evidence for a ticket is written, and whether git ignores it, as JSON"
+    ).argument("<ticket>").exitOverride().action(async (ticket) => {
+      process.stdout.write(
+        `${JSON.stringify(await this.invoke("qa-evidence-dir", { ticket }, external_exports.object({ path: external_exports.string(), gitignored: external_exports.boolean().nullable() })))}
+`
+      );
+    });
+    qa.command("recipe").description(
+      "deprecated: print the path of the nearest QA instructions; use `qa instructions`"
+    ).exitOverride().action(async () => {
+      const result = await this.invoke("qa-recipe", {}, ConfigPathResultSchema);
+      process.stderr.write(
+        "`flight-rules qa recipe` is deprecated; use `flight-rules qa instructions`\n"
+      );
+      process.stdout.write(`${result.path}
+`);
+    });
+  }
+  addConfig(program2) {
+    const config2 = program2.command("config");
+    config2.command("path").description("print the resolved config file path, whether or not it exists").exitOverride().action(async () => {
+      process.stdout.write(
+        `${(await this.invoke("config-path", {}, ConfigPathResultSchema)).path}
+`
+      );
+    });
+    config2.command("show").description(
+      "print the merged config, which file each value came from, and whether it is valid"
+    ).exitOverride().action(async () => {
+      process.stdout.write(
+        `${JSON.stringify(await this.invoke("config-show", {}, ConfigInspectionResultSchema))}
+`
+      );
+    });
+    const scopeHelp = "where to write: user, project, local, or file; config show reports the selected host and exact paths (override with FLIGHT_RULES_HOST=claude|codex)";
+    config2.command("set").description("write one config value; array keys take several values").argument("<key>").argument("<values...>").addOption(new Option("--scope <scope>", scopeHelp).choices(configScopes)).exitOverride().action((key, values, options) => {
+      const store = this.operations.configStore();
+      const scope = options.scope ?? store.defaultScopeFor(key);
+      store.set(key, values, scope);
+      const shadowedBy = store.shadowingScope(key, scope);
+      process.stdout.write(
+        `${JSON.stringify({ key, scope, path: store.pathFor(scope), ...shadowedBy === void 0 ? {} : { warning: `${key} is also set in ${shadowedBy} scope (${store.pathFor(shadowedBy)}), which takes precedence` } })}
+`
+      );
+    });
+    config2.command("unset").description("remove one config value from a scope").argument("<key>").addOption(new Option("--scope <scope>", scopeHelp).choices(configScopes)).exitOverride().action((key, options) => {
+      const store = this.operations.configStore();
+      const scope = options.scope ?? store.defaultScopeFor(key);
+      store.unset(key, scope);
+      process.stdout.write(`${JSON.stringify({ key, scope, path: store.pathFor(scope) })}
+`);
+    });
+  }
+  addCheck(program2) {
+    program2.command("check").addOption(
+      new Option(
+        "--workflow <name>",
+        "check readiness for this workflow before its first mutation"
+      ).choices(WorkflowSchema.options)
+    ).option(
+      "--runtime-file <path>",
+      "JSON containing current caller/worker capability observations; requires --workflow"
+    ).exitOverride().action(async (options) => {
+      let evidence;
+      try {
+        evidence = options.runtimeFile === void 0 ? void 0 : JSON.parse(readFileSync12(options.runtimeFile, "utf8"));
+      } catch {
+        this.writeRuntimeFailure(
+          "Cannot read a JSON runtime evidence file",
+          "Supply a readable evidence file; see flight-rules doc workflow-preflight."
+        );
+        throw new ReadinessFailedError("flight-rules check failed \u2014 see report above");
+      }
+      const parsed = ReadinessOptionsSchema.safeParse({ workflow: options.workflow, evidence });
+      if (!parsed.success) {
+        this.writeRuntimeFailure(
+          "Invalid workflow runtime evidence",
+          "Supply evidence matching WorkflowEvidenceSchema with a --workflow selection."
+        );
+        throw new ReadinessFailedError("flight-rules check failed \u2014 see report above");
+      }
+      const report = await this.invoke("check", parsed.data, ReadinessResultSchema);
+      process.stdout.write(`${JSON.stringify(report)}
+`);
+      if (!report.ok)
+        throw new ReadinessFailedError("flight-rules check failed \u2014 see report above");
+    });
+  }
+  writeRuntimeFailure(detail, remedy) {
+    const report = RuntimeFailureReportSchema.parse({
+      tracker: null,
+      repo: null,
+      checks: [
+        { name: "runtime", ok: false, required: true, code: "INVALID_CONTEXT", detail, remedy }
+      ],
+      ok: false,
+      scope: "workflow"
+    });
+    process.stdout.write(`${JSON.stringify(report)}
+`);
+  }
+  async invoke(id, input2, outputSchema) {
+    const result = await this.registry.invoke(id, input2);
+    if (result.status !== "success")
+      throw new OperationCliError({
+        operationId: id,
+        errorName: result.status === "error" ? result.error.name : result.error.name,
+        message: result.error.message
+      });
+    return outputSchema.parse(result.data);
+  }
+};
 var CharterSelectionError = class extends Error {
   name = "CharterSelectionError";
 };
 
-// src/bundled-docs/charter-catalog/charter-catalog.ts
-var import_yaml3 = __toESM(require_dist(), 1);
-import { matchesGlob } from "node:path";
-var coreCharterId = "coding-charter";
-var languageCharterPrefix = `${coreCharterId}-`;
-var LanguageFrontmatterSchema = external_exports.strictObject({
-  language: external_exports.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
-  "applies-to": external_exports.array(external_exports.string().min(1)).min(1)
-}).transform(({ language, "applies-to": appliesTo }) => ({ language, appliesTo }));
-var FrontmatterSchema = external_exports.string().transform((contents, ctx) => {
-  const block = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/.exec(contents)?.[1];
-  if (block === void 0) {
-    ctx.addIssue({ code: "custom", message: "missing YAML frontmatter" });
-    return external_exports.NEVER;
-  }
-  return (0, import_yaml3.parse)(block);
-}).pipe(LanguageFrontmatterSchema);
-var DocCharterCatalog = class {
-  docs;
-  constructor(props) {
-    this.docs = props.docs;
-  }
-  all() {
-    const core = this.docs.resolve(coreCharterId);
-    const languages = this.docs.list().filter((id) => id.startsWith(languageCharterPrefix)).map((id) => this.languageCharter(this.docs.resolve(id)));
-    return [
-      { id: core.id, language: null, appliesTo: [], tierA: this.tierA(core.contents), path: core.path, contents: core.contents },
-      ...languages
-    ];
-  }
-  select(paths) {
-    const normalized = paths.map((path3) => path3.trim().replace(/^\.\//, "")).filter((path3) => path3.length > 0);
-    return this.all().filter(
-      (charter) => charter.language === null || normalized.some((path3) => charter.appliesTo.some((glob) => matchesGlob(path3, glob)))
-    );
-  }
-  languageCharter(doc) {
-    const parsed = FrontmatterSchema.safeParse(doc.contents);
-    if (!parsed.success) {
-      throw new CharterFormatError(`Charter "${doc.id}" has invalid frontmatter: ${external_exports.prettifyError(parsed.error)}`);
-    }
-    const expectedId = `${languageCharterPrefix}${parsed.data.language}`;
-    if (doc.id !== expectedId) {
-      throw new CharterFormatError(`Charter "${doc.id}" declares language "${parsed.data.language}"; its file must be ${expectedId}.md`);
-    }
-    return { id: doc.id, ...parsed.data, tierA: this.tierA(doc.contents), path: doc.path, contents: doc.contents };
-  }
-  tierA(contents) {
-    const tiers = contents.split(/^## Review tiers\r?$/m)[1]?.split(/^## /m)[0] ?? "";
-    const table = tiers.split(/^\*\*Tier B/m)[0] ?? "";
-    return [...new Set([...table.matchAll(/^\|\s*([A-Z]+-\d+)\b/gm)].flatMap((match) => match[1] ?? []))];
-  }
-};
-var CharterFormatError = class extends Error {
-  name = "CharterFormatError";
-};
-
-// src/bundled-docs/charter-catalog/repository-paths.ts
-import { execFile as execFile5 } from "node:child_process";
-import { promisify as promisify5 } from "node:util";
-var run = promisify5(execFile5);
-var BaseRefSchema = external_exports.string().regex(/^[^\s-]\S*$/, 'base must be a git ref or commit, and cannot start with "-"');
-var GitRepositoryPathsPropsSchema = external_exports.object({ cwd: external_exports.string().min(1) });
-var GitRepositoryPaths = class {
-  cwd;
-  constructor(props) {
-    this.cwd = GitRepositoryPathsPropsSchema.parse(props).cwd;
-  }
-  async inventory() {
-    const root = await this.root();
-    return this.paths(root, ["ls-files", "-z", "--cached", "--others", "--exclude-standard"]);
-  }
-  async changedSince(base) {
-    const ref = BaseRefSchema.parse(base);
-    const root = await this.root();
-    const mergeBase = (await this.git(root, ["merge-base", ref, "HEAD"])).trim();
-    if (mergeBase.length === 0) throw new RepositoryPathsError(`No merge base between ${ref} and HEAD`);
-    const changed = await this.paths(root, ["diff", "-z", "--name-only", mergeBase]);
-    const untracked = await this.paths(root, ["ls-files", "-z", "--others", "--exclude-standard"]);
-    return [.../* @__PURE__ */ new Set([...changed, ...untracked])];
-  }
-  // Path queries run from the top level so the result never depends on which subdirectory the caller is in.
-  async root() {
-    return (await this.git(this.cwd, ["rev-parse", "--show-toplevel"])).replace(/\r?\n$/, "");
-  }
-  // NUL-delimited output keeps paths verbatim; newline output quotes non-ASCII and special characters.
-  async paths(root, args) {
-    return (await this.git(root, args)).split("\0").filter((path3) => path3.length > 0);
-  }
-  async git(cwd, args) {
-    try {
-      const { stdout } = await run("git", args, { cwd, maxBuffer: 64 * 1024 * 1024 });
-      return stdout;
-    } catch (cause) {
-      throw new RepositoryPathsError(`git ${args[0]} failed in ${cwd}`, { cause });
-    }
-  }
-};
-var RepositoryPathsError = class extends Error {
-  name = "RepositoryPathsError";
-};
-
 // src/code-review/commands/command.ts
-import { readFileSync as readFileSync11 } from "node:fs";
-
-// src/code-review/review.schema.ts
-var reviewContractVersion = 1;
-var reviewSchemaRevision = 1;
-var ReviewOutcomeSchema = external_exports.enum(["APPROVED", "CHANGES_NEEDED", "ESCALATE", "INCOMPLETE"]);
-var FindingIdSchema = external_exports.string().regex(/^f-[a-f0-9]{10}$/);
-var HeadShaSchema2 = external_exports.string().regex(/^[a-f0-9]{40}$/);
-var ReviewPathSchema = external_exports.string().max(400).regex(/^(?!\/)(?!.*\\)(?!.*(?:^|\/)\.{1,2}(?:\/|$))[^\p{Cc}]*$/u);
-var TextSchema = external_exports.string().min(1).max(16e3);
-var LineTextSchema = external_exports.string().min(1).max(400).regex(/^[^\r\n]+$/);
-var PositiveIdSchema = external_exports.number().int().positive().max(Number.MAX_SAFE_INTEGER);
-var HttpsUrlSchema = external_exports.url().regex(/^https:\/\//);
-var CategorySchema = external_exports.enum([
-  "security",
-  "correctness",
-  "data",
-  "deployment",
-  "design",
-  "testing",
-  "performance",
-  "readability",
-  "docs"
-]);
-var ActionLabelSchema = external_exports.enum([
-  "issue",
-  "todo",
-  "suggestion",
-  "question",
-  "chore",
-  "nitpick",
-  "typo",
-  "polish"
-]);
-var InformationLabelSchema = external_exports.enum(["praise", "note", "thought"]);
-var SeveritySchema = external_exports.enum(["critical", "major", "minor", "trivial"]);
-var DecisionOptionsSchema = external_exports.array(
-  external_exports.strictObject({ id: external_exports.string().regex(/^[a-z][a-z0-9-]{0,79}$/), description: TextSchema })
-).min(2);
-var findingFields = {
-  path: ReviewPathSchema,
-  line: external_exports.number().int().nonnegative(),
-  start_line: external_exports.number().int().positive().optional(),
-  category: CategorySchema.optional(),
-  subject: LineTextSchema,
-  discussion: TextSchema,
-  related_finding_id: FindingIdSchema.optional()
-};
-var actionFields = {
-  ...findingFields,
-  label: ActionLabelSchema,
-  type: external_exports.enum(["fix", "clarify"]),
-  blocking: external_exports.boolean(),
-  severity: SeveritySchema,
-  details: TextSchema,
-  resolved_when: TextSchema
-};
-var decisionFields = {
-  ...actionFields,
-  type: external_exports.literal("decide"),
-  decision_owner: LineTextSchema,
-  decision_options: DecisionOptionsSchema
-};
-var informationFields = {
-  ...findingFields,
-  label: InformationLabelSchema,
-  blocking: external_exports.literal(false),
-  details: TextSchema.optional()
-};
-var NewFindingSchema = external_exports.union([
-  external_exports.strictObject(actionFields),
-  external_exports.strictObject(decisionFields),
-  external_exports.strictObject(informationFields)
-]);
-var ActionableFindingSchema = external_exports.union([
-  external_exports.strictObject({ ...actionFields, id: FindingIdSchema }),
-  external_exports.strictObject({ ...decisionFields, id: FindingIdSchema })
-]);
-var StoredFindingSchema = external_exports.union([
-  ...ActionableFindingSchema.options,
-  external_exports.strictObject({ ...informationFields, id: FindingIdSchema })
-]);
-var ReviewEvidenceSchema = external_exports.discriminatedUnion("kind", [
-  external_exports.strictObject({
-    kind: external_exports.literal("github_comment"),
-    comment_id: PositiveIdSchema,
-    url: HttpsUrlSchema
-  }),
-  external_exports.strictObject({
-    kind: external_exports.literal("code"),
-    commit_sha: HeadShaSchema2,
-    path: ReviewPathSchema.min(1),
-    line: external_exports.number().int().positive()
-  }),
-  external_exports.strictObject({ kind: external_exports.literal("commit"), sha: HeadShaSchema2 }),
-  external_exports.strictObject({
-    kind: external_exports.literal("check_run"),
-    check_run_id: PositiveIdSchema,
-    commit_sha: HeadShaSchema2
-  }),
-  external_exports.strictObject({ kind: external_exports.literal("document"), url: HttpsUrlSchema }),
-  external_exports.strictObject({
-    kind: external_exports.literal("verification"),
-    commit_sha: HeadShaSchema2,
-    command: TextSchema,
-    result: external_exports.literal("passed"),
-    report_url: HttpsUrlSchema
-  }),
-  external_exports.strictObject({
-    kind: external_exports.literal("thread_resolution"),
-    thread_id: external_exports.string().min(1),
-    author_id: PositiveIdSchema
-  })
-]);
-var DecisionAnswerSchema = external_exports.strictObject({
-  comment_id: PositiveIdSchema,
-  author_id: PositiveIdSchema,
-  option_id: external_exports.string().min(1)
-});
-var transitionFields = {
-  id: FindingIdSchema,
-  reason: TextSchema,
-  reply: TextSchema.optional(),
-  decision: DecisionAnswerSchema.optional()
-};
-var PriorFindingSchema = external_exports.union([
-  external_exports.strictObject({
-    ...transitionFields,
-    status: external_exports.literal("resolved"),
-    evidence: external_exports.array(ReviewEvidenceSchema).min(1)
-  }),
-  external_exports.strictObject({
-    ...transitionFields,
-    status: external_exports.literal("withdrawn"),
-    evidence: external_exports.array(ReviewEvidenceSchema).min(1),
-    withdrawal_basis: external_exports.enum(["incorrect", "no_longer_applicable", "dismissed"])
-  }),
-  external_exports.strictObject({
-    ...transitionFields,
-    status: external_exports.literal("still_open"),
-    evidence: external_exports.array(ReviewEvidenceSchema).optional(),
-    updated_finding: ActionableFindingSchema.optional()
-  })
-]);
-var reviewFields = {
-  contract_version: external_exports.literal(reviewContractVersion),
-  schema_revision: external_exports.literal(reviewSchemaRevision),
-  head_sha: HeadShaSchema2,
-  review_complete: external_exports.boolean(),
-  incomplete_reason: external_exports.string().max(16e3).optional(),
-  summary: TextSchema,
-  outcome: ReviewOutcomeSchema,
-  outcome_reason: TextSchema,
-  remaining_risk: TextSchema,
-  extensions: external_exports.record(external_exports.string(), external_exports.json()).optional()
-};
-var ReviewSchema = external_exports.strictObject({
-  ...reviewFields,
-  findings: external_exports.array(NewFindingSchema),
-  prior_findings: external_exports.array(PriorFindingSchema)
-});
-var FindingRecordSchema = external_exports.strictObject({
-  v: external_exports.literal(reviewContractVersion),
-  schema_revision: external_exports.literal(reviewSchemaRevision),
-  finding: ActionableFindingSchema,
-  status: external_exports.enum(["open", "resolved", "withdrawn"]),
-  evidence: external_exports.array(ReviewEvidenceSchema),
-  decision: DecisionAnswerSchema.optional()
-});
-var ReviewStateSchema = external_exports.strictObject({
-  v: external_exports.literal(reviewContractVersion),
-  schema_revision: external_exports.literal(reviewSchemaRevision),
-  sha: HeadShaSchema2,
-  outcome: ReviewOutcomeSchema,
-  records: external_exports.array(
-    external_exports.union([
-      external_exports.strictObject({
-        id: FindingIdSchema,
-        status: external_exports.enum(["open", "resolved", "withdrawn"]),
-        location: external_exports.union([
-          external_exports.strictObject({ kind: external_exports.literal("review_comment"), comment_id: PositiveIdSchema }),
-          external_exports.strictObject({ kind: external_exports.literal("review_body"), review_id: PositiveIdSchema })
-        ])
-      }),
-      external_exports.strictObject({
-        id: FindingIdSchema,
-        status: external_exports.literal("informational"),
-        fingerprint: external_exports.string().min(1),
-        finding: external_exports.strictObject({ ...informationFields, id: FindingIdSchema }).optional()
-      })
-    ])
-  )
-});
-var TransportReviewSchema = external_exports.strictObject({
-  ...reviewFields,
-  findings: external_exports.array(
-    external_exports.strictObject({
-      ...actionFields,
-      type: external_exports.enum(["fix", "clarify", "decide"]).optional(),
-      label: external_exports.enum([...ActionLabelSchema.options, ...InformationLabelSchema.options]),
-      severity: SeveritySchema.optional(),
-      details: TextSchema.optional(),
-      resolved_when: TextSchema.optional(),
-      decision_owner: LineTextSchema.optional(),
-      decision_options: DecisionOptionsSchema.optional()
-    })
+import { readFileSync as readFileSync13 } from "node:fs";
+var ReviewCommandPropsSchema = external_exports.object({
+  registry: external_exports.custom(
+    (value) => Boolean(value && typeof value === "object" && "invoke" in value)
   ),
-  prior_findings: external_exports.array(
-    external_exports.strictObject({
-      ...transitionFields,
-      status: external_exports.enum(["resolved", "still_open", "withdrawn"]),
-      evidence: external_exports.array(ReviewEvidenceSchema).optional(),
-      withdrawal_basis: external_exports.enum(["incorrect", "no_longer_applicable", "dismissed"]).optional(),
-      updated_finding: StoredFindingSchema.optional()
-    })
+  defaultCwd: external_exports.string().min(1),
+  createTrustedRegistry: external_exports.custom(
+    (value) => typeof value === "function"
   )
 });
-
-// src/code-review/review-contract.ts
-var InvalidReviewError = class extends Error {
-  name = "InvalidReviewError";
-};
-var ZodReviewContract = class {
-  parse(value) {
-    const result = ReviewSchema.parse(value);
-    const ids = result.prior_findings.map((finding) => finding.id);
-    if (new Set(ids).size !== ids.length)
-      throw new InvalidReviewError("duplicate prior finding IDs");
-    if (!result.review_complete && !result.incomplete_reason?.trim()) {
-      throw new InvalidReviewError("an incomplete review must explain what could not be reviewed");
-    }
-    const findings = result.findings.map((finding) => this.normalize(finding));
-    const priorFindings = result.prior_findings.map((transition) => {
-      if (transition.status !== "still_open") return transition;
-      if ((transition.decision !== void 0 || transition.updated_finding !== void 0) && !transition.evidence?.length) {
-        throw new InvalidReviewError(`transition ${transition.id} requires evidence`);
-      }
-      if (transition.updated_finding === void 0) return transition;
-      if (transition.id !== transition.updated_finding.id)
-        throw new InvalidReviewError("a replacement must preserve the finding ID");
-      return {
-        ...transition,
-        updated_finding: this.normalizeActionable(transition.updated_finding)
-      };
-    });
-    for (const transition of priorFindings) {
-      if (transition.decision !== void 0 && !transition.evidence?.some(
-        (evidence) => evidence.kind === "github_comment" && evidence.comment_id === transition.decision?.comment_id
-      )) {
-        throw new InvalidReviewError(
-          `decision ${transition.id} must reference its human comment in evidence`
-        );
-      }
-    }
-    return { ...result, findings, prior_findings: priorFindings };
-  }
-  record(value) {
-    const result = FindingRecordSchema.parse(value);
-    if (result.status !== "open" && result.evidence.length === 0)
-      throw new InvalidReviewError("closed records require evidence");
-    return { ...result, finding: this.normalizeActionable(result.finding) };
-  }
-  state(value) {
-    const result = ReviewStateSchema.parse(value);
-    const ids = result.records.map((record2) => record2.id);
-    if (new Set(ids).size !== ids.length)
-      throw new InvalidReviewError("duplicate finding IDs in state");
-    for (const record2 of result.records) {
-      if (record2.status === "informational" && record2.finding !== void 0 && record2.id !== record2.finding.id) {
-        throw new InvalidReviewError("informational index ID does not match its finding");
-      }
-    }
-    return result;
-  }
-  schemas() {
-    return {
-      full: external_exports.toJSONSchema(ReviewSchema, { target: "draft-07" }),
-      transport: external_exports.toJSONSchema(TransportReviewSchema, { target: "draft-07" })
-    };
-  }
-  normalize(finding) {
-    this.checkRange(finding);
-    if (!("type" in finding)) return finding;
-    if (finding.type === "decide") this.checkOptions(finding);
-    const blocking = finding.blocking || finding.severity === "critical" || finding.severity === "major";
-    const label = blocking && ["nitpick", "typo", "polish"].includes(finding.label) ? "issue" : finding.label;
-    return { ...finding, blocking, label };
-  }
-  normalizeActionable(finding) {
-    return ActionableFindingSchema.parse({ ...this.normalize(finding), id: finding.id });
-  }
-  checkRange(finding) {
-    if (finding.start_line !== void 0 && (finding.line === 0 || finding.start_line > finding.line)) {
-      throw new InvalidReviewError("start_line must not exceed a positive line anchor");
-    }
-  }
-  checkOptions(finding) {
-    const ids = finding.decision_options.map((option) => option.id);
-    if (new Set(ids).size !== ids.length)
-      throw new InvalidReviewError("decision option IDs must be unique");
-  }
-};
-var reviewContract = new ZodReviewContract();
-
-// src/code-review/review-policy.ts
-import { execFileSync as execFileSync3 } from "node:child_process";
-import { readFileSync as readFileSync10, realpathSync as realpathSync3 } from "node:fs";
-import { dirname as dirname10, join as join11, relative as relative2 } from "node:path";
-import { fileURLToPath as fileURLToPath3 } from "node:url";
-var ReviewPolicyPropsSchema = external_exports.strictObject({ home: external_exports.string().min(1).optional() });
-var LoadPolicyPropsSchema = external_exports.strictObject({ paths: external_exports.array(external_exports.string()).optional() });
-var RepositoryContextPropsSchema = external_exports.strictObject({
-  cwd: external_exports.string().min(1),
-  trustedRef: HeadShaSchema2,
-  contextPath: ReviewPathSchema.min(1).default("CODE-REVIEW.md")
-});
-var FileReviewPolicy = class {
-  home;
-  constructor(props = {}) {
-    const parsed = ReviewPolicyPropsSchema.parse(props);
-    this.home = parsed.home ?? join11(dirname10(fileURLToPath3(import.meta.url)), "..");
-  }
-  load(input2 = {}) {
-    const { paths } = LoadPolicyPropsSchema.parse(input2);
-    const docs = realpathSync3(join11(this.home, "docs"));
-    const read = (id) => {
-      const path3 = realpathSync3(join11(docs, `${id}.md`));
-      if (relative2(docs, path3).startsWith(".."))
-        throw new ReviewPolicyError("review policy path leaves the installed docs directory");
-      return readFileSync10(path3, "utf8");
-    };
-    const catalog = new DocCharterCatalog({ docs: new FileDocResolver({ docsDir: docs }) });
-    const charters = (paths === void 0 ? catalog.all() : catalog.select(paths)).map(
-      ({ id, language, appliesTo, tierA, contents }) => ({ id, language, appliesTo, tierA, contents })
-    );
-    return {
-      method: read("autonomous-review-method"),
-      charter: charters.map(({ contents }) => contents.endsWith("\n") ? contents : `${contents}
-`).join("\n"),
-      charters,
-      tierA: [...new Set(charters.flatMap(({ tierA }) => tierA))],
-      contract: read("code-review-findings-contract")
-    };
-  }
-  repository(input2) {
-    const props = RepositoryContextPropsSchema.parse(input2);
-    const paths = [
-      .../* @__PURE__ */ new Set([
-        props.contextPath,
-        "AGENTS.md",
-        "CLAUDE.md",
-        ".github/CODEOWNERS",
-        "CODEOWNERS",
-        "docs/CODEOWNERS"
-      ])
-    ];
-    const sources = [];
-    const missing = [];
-    for (const path3 of paths) {
-      const tree = execFileSync3("git", ["ls-tree", "-z", props.trustedRef, "--", path3], {
-        cwd: props.cwd,
-        encoding: "utf8"
-      });
-      if (!tree) {
-        missing.push(path3);
-        continue;
-      }
-      if (!/^100(?:644|755) blob [a-f0-9]+\t/.test(tree))
-        throw new ReviewPolicyError(`review rules must be a regular file: ${path3}`);
-      sources.push({
-        path: path3,
-        contents: execFileSync3("git", ["show", `${props.trustedRef}:${path3}`], {
-          cwd: props.cwd,
-          encoding: "utf8",
-          maxBuffer: 1e7
-        })
-      });
-    }
-    return { trustedRef: props.trustedRef, contextPath: props.contextPath, sources, missing };
-  }
-};
-var ReviewPolicyError = class extends Error {
-  name = "ReviewPolicyError";
-};
-
-// src/code-review/review-planner.ts
-import { randomBytes as randomBytes2 } from "node:crypto";
-var EvidenceReviewPlanner = class {
-  verifier;
+var CommanderReviewCommand = class {
+  registry;
+  defaultCwd;
+  createTrustedRegistry;
   constructor(props) {
-    this.verifier = props.verifier;
+    const parsed = ReviewCommandPropsSchema.parse(props);
+    this.registry = parsed.registry;
+    this.defaultCwd = parsed.defaultCwd;
+    this.createTrustedRegistry = parsed.createTrustedRegistry;
   }
-  async plan(input2) {
-    const headSha = HeadShaSchema2.parse(input2.headSha);
-    const review = reviewContract.parse(input2.review);
-    const records = input2.records.map((record2) => reviewContract.record(record2));
-    const known = new Map(records.map((record2) => [record2.finding.id, record2]));
-    if (known.size !== records.length) throw new InvalidReviewError("duplicate stored finding IDs");
-    if (review.head_sha !== headSha)
-      throw new InvalidReviewError("reviewed head is stale; rerun against the current PR head");
-    for (const entry of review.prior_findings) {
-      if (known.get(entry.id)?.status !== "open")
-        throw new InvalidReviewError(`unknown or closed prior finding: ${entry.id}`);
-    }
-    const problems = [];
-    const updates = new Map(review.prior_findings.map((entry) => [entry.id, entry]));
-    const retained = [];
-    for (const record2 of records) {
-      if (record2.status !== "open") {
-        retained.push(record2);
-        continue;
-      }
-      const entry = updates.get(record2.finding.id);
-      if (entry === void 0) {
-        problems.push(`omitted open finding ${record2.finding.id}`);
-        retained.push(record2);
-        continue;
-      }
-      const evidence = entry.evidence ?? [];
-      let valid = true;
-      for (const reference of evidence) {
-        try {
-          if (!await this.verifier.verify(reference, headSha)) valid = false;
-        } catch {
-          valid = false;
-        }
-      }
-      const changed = entry.status !== "still_open" || entry.updated_finding !== void 0 || entry.decision !== void 0;
-      if (!valid && changed) {
-        problems.push(`evidence could not be validated for ${entry.id}`);
-        retained.push(record2);
-        continue;
-      }
-      let authorized = false;
-      if (entry.decision !== void 0) {
-        try {
-          authorized = await this.verifier.authorize(entry.decision, record2.finding);
-        } catch {
-          authorized = false;
-        }
-        if (!authorized) {
-          problems.push(`decision authorization was not verified for ${entry.id}`);
-          retained.push(record2);
-          continue;
-        }
-      }
-      if (entry.status === "withdrawn" && entry.withdrawal_basis === "dismissed") {
-        let dismissed = false;
-        for (const reference of evidence) {
-          try {
-            if (await this.verifier.dismissal(reference)) dismissed = true;
-          } catch {
-            continue;
-          }
-        }
-        if (record2.finding.blocking || record2.finding.type === "decide" || !dismissed) {
-          problems.push(`manual dismissal cannot close ${entry.id}`);
-          retained.push(record2);
-          continue;
-        }
-      }
-      const withdrawal = entry.status === "withdrawn" && entry.withdrawal_basis !== "dismissed";
-      const decisionChanged = record2.finding.type === "decide" && changed;
-      if (decisionChanged && !authorized && !withdrawal) {
-        problems.push(`decision ${entry.id} still needs an authorized human answer`);
-        retained.push(record2);
-        continue;
-      }
-      const finding = entry.status === "still_open" && entry.updated_finding !== void 0 ? entry.updated_finding : record2.finding;
-      retained.push(
-        FindingRecordSchema.parse({
-          ...record2,
-          finding,
-          status: entry.status === "still_open" ? "open" : entry.status,
-          evidence: changed ? evidence : record2.evidence,
-          ...entry.decision !== void 0 ? { decision: entry.decision } : {}
-        })
-      );
-    }
-    const ids = new Set(known.keys());
-    const informational = [];
-    for (const finding of review.findings) {
-      const id = this.newId(ids);
-      if (!("type" in finding)) {
-        informational.push({ ...finding, id });
-        continue;
-      }
-      retained.push(
-        FindingRecordSchema.parse({
-          v: 1,
-          schema_revision: 1,
-          finding: { ...finding, id },
-          status: "open",
-          evidence: []
-        })
-      );
-    }
-    const outcome = this.outcome(review, retained, problems);
-    return { review, records: retained, informational, outcome, problems };
-  }
-  newId(ids) {
-    let id = `f-${randomBytes2(5).toString("hex")}`;
-    while (ids.has(id)) id = `f-${randomBytes2(5).toString("hex")}`;
-    ids.add(id);
-    return id;
-  }
-  outcome(review, records, problems) {
-    if (!review.review_complete || problems.length > 0 || review.outcome === "INCOMPLETE")
-      return "INCOMPLETE";
-    const blockers = records.filter(
-      (record2) => record2.status === "open" && record2.finding.blocking
+  create() {
+    const review = new Command("review").description(
+      "shared autonomous review contract, policy and evidence-checked plans"
     );
-    if (blockers.some((record2) => record2.finding.type === "decide")) return "ESCALATE";
-    if (review.outcome === "ESCALATE") {
-      problems.push("claimed escalation has no matching open blocking decision");
-      return "INCOMPLETE";
-    }
-    if (blockers.length > 0) return "CHANGES_NEEDED";
-    if (review.outcome !== "APPROVED") {
-      problems.push("claimed outcome has no matching open blocking finding");
-      return "INCOMPLETE";
-    }
-    return "APPROVED";
-  }
-};
-var ValidatedEvidencePropsSchema = external_exports.strictObject({
-  verified: external_exports.array(external_exports.string()),
-  authorizedDecisions: external_exports.array(external_exports.string()),
-  dismissals: external_exports.array(external_exports.string())
-});
-
-// src/code-review/github-review-verifier.ts
-import { execFile as execFile6 } from "node:child_process";
-import { promisify as promisify6 } from "node:util";
-var GhReviewGitHubApi = class {
-  async get(path3) {
-    return this.run(["api", path3]);
-  }
-  async graphql(query, variables) {
-    return this.run([
-      "api",
-      "graphql",
-      "-f",
-      `query=${query}`,
-      ...Object.entries(variables).flatMap(([key, value]) => [
-        typeof value === "number" ? "-F" : "-f",
-        `${key}=${value}`
-      ])
-    ]);
-  }
-  async run(args) {
-    const { stdout } = await promisify6(execFile6)("gh", args, { maxBuffer: 2e7 });
-    return JSON.parse(stdout);
-  }
-};
-var GitHubReviewVerifierPropsSchema = external_exports.strictObject({
-  repo: external_exports.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
-  prNumber: external_exports.number().int().positive(),
-  prAuthorId: external_exports.number().int().positive(),
-  owners: external_exports.record(external_exports.string(), external_exports.array(external_exports.string().min(1))).default({}),
-  requireMapping: external_exports.boolean().default(false)
-});
-var UserSchema = external_exports.looseObject({ id: external_exports.number(), login: external_exports.string(), type: external_exports.string() });
-var CommentSchema2 = external_exports.looseObject({
-  id: external_exports.number(),
-  user: UserSchema,
-  issue_url: external_exports.string().optional(),
-  pull_request_url: external_exports.string().optional(),
-  body: external_exports.string()
-});
-var GitHubReviewVerifier = class {
-  props;
-  api;
-  constructor(props) {
-    const { api, ...values } = props;
-    this.props = GitHubReviewVerifierPropsSchema.parse(values);
-    this.api = api ?? new GhReviewGitHubApi();
-  }
-  async verify(evidence, headSha) {
-    if (evidence.kind === "document") return true;
-    if (evidence.kind === "verification") return false;
-    if (evidence.kind === "github_comment") {
-      const comment = await this.comment(evidence.comment_id, evidence.url);
-      return comment !== void 0;
-    }
-    if (evidence.kind === "thread_resolution") return this.dismissal(evidence);
-    if (evidence.kind === "commit") return this.reaches(evidence.sha, headSha);
-    if (evidence.kind === "check_run") {
-      if (evidence.commit_sha !== headSha) return false;
-      const check2 = external_exports.looseObject({
-        head_sha: external_exports.string(),
-        status: external_exports.string(),
-        conclusion: external_exports.string().nullable()
-      }).parse(await this.api.get(`/repos/${this.props.repo}/check-runs/${evidence.check_run_id}`));
-      return check2.head_sha === headSha && check2.status === "completed" && check2.conclusion === "success";
-    }
-    if (!await this.reaches(evidence.commit_sha, headSha)) return false;
-    return (evidence.commit_sha === headSha || await this.hasLine(evidence.path, evidence.line, evidence.commit_sha)) && await this.hasLine(evidence.path, evidence.line, headSha);
-  }
-  async authorize(answer, finding) {
-    if (finding.type !== "decide" || !finding.decision_options.some((option) => option.id === answer.option_id))
-      return false;
-    const comment = await this.comment(answer.comment_id);
-    if (comment === void 0 || comment.user.id !== answer.author_id || comment.user.type !== "User" || !comment.body.trim())
-      return false;
-    const owners = this.props.owners[finding.decision_owner];
-    if (owners !== void 0)
-      return owners.some((login) => login.toLowerCase() === comment.user.login.toLowerCase());
-    if (this.props.requireMapping || comment.user.id === this.props.prAuthorId) return false;
-    const permission = external_exports.looseObject({ permission: external_exports.string() }).parse(
-      await this.api.get(
-        `/repos/${this.props.repo}/collaborators/${encodeURIComponent(comment.user.login)}/permission`
-      )
-    );
-    return ["write", "maintain", "admin"].includes(permission.permission);
-  }
-  async dismissal(evidence) {
-    if (evidence.kind !== "thread_resolution" || evidence.author_id === this.props.prAuthorId)
-      return false;
-    const result = external_exports.looseObject({
-      data: external_exports.looseObject({
-        node: external_exports.looseObject({
-          isResolved: external_exports.boolean(),
-          resolvedBy: external_exports.looseObject({ databaseId: external_exports.number(), actorType: external_exports.string() }).nullable(),
-          pullRequest: external_exports.looseObject({
-            number: external_exports.number(),
-            repository: external_exports.looseObject({ nameWithOwner: external_exports.string() })
-          })
-        }).nullable()
-      })
-    }).parse(
-      await this.api.graphql(
-        "query($id: ID!) { node(id: $id) { ... on PullRequestReviewThread { isResolved resolvedBy { actorType: __typename ... on User { databaseId } } pullRequest { number repository { nameWithOwner } } } } }",
-        { id: evidence.thread_id }
-      )
-    );
-    const thread = result.data.node;
-    return thread !== null && thread.isResolved && thread.resolvedBy?.actorType === "User" && thread.resolvedBy.databaseId === evidence.author_id && thread.pullRequest.number === this.props.prNumber && thread.pullRequest.repository.nameWithOwner.toLowerCase() === this.props.repo.toLowerCase();
-  }
-  /** True when `sha` is the head or an ancestor of it, so the head contains that commit. */
-  async reaches(sha, headSha) {
-    if (sha === headSha) return true;
-    const comparison = external_exports.looseObject({ status: external_exports.string() }).parse(await this.api.get(`/repos/${this.props.repo}/compare/${sha}...${headSha}`));
-    return ["ahead", "identical"].includes(comparison.status);
-  }
-  /** True when `ref` has `path` as a file with at least `line` lines. */
-  async hasLine(path3, line, ref) {
-    const file2 = external_exports.looseObject({ type: external_exports.string(), encoding: external_exports.string(), content: external_exports.string() }).parse(
-      await this.api.get(
-        `/repos/${this.props.repo}/contents/${path3.split("/").map(encodeURIComponent).join("/")}?ref=${ref}`
-      )
-    );
-    if (file2.type !== "file" || file2.encoding !== "base64") return false;
-    const text7 = Buffer.from(file2.content, "base64").toString("utf8");
-    const lines = text7 === "" ? 0 : text7.split("\n").length - (text7.endsWith("\n") ? 1 : 0);
-    return line <= lines;
-  }
-  async comment(id, url2) {
-    if (url2 !== void 0 && !url2.toLowerCase().startsWith(
-      `https://github.com/${this.props.repo.toLowerCase()}/pull/${this.props.prNumber}#`
-    ))
-      return void 0;
-    const endpoints = url2?.includes("#discussion_r") ? ["pulls/comments"] : url2?.includes("#issuecomment-") ? ["issues/comments"] : ["issues/comments", "pulls/comments"];
-    for (const endpoint2 of endpoints) {
-      try {
-        const comment = CommentSchema2.parse(
-          await this.api.get(`/repos/${this.props.repo}/${endpoint2}/${id}`)
-        );
-        const expected = `https://api.github.com/repos/${this.props.repo.toLowerCase()}`;
-        if (comment.id === id && (comment.issue_url?.toLowerCase() === `${expected}/issues/${this.props.prNumber}` || comment.pull_request_url?.toLowerCase() === `${expected}/pulls/${this.props.prNumber}`))
-          return comment;
-      } catch {
-        continue;
-      }
-    }
-    return void 0;
-  }
-};
-
-// src/code-review/review-codec.ts
-import { createHash as createHash2 } from "node:crypto";
-var MarkerInputSchema = external_exports.strictObject({
-  body: external_exports.string(),
-  authorId: external_exports.number().int().positive(),
-  trustedAuthorIds: external_exports.array(external_exports.number().int().positive())
-});
-var JsonReviewCodec = class {
-  finding(record2) {
-    return this.marker("finding", reviewContract.record(record2));
-  }
-  state(state) {
-    return this.marker("state", reviewContract.state(state));
-  }
-  readFindings(input2) {
-    const parsed = MarkerInputSchema.parse(input2);
-    if (!parsed.trustedAuthorIds.includes(parsed.authorId)) return [];
-    return this.readMarkers(parsed.body, "finding").map((value) => reviewContract.record(value));
-  }
-  readState(input2) {
-    const parsed = MarkerInputSchema.parse(input2);
-    if (!parsed.trustedAuthorIds.includes(parsed.authorId)) return void 0;
-    const states = this.readMarkers(parsed.body, "state");
-    if (states.length > 1)
-      throw new InvalidReviewError("multiple review state markers in one summary");
-    return states.length === 0 ? void 0 : reviewContract.state(states[0]);
-  }
-  render(record2) {
-    const validated = reviewContract.record(record2);
-    const finding = validated.finding;
-    const decorations = [
-      ...["nitpick", "typo", "polish"].includes(finding.label) ? [] : [finding.blocking ? "blocking" : "non-blocking"],
-      finding.type
-    ];
-    if (finding.category !== void 0) decorations.push(finding.category);
-    const owner = finding.type === "decide" ? `
-
-**Decision owner:** ${finding.decision_owner}
-**Decision options:** ${finding.decision_options.map((option) => `\`${option.id}\`: ${option.description}`).join("; ")}` : "";
-    return `**${finding.label} (${decorations.join(", ")}):** ${finding.subject}
-
-${finding.discussion}
-
-<details>
-<summary>Details For LLM</summary>
-
-${finding.details}${owner}
-
-**Resolved when:** ${finding.resolved_when}
-</details>
-
-${this.finding(validated)}`;
-  }
-  fingerprint(finding) {
-    return createHash2("sha256").update(`${finding.path}|${finding.label}|${finding.subject.trim().toLowerCase()}`).digest("hex");
-  }
-  marker(kind, value) {
-    return `<!-- code-review:${kind} ${JSON.stringify(value).replaceAll(">", "\\u003e")} -->`;
-  }
-  readMarkers(body, kind) {
-    const prefix = `<!-- code-review:${kind} `;
-    const matches = [...body.matchAll(new RegExp(`${prefix}([\\s\\S]*?) -->`, "g"))];
-    if (body.split(prefix).length - 1 !== matches.length)
-      throw new InvalidReviewError("unterminated review marker");
-    return matches.map((match) => {
-      try {
-        return JSON.parse(match[1] ?? "");
-      } catch {
-        throw new InvalidReviewError(
-          "review marker contains invalid JSON; recover state before approving"
-        );
-      }
+    review.command("schema").option("--transport", "print the model-facing superset instead of the full schema").action(async (opts) => {
+      const schema = await this.invoke("review-schema", { transport: opts.transport ?? false });
+      process.stdout.write(JSON.stringify(schema, null, 2) + "\n");
     });
-  }
-};
-
-// src/code-review/commands/command.ts
-function createReviewCommand() {
-  const review = new Command("review").description(
-    "shared autonomous review contract, policy and evidence-checked plans"
-  );
-  review.command("schema").option("--transport", "print the model-facing superset instead of the full schema").action((opts) => {
-    const schemas = reviewContract.schemas();
-    process.stdout.write(
-      JSON.stringify(opts.transport ? schemas.transport : schemas.full, null, 2) + "\n"
-    );
-  });
-  review.command("validate").argument("<file>", "structured reviewer result").action((file2) => {
-    process.stdout.write(
-      JSON.stringify(reviewContract.parse(JSON.parse(readFileSync11(file2, "utf8")))) + "\n"
-    );
-  });
-  review.command("render").argument("<plan>", "evidence-checked plan JSON").action((file2) => {
-    const plan = external_exports.looseObject({
-      review: external_exports.unknown(),
-      records: external_exports.array(FindingRecordSchema),
-      outcome: external_exports.string(),
-      problems: external_exports.array(external_exports.string())
-    }).parse(JSON.parse(readFileSync11(file2, "utf8")));
-    const result = reviewContract.parse(plan.review);
-    const codec2 = new JsonReviewCodec();
-    process.stdout.write(
-      JSON.stringify({
-        headSha: result.head_sha,
-        outcome: plan.outcome,
-        problems: plan.problems,
-        findings: plan.records.map((record2) => ({
-          id: record2.finding.id,
-          status: record2.status,
-          path: record2.finding.path,
-          line: record2.finding.line,
-          body: codec2.render(record2)
-        }))
-      }) + "\n"
-    );
-  });
-  review.command("state").argument("<file>", "index with actual persisted artifact IDs").action((file2) => {
-    process.stdout.write(
-      new JsonReviewCodec().state(
-        ReviewStateSchema.parse(JSON.parse(readFileSync11(file2, "utf8")))
-      ) + "\n"
-    );
-  });
-  review.command("context").requiredOption("--ref <sha>", "pinned trusted default-branch commit").option("--path <path>", "repo review-context file", "CODE-REVIEW.md").option("--cwd <directory>", "repository checkout", process.cwd()).action((opts) => {
-    process.stdout.write(
-      JSON.stringify(
-        new FileReviewPolicy().repository({
-          cwd: opts.cwd,
-          trustedRef: opts.ref,
-          contextPath: opts.path
-        })
-      ) + "\n"
-    );
-  });
-  review.command("plan").argument("<number>").requiredOption("--repo <repo>", "owner/name").requiredOption("--file <path>", "structured reviewer result").requiredOption(
-    "--records-file <path>",
-    "trusted prior records from GitHub; [] for a first review"
-  ).option("--owners-file <path>", "trusted role-to-login authority mapping").option("--require-mapping", "reject independent-writer fallback").action(
-    async (number4, opts) => {
-      const prNumber = external_exports.coerce.number().int().positive().parse(number4);
-      const api = new GhReviewGitHubApi();
-      const pr = external_exports.looseObject({
-        head: external_exports.looseObject({ sha: external_exports.string() }),
-        user: external_exports.looseObject({ id: external_exports.number() })
-      }).parse(await api.get(`/repos/${opts.repo}/pulls/${prNumber}`));
-      const owners = opts.ownersFile === void 0 ? {} : external_exports.record(external_exports.string(), external_exports.array(external_exports.string())).parse(JSON.parse(readFileSync11(opts.ownersFile, "utf8")));
-      const planner = new EvidenceReviewPlanner({
-        verifier: new GitHubReviewVerifier({
-          api,
-          repo: opts.repo,
-          prNumber,
-          prAuthorId: pr.user.id,
-          owners,
-          requireMapping: opts.requireMapping ?? false
-        })
-      });
-      const records = external_exports.array(external_exports.unknown()).parse(JSON.parse(readFileSync11(opts.recordsFile, "utf8")));
-      const result = await planner.plan({
-        review: JSON.parse(readFileSync11(opts.file, "utf8")),
-        records,
-        headSha: pr.head.sha
+    review.command("validate").argument("<file>", "structured reviewer result").action(async (file2) => {
+      const result = await this.invoke("review-validate", {
+        review: JSON.parse(readFileSync13(file2, "utf8"))
       });
       process.stdout.write(JSON.stringify(result) + "\n");
-    }
-  );
-  return review;
-}
-
-// src/shared/commands/config/command.ts
-var scopeHelp = "where to write: user, project, local, or file; config show reports the selected host and exact paths (override with FLIGHT_RULES_HOST=claude|codex)";
-function createConfigCommand(getStore) {
-  const config2 = new Command("config");
-  config2.exitOverride();
-  config2.command("path").description("print the resolved config file path, whether or not it exists").exitOverride().action(() => {
-    process.stdout.write(`${getStore().filePath()}
+    });
+    review.command("render").argument("<plan>", "evidence-checked plan JSON").action(async (file2) => {
+      const plan = external_exports.looseObject({
+        review: external_exports.json(),
+        records: external_exports.array(external_exports.json()),
+        outcome: external_exports.string(),
+        problems: external_exports.array(external_exports.string())
+      }).parse(JSON.parse(readFileSync13(file2, "utf8")));
+      const result = await this.invoke("review-render", {
+        review: plan.review,
+        records: plan.records,
+        outcome: plan.outcome,
+        problems: plan.problems
+      });
+      process.stdout.write(JSON.stringify(result) + "\n");
+    });
+    review.command("state").argument("<file>", "index with actual persisted artifact IDs").action(async (file2) => {
+      const result = await this.invoke("review-state", {
+        state: JSON.parse(readFileSync13(file2, "utf8"))
+      });
+      process.stdout.write(`${external_exports.string().parse(result)}
 `);
-  });
-  config2.command("show").description("print the merged config, which file each value came from, and whether it is valid").exitOverride().action(() => {
-    process.stdout.write(JSON.stringify(getStore().inspect()) + "\n");
-  });
-  config2.command("set").description("write one config value; array keys take several values").argument("<key>").argument("<values...>").addOption(new Option("--scope <scope>", scopeHelp).choices(configScopes)).exitOverride().action((key, values, opts) => {
-    const store = getStore();
-    const scope = opts.scope ?? store.defaultScopeFor(key);
-    store.set(key, values, scope);
-    const shadowedBy = store.shadowingScope(key, scope);
-    process.stdout.write(
-      JSON.stringify({
-        key,
-        scope,
-        path: store.pathFor(scope),
-        ...shadowedBy !== void 0 ? {
-          warning: `${key} is also set in ${shadowedBy} scope (${store.pathFor(shadowedBy)}), which takes precedence`
-        } : {}
-      }) + "\n"
+    });
+    review.command("context").requiredOption("--ref <sha>", "pinned trusted default-branch commit").option("--path <path>", "repo review-context file", "CODE-REVIEW.md").option("--cwd <directory>", "trusted repository checkout", this.defaultCwd).action(async (opts) => {
+      const registry2 = this.createTrustedRegistry({ cwd: opts.cwd, trustedRef: opts.ref });
+      const result = await this.invokeWithRegistry(registry2, "review-context", {
+        contextPath: opts.path
+      });
+      process.stdout.write(JSON.stringify(result) + "\n");
+    });
+    review.command("plan").argument("<number>").requiredOption("--repo <repo>", "owner/name").requiredOption("--file <path>", "structured reviewer result").requiredOption(
+      "--records-file <path>",
+      "trusted prior records from GitHub; [] for a first review"
+    ).option("--owners-file <path>", "trusted role-to-login authority mapping").option("--require-mapping", "reject independent-writer fallback").action(
+      async (number4, opts) => {
+        const input2 = {
+          number: external_exports.coerce.number().int().positive().parse(number4),
+          repo: opts.repo,
+          review: JSON.parse(readFileSync13(opts.file, "utf8")),
+          records: JSON.parse(readFileSync13(opts.recordsFile, "utf8"))
+        };
+        const owners = opts.ownersFile === void 0 ? {} : external_exports.record(external_exports.string(), external_exports.array(external_exports.string().min(1))).parse(JSON.parse(readFileSync13(opts.ownersFile, "utf8")));
+        const registry2 = this.createTrustedRegistry({
+          owners,
+          requireMapping: opts.requireMapping ?? false
+        });
+        const result = await this.invokeWithRegistry(registry2, "review-plan", input2);
+        process.stdout.write(JSON.stringify(result) + "\n");
+      }
     );
-  });
-  config2.command("unset").description("remove one config value from a scope").argument("<key>").addOption(new Option("--scope <scope>", scopeHelp).choices(configScopes)).exitOverride().action((key, opts) => {
-    const store = getStore();
-    const scope = opts.scope ?? store.defaultScopeFor(key);
-    store.unset(key, scope);
-    process.stdout.write(
-      JSON.stringify({ key, scope, path: store.pathFor(scope) }) + "\n"
-    );
-  });
-  return config2;
+    return review;
+  }
+  async invoke(id, input2) {
+    return this.invokeWithRegistry(this.registry, id, input2);
+  }
+  async invokeWithRegistry(registry2, id, input2) {
+    const result = await registry2.invoke(id, input2);
+    if (result.status === "error")
+      throw new OperationCliError({
+        operationId: id,
+        errorName: result.error.name,
+        message: result.error.message
+      });
+    if (result.status === "partial")
+      throw new OperationCliError({
+        operationId: id,
+        errorName: result.error.name,
+        message: result.error.message
+      });
+    return result.data;
+  }
+};
+function createReviewCommand(props) {
+  return new CommanderReviewCommand(props).create();
 }
 
 // src/shared/commands/board/command.ts
@@ -50358,7 +51198,7 @@ var HiddenPrompt = class {
     const muted = new Writable({ write: (_chunk, _encoding, done) => done() });
     const prompt = createInterface({ input: process.stdin, output: muted, terminal: true });
     try {
-      return await new Promise((resolve7) => prompt.once("line", resolve7));
+      return await new Promise((resolve8) => prompt.once("line", resolve8));
     } finally {
       prompt.close();
       process.stderr.write("\n");
@@ -50496,7 +51336,7 @@ function createBoardCommand(getBoard, getTokens = () => new AriadneTokenStore(),
 }
 
 // src/shared/commands/packet/command.ts
-import { readFileSync as readFileSync12, writeFileSync as writeFileSync7 } from "node:fs";
+import { readFileSync as readFileSync14, writeFileSync as writeFileSync7 } from "node:fs";
 
 // src/shared/decimal-integer.ts
 var DecimalIntegerParser = class {
@@ -50543,7 +51383,7 @@ var PacketFile = class {
   read() {
     let text7;
     try {
-      text7 = readFileSync12(this.path, "utf8");
+      text7 = readFileSync14(this.path, "utf8");
     } catch (err) {
       throw new Error(`cannot read ${this.path}: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
     }
@@ -50631,9 +51471,9 @@ var PacketCommandFactory = class {
 var createPacketCommand = (getPackets) => new PacketCommandFactory().create(getPackets);
 
 // src/tasks/commands/resolve-body.ts
-import { readFileSync as readFileSync13 } from "node:fs";
+import { readFileSync as readFileSync15 } from "node:fs";
 function resolveBody(opts) {
-  if (opts.bodyFile !== void 0) return readFileSync13(opts.bodyFile, "utf8");
+  if (opts.bodyFile !== void 0) return readFileSync15(opts.bodyFile, "utf8");
   if (opts.body !== void 0) return opts.body;
   throw new Error("one of --body or --body-file is required");
 }
@@ -51317,7 +52157,7 @@ import { basename as basename3 } from "node:path/posix";
 var mediaReference = /(!?)\[([^\]]*)\]\(\s*<?([^\s()<>]+)>?(?:\s+"[^"]*")?\s*\)/g;
 var absoluteTarget = /^[a-zA-Z][a-zA-Z0-9+.-]*:|^\/\/|^#/;
 var localPrefix = /^(?:\.\/)+/;
-var fenceRun = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+var fenceRun2 = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 var AttachmentSpecSchema = external_exports.string().min(1).transform((spec) => {
   const hash2 = spec.lastIndexOf("#");
   const path3 = hash2 > 0 ? spec.slice(0, hash2) : spec;
@@ -51380,7 +52220,7 @@ var TrackerEvidenceService = class {
    * code from being read as a fence.
    */
   openingFence(line) {
-    const match = fenceRun.exec(line);
+    const match = fenceRun2.exec(line);
     if (match === null) return void 0;
     const run3 = match[1];
     const rest = match[2];
@@ -51393,7 +52233,7 @@ var TrackerEvidenceService = class {
    * least as long as the opening run, with nothing but whitespace after it.
    */
   closesFence(line, fence) {
-    const match = fenceRun.exec(line);
+    const match = fenceRun2.exec(line);
     if (match === null) return false;
     const run3 = match[1];
     const rest = match[2];
@@ -51548,214 +52388,6 @@ function createUsersCommand(getTracker) {
     process.stdout.write(JSON.stringify(result) + "\n");
   });
   return users;
-}
-
-// src/tasks/commands/rfc/command.ts
-import { readdirSync as readdirSync4 } from "node:fs";
-function getNextRfcId(rfcDir) {
-  let files;
-  try {
-    files = readdirSync4(rfcDir);
-  } catch {
-    return "RFC-001";
-  }
-  const ids = files.map((f) => f.match(/^RFC-(\d+)\.md$/)).filter((m) => m !== null).map((m) => parseInt(m[1] ?? "0", 10));
-  if (ids.length === 0) return "RFC-001";
-  return `RFC-${(Math.max(...ids) + 1).toString().padStart(3, "0")}`;
-}
-function createRfcCommand(getConfig, getCwd = () => process.cwd()) {
-  const rfc = new Command("rfc");
-  rfc.command("next-id").exitOverride().action(() => {
-    const rfcDir = getRfcDir(getConfig(), getCwd());
-    process.stdout.write(`${getNextRfcId(rfcDir)}
-`);
-  });
-  rfc.command("dir").exitOverride().action(() => {
-    process.stdout.write(`${getRfcDir(getConfig(), getCwd())}
-`);
-  });
-  return rfc;
-}
-
-// src/tasks/qa-instructions/qa-instructions.ts
-import { existsSync as existsSync10, readFileSync as readFileSync14, statSync as statSync4 } from "node:fs";
-import { dirname as dirname11, join as join12, resolve as resolve5 } from "node:path";
-var atxHeading = /^ {0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$/;
-var fenceRun2 = /^ {0,3}(`{3,}|~{3,})/;
-var legacyHint = 'Legacy QA recipe in use. Move its content into a QA.md at the repo root (or a "QA" section of AGENTS.md); see docs/qa-instructions.md.';
-var nodeFileSystem = {
-  isFile: (path3) => existsSync10(path3) && statSync4(path3).isFile(),
-  exists: (path3) => existsSync10(path3),
-  readFile: (path3) => readFileSync14(path3, "utf8")
-};
-var QaInstructionsFinder = class {
-  fs;
-  constructor(props = {}) {
-    this.fs = props.fs ?? nodeFileSystem;
-  }
-  discover(input2) {
-    const sources = this.levels(input2.from).map((dir) => this.sourceAt(dir)).filter((source) => source !== void 0);
-    if (sources.length > 0) return { found: true, sources };
-    const legacy = this.legacySource(input2.legacyRecipePath);
-    if (legacy !== void 0) return { found: true, sources: [legacy] };
-    return { found: false, sources: [] };
-  }
-  /**
-   * Extracts the body of the first heading whose text is exactly "QA" (any
-   * case, any level), up to the next heading of the same or a higher level.
-   * Headings inside fenced code blocks are ignored. Returns undefined when the
-   * section is absent or empty.
-   */
-  extractQaSection(markdown) {
-    const lines = markdown.split("\n");
-    let openFence = null;
-    let sectionLevel = null;
-    const body = [];
-    for (const line of lines) {
-      const fence = fenceRun2.exec(line)?.[1];
-      if (fence !== void 0) {
-        if (openFence === null) openFence = fence;
-        else if (fence[0] === openFence[0] && fence.length >= openFence.length) openFence = null;
-        if (sectionLevel !== null) body.push(line);
-        continue;
-      }
-      const heading = openFence === null ? atxHeading.exec(line) : null;
-      if (heading !== null) {
-        const level = heading[1]?.length ?? 0;
-        if (sectionLevel !== null && level <= sectionLevel) break;
-        if (sectionLevel === null && (heading[2] ?? "").trim().toLowerCase() === "qa") {
-          sectionLevel = level;
-          continue;
-        }
-      }
-      if (sectionLevel !== null) body.push(line);
-    }
-    const content3 = body.join("\n").trim();
-    return content3.length > 0 ? content3 : void 0;
-  }
-  /** The start directory and each parent up to the repository root; only the start when no root is found. */
-  levels(from) {
-    const absolute = resolve5(from);
-    const start = this.fs.isFile(absolute) ? dirname11(absolute) : absolute;
-    const levels = [];
-    let current = start;
-    for (; ; ) {
-      levels.push(current);
-      if (this.fs.exists(join12(current, ".git"))) return levels;
-      const parent = dirname11(current);
-      if (parent === current) return [start];
-      current = parent;
-    }
-  }
-  sourceAt(dir) {
-    const agentsMd = join12(dir, "AGENTS.md");
-    if (this.fs.isFile(agentsMd)) {
-      const section = this.extractQaSection(this.fs.readFile(agentsMd));
-      if (section !== void 0)
-        return { path: agentsMd, kind: "agents-md-section", dir, content: section };
-    }
-    return this.fileSource(join12(dir, "QA.md"), "qa-md", dir) ?? this.fileSource(join12(dir, ".agents", "QA.md"), "agents-dir-qa-md", dir);
-  }
-  fileSource(path3, kind, dir) {
-    if (!this.fs.isFile(path3)) return void 0;
-    const content3 = this.fs.readFile(path3).trim();
-    return content3.length > 0 ? { path: path3, kind, dir, content: content3 } : void 0;
-  }
-  legacySource(path3) {
-    if (path3 === void 0) return void 0;
-    const source = this.fileSource(path3, "legacy-recipe", dirname11(path3));
-    return source === void 0 ? void 0 : { ...source, legacy: true, hint: legacyHint };
-  }
-};
-
-// src/tasks/commands/qa/command.ts
-function createQaCommand(getConfig, getConfigPath, getFinder = () => new QaInstructionsFinder(), getEvidence) {
-  const qa = new Command("qa");
-  const legacyRecipePath = () => {
-    let config2;
-    try {
-      config2 = getConfig();
-    } catch {
-      return void 0;
-    }
-    if (config2.qaRecipe !== void 0 && config2.qaRecipe.trim() === "") {
-      throw new Error(
-        "qaRecipe is set to a blank value \u2014 remove the key and move the recipe into a QA.md (see docs/qa-instructions.md)"
-      );
-    }
-    return getQaRecipePath(config2, getConfigPath());
-  };
-  qa.command("instructions").description("print the QA instructions that apply to a directory, nearest first, as JSON").option("--from <dir>", "directory (or file) to start from; defaults to the working directory").exitOverride().action((opts) => {
-    const result = getFinder().discover({
-      from: opts.from ?? process.cwd(),
-      legacyRecipePath: legacyRecipePath()
-    });
-    process.stdout.write(JSON.stringify(result) + "\n");
-  });
-  qa.command("evidence-dir").description("print where QA evidence for a ticket is written, and whether git ignores it, as JSON").argument("<ticket>").exitOverride().action((ticket) => {
-    if (getEvidence === void 0) throw new Error("evidence location is not available in this program");
-    process.stdout.write(JSON.stringify(getEvidence().dirFor(ticket)) + "\n");
-  });
-  qa.command("recipe").description("deprecated: print the path of the nearest QA instructions; use `qa instructions`").exitOverride().action(() => {
-    const [nearest] = getFinder().discover({
-      from: process.cwd(),
-      legacyRecipePath: legacyRecipePath()
-    }).sources;
-    if (nearest === void 0) {
-      throw new Error(
-        "No QA instructions found \u2014 add a QA.md at the repo root or a QA section in AGENTS.md (see docs/qa-instructions.md)"
-      );
-    }
-    process.stderr.write(
-      "`flight-rules qa recipe` is deprecated; use `flight-rules qa instructions`\n"
-    );
-    process.stdout.write(`${nearest.path}
-`);
-  });
-  return qa;
-}
-
-// src/tasks/commands/competencies/command.ts
-function createCompetenciesCommand(getConfig) {
-  const competencies = new Command("competencies");
-  competencies.exitOverride().action(() => {
-    process.stdout.write(JSON.stringify(getConfig().competencies) + "\n");
-  });
-  return competencies;
-}
-
-// src/tasks/commands/check/command.ts
-import { readFileSync as readFileSync15 } from "node:fs";
-var ReadinessFailedError = class extends Error {
-  name = "ReadinessFailedError";
-};
-function createCheckCommand(getConfig, getTracker, getConfigPath, getProbe, getFinder = () => new QaInstructionsFinder(), getReadiness = () => new NodeRepositoryReadiness()) {
-  const check2 = new Command("check");
-  check2.addOption(new Option("--workflow <name>", "check readiness for this workflow before its first mutation").choices(WorkflowSchema.options)).option("--runtime-file <path>", "JSON containing current caller/worker capability observations; requires --workflow").exitOverride().action(async (options) => {
-    let evidence;
-    try {
-      evidence = options.runtimeFile === void 0 ? void 0 : JSON.parse(readFileSync15(options.runtimeFile, "utf8"));
-    } catch {
-      process.stdout.write(JSON.stringify({ tracker: null, repo: null, checks: [{ name: "runtime", ok: false, required: true, code: "INVALID_CONTEXT", detail: "Cannot read a JSON runtime evidence file", remedy: "Supply a readable evidence file; see flight-rules doc workflow-preflight." }], ok: false, scope: "workflow" }) + "\n");
-      throw new ReadinessFailedError("flight-rules check failed \u2014 see report above");
-    }
-    const parsed = ReadinessOptionsSchema.safeParse({ workflow: options.workflow, evidence });
-    if (!parsed.success) {
-      process.stdout.write(JSON.stringify({ tracker: null, repo: null, checks: [{ name: "runtime", ok: false, required: true, code: "INVALID_CONTEXT", detail: "Invalid workflow runtime evidence", remedy: "Supply evidence matching WorkflowEvidenceSchema with a --workflow selection." }], ok: false, scope: "workflow" }) + "\n");
-      throw new ReadinessFailedError("flight-rules check failed \u2014 see report above");
-    }
-    const report = await getReadiness().inspect({
-      config: getConfig,
-      tracker: getTracker,
-      configPath: getConfigPath,
-      probe: getProbe(),
-      finder: getFinder(),
-      options: parsed.data
-    });
-    process.stdout.write(JSON.stringify(report) + "\n");
-    if (!report.ok) throw new ReadinessFailedError("flight-rules check failed \u2014 see report above");
-  });
-  return check2;
 }
 
 // src/hooks/commands/hook/command.ts
@@ -52276,7 +52908,7 @@ ${line.trim()}`) === "";
 
 // src/hooks/commit-guard/commit-guard.ts
 import { readFileSync as readFileSync17 } from "node:fs";
-import { isAbsolute as isAbsolute3, resolve as resolve6 } from "node:path";
+import { isAbsolute as isAbsolute3, resolve as resolve7 } from "node:path";
 var PreToolUseInputSchema = external_exports.looseObject({
   tool_name: external_exports.string().optional(),
   tool_input: external_exports.looseObject({ command: external_exports.string().optional() }).optional(),
@@ -52368,7 +53000,7 @@ var CommitGuard = class {
     const unquoted = file2.replace(/^["']|["']$/g, "");
     if (unquoted === "-" || !isAbsolute3(unquoted) && cwd === void 0) return false;
     try {
-      const contents = readFileSync17(isAbsolute3(unquoted) ? unquoted : resolve6(cwd ?? "", unquoted), "utf8");
+      const contents = readFileSync17(isAbsolute3(unquoted) ? unquoted : resolve7(cwd ?? "", unquoted), "utf8");
       return /^Flight-Rules-Version: /m.test(contents);
     } catch {
       return false;
@@ -52849,18 +53481,8 @@ var ManifestCliRouteCoverage = class _ManifestCliRouteCoverage {
   }
 };
 var pendingRoutes = [
-  "charter",
-  "competencies",
-  "rfc dir",
-  "rfc next-id",
-  "qa instructions",
-  "qa evidence-dir",
-  "qa recipe",
-  "config path",
-  "config show",
   "config set",
   "config unset",
-  "check",
   "ticket get",
   "ticket transitions",
   "users get",
@@ -52893,12 +53515,6 @@ var pendingRoutes = [
   "pr comment",
   "pr list",
   "pr request-review",
-  "review schema",
-  "review validate",
-  "review render",
-  "review state",
-  "review context",
-  "review plan",
   "board post heartbeat",
   "board post item",
   "board post activity",
@@ -52950,6 +53566,28 @@ var excludedRoutes = [
 var cliRouteCoverage = new ManifestCliRouteCoverage({
   entries: [
     { status: "supported", route: { path: ["doc"], aliases: [] }, operationId: "doc" },
+    ...[
+      ["charter", "charter"],
+      ["competencies", "competencies"],
+      ["rfc dir", "rfc-dir"],
+      ["rfc next-id", "rfc-next-id"],
+      ["qa instructions", "qa-instructions"],
+      ["qa evidence-dir", "qa-evidence-dir"],
+      ["qa recipe", "qa-recipe"],
+      ["config path", "config-path"],
+      ["config show", "config-show"],
+      ["check", "check"],
+      ["review schema", "review-schema"],
+      ["review validate", "review-validate"],
+      ["review render", "review-render"],
+      ["review state", "review-state"],
+      ["review context", "review-context"],
+      ["review plan", "review-plan"]
+    ].map(([path3, operationId]) => ({
+      status: "supported",
+      route: { path: (path3 ?? "").split(" "), aliases: [] },
+      operationId: operationId ?? ""
+    })),
     ...pendingRoutes.map((path3) => ({
       status: "pending-migration",
       route: { path: path3.split(" "), aliases: [] },
@@ -52965,6 +53603,7 @@ var cliRouteCoverage = new ManifestCliRouteCoverage({
 
 // src/cli/cli.ts
 function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = () => createFlightRules().configPath(), services = createFlightRules()) {
+  const launchCwd = process.cwd();
   const program2 = new Command("flight-rules");
   program2.version(appVersion);
   program2.exitOverride();
@@ -52986,8 +53625,6 @@ function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = () => cr
   program2.addCommand(createBranchNameCommand());
   program2.addCommand(createPrCommand(prHost));
   program2.addCommand(createUsersCommand(tracker));
-  program2.addCommand(createRfcCommand(config2));
-  program2.addCommand(createConfigCommand(() => services.configStore()));
   program2.addCommand(createAgentsCommand(() => services.installation()));
   const boardHooks = () => new BoardHookKit({
     sessions: services.boardSessions(),
@@ -53003,13 +53640,31 @@ function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = () => cr
       branch: () => new GitBranchReader()
     })
   );
-  program2.addCommand(createQaCommand(config2, getConfigPath, void 0, () => services.evidence()));
-  program2.addCommand(createCompetenciesCommand(config2));
   const docOperation = new DocOperation({ getResolver: () => services.docs() });
-  const operationRegistry = new MapOperationRegistry({
-    operations: [docOperation],
-    policy: new LaunchOperationAccessPolicy({ allowedEffects: ["read"] })
+  const localOperations = new DefaultLocalDiscoveryOperations({
+    cwd: launchCwd,
+    getConfig: config2,
+    getConfigStore: () => services.configStore(),
+    getCharters: () => new DocCharterCatalog({ docs: services.docs() }),
+    getRepositoryPaths: () => new GitRepositoryPaths({ cwd: launchCwd }),
+    getEvidence: () => services.evidence(),
+    getReadiness: () => services.readiness(),
+    getProbe: () => services.probe(),
+    getTracker: tracker,
+    getConfigPath
   });
+  const operationRegistry = new MapOperationRegistry({
+    operations: [
+      docOperation,
+      ...localOperations.operations(),
+      ...new DefaultReviewOperations({ cwd: launchCwd }).operations()
+    ],
+    policy: new LaunchOperationAccessPolicy({ allowedEffects: ["read", "process", "network"] })
+  });
+  new CommanderLocalDiscoveryCli({
+    operations: localOperations,
+    registry: operationRegistry
+  }).addTo(program2);
   program2.addCommand(
     createDocCommand({
       getResolver: () => services.docs(),
@@ -53018,21 +53673,16 @@ function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = () => cr
     })
   );
   program2.addCommand(
-    createCharterCommand(
-      () => new DocCharterCatalog({ docs: services.docs() }),
-      () => new GitRepositoryPaths({ cwd: process.cwd() })
-    )
-  );
-  program2.addCommand(createReviewCommand());
-  program2.addCommand(
-    createCheckCommand(
-      config2,
-      tracker,
-      getConfigPath,
-      () => services.probe(),
-      void 0,
-      () => services.readiness()
-    )
+    createReviewCommand({
+      registry: operationRegistry,
+      defaultCwd: launchCwd,
+      createTrustedRegistry: (launch) => new MapOperationRegistry({
+        operations: services.reviewOperations(launch).operations(),
+        policy: new LaunchOperationAccessPolicy({
+          allowedEffects: ["read", "process", "network"]
+        })
+      })
+    })
   );
   program2.addCommand(
     createBoardCommand(

@@ -5,6 +5,7 @@ import { configScopes } from "../shared/config-store.js";
 import { createDocCommand } from "../bundled-docs/commands/doc/command.js";
 import { DocOperation } from "../operations/doc-operation.js";
 import { DefaultLocalDiscoveryOperations } from "../operations/local-discovery-operations.js";
+import { DefaultReviewOperations } from "../operations/review-operations.js";
 import { CommanderLocalDiscoveryCli } from "../operations/local-discovery-cli.js";
 import {
   LaunchOperationAccessPolicy,
@@ -49,6 +50,7 @@ export function buildProgram(
     | "readiness"
     | "docs"
     | "configStore"
+    | "reviewOperations"
     | "installation"
     | "evidence"
     | "board"
@@ -123,6 +125,7 @@ export function buildProgram(
           roots: [parse(launchCwd).root],
         })
       ).operations(),
+      ...new DefaultReviewOperations({ cwd: launchCwd }).operations(),
     ],
     policy: new LaunchOperationAccessPolicy({
       allowedEffects: ["read", "write", "process", "network"],
@@ -141,7 +144,19 @@ export function buildProgram(
       registry: operationRegistry,
     }),
   );
-  program.addCommand(createReviewCommand());
+  program.addCommand(
+    createReviewCommand({
+      registry: operationRegistry,
+      defaultCwd: launchCwd,
+      createTrustedRegistry: (launch) =>
+        new MapOperationRegistry({
+          operations: services.reviewOperations(launch).operations(),
+          policy: new LaunchOperationAccessPolicy({
+            allowedEffects: ["read", "process", "network"],
+          }),
+        }),
+    }),
+  );
   program.addCommand(
     createBoardCommand(
       () => services.board(),

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { z } from "zod";
 import { join } from "node:path";
@@ -227,6 +227,7 @@ describe("local discovery operations", () => {
       ariadneTokens: () => core.ariadneTokens(),
       boardSessions: () => core.boardSessions(),
       boardAgents: () => core.boardAgents(),
+      reviewOperations: () => core.reviewOperations(),
     };
     const program = buildProgram(
       (override) => core.tracker(override),
@@ -326,6 +327,7 @@ describe("local discovery operations", () => {
       ariadneTokens: () => core.ariadneTokens(),
       boardSessions: () => core.boardSessions(),
       boardAgents: () => core.boardAgents(),
+      reviewOperations: () => core.reviewOperations(),
     };
     const program = buildProgram(
       (override) => core.tracker(override),
@@ -395,6 +397,157 @@ describe("local discovery operations", () => {
     }
   });
 
+  it("matches all seven config and git CLI routes to their authorized shared results", async () => {
+    const repo = join(root, "cli-parity-repo");
+    const home = join(root, "cli-parity-home");
+    const remote = join(root, "cli-parity-remote.git");
+    const output = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const cwd = vi.spyOn(process, "cwd").mockReturnValue(repo);
+    const invoke = vi.spyOn(MapOperationRegistry.prototype, "invoke");
+
+    mkdirSync(repo);
+    mkdirSync(home);
+    execFileSync("git", ["init", "--bare", "--quiet", remote], { cwd: root });
+    execFileSync("git", ["init", "--quiet", "-b", "main"], { cwd: repo });
+    execFileSync("git", ["config", "user.name", "CLI Parity"], { cwd: repo });
+    execFileSync("git", ["config", "user.email", "cli-parity@example.invalid"], { cwd: repo });
+    execFileSync("git", ["remote", "add", "origin", remote], { cwd: repo });
+    writeFileSync(join(repo, "tracked.txt"), "initial\n");
+    execFileSync("git", ["add", "tracked.txt"], { cwd: repo });
+    execFileSync("git", ["commit", "--quiet", "-m", "initial"], { cwd: repo });
+    writeFileSync(join(repo, "tracked.txt"), "changed by parity test\n");
+
+    const parityConfigPath = join(repo, ".agents", "flight-rules.local.md");
+    mkdirSync(join(repo, ".agents"));
+    writeFileSync(parityConfigPath, "---\ntracker: github\nrepo: acme/project\n---\n");
+    const parityCore = createFlightRules({
+      cwd: repo,
+      configPath: parityConfigPath,
+      host: "codex",
+      env: {
+        FLIGHT_RULES_HOST: "codex",
+        HOME: home,
+        FLIGHT_RULES_HOME: process.cwd(),
+      },
+    });
+    const services = {
+      git: () => parityCore.git(),
+      gitConfigOperations: (policy: Parameters<typeof parityCore.gitConfigOperations>[0]) =>
+        parityCore.gitConfigOperations(policy),
+      probe: () => parityCore.probe(),
+      readiness: () => parityCore.readiness(),
+      docs: () => parityCore.docs(),
+      configStore: () => parityCore.configStore(),
+      reviewOperations: (props: Parameters<typeof parityCore.reviewOperations>[0]) =>
+        parityCore.reviewOperations(props),
+      installation: () => parityCore.installation(),
+      evidence: () => parityCore.evidence(),
+      board: () => parityCore.board(),
+      packets: () => parityCore.packets(),
+      ariadneTokens: () => parityCore.ariadneTokens(),
+      boardSessions: () => parityCore.boardSessions(),
+      boardAgents: () => parityCore.boardAgents(),
+    };
+    const program = buildProgram(
+      (override) => parityCore.tracker(override),
+      (override) => parityCore.config(override),
+      (override) => parityCore.prHost(override),
+      () => parityCore.configPath(),
+      services,
+    );
+
+    const runAndCompare = async (args: string[], operationId: string) => {
+      const invocationIndex = invoke.mock.calls.length;
+      await program.parseAsync(args, { from: "user" });
+      expect(invoke.mock.calls).toHaveLength(invocationIndex + 1);
+      expect(invoke.mock.calls[invocationIndex]?.[0]).toBe(operationId);
+      const invocation = invoke.mock.results[invocationIndex];
+      if (invocation?.type !== "return") throw new Error(`No shared result for ${operationId}`);
+      const result = await invocation.value;
+      expect(result.status).toBe("success");
+      if (result.status !== "success") throw new Error(`Operation ${operationId} was denied`);
+      const rendered = JSON.parse(String(output.mock.calls.at(-1)?.[0])) as Record<string, unknown>;
+      return { data: result.data, rendered };
+    };
+
+    try {
+      const configSet = await runAndCompare(
+        ["config", "set", "repo", "acme/cli", "--scope", "local"],
+        "config-set",
+      );
+      expect(configSet.rendered).toEqual(configSet.data);
+
+      const configUnset = await runAndCompare(
+        ["config", "unset", "repo", "--scope", "local"],
+        "config-unset",
+      );
+      expect(configUnset.rendered).toEqual(configUnset.data);
+
+      const commit = await runAndCompare(
+        [
+          "git",
+          "commit",
+          "--file",
+          "tracked.txt",
+          "--type",
+          "fix",
+          "--scope",
+          "FRT-260",
+          "--description",
+          "registry parity",
+        ],
+        "git-commit",
+      );
+      expect(commit.rendered).toEqual(commit.data);
+
+      const checkout = await runAndCompare(
+        [
+          "git",
+          "checkout",
+          "--type",
+          "feat",
+          "--scope",
+          "FRT-260",
+          "--description",
+          "registry-parity",
+        ],
+        "git-checkout",
+      );
+      expect(checkout.rendered).toEqual(checkout.data);
+
+      const push = await runAndCompare(["git", "push"], "git-push");
+      expect(push.rendered).toEqual(push.data);
+
+      const messagePath = join(root, "cli-parity-message.txt");
+      const message = await runAndCompare(
+        [
+          "commit-message",
+          "--type",
+          "fix",
+          "--scope",
+          "FRT-260",
+          "--description",
+          "registry parity",
+          "--out",
+          messagePath,
+        ],
+        "commit-message",
+      );
+      expect(message.rendered["message"]).toBe((message.data as { message: string }).message);
+      expect(readFileSync(messagePath, "utf8")).toBe(`${message.rendered["message"]}\n`);
+
+      const branchName = await runAndCompare(
+        ["branch-name", "--type", "feat", "--scope", "FRT-260", "--description", "registry-parity"],
+        "branch-name",
+      );
+      expect(branchName.rendered).toEqual(branchName.data);
+    } finally {
+      invoke.mockRestore();
+      output.mockRestore();
+      cwd.mockRestore();
+    }
+  });
+
   it("compares evidence-directory CLI and operation results from a linked worktree", async () => {
     const mainCheckout = join(root, "main-checkout");
     const linkedCheckout = join(root, "linked-checkout");
@@ -448,6 +601,7 @@ describe("local discovery operations", () => {
       ariadneTokens: () => linkedCore.ariadneTokens(),
       boardSessions: () => linkedCore.boardSessions(),
       boardAgents: () => linkedCore.boardAgents(),
+      reviewOperations: () => linkedCore.reviewOperations(),
     };
     const program = buildProgram(
       (override) => linkedCore.tracker(override),

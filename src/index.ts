@@ -1,6 +1,7 @@
 export { createFlightRules, DefaultFlightRules } from "./flight-rules/flight-rules.js";
 export type { FlightRules } from "./flight-rules/flight-rules.js";
 export type { FlightRulesProps } from "./flight-rules/flight-rules.schema.js";
+export type { ReviewOperations } from "./operations/review-operations.js";
 export { GitHubTaskTracker } from "./tasks/github-task-tracker/github-task-tracker.js";
 export type { GitHubTrackerConfig } from "./tasks/github-task-tracker/github-task-tracker.js";
 export { JiraTaskTracker } from "./tasks/jira-task-tracker/jira-task-tracker.js";

@@ -189,6 +189,7 @@ describe("injected core", () => {
       readiness: vi.fn(),
       docs: vi.fn(),
       localOperations: vi.fn(),
+      reviewOperations: vi.fn(),
       configStore: vi.fn(),
       installation: vi.fn(),
       mainCheckout: vi.fn(),

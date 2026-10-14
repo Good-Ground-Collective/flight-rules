@@ -214,6 +214,7 @@ describe("shared operations", () => {
         new DocOperation({ getResolver: () => core.docs() }),
         ...core.localOperations().operations(),
         ...core.gitConfigOperations().operations(),
+        ...core.reviewOperations().operations(),
       ],
       policy: new LaunchOperationAccessPolicy({ allowedEffects: ["read", "process", "network"] }),
     });
@@ -245,6 +246,12 @@ describe("shared operations", () => {
       "git-push",
       "commit-message",
       "branch-name",
+      "review-schema",
+      "review-validate",
+      "review-render",
+      "review-state",
+      "review-context",
+      "review-plan",
     ]);
   });
 

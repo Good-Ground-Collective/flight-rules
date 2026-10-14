@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Octokit } from "@octokit/rest";
 import { createFlightRules, DefaultFlightRules } from "../flight-rules.js";
 import { GitHubTaskTracker } from "../../tasks/github-task-tracker/github-task-tracker.js";
 import { JiraTaskTracker } from "../../tasks/jira-task-tracker/jira-task-tracker.js";
@@ -131,17 +132,50 @@ describe("createFlightRules", () => {
     expect(createFlightRules({ cwd, env: {} }).configPath()).toBe(discovered);
   });
 
-  it("keeps default and explicit process.env live after construction", () => {
-    const firstPath = join(cwd, "first.md");
-    const secondPath = join(cwd, "second.md");
-    vi.stubEnv("FLIGHT_RULES_CONFIG", firstPath);
-    const defaultEnvCore = createFlightRules();
-    const explicitEnvCore = createFlightRules({ env: process.env });
-    vi.stubEnv("FLIGHT_RULES_CONFIG", secondPath);
+  it.each(["default", "explicit"])(
+    "keeps %s process.env config live after construction",
+    (source) => {
+      const firstPath = join(cwd, "first.md");
+      const secondPath = join(cwd, "second.md");
+      writeFileSync(firstPath, configText("github", "acme/first"));
+      writeFileSync(secondPath, configText("github", "acme/second"));
+      vi.stubEnv("FLIGHT_RULES_CONFIG", firstPath);
+      const core =
+        source === "default" ? createFlightRules() : createFlightRules({ env: process.env });
+      expect(core.configPath()).toBe(firstPath);
+      expect(core.config().repo).toBe("acme/first");
 
-    expect(defaultEnvCore.configPath()).toBe(secondPath);
-    expect(explicitEnvCore.configPath()).toBe(secondPath);
-  });
+      vi.stubEnv("FLIGHT_RULES_CONFIG", secondPath);
+      expect(core.configPath()).toBe(secondPath);
+      expect(core.config().repo).toBe("acme/second");
+    },
+  );
+
+  it.each(["default", "explicit"])(
+    "observes credentials added, changed and removed from %s process.env after construction",
+    (source) => {
+      vi.stubEnv("FLIGHT_RULES_CONFIG", writeConfig());
+      vi.stubEnv("GITHUB_TOKEN", undefined);
+      const core =
+        source === "default" ? createFlightRules() : createFlightRules({ env: process.env });
+      const octokit = vi.mocked(Octokit);
+      octokit.mockClear();
+      expect(() => core.tracker()).toThrow("GITHUB_TOKEN environment variable is required");
+      expect(octokit).not.toHaveBeenCalled();
+
+      vi.stubEnv("GITHUB_TOKEN", "first-test-token");
+      expect(core.tracker()).toBeInstanceOf(GitHubTaskTracker);
+      expect(octokit).toHaveBeenLastCalledWith({ auth: "first-test-token" });
+
+      vi.stubEnv("GITHUB_TOKEN", "second-test-token");
+      expect(core.tracker()).toBeInstanceOf(GitHubTaskTracker);
+      expect(octokit).toHaveBeenLastCalledWith({ auth: "second-test-token" });
+
+      vi.stubEnv("GITHUB_TOKEN", undefined);
+      expect(() => core.tracker()).toThrow("GITHUB_TOKEN environment variable is required");
+      expect(octokit).toHaveBeenCalledTimes(2);
+    },
+  );
 
   it("supports both default and explicitly injected native process.env", () => {
     const path = writeConfig();

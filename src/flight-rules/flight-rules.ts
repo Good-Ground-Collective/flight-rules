@@ -40,6 +40,12 @@ import {
   type ConfigOperationPolicy,
   type GitConfigOperations,
 } from "../operations/git-config-operations.js";
+import {
+  DefaultReviewOperations,
+  ReviewOperationsLaunchPropsSchema,
+  type ReviewOperations,
+  type ReviewOperationsLaunchProps,
+} from "../operations/review-operations.js";
 
 export interface FlightRules {
   installation(): NativeInstallation;
@@ -57,6 +63,7 @@ export interface FlightRules {
   docs(): DocResolver;
   localOperations(): LocalDiscoveryOperations;
   gitConfigOperations(policy?: ConfigOperationPolicy): GitConfigOperations;
+  reviewOperations(props?: ReviewOperationsLaunchProps): ReviewOperations;
   /** Ariadne's Agents page reporter; reads only the `ariadne.*` keys from user and local scope, so it works without a valid tracker config. */
   board(): AriadneBoard;
   packets(): AriadnePackets;
@@ -235,6 +242,15 @@ export class DefaultFlightRules implements FlightRules {
       getProbe: () => this.probe(),
       getTracker: () => this.tracker(),
       getConfigPath: () => this.configPath(),
+    });
+  }
+
+  reviewOperations(props: ReviewOperationsLaunchProps = {}): ReviewOperations {
+    const launch = ReviewOperationsLaunchPropsSchema.parse(props);
+    return new DefaultReviewOperations({
+      ...launch,
+      cwd: launch.cwd ?? this.cwd,
+      env: this.env,
     });
   }
 

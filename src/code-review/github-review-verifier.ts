@@ -4,11 +4,30 @@ import { z } from "zod";
 import type { ReviewVerifier } from "./review-planner.js";
 import type { ActionableFinding, DecisionAnswer, ReviewEvidence } from "./review.schema.js";
 
+const GhReviewGitHubApiPropsSchema = z.strictObject({
+  cwd: z.string().min(1).optional(),
+  env: z
+    .custom<NodeJS.ProcessEnv>(
+      (value): value is NodeJS.ProcessEnv =>
+        typeof value === "object" && value !== null && !Array.isArray(value),
+    )
+    .optional(),
+});
+
 export interface ReviewGitHubApi {
   get(path: string): Promise<unknown>;
   graphql(query: string, variables: Record<string, string | number>): Promise<unknown>;
 }
 export class GhReviewGitHubApi implements ReviewGitHubApi {
+  private readonly cwd: string;
+  private readonly env: NodeJS.ProcessEnv;
+
+  constructor(props: z.input<typeof GhReviewGitHubApiPropsSchema> = {}) {
+    const parsed = GhReviewGitHubApiPropsSchema.parse(props);
+    this.cwd = parsed.cwd ?? process.cwd();
+    this.env = props.env ?? process.env;
+  }
+
   async get(path: string): Promise<unknown> {
     return this.run(["api", path]);
   }
@@ -25,7 +44,11 @@ export class GhReviewGitHubApi implements ReviewGitHubApi {
     ]);
   }
   private async run(args: string[]): Promise<unknown> {
-    const { stdout } = await promisify(execFile)("gh", args, { maxBuffer: 20_000_000 });
+    const { stdout } = await promisify(execFile)("gh", args, {
+      maxBuffer: 20_000_000,
+      cwd: this.cwd,
+      env: this.env,
+    });
     return JSON.parse(stdout);
   }
 }

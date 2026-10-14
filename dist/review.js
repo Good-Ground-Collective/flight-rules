@@ -671,7 +671,12 @@ var FileDocResolver = class _FileDocResolver {
 };
 
 // src/code-review/review-policy.ts
-var ReviewPolicyPropsSchema = z7.strictObject({ home: z7.string().min(1).optional() });
+var ReviewPolicyPropsSchema = z7.strictObject({
+  home: z7.string().min(1).optional(),
+  env: z7.custom(
+    (value) => typeof value === "object" && value !== null && !Array.isArray(value)
+  ).optional()
+});
 var LoadPolicyPropsSchema = z7.strictObject({ paths: z7.array(z7.string()).optional() });
 var RepositoryContextPropsSchema = z7.strictObject({
   cwd: z7.string().min(1),
@@ -680,9 +685,11 @@ var RepositoryContextPropsSchema = z7.strictObject({
 });
 var FileReviewPolicy = class {
   home;
+  env;
   constructor(props = {}) {
     const parsed = ReviewPolicyPropsSchema.parse(props);
     this.home = parsed.home ?? join2(dirname2(fileURLToPath2(import.meta.url)), "..");
+    this.env = props.env ?? process.env;
   }
   load(input = {}) {
     const { paths } = LoadPolicyPropsSchema.parse(input);
@@ -695,7 +702,13 @@ var FileReviewPolicy = class {
     };
     const catalog = new DocCharterCatalog({ docs: new FileDocResolver({ docsDir: docs }) });
     const charters = (paths === void 0 ? catalog.all() : catalog.select(paths)).map(
-      ({ id, language, appliesTo, tierA, contents }) => ({ id, language, appliesTo, tierA, contents })
+      ({ id, language, appliesTo, tierA, contents }) => ({
+        id,
+        language,
+        appliesTo,
+        tierA,
+        contents
+      })
     );
     return {
       method: read("autonomous-review-method"),
@@ -723,6 +736,7 @@ var FileReviewPolicy = class {
     for (const path of paths) {
       const tree = execFileSync("git", ["ls-tree", "-z", props.trustedRef, "--", path], {
         cwd: props.cwd,
+        env: this.env,
         encoding: "utf8"
       });
       if (!tree) {
@@ -735,6 +749,7 @@ var FileReviewPolicy = class {
         path,
         contents: execFileSync("git", ["show", `${props.trustedRef}:${path}`], {
           cwd: props.cwd,
+          env: this.env,
           encoding: "utf8",
           maxBuffer: 1e7
         })
@@ -751,7 +766,20 @@ var ReviewPolicyError = class extends Error {
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { z as z8 } from "zod";
+var GhReviewGitHubApiPropsSchema = z8.strictObject({
+  cwd: z8.string().min(1).optional(),
+  env: z8.custom(
+    (value) => typeof value === "object" && value !== null && !Array.isArray(value)
+  ).optional()
+});
 var GhReviewGitHubApi = class {
+  cwd;
+  env;
+  constructor(props = {}) {
+    const parsed = GhReviewGitHubApiPropsSchema.parse(props);
+    this.cwd = parsed.cwd ?? process.cwd();
+    this.env = props.env ?? process.env;
+  }
   async get(path) {
     return this.run(["api", path]);
   }
@@ -768,7 +796,11 @@ var GhReviewGitHubApi = class {
     ]);
   }
   async run(args) {
-    const { stdout } = await promisify(execFile)("gh", args, { maxBuffer: 2e7 });
+    const { stdout } = await promisify(execFile)("gh", args, {
+      maxBuffer: 2e7,
+      cwd: this.cwd,
+      env: this.env
+    });
     return JSON.parse(stdout);
   }
 };

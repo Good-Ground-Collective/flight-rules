@@ -12,7 +12,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createFlightRules } from "../../flight-rules/flight-rules.js";
 import { LaunchOperationAccessPolicy, MapOperationRegistry } from "../operation-registry.js";
 
@@ -41,9 +41,58 @@ beforeEach(() => {
   git(repo, "commit", "-q", "-m", "initial");
 });
 
-afterEach(() => rmSync(root, { recursive: true, force: true }));
+afterEach(() => {
+  vi.unstubAllEnvs();
+  rmSync(root, { recursive: true, force: true });
+});
 
 describe("git and configuration operations", () => {
+  it.each(["default", "explicit"])(
+    "keeps git bound to %s process.env at launch after environment mutation",
+    async (source) => {
+      vi.stubEnv("HOME", env["HOME"]);
+      vi.stubEnv("GIT_DIR", undefined);
+      vi.stubEnv("GIT_AUTHOR_NAME", "Launch Author");
+      vi.stubEnv("GIT_AUTHOR_EMAIL", "launch-author@example.com");
+      vi.stubEnv("GIT_COMMITTER_NAME", "Launch Committer");
+      vi.stubEnv("GIT_COMMITTER_EMAIL", "launch-committer@example.com");
+      const core =
+        source === "default"
+          ? createFlightRules({ cwd: repo })
+          : createFlightRules({ cwd: repo, env: process.env });
+
+      vi.stubEnv("GIT_DIR", bare);
+      vi.stubEnv("GIT_AUTHOR_NAME", "Changed Author");
+      vi.stubEnv("GIT_AUTHOR_EMAIL", "changed-author@example.com");
+      vi.stubEnv("GIT_COMMITTER_NAME", "Changed Committer");
+      vi.stubEnv("GIT_COMMITTER_EMAIL", "changed-committer@example.com");
+      const registry = new MapOperationRegistry({
+        operations: core.gitConfigOperations().operations(),
+        policy: new LaunchOperationAccessPolicy({ allowedEffects: ["write", "process"] }),
+      });
+      writeFileSync(join(repo, "tracked.txt"), "changed after launch\n");
+
+      await expect(
+        registry.invoke("git-commit", {
+          type: "fix",
+          scope: "context",
+          description: "retain launch environment",
+          files: ["tracked.txt"],
+        }),
+      ).resolves.toMatchObject({
+        status: "success",
+        data: { sha: expect.stringMatching(/^[a-f0-9]{40,}$/) },
+      });
+      expect(git(repo, "log", "-1", "--format=%an <%ae>%n%cn <%ce>")).toBe(
+        "Launch Author <launch-author@example.com>\nLaunch Committer <launch-committer@example.com>",
+      );
+      expect(git(repo, "show", "HEAD:tracked.txt")).toBe("changed after launch");
+      expect(git(bare, "rev-list", "--all", "--count")).toBe("0");
+      expect(process.env["GIT_DIR"]).toBe(bare);
+      expect(process.env["GIT_AUTHOR_NAME"]).toBe("Changed Author");
+    },
+  );
+
   it("runs all seven routes through validated shared handlers", async () => {
     const core = createFlightRules({ cwd: repo, env });
     const registry = new MapOperationRegistry({
