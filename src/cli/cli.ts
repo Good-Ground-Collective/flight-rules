@@ -42,6 +42,7 @@ export function buildProgram(
   services: Pick<
     FlightRules,
     | "git"
+    | "gitConfigOperations"
     | "probe"
     | "readiness"
     | "docs"
@@ -110,7 +111,14 @@ export function buildProgram(
     getConfigPath,
   });
   const operationRegistry = new MapOperationRegistry({
-    operations: [docOperation, ...localOperations.operations()],
+    operations: [
+      docOperation,
+      ...localOperations.operations(),
+      ...(
+        services.gitConfigOperations?.() ??
+        createFlightRules({ cwd: launchCwd }).gitConfigOperations()
+      ).operations(),
+    ],
     policy: new LaunchOperationAccessPolicy({ allowedEffects: ["read", "process", "network"] }),
   });
   new CommanderLocalDiscoveryCli({

@@ -213,6 +213,7 @@ describe("shared operations", () => {
       operations: [
         new DocOperation({ getResolver: () => core.docs() }),
         ...core.localOperations().operations(),
+        ...core.gitConfigOperations().operations(),
       ],
       policy: new LaunchOperationAccessPolicy({ allowedEffects: ["read", "process", "network"] }),
     });
@@ -237,6 +238,13 @@ describe("shared operations", () => {
       "config-path",
       "config-show",
       "check",
+      "config-set",
+      "config-unset",
+      "git-commit",
+      "git-checkout",
+      "git-push",
+      "commit-message",
+      "branch-name",
     ]);
   });
 

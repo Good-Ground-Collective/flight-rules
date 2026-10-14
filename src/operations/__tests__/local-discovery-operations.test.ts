@@ -215,6 +215,7 @@ describe("local discovery operations", () => {
     const cwd = vi.spyOn(process, "cwd").mockReturnValue(root);
     const services = {
       git: () => core.git(),
+      gitConfigOperations: () => core.gitConfigOperations(),
       probe: () => ({ probe: vi.fn(async () => []) }),
       readiness: () => core.readiness(),
       docs: () => core.docs(),
@@ -313,6 +314,7 @@ describe("local discovery operations", () => {
     };
     const services = {
       git: () => core.git(),
+      gitConfigOperations: () => core.gitConfigOperations(),
       probe: () => ({ probe: vi.fn(async () => []) }),
       readiness: () => ({ inspect: async () => failedReadiness }),
       docs: () => core.docs(),
@@ -414,6 +416,7 @@ describe("local discovery operations", () => {
     const resolvedMainCheckout = realpathSync(mainCheckout);
     const services = {
       git: () => linkedCore.git(),
+      gitConfigOperations: () => linkedCore.gitConfigOperations(),
       probe: () => ({ probe: vi.fn(async () => []) }),
       readiness: () => ({
         inspect: async () => ({

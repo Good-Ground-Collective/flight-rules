@@ -1,4 +1,5 @@
 import { FileDocResolver, type DocResolver } from "../bundled-docs/doc-resolver/doc-resolver.js";
+import { resolve } from "node:path";
 import { NodeGitExecutor, type GitExecutor } from "../git/git-executor/git-executor.js";
 import { GhPullRequestHost } from "../pr/pull-request-host/gh-pull-request-host.js";
 import type { PullRequestHost } from "../pr/pull-request-host/pull-request-host.js";
@@ -34,6 +35,10 @@ import {
 } from "../operations/local-discovery-operations.js";
 import { DocCharterCatalog } from "../bundled-docs/charter-catalog/charter-catalog.js";
 import { GitRepositoryPaths } from "../bundled-docs/charter-catalog/repository-paths.js";
+import {
+  DefaultGitConfigOperations,
+  type GitConfigOperations,
+} from "../operations/git-config-operations.js";
 
 export interface FlightRules {
   installation(): NativeInstallation;
@@ -50,6 +55,7 @@ export interface FlightRules {
   readiness(): RepositoryReadiness;
   docs(): DocResolver;
   localOperations(): LocalDiscoveryOperations;
+  gitConfigOperations(): GitConfigOperations;
   /** Ariadne's Agents page reporter; reads only the `ariadne.*` keys from user and local scope, so it works without a valid tracker config. */
   board(): AriadneBoard;
   packets(): AriadnePackets;
@@ -64,9 +70,11 @@ export interface FlightRules {
 export class DefaultFlightRules implements FlightRules {
   private readonly cwd: string;
   private readonly env: Record<string, string | undefined>;
+  private readonly gitEnv: Record<string, string | undefined>;
   private readonly explicitConfigPath: string | undefined;
   private readonly hostSettings: HostSettingsSource | undefined;
   private readonly host: NativeHost | undefined;
+  private readonly configWritePolicy: FlightRulesProps["configWritePolicy"];
   private untrackedRoot: { value: string | undefined } | undefined;
 
   constructor(props: FlightRulesProps = {}) {
@@ -74,12 +82,14 @@ export class DefaultFlightRules implements FlightRules {
       ...props,
       env: props.env === undefined ? undefined : { ...props.env },
     });
-    this.cwd = parsed.cwd ?? process.cwd();
+    this.cwd = resolve(parsed.cwd ?? process.cwd());
     // Keep the validated input reference: Zod clones records, hiding later environment changes.
-    this.env = props.env ?? process.env;
+    this.env = props.env ?? { ...process.env };
+    this.gitEnv = { ...(props.env ?? process.env) };
     this.explicitConfigPath = parsed.configPath;
     this.hostSettings = props.hostSettings;
     this.host = parsed.host;
+    this.configWritePolicy = parsed.configWritePolicy;
   }
 
   configPath(): string {
@@ -187,7 +197,16 @@ export class DefaultFlightRules implements FlightRules {
   }
 
   git(): GitExecutor {
-    return new NodeGitExecutor();
+    return new NodeGitExecutor({ cwd: this.cwd, env: this.gitEnv });
+  }
+
+  gitConfigOperations(): GitConfigOperations {
+    return new DefaultGitConfigOperations({
+      cwd: this.cwd,
+      configStore: this.configStore(),
+      git: this.git(),
+      configPolicy: this.configWritePolicy,
+    });
   }
 
   probe(): ToolProbe {

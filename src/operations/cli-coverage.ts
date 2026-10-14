@@ -182,8 +182,6 @@ export class ManifestCliRouteCoverage implements CliRouteCoverage {
 }
 
 const pendingRoutes = [
-  "config set",
-  "config unset",
   "ticket get",
   "ticket transitions",
   "users get",
@@ -207,11 +205,6 @@ const pendingRoutes = [
   "ticket status",
   "ticket comment",
   "ticket label",
-  "git commit",
-  "git checkout",
-  "git push",
-  "commit-message",
-  "branch-name",
   "pr create",
   "pr comment",
   "pr list",
@@ -286,6 +279,13 @@ export const cliRouteCoverage: CliRouteCoverage = new ManifestCliRouteCoverage({
       ["qa recipe", "qa-recipe"],
       ["config path", "config-path"],
       ["config show", "config-show"],
+      ["config set", "config-set"],
+      ["config unset", "config-unset"],
+      ["git commit", "git-commit"],
+      ["git checkout", "git-checkout"],
+      ["git push", "git-push"],
+      ["commit-message", "commit-message"],
+      ["branch-name", "branch-name"],
       ["check", "check"],
     ].map(([path, operationId]) => ({
       status: "supported" as const,
