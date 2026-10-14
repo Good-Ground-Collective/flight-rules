@@ -37,6 +37,7 @@ import { appVersion } from "../version.js";
 import { createAgentsCommand } from "../plugins/commands/agents/command.js";
 import { cliRouteCoverage } from "../operations/cli-coverage.js";
 import { DefaultTrackerEntityOperations } from "../operations/tracker-entity-operations.js";
+import { createMcpCommand } from "../mcp/command.js";
 
 export function buildProgram(
   getTracker: (overrideTracker?: string) => TaskTracker,
@@ -171,6 +172,7 @@ export function buildProgram(
     ),
   );
   program.addCommand(createPacketCommand(() => services.packets()));
+  program.addCommand(createMcpCommand());
   cliRouteCoverage.check(program, operationRegistry);
   return program;
 }

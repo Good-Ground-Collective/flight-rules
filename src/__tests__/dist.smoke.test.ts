@@ -101,10 +101,13 @@ describe("built library smoke test", () => {
         "-e",
         `
       import { FileReviewPolicy, reviewContract } from '@good-ground-collective/flight-rules/review'
+      import { FlightRulesMcpServer, StdioFlightRulesMcpTransport } from '@good-ground-collective/flight-rules/mcp'
       import full from '@good-ground-collective/flight-rules/review/schema' with { type: 'json' }
       import transport from '@good-ground-collective/flight-rules/review/transport-schema' with { type: 'json' }
       console.log(JSON.stringify({
         policy: new FileReviewPolicy().load().method.includes('fix, clarify and decide'),
+        mcp: typeof FlightRulesMcpServer,
+        serve: typeof StdioFlightRulesMcpTransport,
         full: JSON.stringify(full) === JSON.stringify(reviewContract.schemas().full),
         transport: JSON.stringify(transport) === JSON.stringify(reviewContract.schemas().transport),
       }))
@@ -112,7 +115,13 @@ describe("built library smoke test", () => {
       ],
       { cwd: root, encoding: "utf8" },
     );
-    expect(JSON.parse(output)).toEqual({ policy: true, full: true, transport: true });
+    expect(JSON.parse(output)).toEqual({
+      policy: true,
+      mcp: "function",
+      serve: "function",
+      full: true,
+      transport: true,
+    });
   });
 
   it("keeps Deep Agents optional and loads it only through the isolated SDK entry", () => {
@@ -176,6 +185,7 @@ describe("built library smoke test", () => {
       },
       "./review/schema": "./contracts/code-review/review.v1.schema.json",
       "./review/transport-schema": "./contracts/code-review/review.v1.transport.schema.json",
+      "./mcp": { types: "./dist/mcp/index.d.ts", import: "./dist/mcp.js" },
     });
     expect(pkg.files).toContain("dist/");
     expect(pkg.bin).toEqual({ "flight-rules": "bin/flight-rules.mjs" });
