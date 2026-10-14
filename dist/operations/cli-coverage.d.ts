@@ -69,6 +69,6 @@ export declare class ManifestCliRouteCoverage implements CliRouteCoverage {
     static sameAliases(left: string[], right: string[]): boolean;
     static discover(program: Command): CliRoute[];
 }
-/** Inventory of the existing 68 CLI routes; pending entries stay unavailable to operation consumers. */
+/** Records domain migration states and the local MCP transport launcher. */
 export declare const cliRouteCoverage: CliRouteCoverage;
 export {};
