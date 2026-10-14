@@ -78,7 +78,7 @@ export class DefaultGitConfigOperations implements GitConfigOperations {
     this.allowedScopes = new Set(this.props.configPolicy.scopes);
     const roots =
       this.props.configPolicy.roots.length === 0 ? [this.props.cwd] : this.props.configPolicy.roots;
-    this.allowedRoots = [...new Set(roots)];
+    this.allowedRoots = [...new Set(roots.map((root) => realpathSync(root)))];
   }
 
   operations(): OperationDescriptor[] {
@@ -229,9 +229,8 @@ export class DefaultGitConfigOperations implements GitConfigOperations {
     const target = existsSync(absolutePath)
       ? resolvedExistingPath
       : resolve(resolvedExistingPath, relative(existingPath, absolutePath));
-    const authorizedRoots = this.allowedRoots.map((root) => realpathSync(root));
     if (
-      !authorizedRoots.some((root) => {
+      !this.allowedRoots.some((root) => {
         const rel = relative(root, target);
         return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
       })

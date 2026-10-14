@@ -3,7 +3,9 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -178,6 +180,42 @@ describe("git and configuration operations", () => {
       error: { name: "LaunchConfigOperationDeniedError" },
     });
     expect(existsSync(outsideTarget)).toBe(false);
+  });
+
+  it("keeps authorized roots fixed when the checkout path is replaced", async () => {
+    const outsideSettingsDirectory = join(root, "outside", ".agents");
+    const outsideSettingsPath = join(outsideSettingsDirectory, "flight-rules.settings.local.json");
+    mkdirSync(outsideSettingsDirectory, { recursive: true });
+    writeFileSync(outsideSettingsPath, '{"repo":"acme/original"}\n');
+
+    const core = createFlightRules({
+      cwd: repo,
+      env,
+      configWritePolicy: { scopes: ["local"], roots: [repo] },
+    });
+    const registry = new MapOperationRegistry({
+      operations: core.gitConfigOperations().operations(),
+      policy: new LaunchOperationAccessPolicy({ allowedEffects: ["write", "process"] }),
+    });
+
+    renameSync(repo, join(root, "original-repo"));
+    symlinkSync(join(root, "outside"), repo, "dir");
+
+    for (const operation of ["config-set", "config-unset"] as const) {
+      await expect(
+        registry.invoke(
+          operation,
+          operation === "config-set"
+            ? { key: "repo", values: ["acme/changed"], scope: "local" }
+            : { key: "repo", scope: "local" },
+        ),
+      ).resolves.toMatchObject({
+        status: "error",
+        error: { name: "LaunchConfigOperationDeniedError" },
+      });
+    }
+
+    expect(readFileSync(outsideSettingsPath, "utf8")).toBe('{"repo":"acme/original"}\n');
   });
 
   it("runs concurrent git instances from their own launch checkout", async () => {

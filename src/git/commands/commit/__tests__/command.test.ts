@@ -6,6 +6,7 @@ import { createGitCommandRegistry } from "../../../../operations/__tests__/git-c
 
 vi.mock("node:fs", () => ({
   readFileSync: vi.fn().mockReturnValue(JSON.stringify({ version: "1.2.3" })),
+  realpathSync: vi.fn((path: string) => path),
 }));
 
 const makeMockExecutor = (): GitExecutor => ({
