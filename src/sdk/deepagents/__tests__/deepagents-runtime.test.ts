@@ -47,13 +47,23 @@ class ScriptedModel extends BaseChatModel {
   readonly invocations: string[] = [];
   completed = 0;
   private readonly response: string;
+  private readonly failure: Error | undefined;
   private readonly delay: (prompt: string) => number;
+  private readonly wait: (prompt: string) => Promise<void>;
   private readonly toolCall: string | undefined;
 
-  constructor(props: { response: string; delay?: (prompt: string) => number; toolCall?: string }) {
+  constructor(props: {
+    response: string;
+    delay?: (prompt: string) => number;
+    wait?: (prompt: string) => Promise<void>;
+    toolCall?: string;
+    failure?: Error;
+  }) {
     super({});
     this.response = props.response;
+    this.failure = props.failure;
     this.delay = props.delay ?? (() => 0);
+    this.wait = props.wait ?? (() => Promise.resolve());
     this.toolCall = props.toolCall;
   }
 
@@ -87,8 +97,10 @@ class ScriptedModel extends BaseChatModel {
     const promptText = typeof prompt === "string" ? prompt : JSON.stringify(prompt);
     this.prompts.push(promptText);
     this.invocations.push(promptText);
+    if (this.failure !== undefined) throw this.failure;
     const delay = this.delay(promptText);
     if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
+    await this.wait(promptText);
     this.completed++;
     const message =
       this.toolCall === undefined || messages.some((item) => ToolMessage.isInstance(item))
@@ -259,6 +271,51 @@ describe("Deep Agents worker runtime", () => {
     expect(model.advertisedTools[0]).toContain("repository_read");
   });
 
+  it("preserves structured guard failures without matching provider error text", async () => {
+    const unknownToolModel = new ScriptedModel({ response: "", toolCall: "unregistered_read" });
+    let backingCalls = 0;
+    const repositoryReadTool = tool(
+      async () => {
+        backingCalls++;
+        return "Repository contents";
+      },
+      { name: "repository_read", description: "Read the active checkout", schema: z.object({}) },
+    );
+    const unknownToolRuntime = new LangChainDeepAgentsWorkerRuntime({
+      agents,
+      models: { standard: unknownToolModel, escalated: unknownToolModel, expert: unknownToolModel },
+      toolGrants: { read: [repositoryReadTool] },
+      observe: async (dispatch) => runtimeSnapshot(dispatch),
+    });
+    const unknownTool = await unknownToolRuntime.dispatch(
+      request("unknown-tool", "tech-writer", "author"),
+    );
+
+    const providerModel = new ScriptedModel({
+      response: authorReport,
+      failure: new Error("The worker attempted repository_read without an effective read grant."),
+    });
+    const providerRuntime = new LangChainDeepAgentsWorkerRuntime({
+      agents,
+      models: { standard: providerModel, escalated: providerModel, expert: providerModel },
+      toolGrants: { read: [repositoryReadTool] },
+      observe: async (dispatch) => runtimeSnapshot(dispatch),
+    });
+    const providerFailure = await providerRuntime.dispatch(
+      request("similar-provider-error", "tech-writer", "author"),
+    );
+
+    expect(unknownTool).toMatchObject({
+      status: "failed",
+      failure: { code: "CAPABILITY_UNKNOWN", capability: undefined },
+    });
+    expect(providerFailure).toMatchObject({
+      status: "failed",
+      failure: { code: "EXECUTION_FAILED" },
+    });
+    expect(backingCalls).toBe(0);
+  });
+
   it("keeps actual graph concurrency bounded and returns reports in input order", async () => {
     let active = 0;
     let peak = 0;
@@ -350,6 +407,50 @@ describe("Deep Agents worker runtime", () => {
     expect(secondOutcome).toMatchObject({ status: "completed", dispatchId: "overlap-second" });
     expect(model.invocations).toHaveLength(2);
     expect(model.completed).toBe(2);
+  });
+
+  it("returns cancellation for a queued overlapping call before an unrelated graph settles", async () => {
+    let releaseFirst: (() => void) | undefined;
+    let secondObserved = false;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const model = new ScriptedModel({
+      response: authorReport,
+      wait: (prompt) => (prompt.includes("queued-first") ? firstGate : Promise.resolve()),
+    });
+    const workers = new LangChainDeepAgentsWorkerRuntime({
+      agents,
+      models: { standard: model, escalated: model, expert: model },
+      toolGrants: {},
+      observe: async (dispatch) => {
+        if (dispatch.id === "queued-second") secondObserved = true;
+        const snapshot = runtimeSnapshot(dispatch);
+        return { ...snapshot, limits: { ...snapshot.limits, maxConcurrent: 1 } };
+      },
+    });
+    const first = workers.dispatch(request("queued-first", "tech-writer", "author"));
+    await vi.waitFor(() => expect(model.invocations).toHaveLength(1));
+    const controller = new AbortController();
+    const second = workers.dispatch(request("queued-second", "tech-writer", "author"), {
+      signal: controller.signal,
+    });
+    await vi.waitFor(() => expect(secondObserved).toBe(true));
+    controller.abort();
+
+    const secondOutcome = await second;
+
+    expect(secondOutcome).toMatchObject({
+      status: "failed",
+      dispatchId: "queued-second",
+      failure: { code: "CANCELLED" },
+    });
+    expect(model.invocations).toHaveLength(1);
+    expect(model.completed).toBe(0);
+
+    releaseFirst?.();
+    await expect(first).resolves.toMatchObject({ status: "completed", dispatchId: "queued-first" });
+    expect(model.completed).toBe(1);
   });
 
   it("keeps capacity reserved until an aborted host tool promise settles", async () => {

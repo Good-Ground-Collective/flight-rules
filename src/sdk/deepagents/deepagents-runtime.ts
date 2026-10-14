@@ -26,7 +26,6 @@ import {
   CapabilityScopedDeepAgentsToolPolicy,
   flightRulesAbortSignalConfigKey,
   type DeepAgentsToolPolicyContract,
-  WorkerCapabilitySchema,
   type WorkerToolGrants,
 } from "./tool-policy.js";
 
@@ -180,7 +179,12 @@ export class LangChainDeepAgentsWorkerRuntime implements DeepAgentsWorkerRuntime
     const active = new Map<string, { reservation: symbol; promise: Promise<void> }>();
     const controllers = new Map<string, AbortController>();
     const settledOutcomes = new Map<string, DispatchOutcome<ValidatedWorkerReport>>();
+    let wakeCancellationWait!: () => void;
+    const cancellationWait = new Promise<void>((resolve) => {
+      wakeCancellationWait = resolve;
+    });
     const cancelActive = () => {
+      wakeCancellationWait();
       queue.cancel();
       for (const controller of controllers.values()) controller.abort(options.signal?.reason);
     };
@@ -215,7 +219,7 @@ export class LangChainDeepAgentsWorkerRuntime implements DeepAgentsWorkerRuntime
           snapshot.limits.maxConcurrent !== null &&
           refreshedSnapshot.limits.activeWorkers >= snapshot.limits.maxConcurrent
         ) {
-          await Promise.race(this.activeExecutions.values());
+          await Promise.race([Promise.race(this.activeExecutions.values()), cancellationWait]);
           continue;
         }
         const admission = queue.admit(refreshedSnapshot, []);
@@ -344,8 +348,15 @@ export class LangChainDeepAgentsWorkerRuntime implements DeepAgentsWorkerRuntime
         { name: hostTool.name, description: hostTool.description, schema: hostTool.schema },
       ),
     );
-    const middleware = this.toolPolicy.middlewareFor(model, definition, hostTools, (execution) =>
-      modelTracker.track(execution),
+    let capabilityFailure: CapabilityToolDeniedError | undefined;
+    const middleware = this.toolPolicy.middlewareFor(
+      model,
+      definition,
+      hostTools,
+      (execution) => modelTracker.track(execution),
+      (error) => {
+        capabilityFailure = error;
+      },
     );
     const graph = createDeepAgent({
       model,
@@ -367,6 +378,17 @@ export class LangChainDeepAgentsWorkerRuntime implements DeepAgentsWorkerRuntime
         { messages: [new HumanMessage(prompt)] },
         { recursionLimit: this.maxGraphSteps, signal, callbacks: [modelTracker] },
       );
+    } catch (cause) {
+      if (capabilityFailure !== undefined) {
+        return {
+          status: "failed",
+          dispatchId: request.id,
+          agent: request.agent,
+          context: request.context,
+          failure: this.executionFailure(capabilityFailure, signal),
+        };
+      }
+      throw cause;
     } finally {
       await modelTracker.waitForIdle();
     }
@@ -423,21 +445,8 @@ export class LangChainDeepAgentsWorkerRuntime implements DeepAgentsWorkerRuntime
         remedy: "Start a new invocation only when the caller chooses to resume.",
       };
     }
-    if (
-      cause instanceof CapabilityToolDeniedError ||
-      (cause instanceof Error && cause.message.includes("without an effective "))
-    ) {
-      const capabilityText =
-        cause instanceof CapabilityToolDeniedError
-          ? undefined
-          : /without an effective ([a-z]+) grant/.exec(cause.message)?.[1];
-      const parsedCapability = WorkerCapabilitySchema.safeParse(capabilityText);
-      const capability =
-        cause instanceof CapabilityToolDeniedError
-          ? cause.capability
-          : parsedCapability.success
-            ? parsedCapability.data
-            : undefined;
+    if (cause instanceof CapabilityToolDeniedError) {
+      const capability = cause.capability;
       return {
         code: capability === undefined ? "CAPABILITY_UNKNOWN" : "CAPABILITY_DENIED",
         capability,

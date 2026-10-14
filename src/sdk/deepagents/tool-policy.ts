@@ -55,6 +55,7 @@ export interface DeepAgentsToolPolicyContract {
     definition: AgentDefinition,
     hostTools: readonly StructuredTool[],
     trackExecution: <T>(execution: () => Promise<T>) => Promise<T>,
+    onCapabilityDenied: (error: CapabilityToolDeniedError) => void,
   ): readonly AnyAgentMiddleware[];
 }
 
@@ -90,6 +91,7 @@ export class CapabilityScopedDeepAgentsToolPolicy implements DeepAgentsToolPolic
     definition: AgentDefinition,
     hostTools: readonly StructuredTool[],
     trackExecution: <T>(execution: () => Promise<T>) => Promise<T>,
+    onCapabilityDenied: (error: CapabilityToolDeniedError) => void,
   ): readonly AnyAgentMiddleware[] {
     const permissions = new Set(definition.frontmatter.capabilities);
     const filesystemTools = [
@@ -118,10 +120,12 @@ export class CapabilityScopedDeepAgentsToolPolicy implements DeepAgentsToolPolic
           const response = await handler(request);
           for (const call of response.tool_calls ?? []) {
             if (!allowedToolNames.has(call.name)) {
-              throw new CapabilityToolDeniedError({
+              const error = new CapabilityToolDeniedError({
                 toolName: call.name,
                 capability: filesystemCapabilities.get(call.name),
               });
+              onCapabilityDenied(error);
+              throw error;
             }
           }
           return response;
@@ -140,7 +144,9 @@ export class CapabilityScopedDeepAgentsToolPolicy implements DeepAgentsToolPolic
           ) {
             return trackExecution(() => Promise.resolve(handler(request)));
           }
-          throw new CapabilityToolDeniedError({ toolName: name, capability });
+          const error = new CapabilityToolDeniedError({ toolName: name, capability });
+          onCapabilityDenied(error);
+          throw error;
         },
       }),
     ] as const;
