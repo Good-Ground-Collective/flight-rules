@@ -18,6 +18,7 @@ import type { OperationEffect } from "../operation.schema.js";
 import { buildProgram } from "../../cli/cli.js";
 import { createFlightRules } from "../../flight-rules/flight-rules.js";
 import type { DocResolver } from "../../bundled-docs/doc-resolver/doc-resolver.js";
+import { DefaultTrackerReadOperations } from "../tracker-read-operations.js";
 
 const resolver: DocResolver = {
   list: () => ["workflow"],
@@ -200,7 +201,7 @@ describe("shared operations", () => {
     });
   });
 
-  it("discovers all existing CLI routes once and keeps pending routes unavailable to completion", () => {
+  it("discovers all CLI routes once and registers tracker reads and plans as shared operations", () => {
     const core = createFlightRules();
     const program = buildProgram(
       (override) => core.tracker(override),
@@ -215,6 +216,11 @@ describe("shared operations", () => {
         ...core.localOperations().operations(),
         ...core.gitConfigOperations().operations(),
         ...core.reviewOperations().operations(),
+        ...new DefaultTrackerReadOperations({
+          getTracker: () => core.tracker(),
+          getPrHost: () => core.prHost(),
+          getConfig: () => core.config(),
+        }).operations(),
       ],
       policy: new LaunchOperationAccessPolicy({ allowedEffects: ["read", "process", "network"] }),
     });
@@ -252,6 +258,16 @@ describe("shared operations", () => {
       "review-state",
       "review-context",
       "review-plan",
+      "ticket-get",
+      "ticket-transitions",
+      "users-get",
+      "tdd-get",
+      "epic-get",
+      "initiative-get",
+      "epic-plan",
+      "epic-review-plan",
+      "initiative-plan",
+      "initiative-review-plan",
     ]);
   });
 
