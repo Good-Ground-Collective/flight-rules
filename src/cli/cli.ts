@@ -38,6 +38,7 @@ import { createAgentsCommand } from "../plugins/commands/agents/command.js";
 import { cliRouteCoverage } from "../operations/cli-coverage.js";
 import { createMcpCommand } from "../mcp/command.js";
 import { DefaultTrackerReadOperations } from "../operations/tracker-read-operations.js";
+import { DefaultPrOperations } from "../operations/pr-operations.js";
 
 export function buildProgram(
   getTracker: (overrideTracker?: string) => TaskTracker,
@@ -78,7 +79,6 @@ export function buildProgram(
   const config = (): Config => getConfig(overrideTracker);
   const prHost = (): PullRequestHost => getPrHost(overrideTracker);
 
-  program.addCommand(createPrCommand(prHost));
   program.addCommand(createAgentsCommand(() => services.installation()));
   const boardHooks = (): BoardHookKit =>
     new BoardHookKit({
@@ -128,11 +128,13 @@ export function buildProgram(
         getPrHost: prHost,
         getConfig: config,
       }).operations(),
+      ...new DefaultPrOperations({ cwd: launchCwd, getHost: prHost }).operations(),
     ],
     policy: new LaunchOperationAccessPolicy({
       allowedEffects: ["read", "write", "process", "network"],
     }),
   });
+  program.addCommand(createPrCommand(operationRegistry));
   program.addCommand(createEpicCommand(tracker, prHost, config, operationRegistry));
   program.addCommand(createInitiativeCommand(tracker, prHost, config, operationRegistry));
   program.addCommand(createTicketCommand(tracker, operationRegistry));

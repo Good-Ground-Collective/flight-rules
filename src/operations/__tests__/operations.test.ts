@@ -19,6 +19,7 @@ import { buildProgram } from "../../cli/cli.js";
 import { createFlightRules } from "../../flight-rules/flight-rules.js";
 import type { DocResolver } from "../../bundled-docs/doc-resolver/doc-resolver.js";
 import { DefaultTrackerReadOperations } from "../tracker-read-operations.js";
+import { DefaultPrOperations } from "../pr-operations.js";
 
 const resolver: DocResolver = {
   list: () => ["workflow"],
@@ -221,6 +222,7 @@ describe("shared operations", () => {
           getPrHost: () => core.prHost(),
           getConfig: () => core.config(),
         }).operations(),
+        ...new DefaultPrOperations({ cwd: process.cwd(), getHost: () => core.prHost() }).operations(),
       ],
       policy: new LaunchOperationAccessPolicy({ allowedEffects: ["read", "process", "network"] }),
     });
@@ -272,6 +274,10 @@ describe("shared operations", () => {
       "epic-review-plan",
       "initiative-plan",
       "initiative-review-plan",
+      "pr-create",
+      "pr-comment",
+      "pr-list",
+      "pr-request-review",
     ]);
   });
 

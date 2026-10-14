@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Octokit } from "@octokit/rest";
@@ -56,6 +56,24 @@ describe("createFlightRules", () => {
     expect(() => core.config()).toThrow("No flight-rules config found");
     expect(() => core.tracker()).toThrow("No flight-rules config found");
     expect(() => core.prHost()).toThrow("No flight-rules config found");
+  });
+
+  it("binds PR subprocesses to the environment captured when the core launches", async () => {
+    writeConfig();
+    const fixtureBin = join(cwd, "fixture-bin");
+    mkdirSync(fixtureBin);
+    const fakeGh = join(fixtureBin, "gh");
+    writeFileSync(fakeGh, '#!/bin/sh\nprintf "%s" "$FR_FIXTURE"\n');
+    chmodSync(fakeGh, 0o755);
+    const env: Record<string, string | undefined> = {
+      PATH: `${fixtureBin}:${process.env.PATH ?? ""}`,
+      CLAUDE_CONFIG_DIR: join(cwd, "no-user-settings"),
+      FR_FIXTURE: "launch",
+    };
+    const core = createFlightRules({ cwd, env });
+    env.FR_FIXTURE = "mutated-after-launch";
+
+    await expect(core.prHost().defaultBranch()).resolves.toBe("launch");
   });
 
   it.each(["github", "jira"])("honors overrides on a %s config", (tracker) => {

@@ -1,4 +1,6 @@
-import { readFile } from 'node:fs/promises'
+import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { PullRequestTemplate } from '../../../git/pr-template/pr-template.js'
 import { GhPullRequestHost } from '../gh-pull-request-host.js'
@@ -49,17 +51,17 @@ describe('GhPullRequestHost.createPullRequest', () => {
 
     const [file, args] = calls[0] as [string, readonly string[]]
     expect(file).toBe('gh')
-    expect(args.slice(0, 2)).toEqual(['pr', 'create'])
-    expect(args).toEqual(
-      expect.arrayContaining([
-        '--repo', 'o/r',
-        '--base', 'main',
-        '--head', 'feat/KAN-31-pr-create-command',
-        '--title', 'feat(KAN-31): add pr create',
-      ]),
-    )
-    expect(args).toContain('--body-file')
-    expect(bodyFileContents[0]).toContain('Adds the command.')
+    expect(args).toEqual([
+      'pr', 'create',
+      '--repo', 'o/r',
+      '--base', 'main',
+      '--head', 'feat/KAN-31-pr-create-command',
+      '--title', 'feat(KAN-31): add pr create',
+      '--body-file', bodyFileArg(args),
+    ])
+    expect(bodyFileContents).toEqual([
+      '## What Was Changed\n\n- a\n\n## Why Was It Changed\n\nAdds the command.',
+    ])
 
     expect(result).toEqual({ number: 42, url: 'https://github.com/o/r/pull/42' })
   })
@@ -176,10 +178,10 @@ describe('GhPullRequestHost.commentOnPullRequest', () => {
 
     const [file, args] = calls[0] as [string, readonly string[]]
     expect(file).toBe('gh')
-    expect(args.slice(0, 3)).toEqual(['pr', 'comment', '42'])
-    expect(args).toEqual(
-      expect.arrayContaining(['--repo', 'o/r', '--body-file', bodyFileArg(args), '--attach', './clip.webm']),
-    )
+    expect(args).toEqual([
+      'pr', 'comment', '42', '--repo', 'o/r',
+      '--body-file', bodyFileArg(args), '--attach', './clip.webm',
+    ])
     expect(bodyFileContents[0]).toBe('comment body')
 
     expect(result).toEqual({ url: 'https://github.com/o/r/pull/42#issuecomment-1' })
@@ -307,6 +309,26 @@ describe('GhPullRequestHost.requestReviewers', () => {
 })
 
 describe('GhPullRequestHost.defaultBranch', () => {
+  it('uses a snapshot of the launch environment for subprocesses', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'flight-rules-gh-env-'))
+    try {
+      const gh = join(directory, 'gh')
+      await writeFile(gh, '#!/bin/sh\nprintf "%s" "$FR_FIXTURE"\n')
+      await chmod(gh, 0o755)
+      const env: NodeJS.ProcessEnv = {
+        ...process.env,
+        PATH: `${directory}:${process.env.PATH ?? ''}`,
+        FR_FIXTURE: 'launch',
+      }
+      const host = new GhPullRequestHost({ repo: 'o/r', cwd: directory, env })
+      env.FR_FIXTURE = 'mutated'
+
+      await expect(host.defaultBranch()).resolves.toBe('launch')
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
   it('reads the default branch name through gh repo view', async () => {
     const execFileFn = vi.fn(async () => ({ stdout: 'main\n', stderr: '' }))
     const host = new GhPullRequestHost({ repo: 'o/r', execFileFn })
