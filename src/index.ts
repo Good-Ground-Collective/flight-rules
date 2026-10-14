@@ -4,6 +4,8 @@ export type { FlightRulesProps } from "./flight-rules/flight-rules.schema.js";
 export type { ReviewOperations } from "./operations/review-operations.js";
 export { DefaultTrackerEntityOperations } from "./operations/tracker-entity-operations.js";
 export type { TrackerEntityOperations } from "./operations/tracker-entity-operations.js";
+export { DefaultTicketLifecycleOperations } from "./operations/ticket-lifecycle-operations.js";
+export type { TicketLifecycleOperations } from "./operations/ticket-lifecycle-operations.js";
 export { GitHubTaskTracker } from "./tasks/github-task-tracker/github-task-tracker.js";
 export type { GitHubTrackerConfig } from "./tasks/github-task-tracker/github-task-tracker.js";
 export { JiraTaskTracker } from "./tasks/jira-task-tracker/jira-task-tracker.js";

@@ -182,11 +182,6 @@ export class ManifestCliRouteCoverage implements CliRouteCoverage {
 }
 
 const pendingRoutes = [
-  "ticket block",
-  "ticket unblock",
-  "ticket status",
-  "ticket comment",
-  "ticket label",
   "pr create",
   "pr comment",
   "pr list",
@@ -262,6 +257,11 @@ export const cliRouteCoverage: CliRouteCoverage = new ManifestCliRouteCoverage({
       ["ticket edit", "ticket-edit"],
       ["ticket get", "ticket-get"],
       ["ticket transitions", "ticket-transitions"],
+      ["ticket block", "ticket-block"],
+      ["ticket unblock", "ticket-unblock"],
+      ["ticket status", "ticket-status"],
+      ["ticket comment", "ticket-comment"],
+      ["ticket label", "ticket-label"],
       ["users get", "users-get"],
       ["tdd get", "tdd-get"],
       ["epic get", "epic-get"],
