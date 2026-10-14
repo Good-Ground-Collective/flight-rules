@@ -217,7 +217,11 @@ describe("shared operations", () => {
         ...core.gitConfigOperations().operations(),
         ...core.reviewOperations().operations(),
         ...core.trackerEntityOperations().operations(),
-        ...new DefaultPrOperations({ cwd: process.cwd(), getHost: () => core.prHost() }).operations(),
+        ...new DefaultPrOperations({
+          cwd: process.cwd(),
+          getHost: () => core.prHost(),
+        }).operations(),
+        ...(core.ariadneOperations?.().operations() ?? []),
       ],
       policy: new LaunchOperationAccessPolicy({ allowedEffects: ["read", "process", "network"] }),
     });
@@ -281,6 +285,15 @@ describe("shared operations", () => {
       "pr-comment",
       "pr-list",
       "pr-request-review",
+      "board-post-heartbeat",
+      "board-post-item",
+      "board-post-activity",
+      "board-items",
+      "packet-create",
+      "packet-new-id",
+      "packet-update",
+      "packet-get",
+      "packet-reviewers",
     ]);
   });
 

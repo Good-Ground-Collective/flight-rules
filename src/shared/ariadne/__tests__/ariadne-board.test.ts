@@ -48,12 +48,20 @@ describe("AriadneBoard", () => {
 
   describe("config resolution", () => {
     it("defaults to the production URL and enabled", () => {
-      expect(board(new FakeTransport()).settings()).toEqual({ url: defaultAriadneUrl, enabled: true, notices: [] });
+      expect(board(new FakeTransport()).settings()).toEqual({
+        url: defaultAriadneUrl,
+        enabled: true,
+        notices: [],
+      });
     });
 
     it("reads ariadne.url and ariadne.enabled from user scope", () => {
       const settings = board(new FakeTransport(), {
-        config: { tracker: "jira", "ariadne.url": "http://localhost:8080", "ariadne.enabled": false },
+        config: {
+          tracker: "jira",
+          "ariadne.url": "http://localhost:8080",
+          "ariadne.enabled": false,
+        },
       }).settings();
       expect(settings).toEqual({ url: "http://localhost:8080", enabled: false, notices: [] });
     });
@@ -62,7 +70,10 @@ describe("AriadneBoard", () => {
       const settings = board(new FakeTransport(), {
         layers: [
           { scope: "user", values: { "ariadne.url": "https://user.example.com" } },
-          { scope: "local", values: { "ariadne.url": "https://local.example.com", "ariadne.enabled": "false" } },
+          {
+            scope: "local",
+            values: { "ariadne.url": "https://local.example.com", "ariadne.enabled": "false" },
+          },
         ],
       }).settings();
       expect(settings).toEqual({ url: "https://local.example.com", enabled: false, notices: [] });
@@ -71,18 +82,28 @@ describe("AriadneBoard", () => {
     it.each([
       ["project", "project settings"],
       ["file", "the flight-rules config file"],
-    ] as const)("ignores a %s-layer ariadne.url and posts to the default URL", async (scope, label) => {
-      const transport = new FakeTransport(FakeTransport.json(200, { session: contract.session }));
-      const outcome = await board(transport, {
-        layers: [{ scope, values: { "ariadne.url": "https://attacker.example.com", "ariadne.enabled": false } }],
-      }).heartbeat(heartbeat);
-      expect(outcome.status).toBe("posted");
-      expect(transport.requests.map((r) => r.url)).toEqual([`${defaultAriadneUrl}/v1/agents/heartbeat`]);
-      expect(outcome.notices).toEqual([
-        `ignored ariadne.url from ${label}; set it in user scope`,
-        `ignored ariadne.enabled from ${label}; set it in user scope`,
-      ]);
-    });
+    ] as const)(
+      "ignores a %s-layer ariadne.url and posts to the default URL",
+      async (scope, label) => {
+        const transport = new FakeTransport(FakeTransport.json(200, { session: contract.session }));
+        const outcome = await board(transport, {
+          layers: [
+            {
+              scope,
+              values: { "ariadne.url": "https://attacker.example.com", "ariadne.enabled": false },
+            },
+          ],
+        }).heartbeat(heartbeat);
+        expect(outcome.status).toBe("posted");
+        expect(transport.requests.map((r) => r.url)).toEqual([
+          `${defaultAriadneUrl}/v1/agents/heartbeat`,
+        ]);
+        expect(outcome.notices).toEqual([
+          `ignored ariadne.url from ${label}; set it in user scope`,
+          `ignored ariadne.enabled from ${label}; set it in user scope`,
+        ]);
+      },
+    );
 
     it("lets the user layer win over a project or file layer that sets the URL", async () => {
       const transport = new FakeTransport(FakeTransport.json(200, { session: contract.session }));
@@ -93,7 +114,9 @@ describe("AriadneBoard", () => {
           { scope: "file", values: { "ariadne.url": "https://attacker.example.com" } },
         ],
       }).heartbeat(heartbeat);
-      expect(transport.requests.map((r) => r.url)).toEqual(["https://ariadne.example.com/v1/agents/heartbeat"]);
+      expect(transport.requests.map((r) => r.url)).toEqual([
+        "https://ariadne.example.com/v1/agents/heartbeat",
+      ]);
     });
 
     it("posts to the configured URL", async () => {
@@ -105,27 +128,40 @@ describe("AriadneBoard", () => {
       expect(transport.requests[0]?.url).toBe("http://localhost:8080/v1/agents/heartbeat");
     });
 
-    it.each(["http://127.0.0.1:8080", "http://localhost", "https://ariadne.example.com"])("accepts %s", (url) => {
-      expect(board(new FakeTransport(), { config: { "ariadne.url": url } }).settings().url).toBe(url);
-    });
-
-    it.each(["http://ariadne.example.com", "http://10.0.0.5:8080", "ftp://ariadne.example.com", "not a url"])(
-      "treats %s as not configured and never sends the token, even under strict",
-      async (url) => {
-        const transport = new FakeTransport();
-        const outcome = await board(transport, { config: { "ariadne.url": url } }).heartbeat(heartbeat, { strict: true });
-        expect(outcome).toMatchObject({ status: "skipped", reason: "invalid-url" });
-        expect(outcome.notices?.[0]).toContain("ignored ariadne.url from user settings");
-        expect(transport.requests).toHaveLength(0);
-        expect(transport.requests.some((r) => "Authorization" in r.headers)).toBe(false);
+    it.each(["http://127.0.0.1:8080", "http://localhost", "https://ariadne.example.com"])(
+      "accepts %s",
+      (url) => {
+        expect(board(new FakeTransport(), { config: { "ariadne.url": url } }).settings().url).toBe(
+          url,
+        );
       },
     );
+
+    it.each([
+      "http://ariadne.example.com",
+      "http://10.0.0.5:8080",
+      "ftp://ariadne.example.com",
+      "not a url",
+    ])("treats %s as not configured and never sends the token, even under strict", async (url) => {
+      const transport = new FakeTransport();
+      const outcome = await board(transport, { config: { "ariadne.url": url } }).heartbeat(
+        heartbeat,
+        { strict: true },
+      );
+      expect(outcome).toMatchObject({ status: "skipped", reason: "invalid-url" });
+      expect(outcome.notices?.[0]).toContain("ignored ariadne.url from user settings");
+      expect(transport.requests).toHaveLength(0);
+      expect(transport.requests.some((r) => "Authorization" in r.headers)).toBe(false);
+    });
   });
 
   describe("no-op path", () => {
     it("skips without a request when disabled, even under strict", async () => {
       const transport = new FakeTransport();
-      const outcome = await board(transport, { config: { "ariadne.enabled": false } }).heartbeat(heartbeat, { strict: true });
+      const outcome = await board(transport, { config: { "ariadne.enabled": false } }).heartbeat(
+        heartbeat,
+        { strict: true },
+      );
       expect(outcome).toEqual({ status: "skipped", reason: "disabled" });
       expect(transport.requests).toHaveLength(0);
     });
@@ -134,18 +170,29 @@ describe("AriadneBoard", () => {
       const transport = new FakeTransport();
       const quiet = board(transport, { env: { CLAUDE_CODE_SESSION_ID: "s1" } });
       expect(await quiet.heartbeat(heartbeat)).toEqual({ status: "skipped", reason: "no-token" });
-      expect(await quiet.item({ kind: "question", ticket: "FRT-1", title: "t" })).toEqual({ status: "skipped", reason: "no-token" });
-      expect(await quiet.activity({ ticket: "FRT-1", text: "t" })).toEqual({ status: "skipped", reason: "no-token" });
+      expect(await quiet.item({ kind: "question", ticket: "FRT-1", title: "t" })).toEqual({
+        status: "skipped",
+        reason: "no-token",
+      });
+      expect(await quiet.activity({ ticket: "FRT-1", text: "t" })).toEqual({
+        status: "skipped",
+        reason: "no-token",
+      });
       expect(await quiet.items(undefined)).toEqual({ status: "skipped", reason: "no-token" });
       expect(transport.requests).toHaveLength(0);
     });
 
     it("under strict, posts without a token so the API's 401 surfaces", async () => {
       const transport = new FakeTransport(FakeTransport.json(401, { error: "unauthorized" }));
-      const outcome = await board(transport, { env: { CLAUDE_CODE_SESSION_ID: "s1" } }).heartbeat(heartbeat, { strict: true });
+      const outcome = await board(transport, { env: { CLAUDE_CODE_SESSION_ID: "s1" } }).heartbeat(
+        heartbeat,
+        { strict: true },
+      );
       expect(transport.requests[0]?.headers).not.toHaveProperty("Authorization");
       expect(outcome).toMatchObject({ status: "failed" });
-      expect(outcome.status === "failed" && outcome.message).toContain("no Ariadne token (401 unauthorized)");
+      expect(outcome.status === "failed" && outcome.message).toContain(
+        "no Ariadne token (401 unauthorized)",
+      );
     });
   });
 
@@ -169,80 +216,159 @@ describe("AriadneBoard", () => {
     });
 
     it("reads items from the same default session a post on that ticket used", async () => {
-      const transport = new FakeTransport(FakeTransport.json(200, { items: [] }), FakeTransport.json(200, { items: [] }));
+      const transport = new FakeTransport(
+        FakeTransport.json(200, { items: [] }),
+        FakeTransport.json(200, { items: [] }),
+      );
       await board(transport).items(undefined, {}, "frt-1");
       await board(transport).items(undefined);
-      expect(transport.requests.map((r) => new URL(r.url).searchParams.get("session"))).toEqual(["claude-session-1-FRT-1", "claude-session-1"]);
+      expect(transport.requests.map((r) => new URL(r.url).searchParams.get("session"))).toEqual([
+        "claude-session-1-FRT-1",
+        "claude-session-1",
+      ]);
     });
 
     it("cuts a long Claude Code session id so the default session fits 80 characters, keeping the ticket", () => {
-      const reporter = board(new FakeTransport(), { env: { CLAUDE_CODE_SESSION_ID: `${"a".repeat(90)}.x` } });
+      const reporter = board(new FakeTransport(), {
+        env: { CLAUDE_CODE_SESSION_ID: `${"a".repeat(90)}.x` },
+      });
       const session = reporter.defaultSession("FRT-12345");
       expect(session).toBe(`${"a".repeat(70)}-FRT-12345`);
       expect(session).toMatch(/^[A-Za-z0-9_-]{1,80}$/);
-      expect(board(new FakeTransport(), { env: { CLAUDE_CODE_SESSION_ID: "s.1" } }).defaultSession("FRT-1")).toBe("s_1-FRT-1");
+      expect(
+        board(new FakeTransport(), { env: { CLAUDE_CODE_SESSION_ID: "s.1" } }).defaultSession(
+          "FRT-1",
+        ),
+      ).toBe("s_1-FRT-1");
     });
 
     it("is reportable only when enabled with a token", () => {
       expect(board(new FakeTransport()).reportable()).toBe(true);
       expect(board(new FakeTransport(), { env: {} }).reportable()).toBe(false);
-      expect(board(new FakeTransport(), { config: { "ariadne.enabled": false } }).reportable()).toBe(false);
-      expect(board(new FakeTransport(), { config: { "ariadne.url": "http://example.com" } }).reportable()).toBe(false);
+      expect(
+        board(new FakeTransport(), { config: { "ariadne.enabled": false } }).reportable(),
+      ).toBe(false);
+      expect(
+        board(new FakeTransport(), {
+          config: { "ariadne.url": "http://example.com" },
+        }).reportable(),
+      ).toBe(false);
     });
 
     it("fails without a request when there is no session id", async () => {
       const transport = new FakeTransport();
-      const outcome = await board(transport, { env: { ARIADNE_AGENT_TOKEN: agentToken } }).heartbeat(heartbeat);
+      const outcome = await board(transport, {
+        env: { ARIADNE_AGENT_TOKEN: agentToken },
+      }).heartbeat(heartbeat);
       expect(outcome).toMatchObject({ status: "failed" });
       expect(outcome.status === "failed" && outcome.message).toContain("--session");
       expect(transport.requests).toHaveLength(0);
     });
 
     it("sends an item straight away when the session exists, never overwriting its step", async () => {
-      const transport = new FakeTransport(FakeTransport.json(200, { item: contract.item, created: true }));
+      const transport = new FakeTransport(
+        FakeTransport.json(200, { item: contract.item, created: true }),
+      );
       await board(transport).item({ kind: "question", ticket: "FRT-1", title: "Patch or revert?" });
-      expect(transport.requests.map((r) => r.url)).toEqual([`${defaultAriadneUrl}/v1/agents/items`]);
+      expect(transport.requests.map((r) => r.url)).toEqual([
+        `${defaultAriadneUrl}/v1/agents/items`,
+      ]);
     });
 
     it.each([
-      ["item", (b: AriadneBoard) => b.item({ kind: "testable", ticket: "frt-1", title: "Fix is on staging" }), "/v1/agents/items"],
-      ["activity", (b: AriadneBoard) => b.activity({ ticket: "frt-1", text: "Opened PR #86" }), "/v1/agents/activity"],
-    ] as const)("sends a heartbeat first when the %s's session does not exist yet", async (_kind, post, path) => {
-      const transport = new FakeTransport(
-        FakeTransport.json(404, { error: "session_not_found", message: "Send a heartbeat for this session first." }),
-        FakeTransport.json(200, { session: contract.session }),
-        path === "/v1/agents/items"
-          ? FakeTransport.json(200, { item: contract.item, created: true })
-          : FakeTransport.json(200, { activity: contract.activity, created: true }),
-      );
-      const outcome = await post(board(transport));
-      expect(outcome.status).toBe("posted");
-      expect(transport.requests.map((r) => r.url.replace(defaultAriadneUrl, ""))).toEqual([path, "/v1/agents/heartbeat", path]);
-      expect(transport.bodies()[1]).toEqual({ session: "claude-session-1-FRT-1", ticket: "FRT-1", step: "started", state: "nominal" });
-    });
+      [
+        "item",
+        (b: AriadneBoard) =>
+          b.item({ kind: "testable", ticket: "frt-1", title: "Fix is on staging" }),
+        "/v1/agents/items",
+      ],
+      [
+        "activity",
+        (b: AriadneBoard) => b.activity({ ticket: "frt-1", text: "Opened PR #86" }),
+        "/v1/agents/activity",
+      ],
+    ] as const)(
+      "sends a heartbeat first when the %s's session does not exist yet",
+      async (_kind, post, path) => {
+        const transport = new FakeTransport(
+          FakeTransport.json(404, {
+            error: "session_not_found",
+            message: "Send a heartbeat for this session first.",
+          }),
+          FakeTransport.json(200, { session: contract.session }),
+          path === "/v1/agents/items"
+            ? FakeTransport.json(200, { item: contract.item, created: true })
+            : FakeTransport.json(200, { activity: contract.activity, created: true }),
+        );
+        const outcome = await post(board(transport));
+        expect(outcome.status).toBe("posted");
+        expect(transport.requests.map((r) => r.url.replace(defaultAriadneUrl, ""))).toEqual([
+          path,
+          "/v1/agents/heartbeat",
+          path,
+        ]);
+        expect(transport.bodies()[1]).toEqual({
+          session: "claude-session-1-FRT-1",
+          ticket: "FRT-1",
+          step: "started",
+          state: "nominal",
+        });
+      },
+    );
 
     it.each([
-      ["item", (b: AriadneBoard) => b.item({ kind: "testable", ticket: "FRT-1", title: "Fix is on staging" }, { skill: "flight-rules:verify-ticket" })],
-      ["activity", (b: AriadneBoard) => b.activity({ ticket: "FRT-1", text: "Verified" }, { skill: "flight-rules:verify-ticket" })],
-    ] as const)("names the reporting skill on a session the %s has to create", async (_kind, post) => {
-      const transport = new FakeTransport(
-        FakeTransport.json(404, { error: "session_not_found", message: "Send a heartbeat for this session first." }),
-        FakeTransport.json(200, { session: contract.session }),
-        FakeTransport.json(200, { item: contract.item, activity: contract.activity, created: true }),
-      );
-      await post(board(transport));
-      expect(transport.bodies()[1]).toEqual({
-        session: "claude-session-1-FRT-1",
-        ticket: "FRT-1",
-        step: "started",
-        state: "nominal",
-        skill: "flight-rules:verify-ticket",
-      });
-    });
+      [
+        "item",
+        (b: AriadneBoard) =>
+          b.item(
+            { kind: "testable", ticket: "FRT-1", title: "Fix is on staging" },
+            { skill: "flight-rules:verify-ticket" },
+          ),
+      ],
+      [
+        "activity",
+        (b: AriadneBoard) =>
+          b.activity(
+            { ticket: "FRT-1", text: "Verified" },
+            { skill: "flight-rules:verify-ticket" },
+          ),
+      ],
+    ] as const)(
+      "names the reporting skill on a session the %s has to create",
+      async (_kind, post) => {
+        const transport = new FakeTransport(
+          FakeTransport.json(404, {
+            error: "session_not_found",
+            message: "Send a heartbeat for this session first.",
+          }),
+          FakeTransport.json(200, { session: contract.session }),
+          FakeTransport.json(200, {
+            item: contract.item,
+            activity: contract.activity,
+            created: true,
+          }),
+        );
+        await post(board(transport));
+        expect(transport.bodies()[1]).toEqual({
+          session: "claude-session-1-FRT-1",
+          ticket: "FRT-1",
+          step: "started",
+          state: "nominal",
+          skill: "flight-rules:verify-ticket",
+        });
+      },
+    );
 
     it("does not loop when the session is still missing after the heartbeat", async () => {
-      const missing = FakeTransport.json(404, { error: "session_not_found", message: "Send a heartbeat first." });
-      const transport = new FakeTransport(missing, FakeTransport.json(200, { session: contract.session }), missing);
+      const missing = FakeTransport.json(404, {
+        error: "session_not_found",
+        message: "Send a heartbeat first.",
+      });
+      const transport = new FakeTransport(
+        missing,
+        FakeTransport.json(200, { session: contract.session }),
+        missing,
+      );
       const outcome = await board(transport).activity({ ticket: "FRT-1", text: "x" });
       expect(outcome.status).toBe("failed");
       expect(transport.requests).toHaveLength(3);
@@ -252,23 +378,33 @@ describe("AriadneBoard", () => {
   describe("failures", () => {
     it("names the setting to change when Agents is off", async () => {
       const transport = new FakeTransport(
-        FakeTransport.json(403, { error: "agents_opt_in_required", message: "Turn on Agents in Ariadne’s Connections settings first." }),
+        FakeTransport.json(403, {
+          error: "agents_opt_in_required",
+          message: "Turn on Agents in Ariadne’s Connections settings first.",
+        }),
       );
       const outcome = await board(transport).heartbeat(heartbeat);
       expect(outcome).toEqual({
         status: "failed",
-        message: "Agents reporting is off for you (403 agents_opt_in_required). Turn on Agents in Ariadne › Settings › Connections",
+        message:
+          "Agents reporting is off for you (403 agents_opt_in_required). Turn on Agents in Ariadne › Settings › Connections",
       });
     });
 
     it("explains an unrecognised token without printing it", async () => {
-      const outcome = await board(new FakeTransport(FakeTransport.json(401, { error: "unauthorized" }))).heartbeat(heartbeat);
-      expect(outcome.status === "failed" && outcome.message).toContain("Ariadne agent token not recognised (401 unauthorized)");
+      const outcome = await board(
+        new FakeTransport(FakeTransport.json(401, { error: "unauthorized" })),
+      ).heartbeat(heartbeat);
+      expect(outcome.status === "failed" && outcome.message).toContain(
+        "Ariadne agent token not recognised (401 unauthorized)",
+      );
       expect(JSON.stringify(outcome)).not.toContain(agentToken);
     });
 
     it("tells the person to replace an expired token, separately from an unrecognised one", async () => {
-      const outcome = await board(new FakeTransport(FakeTransport.json(401, { error: "agent_token_expired" }))).heartbeat(heartbeat);
+      const outcome = await board(
+        new FakeTransport(FakeTransport.json(401, { error: "agent_token_expired" })),
+      ).heartbeat(heartbeat);
       expect(outcome).toEqual({
         status: "failed",
         message:
@@ -278,31 +414,46 @@ describe("AriadneBoard", () => {
 
     it("surfaces a 403 agent_token_cannot_decide as a plain failure", async () => {
       const transport = new FakeTransport(
-        FakeTransport.json(403, { error: "agent_token_cannot_decide", message: "Agent tokens cannot answer items." }),
+        FakeTransport.json(403, {
+          error: "agent_token_cannot_decide",
+          message: "Agent tokens cannot answer items.",
+        }),
       );
       const outcome = await board(transport).items("s1");
-      expect(outcome).toEqual({ status: "failed", message: "Ariadne returned 403 agent_token_cannot_decide Agent tokens cannot answer items." });
+      expect(outcome).toEqual({
+        status: "failed",
+        message: "Ariadne returned 403 agent_token_cannot_decide Agent tokens cannot answer items.",
+      });
     });
 
     it("redacts the token if a server message ever echoes it", async () => {
-      const transport = new FakeTransport(FakeTransport.json(422, { error: "invalid_input", message: `Check ${agentToken}.` }));
+      const transport = new FakeTransport(
+        FakeTransport.json(422, { error: "invalid_input", message: `Check ${agentToken}.` }),
+      );
       const outcome = await board(transport).heartbeat(heartbeat);
-      expect(outcome).toEqual({ status: "failed", message: "Ariadne returned 422 invalid_input Check [redacted]." });
+      expect(outcome).toEqual({
+        status: "failed",
+        message: "Ariadne returned 422 invalid_input Check [redacted].",
+      });
     });
 
     it("redacts the token if a network error echoes the Authorization header", async () => {
-      const leaky = new TypeError("fetch failed", { cause: new Error(`bad header Authorization: Bearer ${agentToken}`) });
+      const leaky = new TypeError("fetch failed", {
+        cause: new Error(`bad header Authorization: Bearer ${agentToken}`),
+      });
       const outcome = await board(new FakeTransport(leaky, leaky)).heartbeat(heartbeat);
       expect(outcome.status === "failed" && outcome.message).toContain("Bearer [redacted]");
       expect(JSON.stringify(outcome)).not.toContain(agentToken);
     });
 
-    it("reports an unreachable API after the retry", async () => {
+    it("reports an unreachable API after one heartbeat request", async () => {
       const offline = new TypeError("fetch failed");
-      const outcome = await board(new FakeTransport(offline, offline)).heartbeat(heartbeat);
+      const transport = new FakeTransport(offline, offline);
+      const outcome = await board(transport).heartbeat(heartbeat);
       expect(outcome.status === "failed" && outcome.message).toBe(
-        `could not reach Ariadne at ${defaultAriadneUrl}: no response from ${defaultAriadneUrl} after 2 attempts (fetch failed)`,
+        `could not reach Ariadne at ${defaultAriadneUrl}: no response from ${defaultAriadneUrl} after 1 attempt (fetch failed)`,
       );
+      expect(transport.requests).toHaveLength(1);
     });
 
     it("reports invalid input without a request", async () => {
@@ -318,17 +469,21 @@ describe("AriadneBoard", () => {
       ["heartbeat", (b: AriadneBoard) => b.heartbeat({ ...heartbeat, ticket: "194" })],
       ["item", (b: AriadneBoard) => b.item({ kind: "question", ticket: "#194", title: "t" })],
       ["activity", (b: AriadneBoard) => b.activity({ ticket: "194", text: "t" })],
-    ] as const)("skips a %s whose ticket is not a Jira key, quietly and without a request", async (_kind, post) => {
-      const transport = new FakeTransport();
-      const outcome = await post(board(transport));
-      expect(outcome).toMatchObject({ status: "skipped", reason: "not-jira-ticket" });
-      expect(outcome.notices?.[0]).toContain("is not a Jira issue key");
-      expect(transport.requests).toHaveLength(0);
-    });
+    ] as const)(
+      "skips a %s whose ticket is not a Jira key, quietly and without a request",
+      async (_kind, post) => {
+        const transport = new FakeTransport();
+        const outcome = await post(board(transport));
+        expect(outcome).toMatchObject({ status: "skipped", reason: "not-jira-ticket" });
+        expect(outcome.notices?.[0]).toContain("is not a Jira issue key");
+        expect(transport.requests).toHaveLength(0);
+      },
+    );
   });
 
   describe("remembering heartbeats for the hook", () => {
-    const store = () => new BoardSessionStore({ env: { XDG_STATE_HOME: join(home, "state") }, home });
+    const store = () =>
+      new BoardSessionStore({ env: { XDG_STATE_HOME: join(home, "state") }, home });
 
     it("remembers a skill heartbeat, then replays it unchanged", async () => {
       const sessions = store();
@@ -337,7 +492,12 @@ describe("AriadneBoard", () => {
         FakeTransport.json(200, { session: contract.session }),
       );
       const reporter = board(transport, { sessions });
-      await reporter.heartbeat({ ticket: "FRT-1", step: "verify 2/3", state: "caution", branch: "feat/FRT-1-x" });
+      await reporter.heartbeat({
+        ticket: "FRT-1",
+        step: "verify 2/3",
+        state: "caution",
+        branch: "feat/FRT-1-x",
+      });
       expect(sessions.read("claude-session-1-FRT-1")?.heartbeat).toEqual({
         session: "claude-session-1-FRT-1",
         ticket: "FRT-1",
@@ -357,10 +517,23 @@ describe("AriadneBoard", () => {
       expect(sessions.read("claude-session-1-FRT-1")).toBeDefined();
 
       const other = store();
-      await board(new FakeTransport(), { sessions: other, env: { ARIADNE_AGENT_TOKEN: agentToken, CLAUDE_CODE_SESSION_ID: "s2" } }).heartbeat({ ...heartbeat, step: " " });
-      await board(new FakeTransport(), { sessions: other, env: { CLAUDE_CODE_SESSION_ID: "s3" } }).heartbeat(heartbeat);
-      await board(new FakeTransport(), { sessions: other, env: { ARIADNE_AGENT_TOKEN: agentToken, CLAUDE_CODE_SESSION_ID: "s4" } }).heartbeat({ ...heartbeat, ticket: "194" });
-      expect([other.read("s2-FRT-1"), other.read("s3-FRT-1"), other.read("s4")]).toEqual([undefined, undefined, undefined]);
+      await board(new FakeTransport(), {
+        sessions: other,
+        env: { ARIADNE_AGENT_TOKEN: agentToken, CLAUDE_CODE_SESSION_ID: "s2" },
+      }).heartbeat({ ...heartbeat, step: " " });
+      await board(new FakeTransport(), {
+        sessions: other,
+        env: { CLAUDE_CODE_SESSION_ID: "s3" },
+      }).heartbeat(heartbeat);
+      await board(new FakeTransport(), {
+        sessions: other,
+        env: { ARIADNE_AGENT_TOKEN: agentToken, CLAUDE_CODE_SESSION_ID: "s4" },
+      }).heartbeat({ ...heartbeat, ticket: "194" });
+      expect([other.read("s2-FRT-1"), other.read("s3-FRT-1"), other.read("s4")]).toEqual([
+        undefined,
+        undefined,
+        undefined,
+      ]);
     });
 
     it("points the Claude Code session at a default-session heartbeat, but not at an explicit one", async () => {
@@ -374,17 +547,40 @@ describe("AriadneBoard", () => {
 
     it("replays the hook's inferred heartbeat when no skill posted, and the skill's once one has", async () => {
       const sessions = store();
-      sessions.claimInferred({ session: "s-FRT-1", ticket: "FRT-1", step: "Build FRT-1 probe", state: "nominal", skill: "general-purpose" }, 60_000);
-      const transport = new FakeTransport(FakeTransport.json(200, { session: contract.session }), FakeTransport.json(200, { session: contract.session }));
+      sessions.claimInferred(
+        {
+          session: "s-FRT-1",
+          ticket: "FRT-1",
+          step: "Build FRT-1 probe",
+          state: "nominal",
+          skill: "general-purpose",
+        },
+        60_000,
+      );
+      const transport = new FakeTransport(
+        FakeTransport.json(200, { session: contract.session }),
+        FakeTransport.json(200, { session: contract.session }),
+      );
       await board(transport, { sessions }).replay("s-FRT-1");
-      sessions.record({ session: "s-FRT-1", ticket: "FRT-1", step: "verify 2/3", state: "nominal" });
+      sessions.record({
+        session: "s-FRT-1",
+        ticket: "FRT-1",
+        step: "verify 2/3",
+        state: "nominal",
+      });
       await board(transport, { sessions }).replay("s-FRT-1");
-      expect(transport.bodies().map((body) => (body as { step: string }).step)).toEqual(["Build FRT-1 probe", "verify 2/3"]);
+      expect(transport.bodies().map((body) => (body as { step: string }).step)).toEqual([
+        "Build FRT-1 probe",
+        "verify 2/3",
+      ]);
     });
 
     it("replays nothing for a session no skill reported", async () => {
       const transport = new FakeTransport();
-      expect(await board(transport, { sessions: store() }).replay("unknown")).toEqual({ status: "skipped", reason: "nothing-recorded" });
+      expect(await board(transport, { sessions: store() }).replay("unknown")).toEqual({
+        status: "skipped",
+        reason: "nothing-recorded",
+      });
       expect(transport.requests).toHaveLength(0);
     });
   });

@@ -277,6 +277,7 @@ export class FlightRulesMcpServer implements McpProtocolServerFactory {
         getConfig: () => core.config(),
       }).operations(),
       ...new DefaultPrOperations({ cwd, getHost: () => core.prHost() }).operations(),
+      ...core.ariadneOperations().operations(),
       ...core
         .gitConfigOperations({ scopes: this.props.allowedConfigScopes, roots: [cwd] })
         .operations(),

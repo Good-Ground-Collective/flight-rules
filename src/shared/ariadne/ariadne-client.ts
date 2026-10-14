@@ -33,7 +33,7 @@ import type { AriadneRequest, AriadneResponse, AriadneTransport } from "./ariadn
 
 /**
  * Why a call failed: the input broke the contract before anything was sent,
- * no response arrived after the retry, the API answered with an error status,
+ * no response arrived, the API answered with an error status,
  * or it answered 2xx with a body this client cannot read.
  */
 export type AriadneFailure = "invalid-input" | "network" | "http" | "bad-response";
@@ -63,7 +63,7 @@ export class AriadneError extends Error {
 
 /** Each attempt's timeout. */
 export const ariadneTimeoutMs = 5000;
-/** One try and one retry. */
+/** Maximum attempts for reads. Writes are sent once so callers can reconcile uncertain outcomes. */
 export const ariadneAttempts = 2;
 
 export interface AriadneClientProps {
@@ -77,11 +77,8 @@ export interface AriadneClientProps {
 
 /**
  * Ariadne's Agents API, contract version 1. Each request times out after
- * `timeoutMs` and is retried once when no response arrived or the server
- * answered 5xx. Retrying is safe: heartbeats are upserts, items and
- * activity are keyed by session and id (or their natural key without one),
- * packet creates are keyed by the packet id, and packet updates carry an
- * `operationId` the server replays.
+ * `timeoutMs`; reads retry once after a missing response or 5xx. Writes are
+ * sent once because a lost response can follow a successful external change.
  */
 export class AriadneClient {
   private readonly baseUrl: string;
@@ -117,7 +114,11 @@ export class AriadneClient {
   /** GET /v1/agents/items?session=…: every item of the session, open and resolved, oldest first. */
   async listItems(session: string): Promise<ItemListResponse> {
     const id = this.validate(AgentSessionIdSchema, session, "session");
-    return this.request("GET", `/v1/agents/items?session=${encodeURIComponent(id)}`, ItemListResponseSchema);
+    return this.request(
+      "GET",
+      `/v1/agents/items?session=${encodeURIComponent(id)}`,
+      ItemListResponseSchema,
+    );
   }
 
   /** POST /v1/review-packets: ids are global; replaying an id and body is idempotent, a different body is 409 `packet_exists`, another author's id is 409 `packet_id_taken`. */
@@ -130,13 +131,22 @@ export class AriadneClient {
   async updatePacket(id: string, input: unknown): Promise<Packet> {
     const packetId = this.validate(PacketIdSchema, id, "packet id");
     const body = this.validate(PacketUpdateSchema, input, "packet update");
-    return this.request("PUT", `/v1/review-packets/${encodeURIComponent(packetId)}`, PacketResponseSchema, body);
+    return this.request(
+      "PUT",
+      `/v1/review-packets/${encodeURIComponent(packetId)}`,
+      PacketResponseSchema,
+      body,
+    );
   }
 
   /** GET /v1/review-packets/{id}. */
   async getPacket(id: string): Promise<Packet> {
     const packetId = this.validate(PacketIdSchema, id, "packet id");
-    return this.request("GET", `/v1/review-packets/${encodeURIComponent(packetId)}`, PacketResponseSchema);
+    return this.request(
+      "GET",
+      `/v1/review-packets/${encodeURIComponent(packetId)}`,
+      PacketResponseSchema,
+    );
   }
 
   /** GET /v1/review-packets/reviewers: active members with a linked GitHub login. */
@@ -147,7 +157,9 @@ export class AriadneClient {
   private validate<S extends z.ZodType>(schema: S, input: unknown, what: string): z.output<S> {
     const result = schema.safeParse(input);
     if (result.success) return result.data;
-    const detail = result.error.issues.map((issue) => `${issue.path.join(".") || what}: ${issue.message}`).join("; ");
+    const detail = result.error.issues
+      .map((issue) => `${issue.path.join(".") || what}: ${issue.message}`)
+      .join("; ");
     throw new AriadneError({ failure: "invalid-input", message: `invalid ${what}: ${detail}` });
   }
 
@@ -175,7 +187,11 @@ export class AriadneClient {
     try {
       json = JSON.parse(response.body);
     } catch (err) {
-      throw new AriadneError({ failure: "bad-response", message: `${method} ${path} returned a body that is not JSON`, cause: err });
+      throw new AriadneError({
+        failure: "bad-response",
+        message: `${method} ${path} returned a body that is not JSON`,
+        cause: err,
+      });
     }
     const parsed = schema.safeParse(json);
     if (!parsed.success) {
@@ -189,17 +205,18 @@ export class AriadneClient {
 
   private async send(request: AriadneRequest): Promise<AriadneResponse> {
     let lastError: unknown;
-    for (let attempt = 1; attempt <= ariadneAttempts; attempt++) {
+    const attempts = request.method === "GET" ? ariadneAttempts : 1;
+    for (let attempt = 1; attempt <= attempts; attempt++) {
       try {
         const response = await this.transport.send(request);
-        if (response.status < 500 || attempt === ariadneAttempts) return response;
+        if (response.status < 500 || attempt === attempts) return response;
       } catch (err) {
         lastError = err;
       }
     }
     throw new AriadneError({
       failure: "network",
-      message: `no response from ${this.baseUrl} after ${ariadneAttempts} attempts (${this.describeNetworkError(lastError)})`,
+      message: `no response from ${this.baseUrl} after ${attempts} attempt${attempts === 1 ? "" : "s"} (${this.describeNetworkError(lastError)})`,
       cause: lastError,
     });
   }
@@ -208,7 +225,8 @@ export class AriadneClient {
     if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) {
       return `timed out after ${this.timeoutMs / 1000} s`;
     }
-    const cause = err instanceof Error && err.cause instanceof Error ? `: ${err.cause.message}` : "";
+    const cause =
+      err instanceof Error && err.cause instanceof Error ? `: ${err.cause.message}` : "";
     return err instanceof Error ? `${err.message}${cause}` : String(err);
   }
 
@@ -226,7 +244,9 @@ export class AriadneClient {
       failure: "http",
       status: response.status,
       ...(code !== undefined ? { code } : {}),
-      message: [`${response.status}`, code, reason].filter((part) => part !== undefined && part !== "").join(" "),
+      message: [`${response.status}`, code, reason]
+        .filter((part) => part !== undefined && part !== "")
+        .join(" "),
     });
   }
 }

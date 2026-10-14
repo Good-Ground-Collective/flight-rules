@@ -16,7 +16,9 @@ import { ticketSessionKey } from "./board-session-store.js";
 import type { BoardSessionStore } from "./board-session-store.js";
 
 /** A board call whose `session` falls back to `<Claude Code session id>-<TICKET>`. */
-export type BoardInput<T extends { session: string }> = Omit<T, "session"> & { session?: string | undefined };
+export type BoardInput<T extends { session: string }> = Omit<T, "session"> & {
+  session?: string | undefined;
+};
 
 export interface BoardCallOptions {
   /**
@@ -31,6 +33,8 @@ export interface BoardCallOptions {
 export interface BoardReportOptions extends BoardCallOptions {
   /** The skill reporting, so a session this post creates names it instead of showing none. */
   skill?: string | undefined;
+  /** Lets a shared operation avoid repeating an external post after its session was absent. */
+  bootstrapMissingSession?: boolean;
 }
 
 /** The session an item or activity line may have to create first. */
@@ -40,13 +44,19 @@ interface BootstrapTarget {
   skill: string | undefined;
   /** Whether the session is the default `<Claude Code session id>-<TICKET>` rather than an explicit `--session`. */
   defaulted: boolean;
+  bootstrapMissingSession: boolean;
 }
 
 /**
  * `notices` name config the board ignored. They are diagnostics: callers
  * print them only when asked to be loud (`--strict`, `board items`).
  */
-export type BoardSkipReason = "disabled" | "no-token" | "invalid-url" | "not-jira-ticket" | "nothing-recorded";
+export type BoardSkipReason =
+  | "disabled"
+  | "no-token"
+  | "invalid-url"
+  | "not-jira-ticket"
+  | "nothing-recorded";
 
 export type BoardOutcome<T> = (
   | { status: "skipped"; reason: BoardSkipReason }
@@ -173,7 +183,9 @@ export class AriadneBoard {
       else if (value === false || value === "false") enabled = false;
       else {
         enabled = false;
-        notices.push(`ignored ${enabledKey} from ${scopeLabels[rawEnabled.scope]}: expected true or false; reporting is off until it is fixed`);
+        notices.push(
+          `ignored ${enabledKey} from ${scopeLabels[rawEnabled.scope]}: expected true or false; reporting is off until it is fixed`,
+        );
       }
     }
     return { url, enabled, notices };
@@ -212,7 +224,10 @@ export class AriadneBoard {
    * Posts a heartbeat and remembers it for the session, so the heartbeat
    * hook can keep the session alive with the same ticket and step.
    */
-  async heartbeat(input: BoardInput<HeartbeatInput>, options: BoardCallOptions = {}): Promise<BoardOutcome<HeartbeatResponse>> {
+  async heartbeat(
+    input: BoardInput<HeartbeatInput>,
+    options: BoardCallOptions = {},
+  ): Promise<BoardOutcome<HeartbeatResponse>> {
     return this.call(
       options,
       input.session,
@@ -224,7 +239,8 @@ export class AriadneBoard {
           return response;
         } catch (err) {
           // A heartbeat that failed in transit still says what the run is doing.
-          if (!(err instanceof AriadneError) || err.failure !== "invalid-input") this.remember(sent, input.session === undefined);
+          if (!(err instanceof AriadneError) || err.failure !== "invalid-input")
+            this.remember(sent, input.session === undefined);
           throw err;
         }
       },
@@ -238,10 +254,18 @@ export class AriadneBoard {
    * inferred for it. The heartbeat hook's liveness ping; a skill's heartbeat
    * always wins, so its step is never overwritten.
    */
-  async replay(session: string, options: BoardCallOptions = {}): Promise<BoardOutcome<HeartbeatResponse>> {
+  async replay(
+    session: string,
+    options: BoardCallOptions = {},
+  ): Promise<BoardOutcome<HeartbeatResponse>> {
     const record = this.sessions?.read(session) ?? this.sessions?.readInferred(session);
     if (record === undefined) return { status: "skipped", reason: "nothing-recorded" };
-    return this.call(options, session, (client) => client.heartbeat(record.heartbeat), record.heartbeat.ticket);
+    return this.call(
+      options,
+      session,
+      (client) => client.heartbeat(record.heartbeat),
+      record.heartbeat.ticket,
+    );
   }
 
   /**
@@ -250,26 +274,48 @@ export class AriadneBoard {
    * reporting skill when one is named, and the item is posted again. A live
    * session's step is never overwritten this way.
    */
-  async item(input: BoardInput<ItemInput>, options: BoardReportOptions = {}): Promise<BoardOutcome<ItemResponse>> {
+  async item(
+    input: BoardInput<ItemInput>,
+    options: BoardReportOptions = {},
+  ): Promise<BoardOutcome<ItemResponse>> {
     return this.call(
       options,
       input.session,
       (client, session) =>
-        this.withSession(client, { session, ticket: input.ticket, skill: options.skill, defaulted: input.session === undefined }, () =>
-          client.postItem({ ...input, session }),
+        this.withSession(
+          client,
+          {
+            session,
+            ticket: input.ticket,
+            skill: options.skill,
+            defaulted: input.session === undefined,
+            bootstrapMissingSession: options.bootstrapMissingSession !== false,
+          },
+          () => client.postItem({ ...input, session }),
         ),
       input.ticket,
     );
   }
 
   /** Posts one activity line, creating the session first as `item` does. */
-  async activity(input: BoardInput<ActivityInput>, options: BoardReportOptions = {}): Promise<BoardOutcome<ActivityResponse>> {
+  async activity(
+    input: BoardInput<ActivityInput>,
+    options: BoardReportOptions = {},
+  ): Promise<BoardOutcome<ActivityResponse>> {
     return this.call(
       options,
       input.session,
       (client, session) =>
-        this.withSession(client, { session, ticket: input.ticket, skill: options.skill, defaulted: input.session === undefined }, () =>
-          client.postActivity({ ...input, session }),
+        this.withSession(
+          client,
+          {
+            session,
+            ticket: input.ticket,
+            skill: options.skill,
+            defaulted: input.session === undefined,
+            bootstrapMissingSession: options.bootstrapMissingSession !== false,
+          },
+          () => client.postActivity({ ...input, session }),
         ),
       input.ticket,
     );
@@ -314,11 +360,16 @@ export class AriadneBoard {
    * alive and never replaces its skill with an agent type it infers. The
    * placeholder never replaces a heartbeat a skill recorded meanwhile.
    */
-  private async withSession<T>(client: AriadneClient, target: BootstrapTarget, post: () => Promise<T>): Promise<T> {
+  private async withSession<T>(
+    client: AriadneClient,
+    target: BootstrapTarget,
+    post: () => Promise<T>,
+  ): Promise<T> {
     try {
       return await post();
     } catch (err) {
       if (!(err instanceof AriadneError) || err.code !== "session_not_found") throw err;
+      if (!target.bootstrapMissingSession) throw err;
     }
     const { session, ticket, skill, defaulted } = target;
     const recorded = this.bestEffort(() => this.sessions?.recent(session, bootstrapRecoveryMs));
@@ -327,16 +378,29 @@ export class AriadneBoard {
       return post();
     }
     const named = skill !== undefined && skill !== "";
-    const heartbeat: HeartbeatInput = { session, ticket, step: bootstrapStep, state: "nominal", ...(named ? { skill } : {}) };
+    const heartbeat: HeartbeatInput = {
+      session,
+      ticket,
+      step: bootstrapStep,
+      state: "nominal",
+      ...(named ? { skill } : {}),
+    };
     await client.heartbeat(heartbeat);
     if (named) this.rememberPlaceholder(heartbeat, defaulted);
     return post();
   }
 
   private rememberPlaceholder(heartbeat: HeartbeatInput, defaulted: boolean): void {
-    const remembered = this.bestEffort(() => this.sessions?.recordIfAbsent(heartbeat, bootstrapRecoveryMs));
+    const remembered = this.bestEffort(() =>
+      this.sessions?.recordIfAbsent(heartbeat, bootstrapRecoveryMs),
+    );
     const claudeSession = this.defaultSession();
-    if (remembered === true && defaulted && claudeSession !== undefined && claudeSession !== heartbeat.session) {
+    if (
+      remembered === true &&
+      defaulted &&
+      claudeSession !== undefined &&
+      claudeSession !== heartbeat.session
+    ) {
       this.bestEffort(() => this.sessions?.pointThread(claudeSession, heartbeat.session));
     }
   }
@@ -372,7 +436,10 @@ export class AriadneBoard {
       return {
         status: "skipped",
         reason: "not-jira-ticket",
-        notices: [...settings.notices, `skipped: ${ticket} is not a Jira issue key, and Ariadne tracks only Jira tickets`],
+        notices: [
+          ...settings.notices,
+          `skipped: ${ticket} is not a Jira issue key, and Ariadne tracks only Jira tickets`,
+        ],
       };
     }
 
@@ -382,7 +449,8 @@ export class AriadneBoard {
     } catch (err) {
       return noted({ status: "failed", message: err instanceof Error ? err.message : String(err) });
     }
-    if (token === undefined && options.strict !== true) return noted({ status: "skipped", reason: "no-token" });
+    if (token === undefined && options.strict !== true)
+      return noted({ status: "skipped", reason: "no-token" });
 
     const session = requestedSession ?? this.defaultSession(ticket);
     if (session === undefined) {
@@ -401,7 +469,10 @@ export class AriadneBoard {
     try {
       return noted({ status: "posted", value: await run(client, session) });
     } catch (err) {
-      return noted({ status: "failed", message: this.redact(this.describe(err, url, token !== undefined), token) });
+      return noted({
+        status: "failed",
+        message: this.redact(this.describe(err, url, token !== undefined), token),
+      });
     }
   }
 

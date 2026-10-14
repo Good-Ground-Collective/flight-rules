@@ -48,6 +48,10 @@ import {
 } from "../operations/review-operations.js";
 import { DefaultTrackerEntityOperations } from "../operations/tracker-entity-operations.js";
 import type { TrackerEntityOperations } from "../operations/tracker-entity-operations.js";
+import {
+  DefaultAriadneOperations,
+  type AriadneOperations,
+} from "../operations/ariadne-operations.js";
 
 export interface FlightRules {
   installation(): NativeInstallation;
@@ -67,6 +71,7 @@ export interface FlightRules {
   gitConfigOperations(policy?: ConfigOperationPolicy): GitConfigOperations;
   reviewOperations(props?: ReviewOperationsLaunchProps): ReviewOperations;
   trackerEntityOperations(): TrackerEntityOperations;
+  ariadneOperations?(): AriadneOperations;
   /** Ariadne's Agents page reporter; reads only the `ariadne.*` keys from user and local scope, so it works without a valid tracker config. */
   board(): AriadneBoard;
   packets(): AriadnePackets;
@@ -266,6 +271,13 @@ export class DefaultFlightRules implements FlightRules {
       getPrHost: () => this.prHost(),
       getConfig: () => this.config(),
       cwd: this.cwd,
+    });
+  }
+
+  ariadneOperations(): AriadneOperations {
+    return new DefaultAriadneOperations({
+      getBoard: () => this.board(),
+      getPackets: () => this.packets(),
     });
   }
 

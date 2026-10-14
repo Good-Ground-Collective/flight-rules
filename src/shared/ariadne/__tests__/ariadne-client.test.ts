@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { AriadneClient, AriadneError } from "../ariadne-client.js";
 import { defaultAriadneUrl } from "../ariadne.schema.js";
-import { FakeTransport, agentToken, contract, packetContract, packetEnvelope } from "./fake-transport.js";
+import {
+  FakeTransport,
+  agentToken,
+  contract,
+  packetContract,
+  packetEnvelope,
+} from "./fake-transport.js";
 
 // Payloads and paths are pinned to think-lp/ariadne docs/agents-api.md,
 // contract version 1. The request examples below are the contract's own.
@@ -61,7 +67,9 @@ describe("AriadneClient requests", () => {
   });
 
   it("posts the contract's item example to /v1/agents/items", async () => {
-    const transport = new FakeTransport(FakeTransport.json(200, { item: contract.item, created: false }));
+    const transport = new FakeTransport(
+      FakeTransport.json(200, { item: contract.item, created: false }),
+    );
     const response = await client(transport).postItem({
       session: "0f9a7c4e-1",
       kind: "wave-gate",
@@ -86,7 +94,9 @@ describe("AriadneClient requests", () => {
   });
 
   it("posts the contract's activity example to /v1/agents/activity", async () => {
-    const transport = new FakeTransport(FakeTransport.json(200, { activity: contract.activity, created: true }));
+    const transport = new FakeTransport(
+      FakeTransport.json(200, { activity: contract.activity, created: true }),
+    );
     await client(transport).postActivity({
       session: "0f9a7c4e-1",
       text: "Opened PR #86",
@@ -106,8 +116,15 @@ describe("AriadneClient requests", () => {
   });
 
   it("omits optional fields that were not given instead of sending empty values", async () => {
-    const transport = new FakeTransport(FakeTransport.json(200, { activity: contract.activity, created: true }));
-    await client(transport).postActivity({ session: "s1", text: "Started", ticket: "", level: undefined });
+    const transport = new FakeTransport(
+      FakeTransport.json(200, { activity: contract.activity, created: true }),
+    );
+    await client(transport).postActivity({
+      session: "s1",
+      text: "Started",
+      ticket: "",
+      level: undefined,
+    });
     expect(transport.bodies()[0]).toEqual({ session: "s1", text: "Started" });
   });
 
@@ -132,13 +149,14 @@ describe("AriadneClient requests", () => {
 
 describe("AriadneClient surface", () => {
   it("reports and reads only; agent tokens cannot resolve items, so there is no resolve call", () => {
-    const methods = Object.getOwnPropertyNames(AriadneClient.prototype).filter((name) => name !== "constructor");
-    expect(methods.filter((name) => ["heartbeat", "postItem", "postActivity", "listItems"].includes(name)).sort()).toEqual([
-      "heartbeat",
-      "listItems",
-      "postActivity",
-      "postItem",
-    ]);
+    const methods = Object.getOwnPropertyNames(AriadneClient.prototype).filter(
+      (name) => name !== "constructor",
+    );
+    expect(
+      methods
+        .filter((name) => ["heartbeat", "postItem", "postActivity", "listItems"].includes(name))
+        .sort(),
+    ).toEqual(["heartbeat", "listItems", "postActivity", "postItem"]);
     expect(methods.some((name) => /resolve|answer|decide/i.test(name))).toBe(false);
   });
 });
@@ -146,7 +164,12 @@ describe("AriadneClient surface", () => {
 describe("AriadneClient payload rules", () => {
   it("rejects any field outside the contract, so code, diffs or ticket bodies cannot ride along", async () => {
     const transport = new FakeTransport();
-    const input = { session: "s1", kind: "question", title: "Patch or revert?", diff: "--- a/x\n+++ b/x" };
+    const input = {
+      session: "s1",
+      kind: "question",
+      title: "Patch or revert?",
+      diff: "--- a/x\n+++ b/x",
+    };
     const error = await rejection(client(transport).postItem(input as never));
     expect(error.failure).toBe("invalid-input");
     expect(error.message).toContain("diff");
@@ -155,10 +178,17 @@ describe("AriadneClient payload rules", () => {
 
   it("upper-cases ticket keys and rejects anything that is not a Jira key", async () => {
     const transport = new FakeTransport(FakeTransport.json(200, { session: contract.session }));
-    await client(transport).heartbeat({ session: "s1", ticket: "frt-12", step: "pr", state: "nominal" });
+    await client(transport).heartbeat({
+      session: "s1",
+      ticket: "frt-12",
+      step: "pr",
+      state: "nominal",
+    });
     expect(transport.bodies()[0]).toMatchObject({ ticket: "FRT-12" });
 
-    const error = await rejection(client(transport).heartbeat({ session: "s1", ticket: "#194", step: "pr", state: "nominal" }));
+    const error = await rejection(
+      client(transport).heartbeat({ session: "s1", ticket: "#194", step: "pr", state: "nominal" }),
+    );
     expect(error.message).toContain("ticket");
   });
 
@@ -168,7 +198,9 @@ describe("AriadneClient payload rules", () => {
   });
 
   it("folds one-line fields onto one line and cuts them to their limits", async () => {
-    const transport = new FakeTransport(FakeTransport.json(200, { item: contract.item, created: true }));
+    const transport = new FakeTransport(
+      FakeTransport.json(200, { item: contract.item, created: true }),
+    );
     await client(transport).postItem({
       session: "s1",
       kind: "question",
@@ -187,22 +219,49 @@ describe("AriadneClient payload rules", () => {
 
   it("allows up to six distinct options", async () => {
     const seven = ["a", "b", "c", "d", "e", "f", "g"];
-    expect((await rejection(client(new FakeTransport()).postItem({ session: "s1", kind: "question", title: "t", options: seven }))).message).toContain("options");
-    expect((await rejection(client(new FakeTransport()).postItem({ session: "s1", kind: "question", title: "t", options: ["a", "a"] }))).message).toContain("distinct");
+    expect(
+      (
+        await rejection(
+          client(new FakeTransport()).postItem({
+            session: "s1",
+            kind: "question",
+            title: "t",
+            options: seven,
+          }),
+        )
+      ).message,
+    ).toContain("options");
+    expect(
+      (
+        await rejection(
+          client(new FakeTransport()).postItem({
+            session: "s1",
+            kind: "question",
+            title: "t",
+            options: ["a", "a"],
+          }),
+        )
+      ).message,
+    ).toContain("distinct");
   });
 
   it("accepts a free-text step such as verify 2/3 and requires a known state", async () => {
     const transport = new FakeTransport(FakeTransport.json(200, { session: contract.session }));
     await client(transport).heartbeat({ session: "s1", step: "verify 2/3", state: "hold" });
     expect(transport.bodies()[0]).toEqual({ session: "s1", step: "verify 2/3", state: "hold" });
-    await rejection(client(transport).heartbeat({ session: "s1", step: "pr", state: "fine" as never }));
+    await rejection(
+      client(transport).heartbeat({ session: "s1", step: "pr", state: "fine" as never }),
+    );
   });
 });
 
 describe("AriadneClient failures", () => {
   it("parses {error, message} and keeps the status and code", async () => {
     const transport = new FakeTransport(
-      FakeTransport.json(404, { error: "session_not_found", message: "Send a heartbeat for this session first." }),
+      FakeTransport.json(404, {
+        error: "session_not_found",
+        message: "Send a heartbeat for this session first.",
+      }),
     );
     const error = await rejection(client(transport).postActivity({ session: "s1", text: "x" }));
     expect(error).toMatchObject({ failure: "http", status: 404, code: "session_not_found" });
@@ -217,13 +276,39 @@ describe("AriadneClient failures", () => {
   });
 
   it("does not retry a 4xx", async () => {
-    const transport = new FakeTransport(FakeTransport.json(429, { error: "rate_limited", message: "Retry in a minute." }));
+    const transport = new FakeTransport(
+      FakeTransport.json(429, { error: "rate_limited", message: "Retry in a minute." }),
+    );
     await rejection(client(transport).listItems("s1"));
     expect(transport.requests).toHaveLength(1);
   });
 
+  it("sends a failed external mutation once after a 5xx or timeout", async () => {
+    const unavailable = new FakeTransport(
+      FakeTransport.json(503, { error: "unavailable" }),
+      FakeTransport.json(200, { session: contract.session }),
+    );
+    const error = await rejection(
+      client(unavailable).heartbeat({ session: "0f9a7c4e-1", step: "work", state: "nominal" }),
+    );
+    expect(error).toMatchObject({ failure: "http", status: 503 });
+    expect(unavailable.requests).toHaveLength(1);
+
+    const timeout = Object.assign(new Error("aborted"), { name: "TimeoutError" });
+    const interrupted = new FakeTransport(
+      timeout,
+      FakeTransport.json(200, { session: contract.session }),
+    );
+    await rejection(
+      client(interrupted).heartbeat({ session: "0f9a7c4e-1", step: "work", state: "nominal" }),
+    );
+    expect(interrupted.requests).toHaveLength(1);
+  });
+
   it("retries once after a timeout and succeeds", async () => {
-    const timeout = Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" });
+    const timeout = Object.assign(new Error("The operation was aborted due to timeout"), {
+      name: "TimeoutError",
+    });
     const transport = new FakeTransport(timeout, FakeTransport.json(200, { items: [] }));
     await expect(client(transport).listItems("s1")).resolves.toEqual({ items: [] });
     expect(transport.requests).toHaveLength(2);
@@ -249,7 +334,9 @@ describe("AriadneClient failures", () => {
   });
 
   it("reports a 2xx body it cannot read", async () => {
-    const error = await rejection(client(new FakeTransport({ status: 200, body: "<html>" })).listItems("s1"));
+    const error = await rejection(
+      client(new FakeTransport({ status: 200, body: "<html>" })).listItems("s1"),
+    );
     expect(error.failure).toBe("bad-response");
   });
 });
@@ -258,7 +345,10 @@ describe("AriadneClient review packets", () => {
   const base = `${defaultAriadneUrl}/v1/review-packets`;
   const create = packetContract.createRequest;
   const update = packetContract.updateRequest;
-  const withField = (record: Record<string, unknown>, extra: Record<string, unknown>) => ({ ...record, ...extra });
+  const withField = (record: Record<string, unknown>, extra: Record<string, unknown>) => ({
+    ...record,
+    ...extra,
+  });
 
   it("creates with POST and the exact body, returning the stored packet", async () => {
     const transport = new FakeTransport(FakeTransport.json(200, packetEnvelope));
@@ -294,12 +384,18 @@ describe("AriadneClient review packets", () => {
       `GET ${base}/reviewers`,
     ]);
     expect(transport.requests.every((r) => r.body === undefined)).toBe(true);
-    expect(list.reviewers[0]).toMatchObject({ id: "alex-morgan", name: "Alex Morgan", github: { id: "2001", login: "alex-example" } });
+    expect(list.reviewers[0]).toMatchObject({
+      id: "alex-morgan",
+      name: "Alex Morgan",
+      github: { id: "2001", login: "alex-example" },
+    });
   });
 
   it("rejects an unknown field such as diff or snippet without sending anything", async () => {
     const transport = new FakeTransport();
-    const error = await rejection(client(transport).createPacket(withField(create, { diff: "--- a/x" })));
+    const error = await rejection(
+      client(transport).createPacket(withField(create, { diff: "--- a/x" })),
+    );
     expect(error.failure).toBe("invalid-input");
     expect(error.message).toContain("diff");
 
@@ -312,10 +408,17 @@ describe("AriadneClient review packets", () => {
     const transport = new FakeTransport();
     const prs = (create["prs"] as Record<string, unknown>[]).map((pr, index) =>
       index === 0
-        ? { ...pr, focusAreas: [{ id: "fa-1", kind: "other", title: "t", rationale: "x".repeat(2001), anchors: [] }] }
+        ? {
+            ...pr,
+            focusAreas: [
+              { id: "fa-1", kind: "other", title: "t", rationale: "x".repeat(2001), anchors: [] },
+            ],
+          }
         : pr,
     );
-    const error = await rejection(client(transport).createPacket(withField(create, { prs, title: "y".repeat(201) })));
+    const error = await rejection(
+      client(transport).createPacket(withField(create, { prs, title: "y".repeat(201) })),
+    );
 
     expect(error.message).toContain("rationale: must be at most 2000 characters");
     expect(error.message).toContain("title: must be at most 200 characters");
@@ -329,7 +432,18 @@ describe("AriadneClient review packets", () => {
     const transport = new FakeTransport();
     const prs = (create["prs"] as Record<string, unknown>[]).map((pr, index) =>
       index === 0
-        ? { ...pr, focusAreas: [{ id: "fa-1", kind: "other", title: "t", rationale: "r", anchors: [{ path: "a.ts", side: "RIGHT", ...lines }] }] }
+        ? {
+            ...pr,
+            focusAreas: [
+              {
+                id: "fa-1",
+                kind: "other",
+                title: "t",
+                rationale: "r",
+                anchors: [{ path: "a.ts", side: "RIGHT", ...lines }],
+              },
+            ],
+          }
         : pr,
     );
     const error = await rejection(client(transport).createPacket(withField(create, { prs })));
@@ -337,7 +451,12 @@ describe("AriadneClient review packets", () => {
     expect(transport.requests).toHaveLength(0);
   });
 
-  it.each(["2026-02-30T00:00:00Z", "2026-10-10T25:00:00Z", "2026-10-10T11:61:00Z", "2026-10-10T11:30:00.0000Z"])("rejects the sign-off time %s", async (at) => {
+  it.each([
+    "2026-02-30T00:00:00Z",
+    "2026-10-10T25:00:00Z",
+    "2026-10-10T11:61:00Z",
+    "2026-10-10T11:30:00.0000Z",
+  ])("rejects the sign-off time %s", async (at) => {
     const transport = new FakeTransport();
     const prs = (create["prs"] as Record<string, unknown>[]).map((pr, index) =>
       index === 0 ? { ...pr, signOff: { at, headSha: pr["headSha"] } } : pr,
@@ -354,13 +473,17 @@ describe("AriadneClient review packets", () => {
     expect(transport.requests).toHaveLength(0);
   });
 
-  it("retries once after a 5xx and never after a 4xx", async () => {
-    const retried = new FakeTransport(FakeTransport.json(503, { error: "unavailable" }), FakeTransport.json(200, packetEnvelope));
-    await client(retried).updatePacket("rp-frt-2400", update);
-    expect(retried.requests).toHaveLength(2);
-    expect(retried.bodies()[1]).toEqual(retried.bodies()[0]);
+  it("does not retry an update after a 5xx or 4xx", async () => {
+    const unavailable = new FakeTransport(
+      FakeTransport.json(503, { error: "unavailable" }),
+      FakeTransport.json(200, packetEnvelope),
+    );
+    await rejection(client(unavailable).updatePacket("rp-frt-2400", update));
+    expect(unavailable.requests).toHaveLength(1);
 
-    const conflict = new FakeTransport(FakeTransport.json(409, packetContract.errors["revision_conflict"]));
+    const conflict = new FakeTransport(
+      FakeTransport.json(409, packetContract.errors["revision_conflict"]),
+    );
     const error = await rejection(client(conflict).updatePacket("rp-frt-2400", update));
     expect(error).toMatchObject({ failure: "http", status: 409, code: "revision_conflict" });
     expect(conflict.requests).toHaveLength(1);
@@ -368,7 +491,11 @@ describe("AriadneClient review packets", () => {
 
   it("exposes no way to resolve, answer or decide on a packet", () => {
     const methods = Object.getOwnPropertyNames(AriadneClient.prototype);
-    expect(["createPacket", "updatePacket", "getPacket", "listReviewers"].every((name) => methods.includes(name))).toBe(true);
+    expect(
+      ["createPacket", "updatePacket", "getPacket", "listReviewers"].every((name) =>
+        methods.includes(name),
+      ),
+    ).toBe(true);
     expect(methods.some((name) => /resolve|answer|decide/i.test(name))).toBe(false);
   });
 });

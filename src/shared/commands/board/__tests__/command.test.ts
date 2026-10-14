@@ -7,6 +7,12 @@ import { AriadneTokenStore } from "../../../ariadne/ariadne-token-store.js";
 import { defaultAriadneUrl } from "../../../ariadne/ariadne.schema.js";
 import { FakeTransport, agentToken, contract } from "../../../ariadne/__tests__/fake-transport.js";
 import { createBoardCommand } from "../command.js";
+import { AriadnePackets } from "../../../ariadne/ariadne-packets.js";
+import { DefaultAriadneOperations } from "../../../../operations/ariadne-operations.js";
+import {
+  LaunchOperationAccessPolicy,
+  MapOperationRegistry,
+} from "../../../../operations/operation-registry.js";
 
 // The board must never break the hook or skill that calls it: not configured
 // or disabled prints nothing and exits 0, a failure is one stderr line and
@@ -51,11 +57,20 @@ describe("board command", () => {
       { scope: "user" as const, values: config },
       { scope: "project" as const, values: project },
     ];
+    const getBoard = () => new AriadneBoard({ readLayers, tokens, env, transport });
+    const registry = new MapOperationRegistry({
+      operations: new DefaultAriadneOperations({
+        getBoard,
+        getPackets: () => new AriadnePackets({ readLayers, tokens, transport }),
+      }).operations(),
+      policy: new LaunchOperationAccessPolicy({ allowedEffects: ["read", "write", "network"] }),
+    });
     try {
       await createBoardCommand(
-        () => new AriadneBoard({ readLayers, tokens, env, transport }),
+        getBoard,
         () => tokens,
         () => Promise.resolve(secret),
+        registry,
       )
         .exitOverride()
         .parseAsync(argv, { from: "user" });
@@ -69,17 +84,77 @@ describe("board command", () => {
     }
   };
 
-  const heartbeatArgs = ["post", "heartbeat", "--ticket", "FRT-1", "--step", "implement", "--state", "nominal"];
+  const heartbeatArgs = [
+    "post",
+    "heartbeat",
+    "--ticket",
+    "FRT-1",
+    "--step",
+    "implement",
+    "--state",
+    "nominal",
+  ];
+
+  it("keeps quiet skipped reporting through the Commander shared-operation registry", async () => {
+    const env = { CLAUDE_CODE_SESSION_ID: "session-1" };
+    const transport = new FakeTransport();
+    const tokens = new AriadneTokenStore({ env, home });
+    const getBoard = () => new AriadneBoard({ readLayers: () => [], tokens, env, transport });
+    const registry = new MapOperationRegistry({
+      operations: new DefaultAriadneOperations({
+        getBoard,
+        getPackets: () => new AriadnePackets({ readLayers: () => [], tokens, transport }),
+      }).operations(),
+      policy: new LaunchOperationAccessPolicy({ allowedEffects: ["read", "write", "network"] }),
+    });
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    await createBoardCommand(
+      getBoard,
+      () => tokens,
+      () => Promise.resolve(""),
+      registry,
+    )
+      .exitOverride()
+      .parseAsync(["post", "heartbeat", "--ticket", "FRT-1", "--step", "", "--state", "nominal"], {
+        from: "user",
+      });
+
+    expect(stdout).not.toHaveBeenCalled();
+    expect(stderr).not.toHaveBeenCalled();
+    expect(transport.requests).toHaveLength(0);
+    stdout.mockRestore();
+    stderr.mockRestore();
+  });
 
   describe("not configured or disabled", () => {
     it.each([
       ["heartbeat", heartbeatArgs],
-      ["item", ["post", "item", "--kind", "question", "--ticket", "FRT-1", "--title", "Patch or revert?", "--option", "Patch", "--option", "Revert"]],
+      [
+        "item",
+        [
+          "post",
+          "item",
+          "--kind",
+          "question",
+          "--ticket",
+          "FRT-1",
+          "--title",
+          "Patch or revert?",
+          "--option",
+          "Patch",
+          "--option",
+          "Revert",
+        ],
+      ],
       ["activity", ["post", "activity", "--ticket", "FRT-1", "--text", "Opened PR #86"]],
       ["items", ["items", "--session", "s1", "--json"]],
     ])("%s prints nothing and sends nothing without a token", async (_name, argv) => {
       const transport = new FakeTransport();
-      expect(await run(argv, { transport, env: { CLAUDE_CODE_SESSION_ID: "s1" } })).toEqual({ stdout: "", stderr: "" });
+      expect(await run(argv, { transport, env: { CLAUDE_CODE_SESSION_ID: "s1" } })).toEqual({
+        stdout: "",
+        stderr: "",
+      });
       expect(transport.requests).toHaveLength(0);
     });
 
@@ -88,11 +163,18 @@ describe("board command", () => {
       const ok = () => new FakeTransport(FakeTransport.json(200, { session: contract.session }));
 
       const quiet = ok();
-      expect(await run(heartbeatArgs, { transport: quiet, project })).toEqual({ stdout: "", stderr: "" });
-      expect(quiet.requests.map((r) => r.url)).toEqual([`${defaultAriadneUrl}/v1/agents/heartbeat`]);
+      expect(await run(heartbeatArgs, { transport: quiet, project })).toEqual({
+        stdout: "",
+        stderr: "",
+      });
+      expect(quiet.requests.map((r) => r.url)).toEqual([
+        `${defaultAriadneUrl}/v1/agents/heartbeat`,
+      ]);
 
       const strict = ok();
-      expect((await run([...heartbeatArgs, "--strict"], { transport: strict, project })).stderr).toBe(
+      expect(
+        (await run([...heartbeatArgs, "--strict"], { transport: strict, project })).stderr,
+      ).toBe(
         "flight-rules board: ignored ariadne.url from project settings; set it in user scope\n",
       );
       expect(strict.requests.every((r) => r.url.startsWith(defaultAriadneUrl))).toBe(true);
@@ -100,10 +182,14 @@ describe("board command", () => {
 
     it("board items prints the ignored-config notice", async () => {
       const transport = new FakeTransport(FakeTransport.json(200, { items: [] }));
-      const output = await run(["items", "--json"], { transport, project: { "ariadne.enabled": false } });
+      const output = await run(["items", "--json"], {
+        transport,
+        project: { "ariadne.enabled": false },
+      });
       expect(output).toEqual({
         stdout: '{"items":[]}\n',
-        stderr: "flight-rules board: ignored ariadne.enabled from project settings; set it in user scope\n",
+        stderr:
+          "flight-rules board: ignored ariadne.enabled from project settings; set it in user scope\n",
       });
     });
 
@@ -118,7 +204,12 @@ describe("board command", () => {
 
     it("prints nothing when ariadne.enabled is false, even under --strict", async () => {
       const transport = new FakeTransport();
-      expect(await run([...heartbeatArgs, "--strict"], { transport, config: { "ariadne.enabled": false } })).toEqual({
+      expect(
+        await run([...heartbeatArgs, "--strict"], {
+          transport,
+          config: { "ariadne.enabled": false },
+        }),
+      ).toEqual({
         stdout: "",
         stderr: "",
       });
@@ -164,7 +255,9 @@ describe("board command", () => {
     });
 
     it("posts an item with repeated options and prints the response under --json", async () => {
-      const transport = new FakeTransport(FakeTransport.json(200, { item: contract.item, created: false }));
+      const transport = new FakeTransport(
+        FakeTransport.json(200, { item: contract.item, created: false }),
+      );
       const output = await run(
         [
           "post",
@@ -193,20 +286,37 @@ describe("board command", () => {
         options: ["Start wave", "Review wave"],
         id: "wave-3",
       });
-      expect(JSON.parse(output.stdout)).toMatchObject({ created: false, item: { chosenOption: "Start wave" } });
+      expect(JSON.parse(output.stdout)).toMatchObject({
+        created: false,
+        item: { chosenOption: "Start wave" },
+      });
     });
 
     it("posts an activity line with a level", async () => {
-      const transport = new FakeTransport(FakeTransport.json(200, { activity: contract.activity, created: true }));
-      await run(["post", "activity", "--ticket", "FRT-1", "--text", "Opened PR #86", "--level", "success"], { transport });
-      expect(transport.bodies()[0]).toEqual({ session: "claude-session-1-FRT-1", ticket: "FRT-1", text: "Opened PR #86", level: "success" });
+      const transport = new FakeTransport(
+        FakeTransport.json(200, { activity: contract.activity, created: true }),
+      );
+      await run(
+        ["post", "activity", "--ticket", "FRT-1", "--text", "Opened PR #86", "--level", "success"],
+        { transport },
+      );
+      expect(transport.bodies()[0]).toEqual({
+        session: "claude-session-1-FRT-1",
+        ticket: "FRT-1",
+        text: "Opened PR #86",
+        level: "success",
+      });
     });
 
     it("rejects an unknown state or kind before posting", async () => {
-      await expect(run(["post", "heartbeat", "--ticket", "FRT-1", "--step", "pr", "--state", "fine"])).rejects.toMatchObject({
+      await expect(
+        run(["post", "heartbeat", "--ticket", "FRT-1", "--step", "pr", "--state", "fine"]),
+      ).rejects.toMatchObject({
         code: "commander.invalidArgument",
       });
-      await expect(run(["post", "item", "--kind", "poll", "--ticket", "FRT-1", "--title", "t"])).rejects.toMatchObject({
+      await expect(
+        run(["post", "item", "--kind", "poll", "--ticket", "FRT-1", "--title", "t"]),
+      ).rejects.toMatchObject({
         code: "commander.invalidArgument",
       });
     });
@@ -214,7 +324,12 @@ describe("board command", () => {
 
   describe("failures", () => {
     const optInRequired = () =>
-      new FakeTransport(FakeTransport.json(403, { error: "agents_opt_in_required", message: "Turn on Agents first." }));
+      new FakeTransport(
+        FakeTransport.json(403, {
+          error: "agents_opt_in_required",
+          message: "Turn on Agents first.",
+        }),
+      );
 
     it("writes one stderr line and exits 0", async () => {
       const output = await run(heartbeatArgs, { transport: optInRequired() });
@@ -225,11 +340,17 @@ describe("board command", () => {
     });
 
     it("tells the person to replace an expired token in one line, exit 0, or exit 1 under --strict", async () => {
-      const expired = () => new FakeTransport(FakeTransport.json(401, { error: "agent_token_expired" }));
+      const expired = () =>
+        new FakeTransport(FakeTransport.json(401, { error: "agent_token_expired" }));
       const line =
         "flight-rules board: Ariadne agent token expired (401 agent_token_expired) — create a new one in Ariadne › Settings › Connections and run `flight-rules board login`";
-      expect(await run(heartbeatArgs, { transport: expired() })).toEqual({ stdout: "", stderr: `${line}\n` });
-      await expect(run([...heartbeatArgs, "--strict"], { transport: expired() })).rejects.toThrow(line);
+      expect(await run(heartbeatArgs, { transport: expired() })).toEqual({
+        stdout: "",
+        stderr: `${line}\n`,
+      });
+      await expect(run([...heartbeatArgs, "--strict"], { transport: expired() })).rejects.toThrow(
+        line,
+      );
     });
 
     it("exits 0 with one line when the API is unreachable", async () => {
@@ -239,16 +360,18 @@ describe("board command", () => {
     });
 
     it("--strict turns a failure into exit 1", async () => {
-      await expect(run([...heartbeatArgs, "--strict"], { transport: optInRequired() })).rejects.toThrow(
+      await expect(
+        run([...heartbeatArgs, "--strict"], { transport: optInRequired() }),
+      ).rejects.toThrow(
         "flight-rules board: Agents reporting is off for you (403 agents_opt_in_required)",
       );
     });
 
     it("--strict without a token posts anyway and fails on the 401", async () => {
       const transport = new FakeTransport(FakeTransport.json(401, { error: "unauthorized" }));
-      await expect(run([...heartbeatArgs, "--strict"], { transport, env: { CLAUDE_CODE_SESSION_ID: "s1" } })).rejects.toThrow(
-        "no Ariadne token (401 unauthorized)",
-      );
+      await expect(
+        run([...heartbeatArgs, "--strict"], { transport, env: { CLAUDE_CODE_SESSION_ID: "s1" } }),
+      ).rejects.toThrow("no Ariadne token (401 unauthorized)");
       expect(transport.requests[0]?.url).toBe(`${defaultAriadneUrl}/v1/agents/heartbeat`);
     });
   });
@@ -259,7 +382,17 @@ describe("board command", () => {
         FakeTransport.json(200, {
           items: [
             contract.item,
-            { ...contract.item, id: "q-1", kind: "question", status: "open", chosenOption: null, resolvedAt: null, resolvedBy: null, title: "Patch or revert?", options: ["Patch", "Revert"] },
+            {
+              ...contract.item,
+              id: "q-1",
+              kind: "question",
+              status: "open",
+              chosenOption: null,
+              resolvedAt: null,
+              resolvedBy: null,
+              title: "Patch or revert?",
+              options: ["Patch", "Revert"],
+            },
           ],
         }),
       );
@@ -267,8 +400,12 @@ describe("board command", () => {
     it("prints {items} under --json so a skill can read a decision", async () => {
       const transport = listed();
       const output = await run(["items", "--session", "0f9a7c4e-1", "--json"], { transport });
-      expect(transport.requests[0]?.url).toBe(`${defaultAriadneUrl}/v1/agents/items?session=0f9a7c4e-1`);
-      const { items } = JSON.parse(output.stdout) as { items: { status: string; chosenOption: string | null }[] };
+      expect(transport.requests[0]?.url).toBe(
+        `${defaultAriadneUrl}/v1/agents/items?session=0f9a7c4e-1`,
+      );
+      const { items } = JSON.parse(output.stdout) as {
+        items: { status: string; chosenOption: string | null }[];
+      };
       expect(items.map((item) => [item.status, item.chosenOption])).toEqual([
         ["resolved", "Start wave"],
         ["open", null],
@@ -278,7 +415,9 @@ describe("board command", () => {
     it("--ticket reads the session a post on that ticket defaulted to", async () => {
       const transport = listed();
       await run(["items", "--ticket", "FRT-1", "--json"], { transport });
-      expect(transport.requests[0]?.url).toBe(`${defaultAriadneUrl}/v1/agents/items?session=claude-session-1-FRT-1`);
+      expect(transport.requests[0]?.url).toBe(
+        `${defaultAriadneUrl}/v1/agents/items?session=claude-session-1-FRT-1`,
+      );
     });
 
     it("prints one line per item with its status and answer", async () => {
@@ -304,7 +443,9 @@ describe("board command", () => {
 
     it("warns when an environment variable outranks the saved token", async () => {
       const output = await run(["login"], { env: { ARIADNE_TOKEN: "x" }, secret: agentToken });
-      expect(JSON.parse(output.stdout)).toMatchObject({ warning: expect.stringContaining("$ARIADNE_TOKEN") });
+      expect(JSON.parse(output.stdout)).toMatchObject({
+        warning: expect.stringContaining("$ARIADNE_TOKEN"),
+      });
     });
 
     it("rejects a malformed token without echoing it", async () => {
