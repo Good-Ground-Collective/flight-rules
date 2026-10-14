@@ -12,6 +12,12 @@ export type { OperationDescriptor, OperationAccessPolicy, OperationHandlerResult
 export { OperationEffectSchema, OperationIdSchema, CliRouteSchema, OperationEnvelopeSchema, OperationErrorSchema, } from "../operations/operation.schema.js";
 export type { OperationEffect, OperationEnvelope, CliRoute, } from "../operations/operation.schema.js";
 export { DocOperation, DocOperationInputSchema, DocOperationOutputSchema, } from "../operations/doc-operation.js";
+export { DefaultLocalDiscoveryOperations, BlankQaRecipeError, QaInstructionsNotFoundError, } from "../operations/local-discovery-operations.js";
+export type { LocalWorkflowEvidence, LocalDiscoveryOperations, } from "../operations/local-discovery-operations.js";
+export { CommanderLocalDiscoveryCli, CharterSelectionError, } from "../operations/local-discovery-cli.js";
+export type { LocalDiscoveryCommandAdapter, LocalDiscoveryCliProps, } from "../operations/local-discovery-cli.js";
+export { WorkflowSchema, WorkflowEvidenceSchema, ReadinessOptionsSchema, } from "../tasks/readiness/readiness.schema.js";
+export type { Workflow, WorkflowEvidence, ReadinessOptions, ReadinessReport, ReadinessCheck, } from "../tasks/readiness/readiness.schema.js";
 export { ManifestCliRouteCoverage, CliRouteCoverageError, cliRouteCoverage, } from "../operations/cli-coverage.js";
 export type { RouteDisposition, CliRouteCoverage } from "../operations/cli-coverage.js";
 export interface OrderedDispatch<T> {

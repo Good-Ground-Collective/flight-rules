@@ -426,12 +426,12 @@ var GhPullRequestHost = class {
     if (match?.[1] === void 0) throw new GhOutputParseError(url);
     return { number: Number(match[1]), url };
   }
-  async withBodyFile(body, run) {
+  async withBodyFile(body, run2) {
     const dir = await mkdtemp(join2(tmpdir(), "flight-rules-"));
     const bodyFile = join2(dir, "body.md");
     try {
       await writeFile(bodyFile, body, "utf8");
-      return await run(bodyFile);
+      return await run2(bodyFile);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -1257,7 +1257,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.82.0";
+var appVersion = false ? "0.0.0-dev" : "1.83.0";
 
 // src/shared/ariadne/review-packet.schema.ts
 import { z as z14 } from "zod";
@@ -1968,14 +1968,14 @@ var AriadneBoard = class {
     }
   }
   /** Local state is best effort: a full or unreadable disk must not fail a report. */
-  bestEffort(run) {
+  bestEffort(run2) {
     try {
-      return run();
+      return run2();
     } catch {
       return void 0;
     }
   }
-  async call(options, requestedSession, run, ticket) {
+  async call(options, requestedSession, run2, ticket) {
     let settings;
     try {
       settings = this.settings();
@@ -2014,7 +2014,7 @@ var AriadneBoard = class {
       ...this.timeoutMs !== void 0 ? { timeoutMs: this.timeoutMs } : {}
     });
     try {
-      return noted({ status: "posted", value: await run(client, session) });
+      return noted({ status: "posted", value: await run2(client, session) });
     } catch (err) {
       return noted({ status: "failed", message: this.redact(this.describe(err, url, token !== void 0), token) });
     }
@@ -2164,7 +2164,7 @@ var AriadnePackets = class {
       "no Ariadne token; set ARIADNE_AGENT_TOKEN, or run `flight-rules board login` with an agent token from Ariadne \u203A Settings \u203A Connections"
     );
   }
-  async call(run) {
+  async call(run2) {
     const url = this.url();
     const token = this.token();
     const client = new AriadneClient({
@@ -2174,7 +2174,7 @@ var AriadnePackets = class {
       ...this.timeoutMs !== void 0 ? { timeoutMs: this.timeoutMs } : {}
     });
     try {
-      return await run(client);
+      return await run2(client);
     } catch (err) {
       throw new AriadnePacketError(this.redact(this.describe(err, url), token), { cause: err });
     }
@@ -3179,7 +3179,7 @@ var JiraClient = class {
       const retryAfterSeconds = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : defaultRetryAfterSeconds;
       const jitter = 0.7 + Math.random() * 0.6;
       const delayMs = Math.min(retryAfterSeconds * 1e3 * jitter, maxBackoffMs);
-      await new Promise((resolve6) => setTimeout(resolve6, delayMs));
+      await new Promise((resolve8) => setTimeout(resolve8, delayMs));
       return this.fetchWithRetry(url, init, attempt + 1);
     }
     return res;
@@ -3232,7 +3232,7 @@ var ConfluenceClient = class {
       const retryAfterSeconds = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : defaultRetryAfterSeconds2;
       const jitter = 0.7 + Math.random() * 0.6;
       const delayMs = Math.min(retryAfterSeconds * 1e3 * jitter, maxBackoffMs2);
-      await new Promise((resolve6) => setTimeout(resolve6, delayMs));
+      await new Promise((resolve8) => setTimeout(resolve8, delayMs));
       return this.fetchWithRetry(url, init, attempt + 1);
     }
     return res;
@@ -5388,8 +5388,8 @@ var NodeWorkflowPreflight = class {
     return checks;
   }
   async command(args) {
-    const run = promisify4(execFile4);
-    const { stdout } = await run("git", args, {
+    const run2 = promisify4(execFile4);
+    const { stdout } = await run2("git", args, {
       cwd: this.cwd,
       env: { ...this.env, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "Never" },
       timeout: this.timeoutMs,
@@ -5686,6 +5686,472 @@ var FlightRulesPropsSchema = z32.object({
   host: NativeHostSchema.optional().describe("Explicit configuration host; otherwise FLIGHT_RULES_HOST, the native package host, or Claude for compatibility")
 });
 
+// src/operations/local-discovery-operations.ts
+import { readdirSync as readdirSync4 } from "node:fs";
+import { resolve as resolve6 } from "node:path";
+import { z as z33 } from "zod";
+
+// src/tasks/qa-instructions/qa-instructions.ts
+import { existsSync as existsSync10, readFileSync as readFileSync10, statSync as statSync4 } from "node:fs";
+import { dirname as dirname10, join as join11, resolve as resolve5 } from "node:path";
+var atxHeading = /^ {0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$/;
+var fenceRun = /^ {0,3}(`{3,}|~{3,})/;
+var legacyHint = 'Legacy QA recipe in use. Move its content into a QA.md at the repo root (or a "QA" section of AGENTS.md); see docs/qa-instructions.md.';
+var nodeFileSystem = {
+  isFile: (path) => existsSync10(path) && statSync4(path).isFile(),
+  exists: (path) => existsSync10(path),
+  readFile: (path) => readFileSync10(path, "utf8")
+};
+var QaInstructionsFinder = class {
+  fs;
+  constructor(props = {}) {
+    this.fs = props.fs ?? nodeFileSystem;
+  }
+  discover(input) {
+    const sources = this.levels(input.from).map((dir) => this.sourceAt(dir)).filter((source) => source !== void 0);
+    if (sources.length > 0) return { found: true, sources };
+    const legacy = this.legacySource(input.legacyRecipePath);
+    if (legacy !== void 0) return { found: true, sources: [legacy] };
+    return { found: false, sources: [] };
+  }
+  /**
+   * Extracts the body of the first heading whose text is exactly "QA" (any
+   * case, any level), up to the next heading of the same or a higher level.
+   * Headings inside fenced code blocks are ignored. Returns undefined when the
+   * section is absent or empty.
+   */
+  extractQaSection(markdown) {
+    const lines = markdown.split("\n");
+    let openFence = null;
+    let sectionLevel = null;
+    const body = [];
+    for (const line of lines) {
+      const fence = fenceRun.exec(line)?.[1];
+      if (fence !== void 0) {
+        if (openFence === null) openFence = fence;
+        else if (fence[0] === openFence[0] && fence.length >= openFence.length) openFence = null;
+        if (sectionLevel !== null) body.push(line);
+        continue;
+      }
+      const heading = openFence === null ? atxHeading.exec(line) : null;
+      if (heading !== null) {
+        const level = heading[1]?.length ?? 0;
+        if (sectionLevel !== null && level <= sectionLevel) break;
+        if (sectionLevel === null && (heading[2] ?? "").trim().toLowerCase() === "qa") {
+          sectionLevel = level;
+          continue;
+        }
+      }
+      if (sectionLevel !== null) body.push(line);
+    }
+    const content = body.join("\n").trim();
+    return content.length > 0 ? content : void 0;
+  }
+  /** The start directory and each parent up to the repository root; only the start when no root is found. */
+  levels(from) {
+    const absolute = resolve5(from);
+    const start = this.fs.isFile(absolute) ? dirname10(absolute) : absolute;
+    const levels = [];
+    let current = start;
+    for (; ; ) {
+      levels.push(current);
+      if (this.fs.exists(join11(current, ".git"))) return levels;
+      const parent = dirname10(current);
+      if (parent === current) return [start];
+      current = parent;
+    }
+  }
+  sourceAt(dir) {
+    const agentsMd = join11(dir, "AGENTS.md");
+    if (this.fs.isFile(agentsMd)) {
+      const section = this.extractQaSection(this.fs.readFile(agentsMd));
+      if (section !== void 0)
+        return { path: agentsMd, kind: "agents-md-section", dir, content: section };
+    }
+    return this.fileSource(join11(dir, "QA.md"), "qa-md", dir) ?? this.fileSource(join11(dir, ".agents", "QA.md"), "agents-dir-qa-md", dir);
+  }
+  fileSource(path, kind, dir) {
+    if (!this.fs.isFile(path)) return void 0;
+    const content = this.fs.readFile(path).trim();
+    return content.length > 0 ? { path, kind, dir, content } : void 0;
+  }
+  legacySource(path) {
+    if (path === void 0) return void 0;
+    const source = this.fileSource(path, "legacy-recipe", dirname10(path));
+    return source === void 0 ? void 0 : { ...source, legacy: true, hint: legacyHint };
+  }
+};
+
+// src/operations/local-discovery-operations.ts
+var QaSourceSchema = z33.object({
+  path: z33.string(),
+  kind: z33.enum(["agents-md-section", "qa-md", "agents-dir-qa-md", "legacy-recipe"]),
+  dir: z33.string(),
+  content: z33.string(),
+  legacy: z33.literal(true).optional(),
+  hint: z33.string().optional()
+});
+var QaInstructionsSchema = z33.object({ found: z33.boolean(), sources: z33.array(QaSourceSchema) });
+var ReadinessCheckSchema = z33.object({
+  name: z33.string(),
+  ok: z33.boolean(),
+  detail: z33.string(),
+  required: z33.boolean().optional(),
+  code: z33.string().optional(),
+  remedy: z33.string().optional()
+});
+var ReadinessReportSchema = z33.object({
+  tracker: z33.string().nullable(),
+  repo: z33.string().nullable().optional(),
+  checks: z33.array(ReadinessCheckSchema),
+  ok: z33.boolean(),
+  workflow: WorkflowSchema.optional(),
+  scope: z33.enum(["environment", "workflow"])
+});
+var ConfigInspectionSchema = z33.object({
+  host: z33.string(),
+  valid: z33.boolean(),
+  error: z33.string().optional(),
+  values: z33.record(z33.string(), z33.unknown()),
+  sources: z33.record(
+    z33.string(),
+    z33.object({ scope: z33.enum(["user", "project", "local", "file"]), path: z33.string() })
+  ),
+  layers: z33.array(
+    z33.object({
+      scope: z33.enum(["user", "project", "local", "file"]),
+      path: z33.string(),
+      present: z33.boolean()
+    })
+  )
+});
+var CharterInputSchema = z33.object({
+  paths: z33.array(z33.string()).optional(),
+  diff: z33.string().optional(),
+  repository: z33.boolean().default(false),
+  pathOutput: z33.boolean().default(false)
+}).strict().refine(
+  (input) => Number(input.paths !== void 0 && input.paths.length > 0) + Number(input.diff !== void 0) + Number(input.repository) <= 1,
+  "Choose one charter selection source"
+);
+var QaInstructionsInputSchema = z33.object({ from: z33.string().optional() }).strict();
+var RfcDirectoryOutputSchema = z33.object({ path: z33.string() });
+var RfcNextIdOutputSchema = z33.object({
+  id: z33.string().regex(/^RFC-\d+$/),
+  directory: z33.string()
+});
+var QaRecipeOutputSchema = z33.object({ path: z33.string() });
+var EvidenceDirectoryOutputSchema = z33.object({
+  path: z33.string(),
+  gitignored: z33.boolean().nullable()
+});
+var rfcIdPattern = /^RFC-(\d+)\.md$/;
+var LocalDiscoveryPropsSchema = z33.object({
+  cwd: z33.string().min(1),
+  getConfig: z33.custom((value) => typeof value === "function"),
+  getConfigStore: z33.custom((value) => typeof value === "function"),
+  getCharters: z33.custom((value) => typeof value === "function"),
+  getRepositoryPaths: z33.custom((value) => typeof value === "function"),
+  getEvidence: z33.custom((value) => typeof value === "function"),
+  getReadiness: z33.custom((value) => typeof value === "function"),
+  getProbe: z33.custom((value) => typeof value === "function"),
+  getTracker: z33.custom((value) => typeof value === "function"),
+  getConfigPath: z33.custom((value) => typeof value === "function"),
+  getQaFinder: z33.custom((value) => typeof value === "function").optional()
+});
+var DefaultLocalDiscoveryOperations = class {
+  props;
+  constructor(props) {
+    this.props = LocalDiscoveryPropsSchema.parse(props);
+  }
+  operations() {
+    return [
+      this.descriptor(
+        "charter",
+        "Print the core and applicable language charters.",
+        ["read", "process"],
+        ["charter"],
+        CharterInputSchema,
+        z33.object({
+          charters: z33.array(
+            z33.object({ path: z33.string(), contents: z33.string(), language: z33.string().nullable() })
+          ),
+          unmatched: z33.boolean()
+        }),
+        (input) => this.charter(input)
+      ),
+      this.descriptor(
+        "competencies",
+        "Read the configured worker competencies.",
+        ["read", "process"],
+        ["competencies"],
+        z33.object({}),
+        z33.array(z33.string()),
+        () => this.props.getConfig().competencies
+      ),
+      this.descriptor(
+        "rfc-dir",
+        "Resolve the RFC directory for this checkout.",
+        ["read", "process"],
+        ["rfc", "dir"],
+        z33.object({}),
+        RfcDirectoryOutputSchema,
+        () => ({ path: getRfcDir(this.props.getConfig(), this.props.cwd) })
+      ),
+      this.descriptor(
+        "rfc-next-id",
+        "Find the next RFC number in the configured RFC directory.",
+        ["read", "process"],
+        ["rfc", "next-id"],
+        z33.object({}),
+        RfcNextIdOutputSchema,
+        () => this.nextRfcId()
+      ),
+      this.descriptor(
+        "qa-instructions",
+        "Find QA instructions that apply to a directory.",
+        ["read", "process"],
+        ["qa", "instructions"],
+        QaInstructionsInputSchema,
+        QaInstructionsSchema,
+        (input) => this.qaInstructions(input)
+      ),
+      this.descriptor(
+        "qa-evidence-dir",
+        "Resolve the persistent evidence directory for a ticket.",
+        ["read", "process"],
+        ["qa", "evidence-dir"],
+        z33.object({ ticket: z33.string().min(1) }),
+        EvidenceDirectoryOutputSchema,
+        (input) => this.props.getEvidence().dirFor(input.ticket)
+      ),
+      this.descriptor(
+        "qa-recipe",
+        "Resolve the nearest QA instruction path (deprecated CLI route).",
+        ["read", "process"],
+        ["qa", "recipe"],
+        z33.object({}),
+        QaRecipeOutputSchema,
+        () => this.qaRecipe()
+      ),
+      this.descriptor(
+        "config-path",
+        "Resolve the config file path for this checkout.",
+        ["read", "process"],
+        ["config", "path"],
+        z33.object({}),
+        z33.object({ path: z33.string() }),
+        () => ({ path: this.props.getConfigStore().filePath() })
+      ),
+      this.descriptor(
+        "config-show",
+        "Inspect merged configuration and its sources.",
+        ["read", "process"],
+        ["config", "show"],
+        z33.object({}),
+        ConfigInspectionSchema,
+        () => this.props.getConfigStore().inspect()
+      ),
+      this.descriptor(
+        "check",
+        "Check local configuration, tools, and optional workflow readiness.",
+        ["read", "process", "network"],
+        ["check"],
+        ReadinessOptionsSchema,
+        ReadinessReportSchema,
+        (input) => this.check(input)
+      )
+    ];
+  }
+  configStore() {
+    return this.props.getConfigStore();
+  }
+  descriptor(id, description, effects, path, inputSchema, outputSchema, handler) {
+    return {
+      id,
+      description,
+      effects,
+      cli: { path, aliases: [] },
+      inputSchema,
+      outputSchema,
+      handler
+    };
+  }
+  async charter(input) {
+    let paths = input.paths ?? [];
+    if (input.diff !== void 0)
+      paths = await this.props.getRepositoryPaths().changedSince(input.diff);
+    else if (input.repository || input.paths === void 0)
+      paths = await this.props.getRepositoryPaths().inventory();
+    const selected = this.props.getCharters().select(paths);
+    return {
+      charters: selected.map(({ path, contents, language }) => ({ path, contents, language })),
+      unmatched: selected.every((charter) => charter.language === null)
+    };
+  }
+  nextRfcId() {
+    const directory = getRfcDir(this.props.getConfig(), this.props.cwd);
+    let files;
+    try {
+      files = readdirSync4(directory);
+    } catch {
+      return { id: "RFC-001", directory };
+    }
+    const ids = files.map((file) => file.match(rfcIdPattern)).filter((match) => match !== null).map((match) => Number(match[1] ?? 0));
+    return {
+      id: `RFC-${String(ids.length === 0 ? 1 : Math.max(...ids) + 1).padStart(3, "0")}`,
+      directory
+    };
+  }
+  qaInstructions(input) {
+    const config = this.safeConfig();
+    if (config?.qaRecipe !== void 0 && config.qaRecipe.trim() === "")
+      throw new BlankQaRecipeError(
+        "qaRecipe is set to a blank value \u2014 remove the key and move the recipe into a QA.md (see docs/qa-instructions.md)"
+      );
+    return (this.props.getQaFinder?.() ?? new QaInstructionsFinder()).discover({
+      from: input.from === void 0 ? this.props.cwd : resolve6(this.props.cwd, input.from),
+      ...config === void 0 ? {} : { legacyRecipePath: getQaRecipePath(config, this.props.getConfigPath()) }
+    });
+  }
+  qaRecipe() {
+    const result = this.qaInstructions({});
+    const nearest = result.sources[0];
+    if (nearest === void 0)
+      throw new QaInstructionsNotFoundError(
+        "No QA instructions found \u2014 add a QA.md at the repo root or a QA section in AGENTS.md (see docs/qa-instructions.md)"
+      );
+    return { path: nearest.path };
+  }
+  check(input) {
+    return this.props.getReadiness().inspect({
+      config: this.props.getConfig,
+      tracker: this.props.getTracker,
+      configPath: this.props.getConfigPath,
+      probe: this.props.getProbe(),
+      finder: this.props.getQaFinder?.() ?? new QaInstructionsFinder(),
+      options: input
+    });
+  }
+  safeConfig() {
+    try {
+      return this.props.getConfig();
+    } catch {
+      return void 0;
+    }
+  }
+};
+var QaInstructionsNotFoundError = class extends Error {
+  name = "QaInstructionsNotFoundError";
+};
+var BlankQaRecipeError = class extends Error {
+  name = "BlankQaRecipeError";
+};
+
+// src/bundled-docs/charter-catalog/charter-catalog.ts
+import { matchesGlob } from "node:path";
+import { parse as parseYaml3 } from "yaml";
+import { z as z34 } from "zod";
+var coreCharterId = "coding-charter";
+var languageCharterPrefix = `${coreCharterId}-`;
+var LanguageFrontmatterSchema = z34.strictObject({
+  language: z34.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+  "applies-to": z34.array(z34.string().min(1)).min(1)
+}).transform(({ language, "applies-to": appliesTo }) => ({ language, appliesTo }));
+var FrontmatterSchema = z34.string().transform((contents, ctx) => {
+  const block = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/.exec(contents)?.[1];
+  if (block === void 0) {
+    ctx.addIssue({ code: "custom", message: "missing YAML frontmatter" });
+    return z34.NEVER;
+  }
+  return parseYaml3(block);
+}).pipe(LanguageFrontmatterSchema);
+var DocCharterCatalog = class {
+  docs;
+  constructor(props) {
+    this.docs = props.docs;
+  }
+  all() {
+    const core = this.docs.resolve(coreCharterId);
+    const languages = this.docs.list().filter((id) => id.startsWith(languageCharterPrefix)).map((id) => this.languageCharter(this.docs.resolve(id)));
+    return [
+      { id: core.id, language: null, appliesTo: [], tierA: this.tierA(core.contents), path: core.path, contents: core.contents },
+      ...languages
+    ];
+  }
+  select(paths) {
+    const normalized = paths.map((path) => path.trim().replace(/^\.\//, "")).filter((path) => path.length > 0);
+    return this.all().filter(
+      (charter) => charter.language === null || normalized.some((path) => charter.appliesTo.some((glob) => matchesGlob(path, glob)))
+    );
+  }
+  languageCharter(doc) {
+    const parsed = FrontmatterSchema.safeParse(doc.contents);
+    if (!parsed.success) {
+      throw new CharterFormatError(`Charter "${doc.id}" has invalid frontmatter: ${z34.prettifyError(parsed.error)}`);
+    }
+    const expectedId = `${languageCharterPrefix}${parsed.data.language}`;
+    if (doc.id !== expectedId) {
+      throw new CharterFormatError(`Charter "${doc.id}" declares language "${parsed.data.language}"; its file must be ${expectedId}.md`);
+    }
+    return { id: doc.id, ...parsed.data, tierA: this.tierA(doc.contents), path: doc.path, contents: doc.contents };
+  }
+  tierA(contents) {
+    const tiers = contents.split(/^## Review tiers\r?$/m)[1]?.split(/^## /m)[0] ?? "";
+    const table = tiers.split(/^\*\*Tier B/m)[0] ?? "";
+    return [...new Set([...table.matchAll(/^\|\s*([A-Z]+-\d+)\b/gm)].flatMap((match) => match[1] ?? []))];
+  }
+};
+var CharterFormatError = class extends Error {
+  name = "CharterFormatError";
+};
+
+// src/bundled-docs/charter-catalog/repository-paths.ts
+import { execFile as execFile5 } from "node:child_process";
+import { promisify as promisify5 } from "node:util";
+import { z as z35 } from "zod";
+var run = promisify5(execFile5);
+var BaseRefSchema = z35.string().regex(/^[^\s-]\S*$/, 'base must be a git ref or commit, and cannot start with "-"');
+var GitRepositoryPathsPropsSchema = z35.object({ cwd: z35.string().min(1) });
+var GitRepositoryPaths = class {
+  cwd;
+  constructor(props) {
+    this.cwd = GitRepositoryPathsPropsSchema.parse(props).cwd;
+  }
+  async inventory() {
+    const root = await this.root();
+    return this.paths(root, ["ls-files", "-z", "--cached", "--others", "--exclude-standard"]);
+  }
+  async changedSince(base) {
+    const ref = BaseRefSchema.parse(base);
+    const root = await this.root();
+    const mergeBase = (await this.git(root, ["merge-base", ref, "HEAD"])).trim();
+    if (mergeBase.length === 0) throw new RepositoryPathsError(`No merge base between ${ref} and HEAD`);
+    const changed = await this.paths(root, ["diff", "-z", "--name-only", mergeBase]);
+    const untracked = await this.paths(root, ["ls-files", "-z", "--others", "--exclude-standard"]);
+    return [.../* @__PURE__ */ new Set([...changed, ...untracked])];
+  }
+  // Path queries run from the top level so the result never depends on which subdirectory the caller is in.
+  async root() {
+    return (await this.git(this.cwd, ["rev-parse", "--show-toplevel"])).replace(/\r?\n$/, "");
+  }
+  // NUL-delimited output keeps paths verbatim; newline output quotes non-ASCII and special characters.
+  async paths(root, args) {
+    return (await this.git(root, args)).split("\0").filter((path) => path.length > 0);
+  }
+  async git(cwd, args) {
+    try {
+      const { stdout } = await run("git", args, { cwd, maxBuffer: 64 * 1024 * 1024 });
+      return stdout;
+    } catch (cause) {
+      throw new RepositoryPathsError(`git ${args[0]} failed in ${cwd}`, { cause });
+    }
+  }
+};
+var RepositoryPathsError = class extends Error {
+  name = "RepositoryPathsError";
+};
+
 // src/flight-rules/flight-rules.ts
 var DefaultFlightRules = class {
   cwd;
@@ -5695,7 +6161,10 @@ var DefaultFlightRules = class {
   host;
   untrackedRoot;
   constructor(props = {}) {
-    const parsed = FlightRulesPropsSchema.parse({ ...props, env: props.env === void 0 ? void 0 : { ...props.env } });
+    const parsed = FlightRulesPropsSchema.parse({
+      ...props,
+      env: props.env === void 0 ? void 0 : { ...props.env }
+    });
     this.cwd = parsed.cwd ?? process.cwd();
     this.env = props.env ?? process.env;
     this.explicitConfigPath = parsed.configPath;
@@ -5711,13 +6180,19 @@ var DefaultFlightRules = class {
     return new ConfigStore({
       cwd: this.cwd,
       env,
-      host: NativeHostSchema.parse(this.host ?? env["FLIGHT_RULES_HOST"] ?? this.installation().host() ?? "claude"),
+      host: NativeHostSchema.parse(
+        this.host ?? env["FLIGHT_RULES_HOST"] ?? this.installation().host() ?? "claude"
+      ),
       ...this.hostSettings !== void 0 ? { hostSettings: this.hostSettings } : {},
       ...untrackedRoot !== void 0 ? { untrackedRoot } : {}
     });
   }
   installation() {
-    return FileNativeInstallation.fromInstall({ moduleUrl: import.meta.url, cwd: this.cwd, env: this.env });
+    return FileNativeInstallation.fromInstall({
+      moduleUrl: import.meta.url,
+      cwd: this.cwd,
+      env: this.env
+    });
   }
   /** Looked up once per instance. */
   mainCheckout() {
@@ -5739,7 +6214,8 @@ var DefaultFlightRules = class {
     const config = this.config(overrideTracker);
     const env = new EnvLoader().load(this.env);
     if (config.tracker === "github") {
-      if (env.githubToken === void 0) throw new Error("GITHUB_TOKEN environment variable is required");
+      if (env.githubToken === void 0)
+        throw new Error("GITHUB_TOKEN environment variable is required");
       if (config.repo === void 0) throw new Error("repo is required when tracker is github");
       const [owner, repo] = config.repo.split("/");
       if (owner === void 0 || repo === void 0) {
@@ -5748,13 +6224,18 @@ var DefaultFlightRules = class {
       return new GitHubTaskTracker({ token: env.githubToken, owner, repo });
     }
     if (env.jiraToken === void 0) {
-      throw new Error("JIRA_TOKEN (or JIRA_API_TOKEN / JIRA_API_KEY) environment variable is required");
+      throw new Error(
+        "JIRA_TOKEN (or JIRA_API_TOKEN / JIRA_API_KEY) environment variable is required"
+      );
     }
     const email = env.jiraEmail ?? config.jiraEmail;
-    if (email === void 0) throw new Error("JIRA_EMAIL environment variable or jiraEmail config is required");
+    if (email === void 0)
+      throw new Error("JIRA_EMAIL environment variable or jiraEmail config is required");
     const host = env.jiraHost ?? config.jiraHost;
-    if (host === void 0) throw new Error("JIRA_HOST environment variable or jiraHost config is required");
-    if (config.jiraProject === void 0) throw new Error("jiraProject is required when tracker is jira");
+    if (host === void 0)
+      throw new Error("JIRA_HOST environment variable or jiraHost config is required");
+    if (config.jiraProject === void 0)
+      throw new Error("jiraProject is required when tracker is jira");
     return new JiraTaskTracker({
       token: env.jiraToken,
       host,
@@ -5782,6 +6263,20 @@ var DefaultFlightRules = class {
   }
   docs() {
     return FileDocResolver.fromInstall({ moduleUrl: import.meta.url, env: this.env });
+  }
+  localOperations() {
+    return new DefaultLocalDiscoveryOperations({
+      cwd: this.cwd,
+      getConfig: () => this.config(),
+      getConfigStore: () => this.configStore(),
+      getCharters: () => new DocCharterCatalog({ docs: this.docs() }),
+      getRepositoryPaths: () => new GitRepositoryPaths({ cwd: this.cwd }),
+      getEvidence: () => this.evidence(),
+      getReadiness: () => this.readiness(),
+      getProbe: () => this.probe(),
+      getTracker: () => this.tracker(),
+      getConfigPath: () => this.configPath()
+    });
   }
   board() {
     return new AriadneBoard({
@@ -5812,8 +6307,8 @@ function createFlightRules(props = {}) {
 }
 
 // src/git/commit-message-builder/commit-message-builder.ts
-import { readFileSync as readFileSync10 } from "node:fs";
-import { dirname as dirname10, join as join11 } from "node:path";
+import { readFileSync as readFileSync11 } from "node:fs";
+import { dirname as dirname11, join as join12 } from "node:path";
 
 // src/shared/attribution-stripper/attribution-stripper.ts
 var trailerText = String.raw`(?:Co-Authored-By:[^\n"']*(?:Claude|anthropic\.com)[^\n"']*|Claude-Session:[^\n"']*|https://claude\.ai/code/session_[A-Za-z0-9_-]+)`;
@@ -5844,25 +6339,25 @@ ${line.trim()}`) === "";
 };
 
 // src/git/commit-message-builder/commit-message.schema.ts
-import { z as z33 } from "zod";
-var CommitMessageInputSchema = z33.object({
+import { z as z36 } from "zod";
+var CommitMessageInputSchema = z36.object({
   type: SemanticTypeSchema,
   // Bare issue numbers make one-character scopes legitimate; 32 clears a 10-character tracker key plus a six-digit number.
-  scope: z33.string().min(1).max(32),
-  description: z33.string().min(2).max(50),
-  body: z33.string().optional(),
-  model: z33.string().max(72).optional(),
-  footers: z33.array(z33.string().regex(/^[a-zA-Z0-9-]+(: |=).*$/)).default([])
+  scope: z36.string().min(1).max(32),
+  description: z36.string().min(2).max(50),
+  body: z36.string().optional(),
+  model: z36.string().max(72).optional(),
+  footers: z36.array(z36.string().regex(/^[a-zA-Z0-9-]+(: |=).*$/)).default([])
 });
-var CommitMessageHeaderSchema = z33.preprocess(
+var CommitMessageHeaderSchema = z36.preprocess(
   (arg) => {
-    return z33.string({ error: "Git Commit headers should be 72 characters or less" }).max(72).parse(arg);
+    return z36.string({ error: "Git Commit headers should be 72 characters or less" }).max(72).parse(arg);
   },
-  z33.templateLiteral([SemanticTypeSchema, "(", z33.string(), "): ", z33.string()])
+  z36.templateLiteral([SemanticTypeSchema, "(", z36.string(), "): ", z36.string()])
 );
-var CommitMessageBuilderPropsSchema = z33.object({
-  binPath: z33.string().min(1),
-  agentEnv: z33.string().optional()
+var CommitMessageBuilderPropsSchema = z36.object({
+  binPath: z36.string().min(1),
+  agentEnv: z36.string().optional()
 });
 
 // src/git/commit-message-builder/commit-message-builder.ts
@@ -5900,8 +6395,8 @@ var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
   }
   static readPluginVersion(binPath) {
     try {
-      const pkgPath = join11(dirname10(binPath), "..", "package.json");
-      const parsed = JSON.parse(readFileSync10(pkgPath, "utf-8"));
+      const pkgPath = join12(dirname11(binPath), "..", "package.json");
+      const parsed = JSON.parse(readFileSync11(pkgPath, "utf-8"));
       if (typeof parsed === "object" && parsed !== null && "version" in parsed && typeof parsed.version === "string") {
         return parsed.version;
       }
@@ -6155,12 +6650,12 @@ var bodyFormatDetector = new PrecedenceBodyFormatDetector();
 
 // src/tasks/evidence/evidence.ts
 import { basename as basename3 } from "node:path/posix";
-import { z as z34 } from "zod";
+import { z as z37 } from "zod";
 var mediaReference = /(!?)\[([^\]]*)\]\(\s*<?([^\s()<>]+)>?(?:\s+"[^"]*")?\s*\)/g;
 var absoluteTarget = /^[a-zA-Z][a-zA-Z0-9+.-]*:|^\/\/|^#/;
 var localPrefix = /^(?:\.\/)+/;
-var fenceRun = /^ {0,3}(`{3,}|~{3,})(.*)$/;
-var AttachmentSpecSchema = z34.string().min(1).transform((spec) => {
+var fenceRun2 = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+var AttachmentSpecSchema = z37.string().min(1).transform((spec) => {
   const hash = spec.lastIndexOf("#");
   const path = hash > 0 ? spec.slice(0, hash) : spec;
   const caption = hash > 0 ? spec.slice(hash + 1).trim() : "";
@@ -6222,25 +6717,25 @@ var TrackerEvidenceService = class {
    * code from being read as a fence.
    */
   openingFence(line) {
-    const match = fenceRun.exec(line);
+    const match = fenceRun2.exec(line);
     if (match === null) return void 0;
-    const run = match[1];
+    const run2 = match[1];
     const rest = match[2];
-    if (run === void 0 || rest === void 0) return void 0;
-    if (run.charAt(0) === "`" && rest.includes("`")) return void 0;
-    return { char: run.charAt(0), length: run.length };
+    if (run2 === void 0 || rest === void 0) return void 0;
+    if (run2.charAt(0) === "`" && rest.includes("`")) return void 0;
+    return { char: run2.charAt(0), length: run2.length };
   }
   /**
    * A line closes an open fence only when it is a run of the SAME character, at
    * least as long as the opening run, with nothing but whitespace after it.
    */
   closesFence(line, fence) {
-    const match = fenceRun.exec(line);
+    const match = fenceRun2.exec(line);
     if (match === null) return false;
-    const run = match[1];
+    const run2 = match[1];
     const rest = match[2];
-    if (run === void 0 || rest === void 0) return false;
-    return run.charAt(0) === fence.char && run.length >= fence.length && rest.trim().length === 0;
+    if (run2 === void 0 || rest === void 0) return false;
+    return run2.charAt(0) === fence.char && run2.length >= fence.length && rest.trim().length === 0;
   }
   rewriteLine(line, byName) {
     let result = "";
@@ -6281,64 +6776,6 @@ var TrackerEvidenceService = class {
 // src/shared/host-settings/host-settings-source.ts
 var settingsScopes = ["user", "project", "local"];
 
-// src/bundled-docs/charter-catalog/charter-catalog.ts
-import { matchesGlob } from "node:path";
-import { parse as parseYaml3 } from "yaml";
-import { z as z35 } from "zod";
-var coreCharterId = "coding-charter";
-var languageCharterPrefix = `${coreCharterId}-`;
-var LanguageFrontmatterSchema = z35.strictObject({
-  language: z35.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
-  "applies-to": z35.array(z35.string().min(1)).min(1)
-}).transform(({ language, "applies-to": appliesTo }) => ({ language, appliesTo }));
-var FrontmatterSchema = z35.string().transform((contents, ctx) => {
-  const block = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/.exec(contents)?.[1];
-  if (block === void 0) {
-    ctx.addIssue({ code: "custom", message: "missing YAML frontmatter" });
-    return z35.NEVER;
-  }
-  return parseYaml3(block);
-}).pipe(LanguageFrontmatterSchema);
-var DocCharterCatalog = class {
-  docs;
-  constructor(props) {
-    this.docs = props.docs;
-  }
-  all() {
-    const core = this.docs.resolve(coreCharterId);
-    const languages = this.docs.list().filter((id) => id.startsWith(languageCharterPrefix)).map((id) => this.languageCharter(this.docs.resolve(id)));
-    return [
-      { id: core.id, language: null, appliesTo: [], tierA: this.tierA(core.contents), path: core.path, contents: core.contents },
-      ...languages
-    ];
-  }
-  select(paths) {
-    const normalized = paths.map((path) => path.trim().replace(/^\.\//, "")).filter((path) => path.length > 0);
-    return this.all().filter(
-      (charter) => charter.language === null || normalized.some((path) => charter.appliesTo.some((glob) => matchesGlob(path, glob)))
-    );
-  }
-  languageCharter(doc) {
-    const parsed = FrontmatterSchema.safeParse(doc.contents);
-    if (!parsed.success) {
-      throw new CharterFormatError(`Charter "${doc.id}" has invalid frontmatter: ${z35.prettifyError(parsed.error)}`);
-    }
-    const expectedId = `${languageCharterPrefix}${parsed.data.language}`;
-    if (doc.id !== expectedId) {
-      throw new CharterFormatError(`Charter "${doc.id}" declares language "${parsed.data.language}"; its file must be ${expectedId}.md`);
-    }
-    return { id: doc.id, ...parsed.data, tierA: this.tierA(doc.contents), path: doc.path, contents: doc.contents };
-  }
-  tierA(contents) {
-    const tiers = contents.split(/^## Review tiers\r?$/m)[1]?.split(/^## /m)[0] ?? "";
-    const table = tiers.split(/^\*\*Tier B/m)[0] ?? "";
-    return [...new Set([...table.matchAll(/^\|\s*([A-Z]+-\d+)\b/gm)].flatMap((match) => match[1] ?? []))];
-  }
-};
-var CharterFormatError = class extends Error {
-  name = "CharterFormatError";
-};
-
 // src/agents/agent-frontmatter/agent-frontmatter.ts
 import { parse as parseYaml4 } from "yaml";
 var MissingFrontmatterError = class extends Error {
@@ -6360,25 +6797,25 @@ var YamlAgentFrontmatterParser = class {
 var agentFrontmatterParser = new YamlAgentFrontmatterParser();
 
 // src/agents/agent-registry/agent-registry.ts
-import { readFileSync as readFileSync11, readdirSync as readdirSync4 } from "node:fs";
-import { basename as basename4, join as join12 } from "node:path";
-import { z as z36 } from "zod";
+import { readFileSync as readFileSync12, readdirSync as readdirSync5 } from "node:fs";
+import { basename as basename4, join as join13 } from "node:path";
+import { z as z38 } from "zod";
 var AgentNameSchema = AgentFrontmatterSchema.shape.name;
-var AgentVariantSchema = z36.strictObject({
+var AgentVariantSchema = z38.strictObject({
   name: AgentNameSchema,
   extends: AgentNameSchema,
   description: AgentFrontmatterSchema.shape.description,
   model: ModelTierSchema,
-  modelReason: z36.string().trim().min(1).optional()
+  modelReason: z38.string().trim().min(1).optional()
 });
-var AgentVariantsSchema = z36.array(AgentVariantSchema);
+var AgentVariantsSchema = z38.array(AgentVariantSchema);
 var InvalidAgentDefinitionError = class extends Error {
   name = "InvalidAgentDefinitionError";
 };
 var FileAgentRegistry = class {
   load(directory) {
-    const agents = readdirSync4(directory, { withFileTypes: true }).filter((entry) => entry.isFile() && entry.name.endsWith(".md")).sort((a, b) => a.name.localeCompare(b.name)).map((entry) => {
-      const markdown = readFileSync11(join12(directory, entry.name), "utf8");
+    const agents = readdirSync5(directory, { withFileTypes: true }).filter((entry) => entry.isFile() && entry.name.endsWith(".md")).sort((a, b) => a.name.localeCompare(b.name)).map((entry) => {
+      const markdown = readFileSync12(join13(directory, entry.name), "utf8");
       const frontmatter = AgentRegistrationSchema.parse(agentFrontmatterParser.parse(markdown));
       const body = markdown.replace(/^---\r?\n[\s\S]*?^---(?:\r?\n|$)/m, "");
       if (frontmatter.name !== basename4(entry.name, ".md") || body.trim() === "") {
@@ -6388,7 +6825,7 @@ var FileAgentRegistry = class {
     });
     const canonical = new Map(agents.map((agent) => [agent.frontmatter.name, agent]));
     const names = new Set(canonical.keys());
-    const variants = AgentVariantsSchema.parse(JSON.parse(readFileSync11(join12(directory, "variants.json"), "utf8")));
+    const variants = AgentVariantsSchema.parse(JSON.parse(readFileSync12(join13(directory, "variants.json"), "utf8")));
     for (const variant of variants) {
       const base = canonical.get(variant.extends);
       if (base === void 0 || names.has(variant.name)) {
@@ -6411,7 +6848,7 @@ var FileAgentRegistry = class {
 
 // src/agents/agent-emitter/claude-agent-emitter.ts
 import { stringify as stringifyYaml3 } from "yaml";
-import { z as z37 } from "zod";
+import { z as z39 } from "zod";
 
 // src/agents/agent-emitter/agent-emitter.ts
 var UnsupportedAgentSettingError = class extends Error {
@@ -6419,7 +6856,7 @@ var UnsupportedAgentSettingError = class extends Error {
 };
 
 // src/agents/agent-emitter/claude-agent-emitter.ts
-var ClaudeAgentEmitterPropsSchema = z37.strictObject({ models: ModelBindingsSchema });
+var ClaudeAgentEmitterPropsSchema = z39.strictObject({ models: ModelBindingsSchema });
 var MarkdownClaudeAgentEmitter = class {
   models;
   constructor(props) {
@@ -6452,13 +6889,13 @@ ${body}`;
 };
 
 // src/agents/agent-emitter/codex-agent-emitter.ts
-import { z as z38 } from "zod";
-var ReasoningBindingsSchema = z38.strictObject({
-  standard: z38.enum(reasoningLevels),
-  escalated: z38.enum(reasoningLevels),
-  expert: z38.enum(reasoningLevels)
+import { z as z40 } from "zod";
+var ReasoningBindingsSchema = z40.strictObject({
+  standard: z40.enum(reasoningLevels),
+  escalated: z40.enum(reasoningLevels),
+  expert: z40.enum(reasoningLevels)
 });
-var CodexAgentEmitterPropsSchema = z38.strictObject({
+var CodexAgentEmitterPropsSchema = z40.strictObject({
   models: ModelBindingsSchema,
   reasoning: ReasoningBindingsSchema
 });
@@ -6501,27 +6938,27 @@ var TomlCodexAgentEmitter = class {
 import {
   chmodSync as chmodSync2,
   copyFileSync,
-  existsSync as existsSync10,
+  existsSync as existsSync11,
   lstatSync as lstatSync2,
   mkdirSync as mkdirSync7,
-  readFileSync as readFileSync12,
-  readdirSync as readdirSync5,
+  readFileSync as readFileSync13,
+  readdirSync as readdirSync6,
   realpathSync as realpathSync3,
   rmSync as rmSync3,
   writeFileSync as writeFileSync7
 } from "node:fs";
-import { join as join13, resolve as resolve5 } from "node:path";
+import { join as join14, resolve as resolve7 } from "node:path";
 import { createHash as createHash2 } from "node:crypto";
-import { z as z39 } from "zod";
-var NativePluginCompilerPropsSchema = z39.strictObject({ sourceDir: z39.string().min(1) });
-var PluginHostSchema = z39.enum(["claude", "codex"]);
-var PackageVersionSchema = z39.object({ version: z39.string().min(1) });
-var PluginIdentitySchema = z39.strictObject({
-  name: z39.string().regex(/^[a-z][a-z0-9-]*$/),
-  description: z39.string().min(1),
-  repository: z39.url(),
-  author: z39.strictObject({ name: z39.string().min(1) }),
-  license: z39.string().min(1)
+import { z as z41 } from "zod";
+var NativePluginCompilerPropsSchema = z41.strictObject({ sourceDir: z41.string().min(1) });
+var PluginHostSchema = z41.enum(["claude", "codex"]);
+var PackageVersionSchema = z41.object({ version: z41.string().min(1) });
+var PluginIdentitySchema = z41.strictObject({
+  name: z41.string().regex(/^[a-z][a-z0-9-]*$/),
+  description: z41.string().min(1),
+  repository: z41.url(),
+  author: z41.strictObject({ name: z41.string().min(1) }),
+  license: z41.string().min(1)
 });
 var InvalidPluginSourceError = class extends Error {
   name = "InvalidPluginSourceError";
@@ -6529,7 +6966,7 @@ var InvalidPluginSourceError = class extends Error {
 var NativePluginCompiler = class {
   sourceDir;
   constructor(props) {
-    this.sourceDir = realpathSync3(resolve5(NativePluginCompilerPropsSchema.parse(props).sourceDir));
+    this.sourceDir = realpathSync3(resolve7(NativePluginCompilerPropsSchema.parse(props).sourceDir));
   }
   compile(host = "claude") {
     const target = PluginHostSchema.parse(host);
@@ -6542,22 +6979,22 @@ var NativePluginCompiler = class {
       "hooks",
       "bin"
     ]) {
-      this.validateSource(join13(this.sourceDir, resource));
+      this.validateSource(join14(this.sourceDir, resource));
     }
     const identity = PluginIdentitySchema.parse(
-      JSON.parse(readFileSync12(join13(this.sourceDir, "adapters/plugin.json"), "utf8"))
+      JSON.parse(readFileSync13(join14(this.sourceDir, "adapters/plugin.json"), "utf8"))
     );
     const { version } = PackageVersionSchema.parse(
-      JSON.parse(readFileSync12(join13(this.sourceDir, "package.json"), "utf8"))
+      JSON.parse(readFileSync13(join14(this.sourceDir, "package.json"), "utf8"))
     );
-    const definitions = new FileAgentRegistry().load(join13(this.sourceDir, "agents"));
+    const definitions = new FileAgentRegistry().load(join14(this.sourceDir, "agents"));
     const models = JSON.parse(
-      readFileSync12(join13(this.sourceDir, "adapters", target, "model-tiers.json"), "utf8")
+      readFileSync13(join14(this.sourceDir, "adapters", target, "model-tiers.json"), "utf8")
     );
     const codexEmitter = target === "codex" ? new TomlCodexAgentEmitter({
       models,
       reasoning: JSON.parse(
-        readFileSync12(join13(this.sourceDir, "adapters/codex/reasoning-tiers.json"), "utf8")
+        readFileSync13(join14(this.sourceDir, "adapters/codex/reasoning-tiers.json"), "utf8")
       )
     }) : void 0;
     const emitter = codexEmitter ?? new MarkdownClaudeAgentEmitter({ models });
@@ -6572,32 +7009,32 @@ var NativePluginCompiler = class {
         "Claude commit and Ariadne hooks are omitted; this target emits no Codex hooks."
       );
     for (const executable of ["flight-rules", "flight-rules.mjs"]) {
-      if (!existsSync10(join13(this.sourceDir, "bin", executable))) {
+      if (!existsSync11(join14(this.sourceDir, "bin", executable))) {
         throw new InvalidPluginSourceError(
           `Build the CLI before native assembly: missing bin/${executable}`
         );
       }
     }
-    const directory = join13(this.sourceDir, "dist", target);
-    if (existsSync10(join13(this.sourceDir, "dist")) && lstatSync2(join13(this.sourceDir, "dist")).isSymbolicLink()) {
+    const directory = join14(this.sourceDir, "dist", target);
+    if (existsSync11(join14(this.sourceDir, "dist")) && lstatSync2(join14(this.sourceDir, "dist")).isSymbolicLink()) {
       throw new InvalidPluginSourceError("Native output cannot use a symlinked dist directory");
     }
     rmSync3(directory, { recursive: true, force: true });
     mkdirSync7(directory, { recursive: true });
     const resources = target === "claude" ? ["skills", "docs", "hooks", "bin"] : ["skills", "docs", "bin"];
     for (const resource of resources)
-      this.copyDirectory(join13(this.sourceDir, resource), join13(directory, resource));
+      this.copyDirectory(join14(this.sourceDir, resource), join14(directory, resource));
     this.copyDirectory(
-      join13(this.sourceDir, "agents"),
-      join13(directory, "bin", "resources", "agents")
+      join14(this.sourceDir, "agents"),
+      join14(directory, "bin", "resources", "agents")
     );
-    const agentDirectory = target === "claude" ? join13(directory, "agents") : join13(directory, ".codex", "agents");
+    const agentDirectory = target === "claude" ? join14(directory, "agents") : join14(directory, ".codex", "agents");
     mkdirSync7(agentDirectory, { recursive: true });
     const extension = target === "claude" ? "md" : "toml";
     for (const agent of agents)
-      writeFileSync7(join13(agentDirectory, `${agent.name}.${extension}`), agent.contents);
+      writeFileSync7(join14(agentDirectory, `${agent.name}.${extension}`), agent.contents);
     writeFileSync7(
-      join13(directory, "flight-rules-install.json"),
+      join14(directory, "flight-rules-install.json"),
       JSON.stringify(
         {
           host: target,
@@ -6611,19 +7048,19 @@ var NativePluginCompiler = class {
         2
       ) + "\n"
     );
-    mkdirSync7(join13(directory, "adapters", target), { recursive: true });
+    mkdirSync7(join14(directory, "adapters", target), { recursive: true });
     copyFileSync(
-      join13(this.sourceDir, "adapters", target, "model-tiers.json"),
-      join13(directory, "adapters", target, "model-tiers.json")
+      join14(this.sourceDir, "adapters", target, "model-tiers.json"),
+      join14(directory, "adapters", target, "model-tiers.json")
     );
     if (target === "codex")
       copyFileSync(
-        join13(this.sourceDir, "adapters/codex/reasoning-tiers.json"),
-        join13(directory, "adapters/codex/reasoning-tiers.json")
+        join14(this.sourceDir, "adapters/codex/reasoning-tiers.json"),
+        join14(directory, "adapters/codex/reasoning-tiers.json")
       );
     for (const executable of ["flight-rules", "flight-rules.mjs"])
-      chmodSync2(join13(directory, "bin", executable), 493);
-    const manifestDirectory = join13(
+      chmodSync2(join14(directory, "bin", executable), 493);
+    const manifestDirectory = join14(
       directory,
       target === "claude" ? ".claude-plugin" : ".codex-plugin"
     );
@@ -6634,10 +7071,10 @@ var NativePluginCompiler = class {
       skills: "./skills/",
       agents: agents.map((agent) => `./agents/${agent.name}.md`)
     } : { ...identity, version, skills: "./skills/" };
-    writeFileSync7(join13(manifestDirectory, "plugin.json"), JSON.stringify(manifest, null, 2) + "\n");
+    writeFileSync7(join14(manifestDirectory, "plugin.json"), JSON.stringify(manifest, null, 2) + "\n");
     if (target === "codex") {
       writeFileSync7(
-        join13(directory, "plugin.json"),
+        join14(directory, "plugin.json"),
         JSON.stringify(
           {
             $schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
@@ -6648,9 +7085,9 @@ var NativePluginCompiler = class {
           2
         ) + "\n"
       );
-      writeFileSync7(join13(directory, ".codex", "config.toml"), "[agents]\nenabled = true\n");
+      writeFileSync7(join14(directory, ".codex", "config.toml"), "[agents]\nenabled = true\n");
       writeFileSync7(
-        join13(directory, "diagnostics.json"),
+        join14(directory, "diagnostics.json"),
         JSON.stringify(diagnostics, null, 2) + "\n"
       );
     }
@@ -6664,14 +7101,14 @@ var NativePluginCompiler = class {
       );
     }
     if (stat.isDirectory()) {
-      for (const entry of readdirSync5(path)) this.validateSource(join13(path, entry));
+      for (const entry of readdirSync6(path)) this.validateSource(join14(path, entry));
     }
   }
   copyDirectory(source, destination) {
     mkdirSync7(destination, { recursive: true });
-    for (const entry of readdirSync5(source, { withFileTypes: true })) {
-      const from = join13(source, entry.name);
-      const to = join13(destination, entry.name);
+    for (const entry of readdirSync6(source, { withFileTypes: true })) {
+      const from = join14(source, entry.name);
+      const to = join14(destination, entry.name);
       if (entry.isDirectory()) this.copyDirectory(from, to);
       else copyFileSync(from, to);
     }
@@ -6722,46 +7159,46 @@ var ValidatedReportHandoff = class {
 };
 
 // src/orchestration/implementation-loop.schema.ts
-import { z as z40 } from "zod";
-var ImplementationReportSchema = z40.strictObject({
+import { z as z42 } from "zod";
+var ImplementationReportSchema = z42.strictObject({
   summary: OrchestrationTextSchema,
-  filesChanged: z40.array(
-    z40.strictObject({ path: OrchestrationTextSchema, why: OrchestrationTextSchema })
+  filesChanged: z42.array(
+    z42.strictObject({ path: OrchestrationTextSchema, why: OrchestrationTextSchema })
   ),
-  testsRun: z40.array(
-    z40.strictObject({ command: OrchestrationTextSchema, result: OrchestrationTextSchema })
+  testsRun: z42.array(
+    z42.strictObject({ command: OrchestrationTextSchema, result: OrchestrationTextSchema })
   ),
   approach: OrchestrationTextSchema,
-  openQuestions: z40.array(OrchestrationTextSchema).optional()
+  openQuestions: z42.array(OrchestrationTextSchema).optional()
 });
-var CriterionResultSchema = z40.strictObject({
+var CriterionResultSchema = z42.strictObject({
   criterion: OrchestrationTextSchema,
-  verdict: z40.enum(["PASS", "FAIL", "UNVERIFIABLE"]),
+  verdict: z42.enum(["PASS", "FAIL", "UNVERIFIABLE"]),
   evidence: OrchestrationTextSchema
 });
-var VerificationReportSchema = z40.strictObject({
+var VerificationReportSchema = z42.strictObject({
   summary: OrchestrationTextSchema,
-  criteria: z40.array(CriterionResultSchema).min(1),
-  charterConcerns: z40.array(OrchestrationTextSchema).optional(),
-  openQuestions: z40.array(OrchestrationTextSchema).optional(),
-  verified: z40.boolean()
+  criteria: z42.array(CriterionResultSchema).min(1),
+  charterConcerns: z42.array(OrchestrationTextSchema).optional(),
+  openQuestions: z42.array(OrchestrationTextSchema).optional(),
+  verified: z42.boolean()
 }).refine(
   (report) => report.verified === report.criteria.every((criterion) => criterion.verdict === "PASS"),
   "verified must agree with every itemized verdict"
 );
-var HandoffRecordSchema = z40.strictObject({
+var HandoffRecordSchema = z42.strictObject({
   request: DispatchRequestSchema,
-  outcome: z40.unknown()
+  outcome: z42.unknown()
 });
-var ImplementationRunSchema = z40.strictObject({
+var ImplementationRunSchema = z42.strictObject({
   context: RunContextSchema,
-  criteria: z40.array(OrchestrationTextSchema).min(1).refine((criteria) => new Set(criteria).size === criteria.length, "criteria must be distinct"),
-  implementationInput: z40.record(z40.string(), z40.json()).refine(
+  criteria: z42.array(OrchestrationTextSchema).min(1).refine((criteria) => new Set(criteria).size === criteria.length, "criteria must be distinct"),
+  implementationInput: z42.record(z42.string(), z42.json()).refine(
     (input) => !Object.hasOwn(input, "verifierFailures"),
     "verifierFailures is reserved for validated retry evidence"
   ),
-  history: z40.array(
-    z40.strictObject({ implementation: HandoffRecordSchema, verification: HandoffRecordSchema })
+  history: z42.array(
+    z42.strictObject({ implementation: HandoffRecordSchema, verification: HandoffRecordSchema })
   ).max(3)
 });
 
@@ -6769,8 +7206,8 @@ var ImplementationRunSchema = z40.strictObject({
 import { isDeepStrictEqual as isDeepStrictEqual3 } from "node:util";
 var VerifiedImplementationLoop = class {
   reports = new ValidatedReportHandoff();
-  next(run) {
-    const parsed = ImplementationRunSchema.safeParse(run);
+  next(run2) {
+    const parsed = ImplementationRunSchema.safeParse(run2);
     if (!parsed.success) {
       return {
         status: "stopped",
@@ -6856,8 +7293,8 @@ var VerifiedImplementationLoop = class {
       filesChanged: [...filesChanged]
     };
   }
-  verify(run, implementation) {
-    const decision = this.next(run);
+  verify(run2, implementation) {
+    const decision = this.next(run2);
     if (decision.status === "stopped") return decision;
     if (decision.status === "verified") {
       return {
@@ -6891,27 +7328,27 @@ var VerifiedImplementationLoop = class {
     ];
     return {
       status: "verify",
-      request: this.verificationRequest(run, decision.request.context.attempt, filesChanged)
+      request: this.verificationRequest(run2, decision.request.context.attempt, filesChanged)
     };
   }
-  implementationRequest(run, attempt, failures) {
+  implementationRequest(run2, attempt, failures) {
     return {
-      id: `${run.context.runId}:implementation:${attempt}`,
+      id: `${run2.context.runId}:implementation:${attempt}`,
       agent: attempt === 3 ? "code-implementation-escalated" : "code-implementation",
-      context: { ...run.context, attempt },
+      context: { ...run2.context, attempt },
       input: {
-        ...run.implementationInput,
-        criteria: [...run.criteria],
+        ...run2.implementationInput,
+        criteria: [...run2.criteria],
         ...failures.length ? { verifierFailures: failures } : {}
       }
     };
   }
-  verificationRequest(run, attempt, filesChanged) {
+  verificationRequest(run2, attempt, filesChanged) {
     return {
-      id: `${run.context.runId}:verification:${attempt}`,
+      id: `${run2.context.runId}:verification:${attempt}`,
       agent: "code-verifier",
-      context: { ...run.context, attempt },
-      input: { criteria: [...run.criteria], filesChanged: filesChanged.map((path) => ({ path })) }
+      context: { ...run2.context, attempt },
+      input: { criteria: [...run2.criteria], filesChanged: filesChanged.map((path) => ({ path })) }
     };
   }
   readReport(expected, record, schema) {
@@ -6944,16 +7381,16 @@ var VerifiedImplementationLoop = class {
 };
 
 // src/orchestration/dispatch-queue.ts
-import { z as z41 } from "zod";
-var DispatchQueuePropsSchema = z41.strictObject({
-  agents: z41.array(AgentDefinitionSchema).min(1),
-  requests: z41.array(DispatchRequestSchema).refine(
+import { z as z43 } from "zod";
+var DispatchQueuePropsSchema = z43.strictObject({
+  agents: z43.array(AgentDefinitionSchema).min(1),
+  requests: z43.array(DispatchRequestSchema).refine(
     (requests) => new Set(requests.map((request) => request.id)).size === requests.length,
     "dispatch IDs must be unique"
   ),
-  maxConcurrent: z41.int().positive()
+  maxConcurrent: z43.int().positive()
 });
-var ObservedDispatchIdsSchema = z41.array(z41.string().min(1)).refine((ids) => new Set(ids).size === ids.length, "observed dispatch IDs must be unique");
+var ObservedDispatchIdsSchema = z43.array(z43.string().min(1)).refine((ids) => new Set(ids).size === ids.length, "observed dispatch IDs must be unique");
 var InvalidDispatchQueueStateError = class extends Error {
   name = "InvalidDispatchQueueStateError";
 };

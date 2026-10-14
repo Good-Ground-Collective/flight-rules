@@ -747,22 +747,985 @@ var DocOperation = class {
   }
 };
 
-// src/operations/cli-coverage.ts
+// src/operations/local-discovery-operations.ts
+import { readdirSync as readdirSync3 } from "node:fs";
+import { resolve as resolve4 } from "node:path";
+import { z as z15 } from "zod";
+
+// src/shared/config.ts
+import { existsSync as existsSync2, readFileSync as readFileSync3, statSync as statSync2 } from "node:fs";
+import { dirname as dirname2, isAbsolute as isAbsolute3, join as join3, resolve as resolve2 } from "node:path";
+import { z as z13 } from "zod";
+
+// src/tasks/jira-task-tracker/jira-host.ts
 import { z as z11 } from "zod";
-var RouteDispositionSchema = z11.discriminatedUnion("status", [
-  z11.object({
-    status: z11.literal("supported"),
-    route: CliRouteSchema,
-    operationId: OperationIdSchema
-  }),
-  z11.object({
-    status: z11.literal("pending-migration"),
-    route: CliRouteSchema,
-    operationId: OperationIdSchema
-  }),
-  z11.object({ status: z11.literal("excluded"), route: CliRouteSchema, reason: z11.string().min(1) })
+var JiraHostSchema = z11.string().transform((host) => host.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, ""));
+
+// src/shared/ariadne/ariadne.schema.ts
+import { z as z12 } from "zod";
+var loopbackHosts = /* @__PURE__ */ new Set(["localhost", "127.0.0.1"]);
+var AriadneUrlSchema = z12.url().refine((value) => {
+  if (!URL.canParse(value)) return false;
+  const url = new URL(value);
+  return url.protocol === "https:" || url.protocol === "http:" && loopbackHosts.has(url.hostname);
+}, "must be https (http only for localhost or 127.0.0.1)");
+var agentStates = ["nominal", "caution", "abort", "hold"];
+var agentItemKinds = ["question", "blocker", "testable", "wave-gate"];
+var agentActivityLevels = ["info", "success", "caution", "abort"];
+var agentLimits = {
+  step: 60,
+  heartbeatDetail: 500,
+  title: 200,
+  itemDetail: 2e3,
+  option: 60,
+  options: 6,
+  text: 500,
+  branch: 255
+};
+var AgentTextNormalizer = class {
+  /** Whitespace runs collapse to a space and control characters go. */
+  oneLine(value, max) {
+    return this.cut(value.replace(/[\x00-\x08\x0e-\x1f\x7f]/g, "").replace(/\s+/g, " ").trim(), max);
+  }
+  /** Line feeds stay; tabs become spaces and other control characters go. */
+  multiLine(value, max) {
+    const normalized = value.replace(/\r\n?/g, "\n").replace(/\t/g, " ").replace(/[\x00-\x09\x0b-\x1f\x7f]/g, "").trim();
+    return this.cut(normalized, max);
+  }
+  /** Overlong text ends in an ellipsis, never in half a surrogate pair. */
+  cut(value, max) {
+    if (value.length <= max) return value;
+    const head = value.slice(0, max - 1).replace(/[\uD800-\uDBFF]$/, "");
+    return `${head.trimEnd()}\u2026`;
+  }
+};
+var normalizer = new AgentTextNormalizer();
+var oneLineSchema = (max) => z12.string().transform((value) => normalizer.oneLine(value, max)).pipe(z12.string().min(1, "must not be blank"));
+var multiLineSchema = (max) => z12.string().transform((value) => normalizer.multiLine(value, max)).pipe(z12.string().min(1, "must not be blank"));
+var optionalSchema = (schema) => z12.preprocess((value) => value === "" || value === null ? void 0 : value, schema.optional());
+var AgentSessionIdSchema = z12.string().regex(/^[A-Za-z0-9_-]{1,80}$/, "must be 1\u201380 letters, digits, underscores or hyphens");
+var AgentRecordIdSchema = AgentSessionIdSchema;
+var TicketKeySchema = z12.string().transform((value) => value.trim().toUpperCase()).pipe(z12.string().regex(/^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,8}$/, "must be a Jira issue key: project key, hyphen, number"));
+var RepoSchema = z12.string().regex(/^(?:[A-Za-z0-9][A-Za-z0-9-]{0,38}\/)?[A-Za-z0-9_.-]{1,100}$/, "must be owner/name or name").refine((value) => !value.includes(".."), "must not contain ..");
+var BranchSchema = z12.string().regex(/^[A-Za-z0-9_+@][A-Za-z0-9._/+@-]{0,254}$/, "must be a branch name as git prints it").refine((value) => !value.includes(".."), "must not contain ..");
+var SkillSchema = z12.string().regex(/^[A-Za-z0-9:._-]{1,80}$/, "must be up to 80 of A-Z a-z 0-9 : . _ -");
+var HeartbeatInputSchema = z12.strictObject({
+  session: AgentSessionIdSchema,
+  step: oneLineSchema(agentLimits.step),
+  state: z12.enum(agentStates),
+  ticket: optionalSchema(TicketKeySchema),
+  repo: optionalSchema(RepoSchema),
+  branch: optionalSchema(BranchSchema),
+  skill: optionalSchema(SkillSchema),
+  detail: optionalSchema(oneLineSchema(agentLimits.heartbeatDetail))
+});
+var ItemInputSchema = z12.strictObject({
+  session: AgentSessionIdSchema,
+  kind: z12.enum(agentItemKinds),
+  title: oneLineSchema(agentLimits.title),
+  ticket: optionalSchema(TicketKeySchema),
+  detail: optionalSchema(multiLineSchema(agentLimits.itemDetail)),
+  options: z12.array(oneLineSchema(agentLimits.option)).max(agentLimits.options, `up to ${agentLimits.options} options`).refine((labels) => new Set(labels).size === labels.length, "options must be distinct").optional(),
+  id: optionalSchema(AgentRecordIdSchema)
+});
+var ActivityInputSchema = z12.strictObject({
+  session: AgentSessionIdSchema,
+  text: oneLineSchema(agentLimits.text),
+  level: optionalSchema(z12.enum(agentActivityLevels)),
+  ticket: optionalSchema(TicketKeySchema),
+  id: optionalSchema(AgentRecordIdSchema)
+});
+var AgentSessionSchema = z12.looseObject({
+  id: z12.string(),
+  ownerId: z12.string(),
+  ticket: z12.string().nullable(),
+  step: z12.string(),
+  state: z12.string(),
+  lastHeartbeat: z12.string(),
+  running: z12.boolean()
+});
+var AgentItemSchema = z12.looseObject({
+  id: z12.string(),
+  session: z12.string(),
+  kind: z12.string(),
+  ticket: z12.string().nullable(),
+  title: z12.string(),
+  detail: z12.string().nullable(),
+  options: z12.array(z12.string()),
+  status: z12.string(),
+  chosenOption: z12.string().nullable(),
+  createdAt: z12.string(),
+  resolvedAt: z12.string().nullable(),
+  resolvedBy: z12.string().nullable()
+});
+var AgentActivitySchema = z12.looseObject({
+  id: z12.string(),
+  at: z12.string(),
+  session: z12.string(),
+  ticket: z12.string().nullable(),
+  level: z12.string(),
+  text: z12.string()
+});
+var HeartbeatResponseSchema = z12.looseObject({ session: AgentSessionSchema });
+var ItemResponseSchema = z12.looseObject({ item: AgentItemSchema, created: z12.boolean() });
+var ActivityResponseSchema = z12.looseObject({ activity: AgentActivitySchema, created: z12.boolean() });
+var ItemListResponseSchema = z12.looseObject({ items: z12.array(AgentItemSchema) });
+var AgentErrorBodySchema = z12.looseObject({ error: z12.string(), message: z12.string().optional() });
+
+// src/shared/config.ts
+var seedCompetencies = [
+  "define-a-schema",
+  "wire-an-endpoint",
+  "write-a-migration",
+  "pure-transform",
+  "write-a-query",
+  "mapper-adapter",
+  "harden-edge-cases",
+  "business-rule",
+  "external-api-client",
+  "reducer-state",
+  "async-coordination",
+  "auth-check"
+];
+var ConfigSchema = z13.object({
+  tracker: z13.enum(["github", "jira"]),
+  repo: z13.string().optional().describe("GitHub owner/repo; required when tracker is github"),
+  jiraHost: JiraHostSchema.optional().describe(
+    "Atlassian Cloud host, e.g. acme.atlassian.net"
+  ),
+  jiraEmail: z13.string().optional().describe("Atlassian account email for Basic auth"),
+  jiraProject: z13.string().optional().describe("Jira project key holding epics and tickets"),
+  jpdProject: z13.string().optional().describe("Jira Product Discovery project key holding initiatives"),
+  confluenceSpaceKey: z13.string().optional().describe("Confluence space key holding technical design docs"),
+  inProgressStatus: z13.string().optional().describe(
+    "Tracker status meaning work has started; discovered and stored on first run"
+  ),
+  inReviewStatus: z13.string().optional().describe(
+    "Tracker status meaning a PR is open; discovered and stored on first run"
+  ),
+  defaultLabels: z13.array(z13.string()).default([]),
+  rfcStorage: z13.enum(["local", "global"]).default("local"),
+  rfcStoragePath: z13.string().optional(),
+  qaRecipe: z13.string().optional().describe(
+    "Deprecated: path to a legacy QA recipe, read only when no QA.md or AGENTS.md QA section exists; relative paths resolve against the directory holding this config file; defaults to flight-rules.qa.md beside it"
+  ),
+  competencies: z13.array(z13.string()).default([...seedCompetencies]),
+  "ariadne.url": AriadneUrlSchema.optional().describe(
+    "Ariadne API base URL for `flight-rules board`; https only (http for localhost); read only from user or local scope; defaults to the production Ariadne API"
+  ),
+  "ariadne.enabled": z13.boolean().optional().describe(
+    "Set false to stop `flight-rules board` reporting even when an Ariadne token is set; read only from user or local scope; defaults to true"
+  )
+}).superRefine((cfg, ctx) => {
+  if (cfg.tracker === "github" && cfg.repo === void 0) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["repo"],
+      message: "repo is required when tracker is github"
+    });
+  }
+  if (cfg.tracker === "jira") {
+    ["jiraHost", "jiraEmail", "jiraProject"].forEach((field) => {
+      if (cfg[field] === void 0) {
+        ctx.addIssue({
+          code: "custom",
+          path: [field],
+          message: `${field} is required when tracker is jira`
+        });
+      }
+    });
+  }
+});
+function getRfcDir(config, cwd) {
+  if (config.rfcStorage === "global") {
+    if (config.rfcStoragePath === void 0) {
+      throw new Error("rfcStoragePath is required when rfcStorage is global");
+    }
+    return config.rfcStoragePath;
+  }
+  return join3(cwd, "rfcs");
+}
+var NodePathProbe = class {
+  isFile(path) {
+    return existsSync2(path) && statSync2(path, { throwIfNoEntry: false })?.isFile() === true;
+  }
+  isDirectory(path) {
+    return existsSync2(path) && statSync2(path, { throwIfNoEntry: false })?.isDirectory() === true;
+  }
+};
+var nodePathProbe = new NodePathProbe();
+function getQaRecipePath(config, configPath) {
+  const recipe = config.qaRecipe ?? "flight-rules.qa.md";
+  if (isAbsolute3(recipe)) return recipe;
+  return resolve2(dirname2(configPath), recipe);
+}
+
+// src/tasks/qa-instructions/qa-instructions.ts
+import { existsSync as existsSync3, readFileSync as readFileSync4, statSync as statSync3 } from "node:fs";
+import { dirname as dirname3, join as join4, resolve as resolve3 } from "node:path";
+var atxHeading = /^ {0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$/;
+var fenceRun = /^ {0,3}(`{3,}|~{3,})/;
+var legacyHint = 'Legacy QA recipe in use. Move its content into a QA.md at the repo root (or a "QA" section of AGENTS.md); see docs/qa-instructions.md.';
+var nodeFileSystem = {
+  isFile: (path) => existsSync3(path) && statSync3(path).isFile(),
+  exists: (path) => existsSync3(path),
+  readFile: (path) => readFileSync4(path, "utf8")
+};
+var QaInstructionsFinder = class {
+  fs;
+  constructor(props = {}) {
+    this.fs = props.fs ?? nodeFileSystem;
+  }
+  discover(input) {
+    const sources = this.levels(input.from).map((dir) => this.sourceAt(dir)).filter((source) => source !== void 0);
+    if (sources.length > 0) return { found: true, sources };
+    const legacy = this.legacySource(input.legacyRecipePath);
+    if (legacy !== void 0) return { found: true, sources: [legacy] };
+    return { found: false, sources: [] };
+  }
+  /**
+   * Extracts the body of the first heading whose text is exactly "QA" (any
+   * case, any level), up to the next heading of the same or a higher level.
+   * Headings inside fenced code blocks are ignored. Returns undefined when the
+   * section is absent or empty.
+   */
+  extractQaSection(markdown) {
+    const lines = markdown.split("\n");
+    let openFence = null;
+    let sectionLevel = null;
+    const body = [];
+    for (const line of lines) {
+      const fence = fenceRun.exec(line)?.[1];
+      if (fence !== void 0) {
+        if (openFence === null) openFence = fence;
+        else if (fence[0] === openFence[0] && fence.length >= openFence.length) openFence = null;
+        if (sectionLevel !== null) body.push(line);
+        continue;
+      }
+      const heading = openFence === null ? atxHeading.exec(line) : null;
+      if (heading !== null) {
+        const level = heading[1]?.length ?? 0;
+        if (sectionLevel !== null && level <= sectionLevel) break;
+        if (sectionLevel === null && (heading[2] ?? "").trim().toLowerCase() === "qa") {
+          sectionLevel = level;
+          continue;
+        }
+      }
+      if (sectionLevel !== null) body.push(line);
+    }
+    const content = body.join("\n").trim();
+    return content.length > 0 ? content : void 0;
+  }
+  /** The start directory and each parent up to the repository root; only the start when no root is found. */
+  levels(from) {
+    const absolute = resolve3(from);
+    const start = this.fs.isFile(absolute) ? dirname3(absolute) : absolute;
+    const levels = [];
+    let current = start;
+    for (; ; ) {
+      levels.push(current);
+      if (this.fs.exists(join4(current, ".git"))) return levels;
+      const parent = dirname3(current);
+      if (parent === current) return [start];
+      current = parent;
+    }
+  }
+  sourceAt(dir) {
+    const agentsMd = join4(dir, "AGENTS.md");
+    if (this.fs.isFile(agentsMd)) {
+      const section = this.extractQaSection(this.fs.readFile(agentsMd));
+      if (section !== void 0)
+        return { path: agentsMd, kind: "agents-md-section", dir, content: section };
+    }
+    return this.fileSource(join4(dir, "QA.md"), "qa-md", dir) ?? this.fileSource(join4(dir, ".agents", "QA.md"), "agents-dir-qa-md", dir);
+  }
+  fileSource(path, kind, dir) {
+    if (!this.fs.isFile(path)) return void 0;
+    const content = this.fs.readFile(path).trim();
+    return content.length > 0 ? { path, kind, dir, content } : void 0;
+  }
+  legacySource(path) {
+    if (path === void 0) return void 0;
+    const source = this.fileSource(path, "legacy-recipe", dirname3(path));
+    return source === void 0 ? void 0 : { ...source, legacy: true, hint: legacyHint };
+  }
+};
+
+// src/tasks/readiness/readiness.schema.ts
+import { z as z14 } from "zod";
+var WorkflowSchema = z14.enum([
+  "execute-work",
+  "execute-wave",
+  "break-down-work",
+  "reproduce-bug",
+  "verify-ticket"
 ]);
-var CliRouteCoveragePropsSchema = z11.object({ entries: z11.array(RouteDispositionSchema) });
+var WorkflowEvidenceSchema = z14.strictObject({
+  context: CallerContextSchema,
+  callerCapabilities: z14.record(z14.string(), CapabilityEvidenceSchema),
+  workers: z14.array(
+    z14.strictObject({ registration: AgentRegistrationSchema, runtime: RuntimeSnapshotSchema })
+  ).refine(
+    (workers) => new Set(workers.map((worker) => worker.registration.name)).size === workers.length,
+    "duplicate worker evidence"
+  )
+});
+var ReadinessOptionsSchema = z14.strictObject({
+  workflow: WorkflowSchema.optional(),
+  evidence: WorkflowEvidenceSchema.optional()
+}).refine(
+  (value) => value.evidence === void 0 || value.workflow !== void 0,
+  "workflow is required with capability evidence"
+);
+
+// src/operations/local-discovery-operations.ts
+var QaSourceSchema = z15.object({
+  path: z15.string(),
+  kind: z15.enum(["agents-md-section", "qa-md", "agents-dir-qa-md", "legacy-recipe"]),
+  dir: z15.string(),
+  content: z15.string(),
+  legacy: z15.literal(true).optional(),
+  hint: z15.string().optional()
+});
+var QaInstructionsSchema = z15.object({ found: z15.boolean(), sources: z15.array(QaSourceSchema) });
+var ReadinessCheckSchema = z15.object({
+  name: z15.string(),
+  ok: z15.boolean(),
+  detail: z15.string(),
+  required: z15.boolean().optional(),
+  code: z15.string().optional(),
+  remedy: z15.string().optional()
+});
+var ReadinessReportSchema = z15.object({
+  tracker: z15.string().nullable(),
+  repo: z15.string().nullable().optional(),
+  checks: z15.array(ReadinessCheckSchema),
+  ok: z15.boolean(),
+  workflow: WorkflowSchema.optional(),
+  scope: z15.enum(["environment", "workflow"])
+});
+var ConfigInspectionSchema = z15.object({
+  host: z15.string(),
+  valid: z15.boolean(),
+  error: z15.string().optional(),
+  values: z15.record(z15.string(), z15.unknown()),
+  sources: z15.record(
+    z15.string(),
+    z15.object({ scope: z15.enum(["user", "project", "local", "file"]), path: z15.string() })
+  ),
+  layers: z15.array(
+    z15.object({
+      scope: z15.enum(["user", "project", "local", "file"]),
+      path: z15.string(),
+      present: z15.boolean()
+    })
+  )
+});
+var CharterInputSchema = z15.object({
+  paths: z15.array(z15.string()).optional(),
+  diff: z15.string().optional(),
+  repository: z15.boolean().default(false),
+  pathOutput: z15.boolean().default(false)
+}).strict().refine(
+  (input) => Number(input.paths !== void 0 && input.paths.length > 0) + Number(input.diff !== void 0) + Number(input.repository) <= 1,
+  "Choose one charter selection source"
+);
+var QaInstructionsInputSchema = z15.object({ from: z15.string().optional() }).strict();
+var RfcDirectoryOutputSchema = z15.object({ path: z15.string() });
+var RfcNextIdOutputSchema = z15.object({
+  id: z15.string().regex(/^RFC-\d+$/),
+  directory: z15.string()
+});
+var QaRecipeOutputSchema = z15.object({ path: z15.string() });
+var EvidenceDirectoryOutputSchema = z15.object({
+  path: z15.string(),
+  gitignored: z15.boolean().nullable()
+});
+var rfcIdPattern = /^RFC-(\d+)\.md$/;
+var LocalDiscoveryPropsSchema = z15.object({
+  cwd: z15.string().min(1),
+  getConfig: z15.custom((value) => typeof value === "function"),
+  getConfigStore: z15.custom((value) => typeof value === "function"),
+  getCharters: z15.custom((value) => typeof value === "function"),
+  getRepositoryPaths: z15.custom((value) => typeof value === "function"),
+  getEvidence: z15.custom((value) => typeof value === "function"),
+  getReadiness: z15.custom((value) => typeof value === "function"),
+  getProbe: z15.custom((value) => typeof value === "function"),
+  getTracker: z15.custom((value) => typeof value === "function"),
+  getConfigPath: z15.custom((value) => typeof value === "function"),
+  getQaFinder: z15.custom((value) => typeof value === "function").optional()
+});
+var DefaultLocalDiscoveryOperations = class {
+  props;
+  constructor(props) {
+    this.props = LocalDiscoveryPropsSchema.parse(props);
+  }
+  operations() {
+    return [
+      this.descriptor(
+        "charter",
+        "Print the core and applicable language charters.",
+        ["read", "process"],
+        ["charter"],
+        CharterInputSchema,
+        z15.object({
+          charters: z15.array(
+            z15.object({ path: z15.string(), contents: z15.string(), language: z15.string().nullable() })
+          ),
+          unmatched: z15.boolean()
+        }),
+        (input) => this.charter(input)
+      ),
+      this.descriptor(
+        "competencies",
+        "Read the configured worker competencies.",
+        ["read", "process"],
+        ["competencies"],
+        z15.object({}),
+        z15.array(z15.string()),
+        () => this.props.getConfig().competencies
+      ),
+      this.descriptor(
+        "rfc-dir",
+        "Resolve the RFC directory for this checkout.",
+        ["read", "process"],
+        ["rfc", "dir"],
+        z15.object({}),
+        RfcDirectoryOutputSchema,
+        () => ({ path: getRfcDir(this.props.getConfig(), this.props.cwd) })
+      ),
+      this.descriptor(
+        "rfc-next-id",
+        "Find the next RFC number in the configured RFC directory.",
+        ["read", "process"],
+        ["rfc", "next-id"],
+        z15.object({}),
+        RfcNextIdOutputSchema,
+        () => this.nextRfcId()
+      ),
+      this.descriptor(
+        "qa-instructions",
+        "Find QA instructions that apply to a directory.",
+        ["read", "process"],
+        ["qa", "instructions"],
+        QaInstructionsInputSchema,
+        QaInstructionsSchema,
+        (input) => this.qaInstructions(input)
+      ),
+      this.descriptor(
+        "qa-evidence-dir",
+        "Resolve the persistent evidence directory for a ticket.",
+        ["read", "process"],
+        ["qa", "evidence-dir"],
+        z15.object({ ticket: z15.string().min(1) }),
+        EvidenceDirectoryOutputSchema,
+        (input) => this.props.getEvidence().dirFor(input.ticket)
+      ),
+      this.descriptor(
+        "qa-recipe",
+        "Resolve the nearest QA instruction path (deprecated CLI route).",
+        ["read", "process"],
+        ["qa", "recipe"],
+        z15.object({}),
+        QaRecipeOutputSchema,
+        () => this.qaRecipe()
+      ),
+      this.descriptor(
+        "config-path",
+        "Resolve the config file path for this checkout.",
+        ["read", "process"],
+        ["config", "path"],
+        z15.object({}),
+        z15.object({ path: z15.string() }),
+        () => ({ path: this.props.getConfigStore().filePath() })
+      ),
+      this.descriptor(
+        "config-show",
+        "Inspect merged configuration and its sources.",
+        ["read", "process"],
+        ["config", "show"],
+        z15.object({}),
+        ConfigInspectionSchema,
+        () => this.props.getConfigStore().inspect()
+      ),
+      this.descriptor(
+        "check",
+        "Check local configuration, tools, and optional workflow readiness.",
+        ["read", "process", "network"],
+        ["check"],
+        ReadinessOptionsSchema,
+        ReadinessReportSchema,
+        (input) => this.check(input)
+      )
+    ];
+  }
+  configStore() {
+    return this.props.getConfigStore();
+  }
+  descriptor(id, description, effects, path, inputSchema, outputSchema, handler) {
+    return {
+      id,
+      description,
+      effects,
+      cli: { path, aliases: [] },
+      inputSchema,
+      outputSchema,
+      handler
+    };
+  }
+  async charter(input) {
+    let paths = input.paths ?? [];
+    if (input.diff !== void 0)
+      paths = await this.props.getRepositoryPaths().changedSince(input.diff);
+    else if (input.repository || input.paths === void 0)
+      paths = await this.props.getRepositoryPaths().inventory();
+    const selected = this.props.getCharters().select(paths);
+    return {
+      charters: selected.map(({ path, contents, language }) => ({ path, contents, language })),
+      unmatched: selected.every((charter) => charter.language === null)
+    };
+  }
+  nextRfcId() {
+    const directory = getRfcDir(this.props.getConfig(), this.props.cwd);
+    let files;
+    try {
+      files = readdirSync3(directory);
+    } catch {
+      return { id: "RFC-001", directory };
+    }
+    const ids = files.map((file) => file.match(rfcIdPattern)).filter((match) => match !== null).map((match) => Number(match[1] ?? 0));
+    return {
+      id: `RFC-${String(ids.length === 0 ? 1 : Math.max(...ids) + 1).padStart(3, "0")}`,
+      directory
+    };
+  }
+  qaInstructions(input) {
+    const config = this.safeConfig();
+    if (config?.qaRecipe !== void 0 && config.qaRecipe.trim() === "")
+      throw new BlankQaRecipeError(
+        "qaRecipe is set to a blank value \u2014 remove the key and move the recipe into a QA.md (see docs/qa-instructions.md)"
+      );
+    return (this.props.getQaFinder?.() ?? new QaInstructionsFinder()).discover({
+      from: input.from === void 0 ? this.props.cwd : resolve4(this.props.cwd, input.from),
+      ...config === void 0 ? {} : { legacyRecipePath: getQaRecipePath(config, this.props.getConfigPath()) }
+    });
+  }
+  qaRecipe() {
+    const result = this.qaInstructions({});
+    const nearest = result.sources[0];
+    if (nearest === void 0)
+      throw new QaInstructionsNotFoundError(
+        "No QA instructions found \u2014 add a QA.md at the repo root or a QA section in AGENTS.md (see docs/qa-instructions.md)"
+      );
+    return { path: nearest.path };
+  }
+  check(input) {
+    return this.props.getReadiness().inspect({
+      config: this.props.getConfig,
+      tracker: this.props.getTracker,
+      configPath: this.props.getConfigPath,
+      probe: this.props.getProbe(),
+      finder: this.props.getQaFinder?.() ?? new QaInstructionsFinder(),
+      options: input
+    });
+  }
+  safeConfig() {
+    try {
+      return this.props.getConfig();
+    } catch {
+      return void 0;
+    }
+  }
+};
+var QaInstructionsNotFoundError = class extends Error {
+  name = "QaInstructionsNotFoundError";
+};
+var BlankQaRecipeError = class extends Error {
+  name = "BlankQaRecipeError";
+};
+
+// src/operations/local-discovery-cli.ts
+import { readFileSync as readFileSync5 } from "node:fs";
+import { text } from "node:stream/consumers";
+import { Option as Option2 } from "commander";
+import { z as z25 } from "zod";
+
+// src/shared/host-settings/claude-settings-source.ts
+import { z as z16 } from "zod";
+var SettingsSchema = z16.looseObject({
+  pluginConfigs: z16.record(z16.string(), z16.looseObject({ options: z16.record(z16.string(), z16.unknown()).optional() })).optional()
+});
+
+// src/shared/host-settings/neutral-settings-source.ts
+import { homedir } from "node:os";
+import { z as z17 } from "zod";
+var PropsSchema = z17.object({
+  cwd: z17.string().min(1),
+  home: z17.string().min(1).default(homedir),
+  untrackedCwd: z17.string().min(1).optional()
+});
+var SettingsSchema2 = z17.record(z17.string(), z17.unknown());
+
+// src/plugins/native-installation/native-installation.ts
+import { homedir as homedir2 } from "node:os";
+import { z as z18 } from "zod";
+var NativeHostSchema = z18.enum(["claude", "codex"]);
+var AgentInstallScopeSchema = z18.enum(["project", "user"]);
+var InstallationManifestSchema = z18.strictObject({
+  host: NativeHostSchema,
+  agents: z18.array(z18.strictObject({
+    name: z18.string().regex(/^[a-z][a-z0-9-]*$/),
+    sha256: z18.string().regex(/^[a-f0-9]{64}$/),
+    registration: AgentRegistrationSchema
+  })).min(1)
+}).refine((value) => new Set(value.agents.map((agent) => agent.name)).size === value.agents.length, "Duplicate agent names").refine((value) => value.agents.every((agent) => agent.name === agent.registration.name), "Registration name mismatch");
+var PropsSchema2 = z18.object({
+  root: z18.string().min(1),
+  cwd: z18.string().min(1),
+  home: z18.string().min(1).default(homedir2),
+  env: z18.record(z18.string(), z18.string().optional()).default({})
+});
+
+// src/shared/config-store.ts
+var configScopes = ["user", "project", "local", "file"];
+
+// src/tasks/commands/check/command.ts
+import { Command, Option } from "commander";
+
+// src/tasks/readiness/repository-readiness.ts
+import { z as z24 } from "zod";
+
+// src/shared/env.ts
+import { z as z19 } from "zod";
+var EnvSchema = z19.object({
+  githubToken: z19.string().optional(),
+  jiraToken: z19.string().optional(),
+  jiraEmail: z19.string().optional(),
+  jiraHost: JiraHostSchema.optional()
+});
+
+// src/tasks/readiness/probe-diagnostics.ts
+import { z as z20 } from "zod";
+var ProbeDiagnosticsPropsSchema = z20.object({ env: z20.record(z20.string(), z20.string().optional()) });
+var ErrorFactsSchema = z20.object({
+  code: z20.union([z20.string(), z20.number()]).nullable().optional(),
+  status: z20.number().optional(),
+  statusCode: z20.number().optional(),
+  killed: z20.boolean().optional(),
+  name: z20.string().optional(),
+  message: z20.string().optional(),
+  stderr: z20.string().optional(),
+  cause: z20.unknown().optional()
+});
+
+// src/tasks/readiness/workflow-preflight.ts
+import { z as z23 } from "zod";
+
+// src/orchestration/orchestration-policy.ts
+import { z as z22 } from "zod";
+
+// src/agents/agent-emitter/agent-emitter.schema.ts
+import { z as z21 } from "zod";
+var ModelBindingsSchema = z21.strictObject({
+  standard: z21.string().trim().min(1),
+  escalated: z21.string().trim().min(1),
+  expert: z21.string().trim().min(1)
+});
+var AgentDefinitionSchema = z21.strictObject({
+  frontmatter: AgentRegistrationSchema,
+  body: z21.string().refine((body) => body.trim() !== "", "agent prompt must not be empty")
+});
+
+// src/orchestration/orchestration-policy.ts
+var RegistryOrchestrationPolicyPropsSchema = z22.strictObject({
+  agents: z22.array(AgentDefinitionSchema).min(1).refine(
+    (agents) => new Set(agents.map((agent) => agent.frontmatter.name)).size === agents.length,
+    "duplicate agent name"
+  )
+});
+
+// src/tasks/readiness/workflow-preflight.ts
+var WorkflowPreflightPropsSchema = z23.object({
+  cwd: z23.string(),
+  env: z23.record(z23.string(), z23.string().optional()),
+  timeoutMs: z23.int().positive().max(6e4).default(1e4)
+});
+
+// src/tasks/readiness/repository-readiness.ts
+var RepositoryReadinessPropsSchema = z24.object({
+  cwd: z24.string().optional(),
+  env: z24.record(z24.string(), z24.string().optional()).optional(),
+  timeoutMs: z24.int().positive().max(6e4).default(1e4)
+});
+
+// src/tasks/commands/check/command.ts
+var ReadinessFailedError = class extends Error {
+  name = "ReadinessFailedError";
+};
+
+// src/operations/local-discovery-cli.ts
+var RuntimeFailureReportSchema = z25.object({
+  tracker: z25.null(),
+  repo: z25.null(),
+  checks: z25.array(
+    z25.object({
+      name: z25.string(),
+      ok: z25.boolean(),
+      required: z25.boolean(),
+      code: z25.string(),
+      detail: z25.string(),
+      remedy: z25.string()
+    })
+  ),
+  ok: z25.literal(false),
+  scope: z25.literal("workflow")
+});
+var CharterResultSchema = z25.object({
+  charters: z25.array(
+    z25.object({ path: z25.string(), contents: z25.string(), language: z25.string().nullable() })
+  ),
+  unmatched: z25.boolean()
+});
+var ConfigPathResultSchema = z25.object({ path: z25.string() });
+var RfcIdResultSchema = z25.object({ id: z25.string() });
+var CompetenciesResultSchema = z25.array(z25.string());
+var ConfigInspectionResultSchema = z25.object({
+  host: z25.string(),
+  valid: z25.boolean(),
+  values: z25.record(z25.string(), z25.unknown()),
+  sources: z25.record(z25.string(), z25.unknown()),
+  layers: z25.array(z25.unknown()),
+  error: z25.string().optional()
+});
+var ReadinessResultSchema = z25.object({
+  tracker: z25.string().nullable(),
+  repo: z25.string().nullable().optional(),
+  checks: z25.array(z25.unknown()),
+  ok: z25.boolean(),
+  workflow: WorkflowSchema.optional(),
+  scope: z25.enum(["environment", "workflow"])
+});
+var LocalDiscoveryCliPropsSchema = z25.object({
+  operations: z25.custom(
+    (value) => typeof value === "object" && value !== null && "operations" in value && typeof value.operations === "function" && "configStore" in value && typeof value.configStore === "function"
+  ),
+  registry: z25.custom(
+    (value) => typeof value === "object" && value !== null && "invoke" in value
+  ),
+  readStdin: z25.custom((value) => typeof value === "function").optional()
+});
+var CommanderLocalDiscoveryCli = class {
+  operations;
+  registry;
+  readStdin;
+  constructor(props) {
+    const parsed = LocalDiscoveryCliPropsSchema.parse(props);
+    this.operations = parsed.operations;
+    this.registry = parsed.registry;
+    this.readStdin = parsed.readStdin ?? (() => text(process.stdin));
+  }
+  addTo(program) {
+    this.addCharter(program);
+    this.addCompetencies(program);
+    this.addRfc(program);
+    this.addQa(program);
+    this.addConfig(program);
+    this.addCheck(program);
+  }
+  addCharter(program) {
+    program.command("charter").description("print the core coding charter and language charters for selected files").argument("[paths...]").option("--stdin").option("--diff <base>").option("--repo").option("--path").exitOverride().action(
+      async (paths, opts) => {
+        const selectedSources = [
+          paths.length > 0,
+          opts.stdin === true,
+          opts.diff !== void 0,
+          opts.repo === true
+        ];
+        if (selectedSources.filter(Boolean).length > 1)
+          throw new CharterSelectionError("Choose one of: paths, --stdin, --diff <base>, --repo");
+        const selectedPaths = opts.stdin ? (await this.readStdin()).split("\n") : paths;
+        const input = {
+          ...opts.stdin || paths.length > 0 ? { paths: selectedPaths } : {},
+          ...opts.diff === void 0 ? {} : { diff: opts.diff },
+          repository: opts.repo ?? false,
+          pathOutput: opts.path ?? false
+        };
+        const result = await this.invoke("charter", input, CharterResultSchema);
+        if (result.unmatched)
+          process.stderr.write(
+            "No language charter matched these files; printing the core charter only.\n"
+          );
+        const output = opts.path ? result.charters.map((charter) => `${charter.path}
+`).join("") : result.charters.map(
+          (charter) => charter.contents.endsWith("\n") ? charter.contents : `${charter.contents}
+`
+        ).join("\n");
+        process.stdout.write(output);
+      }
+    );
+  }
+  addCompetencies(program) {
+    program.command("competencies").exitOverride().action(async () => {
+      process.stdout.write(
+        `${JSON.stringify(await this.invoke("competencies", {}, CompetenciesResultSchema))}
+`
+      );
+    });
+  }
+  addRfc(program) {
+    const rfc = program.command("rfc");
+    rfc.command("dir").exitOverride().action(async () => {
+      process.stdout.write(
+        `${(await this.invoke("rfc-dir", {}, ConfigPathResultSchema)).path}
+`
+      );
+    });
+    rfc.command("next-id").exitOverride().action(async () => {
+      process.stdout.write(`${(await this.invoke("rfc-next-id", {}, RfcIdResultSchema)).id}
+`);
+    });
+  }
+  addQa(program) {
+    const qa = program.command("qa");
+    qa.command("instructions").description("print the QA instructions that apply to a directory, nearest first, as JSON").option("--from <dir>").exitOverride().action(async (opts) => {
+      process.stdout.write(
+        `${JSON.stringify(await this.invoke("qa-instructions", opts.from === void 0 ? {} : { from: opts.from }, z25.object({ found: z25.boolean(), sources: z25.array(z25.unknown()) })))}
+`
+      );
+    });
+    qa.command("evidence-dir").description(
+      "print where QA evidence for a ticket is written, and whether git ignores it, as JSON"
+    ).argument("<ticket>").exitOverride().action(async (ticket) => {
+      process.stdout.write(
+        `${JSON.stringify(await this.invoke("qa-evidence-dir", { ticket }, z25.object({ path: z25.string(), gitignored: z25.boolean().nullable() })))}
+`
+      );
+    });
+    qa.command("recipe").description(
+      "deprecated: print the path of the nearest QA instructions; use `qa instructions`"
+    ).exitOverride().action(async () => {
+      const result = await this.invoke("qa-recipe", {}, ConfigPathResultSchema);
+      process.stderr.write(
+        "`flight-rules qa recipe` is deprecated; use `flight-rules qa instructions`\n"
+      );
+      process.stdout.write(`${result.path}
+`);
+    });
+  }
+  addConfig(program) {
+    const config = program.command("config");
+    config.command("path").description("print the resolved config file path, whether or not it exists").exitOverride().action(async () => {
+      process.stdout.write(
+        `${(await this.invoke("config-path", {}, ConfigPathResultSchema)).path}
+`
+      );
+    });
+    config.command("show").description(
+      "print the merged config, which file each value came from, and whether it is valid"
+    ).exitOverride().action(async () => {
+      process.stdout.write(
+        `${JSON.stringify(await this.invoke("config-show", {}, ConfigInspectionResultSchema))}
+`
+      );
+    });
+    const scopeHelp = "where to write: user, project, local, or file; config show reports the selected host and exact paths (override with FLIGHT_RULES_HOST=claude|codex)";
+    config.command("set").description("write one config value; array keys take several values").argument("<key>").argument("<values...>").addOption(new Option2("--scope <scope>", scopeHelp).choices(configScopes)).exitOverride().action((key, values, options) => {
+      const store = this.operations.configStore();
+      const scope = options.scope ?? store.defaultScopeFor(key);
+      store.set(key, values, scope);
+      const shadowedBy = store.shadowingScope(key, scope);
+      process.stdout.write(
+        `${JSON.stringify({ key, scope, path: store.pathFor(scope), ...shadowedBy === void 0 ? {} : { warning: `${key} is also set in ${shadowedBy} scope (${store.pathFor(shadowedBy)}), which takes precedence` } })}
+`
+      );
+    });
+    config.command("unset").description("remove one config value from a scope").argument("<key>").addOption(new Option2("--scope <scope>", scopeHelp).choices(configScopes)).exitOverride().action((key, options) => {
+      const store = this.operations.configStore();
+      const scope = options.scope ?? store.defaultScopeFor(key);
+      store.unset(key, scope);
+      process.stdout.write(`${JSON.stringify({ key, scope, path: store.pathFor(scope) })}
+`);
+    });
+  }
+  addCheck(program) {
+    program.command("check").addOption(
+      new Option2(
+        "--workflow <name>",
+        "check readiness for this workflow before its first mutation"
+      ).choices(WorkflowSchema.options)
+    ).option(
+      "--runtime-file <path>",
+      "JSON containing current caller/worker capability observations; requires --workflow"
+    ).exitOverride().action(async (options) => {
+      let evidence;
+      try {
+        evidence = options.runtimeFile === void 0 ? void 0 : JSON.parse(readFileSync5(options.runtimeFile, "utf8"));
+      } catch {
+        this.writeRuntimeFailure(
+          "Cannot read a JSON runtime evidence file",
+          "Supply a readable evidence file; see flight-rules doc workflow-preflight."
+        );
+        throw new ReadinessFailedError("flight-rules check failed \u2014 see report above");
+      }
+      const parsed = ReadinessOptionsSchema.safeParse({ workflow: options.workflow, evidence });
+      if (!parsed.success) {
+        this.writeRuntimeFailure(
+          "Invalid workflow runtime evidence",
+          "Supply evidence matching WorkflowEvidenceSchema with a --workflow selection."
+        );
+        throw new ReadinessFailedError("flight-rules check failed \u2014 see report above");
+      }
+      const report = await this.invoke("check", parsed.data, ReadinessResultSchema);
+      process.stdout.write(`${JSON.stringify(report)}
+`);
+      if (!report.ok)
+        throw new ReadinessFailedError("flight-rules check failed \u2014 see report above");
+    });
+  }
+  writeRuntimeFailure(detail, remedy) {
+    const report = RuntimeFailureReportSchema.parse({
+      tracker: null,
+      repo: null,
+      checks: [
+        { name: "runtime", ok: false, required: true, code: "INVALID_CONTEXT", detail, remedy }
+      ],
+      ok: false,
+      scope: "workflow"
+    });
+    process.stdout.write(`${JSON.stringify(report)}
+`);
+  }
+  async invoke(id, input, outputSchema) {
+    const result = await this.registry.invoke(id, input);
+    if (result.status !== "success")
+      throw new OperationCliError({
+        operationId: id,
+        errorName: result.status === "error" ? result.error.name : result.error.name,
+        message: result.error.message
+      });
+    return outputSchema.parse(result.data);
+  }
+};
+var CharterSelectionError = class extends Error {
+  name = "CharterSelectionError";
+};
+
+// src/operations/cli-coverage.ts
+import { z as z26 } from "zod";
+var RouteDispositionSchema = z26.discriminatedUnion("status", [
+  z26.object({
+    status: z26.literal("supported"),
+    route: CliRouteSchema,
+    operationId: OperationIdSchema
+  }),
+  z26.object({
+    status: z26.literal("pending-migration"),
+    route: CliRouteSchema,
+    operationId: OperationIdSchema
+  }),
+  z26.object({ status: z26.literal("excluded"), route: CliRouteSchema, reason: z26.string().min(1) })
+]);
+var CliRouteCoveragePropsSchema = z26.object({ entries: z26.array(RouteDispositionSchema) });
 var CliRouteCoverageError = class extends Error {
   name = "CliRouteCoverageError";
 };
@@ -879,18 +1842,8 @@ var ManifestCliRouteCoverage = class _ManifestCliRouteCoverage {
   }
 };
 var pendingRoutes = [
-  "charter",
-  "competencies",
-  "rfc dir",
-  "rfc next-id",
-  "qa instructions",
-  "qa evidence-dir",
-  "qa recipe",
-  "config path",
-  "config show",
   "config set",
   "config unset",
-  "check",
   "ticket get",
   "ticket transitions",
   "users get",
@@ -980,6 +1933,22 @@ var excludedRoutes = [
 var cliRouteCoverage = new ManifestCliRouteCoverage({
   entries: [
     { status: "supported", route: { path: ["doc"], aliases: [] }, operationId: "doc" },
+    ...[
+      ["charter", "charter"],
+      ["competencies", "competencies"],
+      ["rfc dir", "rfc-dir"],
+      ["rfc next-id", "rfc-next-id"],
+      ["qa instructions", "qa-instructions"],
+      ["qa evidence-dir", "qa-evidence-dir"],
+      ["qa recipe", "qa-recipe"],
+      ["config path", "config-path"],
+      ["config show", "config-show"],
+      ["check", "check"]
+    ].map(([path, operationId]) => ({
+      status: "supported",
+      route: { path: (path ?? "").split(" "), aliases: [] },
+      operationId: operationId ?? ""
+    })),
     ...pendingRoutes.map((path) => ({
       status: "pending-migration",
       route: { path: path.split(" "), aliases: [] },
@@ -993,9 +1962,13 @@ var cliRouteCoverage = new ManifestCliRouteCoverage({
   ]
 });
 export {
+  BlankQaRecipeError,
   CallerContextSchema,
+  CharterSelectionError,
   CliRouteCoverageError,
   CliRouteSchema,
+  CommanderLocalDiscoveryCli,
+  DefaultLocalDiscoveryOperations,
   DispatchOutcomeSchema,
   DispatchRequestSchema,
   DocOperation,
@@ -1017,7 +1990,9 @@ export {
   OperationIdSchema,
   OperationInputError,
   OperationOutputError,
+  QaInstructionsNotFoundError,
   QuestionRequestSchema,
+  ReadinessOptionsSchema,
   ReportModeSchema,
   RunContextSchema,
   RuntimeSnapshotSchema,
@@ -1027,6 +2002,8 @@ export {
   UnsafeInstructionPathError,
   VerificationReportSchema,
   WorkerReportCodec,
+  WorkflowEvidenceSchema,
+  WorkflowSchema,
   cliRouteCoverage,
   instructionCatalog,
   workerReportCodec
