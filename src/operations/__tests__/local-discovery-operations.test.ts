@@ -226,6 +226,7 @@ describe("local discovery operations", () => {
       ariadneTokens: () => core.ariadneTokens(),
       boardSessions: () => core.boardSessions(),
       boardAgents: () => core.boardAgents(),
+      reviewOperations: () => core.reviewOperations(),
     };
     const program = buildProgram(
       (override) => core.tracker(override),
@@ -324,6 +325,7 @@ describe("local discovery operations", () => {
       ariadneTokens: () => core.ariadneTokens(),
       boardSessions: () => core.boardSessions(),
       boardAgents: () => core.boardAgents(),
+      reviewOperations: () => core.reviewOperations(),
     };
     const program = buildProgram(
       (override) => core.tracker(override),
@@ -433,6 +435,7 @@ describe("local discovery operations", () => {
       ariadneTokens: () => linkedCore.ariadneTokens(),
       boardSessions: () => linkedCore.boardSessions(),
       boardAgents: () => linkedCore.boardAgents(),
+      reviewOperations: () => linkedCore.reviewOperations(),
     };
     const program = buildProgram(
       (override) => linkedCore.tracker(override),

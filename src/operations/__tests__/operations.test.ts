@@ -213,6 +213,7 @@ describe("shared operations", () => {
       operations: [
         new DocOperation({ getResolver: () => core.docs() }),
         ...core.localOperations().operations(),
+        ...core.reviewOperations().operations(),
       ],
       policy: new LaunchOperationAccessPolicy({ allowedEffects: ["read", "process", "network"] }),
     });
@@ -237,6 +238,12 @@ describe("shared operations", () => {
       "config-path",
       "config-show",
       "check",
+      "review-schema",
+      "review-validate",
+      "review-render",
+      "review-state",
+      "review-context",
+      "review-plan",
     ]);
   });
 
