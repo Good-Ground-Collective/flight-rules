@@ -1,14 +1,16 @@
 import { Command } from "commander";
-import type { CreateTicketInput, TaskTracker } from "../../task-tracker/task-tracker.js";
+import type { TaskTracker } from "../../task-tracker/task-tracker.js";
 import { resolveBody } from "../resolve-body.js";
-import { portableContextGuard } from "../../portable-context/portable-context.js";
 import { collect } from "../../../shared/collect.js";
-import { TrackerEvidenceService } from "../../evidence/evidence.js";
 import { EpicBoundaryGuard } from "../../epic-boundary/epic-boundary.js";
+import { TrackerEvidenceService } from "../../evidence/evidence.js";
 import { z } from "zod";
 import { RegistryCommandOperationClient } from "../../../operations/command-operation-client.js";
-import { DefaultTrackerReadOperations } from "../../../operations/tracker-read-operations.js";
-import type { OperationRegistry } from "../../../operations/operation-registry.js";
+import { DefaultTrackerEntityOperations } from "../../../operations/tracker-entity-operations.js";
+import {
+  LaunchOperationAccessPolicy,
+  type OperationRegistry,
+} from "../../../operations/operation-registry.js";
 
 type CreateTicketOptions = {
   title: string;
@@ -35,7 +37,13 @@ export function createTicketCommand(
 ): Command {
   const ticket = new Command("ticket");
   const operations = new RegistryCommandOperationClient({
-    registry: registry ?? new DefaultTrackerReadOperations({ getTracker }).registry(),
+    registry:
+      registry ??
+      new DefaultTrackerEntityOperations({ getTracker, cwd: process.cwd() }).registry(
+        new LaunchOperationAccessPolicy({
+          allowedEffects: ["read", "write", "network", "process"],
+        }),
+      ),
   });
 
   ticket
@@ -53,15 +61,18 @@ export function createTicketCommand(
     )
     .action(async (opts: CreateTicketOptions) => {
       const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
-      portableContextGuard.assertPortable(body, { allowLocalPaths: opts.allowLocalPaths });
-      const input: CreateTicketInput = {
-        title: opts.title,
-        body,
-        labels: opts.labels !== undefined ? opts.labels.split(",") : [],
-        ...(opts.epicId !== undefined ? { epicId: opts.epicId } : {}),
-        ...(opts.assignee !== undefined ? { assignee: opts.assignee } : {}),
-      };
-      const result = await getTracker().createTicket(input);
+      const result = await operations.invoke(
+        "ticket-create",
+        {
+          title: opts.title,
+          body,
+          labels: opts.labels !== undefined ? opts.labels.split(",") : [],
+          ...(opts.epicId !== undefined ? { epicId: opts.epicId } : {}),
+          ...(opts.assignee !== undefined ? { assignee: opts.assignee } : {}),
+          allowLocalPaths: opts.allowLocalPaths ?? false,
+        },
+        z.unknown(),
+      );
       process.stdout.write(JSON.stringify(result) + "\n");
     });
 
@@ -79,25 +90,19 @@ export function createTicketCommand(
       "accept machine-local paths in the body (see docs/layered-body-format.md)",
     )
     .action(async (id: string, opts: EditTicketOptions) => {
-      const tracker = getTracker();
-      const raw = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
-      // Checked after attaching: attach rewrites each local image path to its uploaded form.
-      const body =
-        opts.attach.length === 0
-          ? raw
-          : (
-              await new TrackerEvidenceService({ tracker }).attach({
-                ticketId: id,
-                body: raw,
-                specs: opts.attach,
-              })
-            ).body;
-      portableContextGuard.assertPortable(body, { allowLocalPaths: opts.allowLocalPaths });
-      const result = await tracker.updateTicketDescription(id, {
-        body,
-        ...(opts.title !== undefined ? { title: opts.title } : {}),
-        ...(opts.labels !== undefined ? { labels: opts.labels.split(",") } : {}),
-      });
+      const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
+      const result = await operations.invoke(
+        "ticket-edit",
+        {
+          id,
+          body,
+          ...(opts.title !== undefined ? { title: opts.title } : {}),
+          ...(opts.labels !== undefined ? { labels: opts.labels.split(",") } : {}),
+          attach: opts.attach,
+          allowLocalPaths: opts.allowLocalPaths ?? false,
+        },
+        z.unknown(),
+      );
       process.stdout.write(JSON.stringify(result) + "\n");
     });
 

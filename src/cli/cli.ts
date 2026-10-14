@@ -36,8 +36,8 @@ import { createPrCommand } from "../pr/commands/pr/command.js";
 import { appVersion } from "../version.js";
 import { createAgentsCommand } from "../plugins/commands/agents/command.js";
 import { cliRouteCoverage } from "../operations/cli-coverage.js";
+import { DefaultTrackerEntityOperations } from "../operations/tracker-entity-operations.js";
 import { createMcpCommand } from "../mcp/command.js";
-import { DefaultTrackerReadOperations } from "../operations/tracker-read-operations.js";
 
 export function buildProgram(
   getTracker: (overrideTracker?: string) => TaskTracker,
@@ -123,10 +123,11 @@ export function buildProgram(
         })
       ).operations(),
       ...new DefaultReviewOperations({ cwd: launchCwd }).operations(),
-      ...new DefaultTrackerReadOperations({
+      ...new DefaultTrackerEntityOperations({
         getTracker: tracker,
         getPrHost: prHost,
         getConfig: config,
+        cwd: launchCwd,
       }).operations(),
     ],
     policy: new LaunchOperationAccessPolicy({

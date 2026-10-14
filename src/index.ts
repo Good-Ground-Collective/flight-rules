@@ -2,6 +2,8 @@ export { createFlightRules, DefaultFlightRules } from "./flight-rules/flight-rul
 export type { FlightRules } from "./flight-rules/flight-rules.js";
 export type { FlightRulesProps } from "./flight-rules/flight-rules.schema.js";
 export type { ReviewOperations } from "./operations/review-operations.js";
+export { DefaultTrackerEntityOperations } from "./operations/tracker-entity-operations.js";
+export type { TrackerEntityOperations } from "./operations/tracker-entity-operations.js";
 export { GitHubTaskTracker } from "./tasks/github-task-tracker/github-task-tracker.js";
 export type { GitHubTrackerConfig } from "./tasks/github-task-tracker/github-task-tracker.js";
 export { JiraTaskTracker } from "./tasks/jira-task-tracker/jira-task-tracker.js";
@@ -125,6 +127,7 @@ export type { AdfDocNode } from "./tasks/jira-task-tracker/adf.js";
 export {
   TrackerEvidenceService,
   DuplicateEvidenceNameError,
+  EvidenceUploadFailure,
   AttachmentSpecSchema,
 } from "./tasks/evidence/evidence.js";
 export type {

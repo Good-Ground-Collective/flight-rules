@@ -1,5 +1,5 @@
 /* eslint-disable preflight/no-loose-functions -- resolveBody is module-level behaviour awaiting a home on a service; tracked in KAN-39 */
-import { readFileSync } from 'node:fs'
+import { readFileSync } from "node:fs";
 
 /**
  * Resolves an entity body from either an inline --body string or a --body-file
@@ -7,8 +7,11 @@ import { readFileSync } from 'node:fs'
  * (with fenced YAML and nested code) without shell-escaping it. --body-file wins
  * when both are supplied.
  */
-export function resolveBody(opts: { body?: string | undefined; bodyFile?: string | undefined }): string {
-  if (opts.bodyFile !== undefined) return readFileSync(opts.bodyFile, 'utf8')
-  if (opts.body !== undefined) return opts.body
-  throw new Error('one of --body or --body-file is required')
+export function resolveBody(opts: {
+  body?: string | undefined;
+  bodyFile?: string | undefined;
+}): string {
+  if (opts.bodyFile !== undefined) return readFileSync(opts.bodyFile, "utf8");
+  if (opts.body !== undefined) return opts.body;
+  throw new Error("one of --body or --body-file is required");
 }

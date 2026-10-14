@@ -18,7 +18,6 @@ import type { OperationEffect } from "../operation.schema.js";
 import { buildProgram } from "../../cli/cli.js";
 import { createFlightRules } from "../../flight-rules/flight-rules.js";
 import type { DocResolver } from "../../bundled-docs/doc-resolver/doc-resolver.js";
-import { DefaultTrackerReadOperations } from "../tracker-read-operations.js";
 
 const resolver: DocResolver = {
   list: () => ["workflow"],
@@ -216,11 +215,7 @@ describe("shared operations", () => {
         ...core.localOperations().operations(),
         ...core.gitConfigOperations().operations(),
         ...core.reviewOperations().operations(),
-        ...new DefaultTrackerReadOperations({
-          getTracker: () => core.tracker(),
-          getPrHost: () => core.prHost(),
-          getConfig: () => core.config(),
-        }).operations(),
+        ...core.trackerEntityOperations().operations(),
       ],
       policy: new LaunchOperationAccessPolicy({ allowedEffects: ["read", "process", "network"] }),
     });
@@ -272,6 +267,14 @@ describe("shared operations", () => {
       "epic-review-plan",
       "initiative-plan",
       "initiative-review-plan",
+      "epic-create",
+      "epic-edit",
+      "epic-link-initiative",
+      "initiative-create",
+      "initiative-edit",
+      "ticket-create",
+      "ticket-edit",
+      "tdd-create",
     ]);
   });
 

@@ -1,8 +1,9 @@
-import { Octokit } from '@octokit/rest'
-import { graphql } from '@octokit/graphql'
-import { BodyMetadataService } from '../body-metadata/body-metadata.js'
-import { z } from 'zod'
-import { UnsupportedTrackerOperationError } from '../task-tracker/unsupported-tracker-operation-error.js'
+import { Octokit } from "@octokit/rest";
+import { graphql } from "@octokit/graphql";
+import { BodyMetadataService } from "../body-metadata/body-metadata.js";
+import { z } from "zod";
+import { UnsupportedTrackerOperationError } from "../task-tracker/unsupported-tracker-operation-error.js";
+import { TaskTrackerPartialWriteError } from "../task-tracker/task-tracker.js";
 import type {
   Attachment,
   Comment,
@@ -20,57 +21,59 @@ import type {
   UpdateEpicInput,
   UpdateInitiativeInput,
   UpdateTicketInput,
-} from '../task-tracker/task-tracker.js'
+} from "../task-tracker/task-tracker.js";
 
 export interface GitHubTrackerConfig {
-  token: string
-  owner: string
-  repo: string
+  token: string;
+  owner: string;
+  repo: string;
 }
 
-type OctokitIssueData = Awaited<ReturnType<Octokit['rest']['issues']['get']>>['data']
-type OctokitCommentData = Awaited<ReturnType<Octokit['rest']['issues']['listComments']>>['data'][number]
-type OctokitLabelData = OctokitIssueData['labels'][number]
+type OctokitIssueData = Awaited<ReturnType<Octokit["rest"]["issues"]["get"]>>["data"];
+type OctokitCommentData = Awaited<
+  ReturnType<Octokit["rest"]["issues"]["listComments"]>
+>["data"][number];
+type OctokitLabelData = OctokitIssueData["labels"][number];
 
-const IssueRefSchema = z.object({ number: z.number() })
-const IssueRefListSchema = z.array(IssueRefSchema)
-const ParentNotFoundSchema = z.object({ status: z.literal(404) })
+const IssueRefSchema = z.object({ number: z.number() });
+const IssueRefListSchema = z.array(IssueRefSchema);
+const ParentNotFoundSchema = z.object({ status: z.literal(404) });
 
 export class GitHubTaskTracker implements TaskTracker {
-  private octokit: Octokit
-  private gql: ReturnType<typeof graphql.defaults>
-  private owner: string
-  private repo: string
-  private readonly bodyMetadata = new BodyMetadataService()
+  private octokit: Octokit;
+  private gql: ReturnType<typeof graphql.defaults>;
+  private owner: string;
+  private repo: string;
+  private readonly bodyMetadata = new BodyMetadataService();
 
   constructor(config: GitHubTrackerConfig) {
-    this.octokit = new Octokit({ auth: config.token })
-    this.gql = graphql.defaults({ headers: { authorization: `token ${config.token}` } })
-    this.owner = config.owner
-    this.repo = config.repo
+    this.octokit = new Octokit({ auth: config.token });
+    this.gql = graphql.defaults({ headers: { authorization: `token ${config.token}` } });
+    this.owner = config.owner;
+    this.repo = config.repo;
   }
 
   async createEpic(input: CreateEpicInput): Promise<Epic> {
-    const body = this.bodyMetadata.splice(input.body, input.metadata ?? {})
+    const body = this.bodyMetadata.splice(input.body, input.metadata ?? {});
     const { data } = await this.octokit.rest.issues.create({
       owner: this.owner,
       repo: this.repo,
       title: input.title,
       body,
-      labels: ['epic', ...input.labels],
-    })
+      labels: ["epic", ...input.labels],
+    });
     return {
       id: String(data.number),
-      size: 'epic',
+      size: "epic",
       status: data.state,
       labels: data.labels.map((l) => this.labelName(l)).filter(Boolean),
       title: data.title,
-      body: data.body ?? '',
+      body: data.body ?? "",
       childIssues: [],
       comments: [],
-      metadata: this.bodyMetadata.parse(data.body ?? ''),
+      metadata: this.bodyMetadata.parse(data.body ?? ""),
       updatedAt: data.updated_at,
-    }
+    };
   }
 
   async createInitiative(input: CreateInitiativeInput): Promise<Initiative> {
@@ -79,18 +82,18 @@ export class GitHubTaskTracker implements TaskTracker {
       repo: this.repo,
       title: input.title,
       description: input.body,
-    })
+    });
     return {
       id: String(data.number),
-      size: 'initiative',
+      size: "initiative",
       title: data.title,
-      body: data.description ?? '',
+      body: data.description ?? "",
       epics: [],
-    }
+    };
   }
 
   async getInitiative(id: string): Promise<Initiative> {
-    const milestoneNumber = parseInt(id, 10)
+    const milestoneNumber = parseInt(id, 10);
     const [milestoneResponse, epicsResponse] = await Promise.all([
       this.octokit.rest.issues.getMilestone({
         owner: this.owner,
@@ -101,21 +104,21 @@ export class GitHubTaskTracker implements TaskTracker {
         owner: this.owner,
         repo: this.repo,
         milestone: String(milestoneNumber),
-        labels: 'epic',
-        state: 'all',
+        labels: "epic",
+        state: "all",
       }),
-    ])
-    const milestone = milestoneResponse.data
+    ]);
+    const milestone = milestoneResponse.data;
     return {
       id,
-      size: 'initiative',
+      size: "initiative",
       title: milestone.title,
-      body: milestone.description ?? '',
+      body: milestone.description ?? "",
       epics: epicsResponse.data.map((issue) => ({
         id: String(issue.number),
         title: issue.title,
       })),
-    }
+    };
   }
 
   async linkEpicToInitiative(epicId: string, initiativeId: string): Promise<void> {
@@ -124,35 +127,45 @@ export class GitHubTaskTracker implements TaskTracker {
       repo: this.repo,
       issue_number: parseInt(epicId, 10),
       milestone: parseInt(initiativeId, 10),
-    })
+    });
   }
 
   async getEpic(id: string): Promise<Epic> {
-    const issueNumber = parseInt(id, 10)
+    const issueNumber = parseInt(id, 10);
     const [issueResponse, commentsResponse, subIssuesResponse] = await Promise.all([
-      this.octokit.rest.issues.get({ owner: this.owner, repo: this.repo, issue_number: issueNumber }),
-      this.octokit.rest.issues.listComments({ owner: this.owner, repo: this.repo, issue_number: issueNumber }),
-      this.octokit.request('GET /repos/{owner}/{repo}/issues/{issue_number}/sub_issues', {
+      this.octokit.rest.issues.get({
         owner: this.owner,
         repo: this.repo,
         issue_number: issueNumber,
       }),
-    ])
-    const issue = issueResponse.data
-    const body = issue.body ?? ''
-    const metadata = this.bodyMetadata.parse(body)
+      this.octokit.rest.issues.listComments({
+        owner: this.owner,
+        repo: this.repo,
+        issue_number: issueNumber,
+      }),
+      this.octokit.request("GET /repos/{owner}/{repo}/issues/{issue_number}/sub_issues", {
+        owner: this.owner,
+        repo: this.repo,
+        issue_number: issueNumber,
+      }),
+    ]);
+    const issue = issueResponse.data;
+    const body = issue.body ?? "";
+    const metadata = this.bodyMetadata.parse(body);
 
-    const childNumbers = IssueRefListSchema.parse(subIssuesResponse.data).map((ref) => String(ref.number))
-    const childIssues = await Promise.all(childNumbers.map((n) => this.getTicket(n)))
+    const childNumbers = IssueRefListSchema.parse(subIssuesResponse.data).map((ref) =>
+      String(ref.number),
+    );
+    const childIssues = await Promise.all(childNumbers.map((n) => this.getTicket(n)));
 
-    let tdd: TechnicalDesign | undefined
+    let tdd: TechnicalDesign | undefined;
     if (metadata.tddId !== undefined) {
-      tdd = await this.getTechnicalDesign(String(metadata.tddId))
+      tdd = await this.getTechnicalDesign(String(metadata.tddId));
     }
 
     return {
       id,
-      size: 'epic',
+      size: "epic",
       status: issue.state,
       labels: issue.labels.map((l) => this.labelName(l)).filter(Boolean),
       title: issue.title,
@@ -162,141 +175,171 @@ export class GitHubTaskTracker implements TaskTracker {
       tdd,
       metadata,
       updatedAt: issue.updated_at,
-    }
+    };
   }
 
   async createTicket(input: CreateTicketInput): Promise<Ticket> {
-    const body = this.bodyMetadata.splice(input.body, input.metadata ?? {})
+    const body = this.bodyMetadata.splice(input.body, input.metadata ?? {});
     const { data } = await this.octokit.rest.issues.create({
       owner: this.owner,
       repo: this.repo,
       title: input.title,
       body,
-      labels: ['ticket', ...input.labels],
+      labels: ["ticket", ...input.labels],
       ...(input.assignee !== undefined ? { assignee: input.assignee } : {}),
-    })
-    if (input.epicId !== undefined) await this.linkTicketToEpic(String(data.number), input.epicId)
-    return this.mapTicket(data, [], [], [], this.bodyMetadata.parse(data.body ?? ''))
+    });
+    if (input.epicId !== undefined) {
+      try {
+        await this.linkTicketToEpic(String(data.number), input.epicId);
+      } catch (cause) {
+        throw new TaskTrackerPartialWriteError({ id: String(data.number), cause });
+      }
+    }
+    return this.mapTicket(data, [], [], [], this.bodyMetadata.parse(data.body ?? ""));
   }
 
   async getTicket(id: string): Promise<Ticket> {
-    const issueNumber = parseInt(id, 10)
-    const [issueResponse, commentsResponse, blockedByResponse, blockingResponse] = await Promise.all([
-      this.octokit.rest.issues.get({ owner: this.owner, repo: this.repo, issue_number: issueNumber }),
-      this.octokit.rest.issues.listComments({ owner: this.owner, repo: this.repo, issue_number: issueNumber }),
-      this.octokit.request('GET /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocked_by', {
-        owner: this.owner,
-        repo: this.repo,
-        issue_number: issueNumber,
-      }),
-      this.octokit.request('GET /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocking', {
-        owner: this.owner,
-        repo: this.repo,
-        issue_number: issueNumber,
-      }),
-    ])
-    const body = issueResponse.data.body ?? ''
-    const metadata = this.bodyMetadata.parse(body)
-    const blockedBy = IssueRefListSchema.parse(blockedByResponse.data).map((ref) => String(ref.number))
-    const blocking = IssueRefListSchema.parse(blockingResponse.data).map((ref) => String(ref.number))
-    return this.mapTicket(issueResponse.data, commentsResponse.data, blockedBy, blocking, metadata)
+    const issueNumber = parseInt(id, 10);
+    const [issueResponse, commentsResponse, blockedByResponse, blockingResponse] =
+      await Promise.all([
+        this.octokit.rest.issues.get({
+          owner: this.owner,
+          repo: this.repo,
+          issue_number: issueNumber,
+        }),
+        this.octokit.rest.issues.listComments({
+          owner: this.owner,
+          repo: this.repo,
+          issue_number: issueNumber,
+        }),
+        this.octokit.request(
+          "GET /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocked_by",
+          {
+            owner: this.owner,
+            repo: this.repo,
+            issue_number: issueNumber,
+          },
+        ),
+        this.octokit.request(
+          "GET /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocking",
+          {
+            owner: this.owner,
+            repo: this.repo,
+            issue_number: issueNumber,
+          },
+        ),
+      ]);
+    const body = issueResponse.data.body ?? "";
+    const metadata = this.bodyMetadata.parse(body);
+    const blockedBy = IssueRefListSchema.parse(blockedByResponse.data).map((ref) =>
+      String(ref.number),
+    );
+    const blocking = IssueRefListSchema.parse(blockingResponse.data).map((ref) =>
+      String(ref.number),
+    );
+    return this.mapTicket(issueResponse.data, commentsResponse.data, blockedBy, blocking, metadata);
   }
 
   async linkTicketToEpic(ticketId: string, epicId: string): Promise<void> {
-    const epicNumber = parseInt(epicId, 10)
-    const ticketNumber = parseInt(ticketId, 10)
+    const epicNumber = parseInt(epicId, 10);
+    const ticketNumber = parseInt(ticketId, 10);
     const existing = await this.octokit.request(
-      'GET /repos/{owner}/{repo}/issues/{issue_number}/sub_issues',
+      "GET /repos/{owner}/{repo}/issues/{issue_number}/sub_issues",
       { owner: this.owner, repo: this.repo, issue_number: epicNumber },
-    )
-    const childNumbers = IssueRefListSchema.parse(existing.data).map((ref) => ref.number)
-    if (childNumbers.includes(ticketNumber)) return
-    const subIssueId = await this.resolveIssueId(ticketNumber)
-    await this.octokit.request('POST /repos/{owner}/{repo}/issues/{issue_number}/sub_issues', {
+    );
+    const childNumbers = IssueRefListSchema.parse(existing.data).map((ref) => ref.number);
+    if (childNumbers.includes(ticketNumber)) return;
+    const subIssueId = await this.resolveIssueId(ticketNumber);
+    await this.octokit.request("POST /repos/{owner}/{repo}/issues/{issue_number}/sub_issues", {
       owner: this.owner,
       repo: this.repo,
       issue_number: epicNumber,
       sub_issue_id: subIssueId,
-    })
+    });
   }
 
   async getTicketEpicId(ticketId: string): Promise<string | null> {
     try {
-      const { data } = await this.octokit.request('GET /repos/{owner}/{repo}/issues/{issue_number}/parent', {
-        owner: this.owner,
-        repo: this.repo,
-        issue_number: parseInt(ticketId, 10),
-      })
-      return String(IssueRefSchema.parse(data).number)
+      const { data } = await this.octokit.request(
+        "GET /repos/{owner}/{repo}/issues/{issue_number}/parent",
+        {
+          owner: this.owner,
+          repo: this.repo,
+          issue_number: parseInt(ticketId, 10),
+        },
+      );
+      return String(IssueRefSchema.parse(data).number);
     } catch (error) {
       // GitHub answers 404 "No parent issue found" for an issue that is not a sub-issue.
-      if (ParentNotFoundSchema.safeParse(error).success) return null
-      throw error
+      if (ParentNotFoundSchema.safeParse(error).success) return null;
+      throw error;
     }
   }
 
   async blockTicket(ticketId: string, blockedById: string): Promise<void> {
-    if (ticketId === blockedById) throw new Error('a ticket cannot block itself')
-    const ticketNumber = parseInt(ticketId, 10)
-    const blockerNumber = parseInt(blockedById, 10)
+    if (ticketId === blockedById) throw new Error("a ticket cannot block itself");
+    const ticketNumber = parseInt(ticketId, 10);
+    const blockerNumber = parseInt(blockedById, 10);
     const existing = await this.octokit.request(
-      'GET /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocked_by',
+      "GET /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocked_by",
       { owner: this.owner, repo: this.repo, issue_number: ticketNumber },
-    )
-    const blockerNumbers = IssueRefListSchema.parse(existing.data).map((ref) => ref.number)
-    if (blockerNumbers.includes(blockerNumber)) return
-    const issueId = await this.resolveIssueId(blockerNumber)
+    );
+    const blockerNumbers = IssueRefListSchema.parse(existing.data).map((ref) => ref.number);
+    if (blockerNumbers.includes(blockerNumber)) return;
+    const issueId = await this.resolveIssueId(blockerNumber);
     await this.octokit.request(
-      'POST /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocked_by',
+      "POST /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocked_by",
       { owner: this.owner, repo: this.repo, issue_number: ticketNumber, issue_id: issueId },
-    )
+    );
   }
 
   async unblockTicket(ticketId: string, blockedById: string): Promise<void> {
-    const ticketNumber = parseInt(ticketId, 10)
-    const issueId = await this.resolveIssueId(parseInt(blockedById, 10))
+    const ticketNumber = parseInt(ticketId, 10);
+    const issueId = await this.resolveIssueId(parseInt(blockedById, 10));
     await this.octokit.request(
-      'DELETE /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocked_by/{issue_id}',
+      "DELETE /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocked_by/{issue_id}",
       { owner: this.owner, repo: this.repo, issue_number: ticketNumber, issue_id: issueId },
-    )
+    );
   }
 
   async transitionTicket(ticketId: string, status: string): Promise<void> {
     // GitHub has no native in-progress/in-review concept, so status is encoded
     // as a `status:<slug>` label (matching the epic/ticket label convention).
-    const issueNumber = parseInt(ticketId, 10)
-    const slug = `status:${status.trim().toLowerCase().replace(/\s+/g, '-')}`
+    const issueNumber = parseInt(ticketId, 10);
+    const slug = `status:${status.trim().toLowerCase().replace(/\s+/g, "-")}`;
     // A label the repo already defines under different capitalisation is the
     // same status, so reuse its exact name rather than adding a second label.
-    const existing = await this.statusLabelNames()
-    const label = existing.find((name) => name.toLowerCase() === slug) ?? slug
+    const existing = await this.statusLabelNames();
+    const label = existing.find((name) => name.toLowerCase() === slug) ?? slug;
     const { data: issue } = await this.octokit.rest.issues.get({
       owner: this.owner,
       repo: this.repo,
       issue_number: issueNumber,
-    })
+    });
     const stale = issue.labels
       .map((l) => this.labelName(l))
-      .filter(
-        (name) =>
-          name.startsWith('status:') && name.toLowerCase() !== label.toLowerCase(),
-      )
+      .filter((name) => name.startsWith("status:") && name.toLowerCase() !== label.toLowerCase());
     for (const name of stale) {
-      await this.octokit.rest.issues.removeLabel({ owner: this.owner, repo: this.repo, issue_number: issueNumber, name })
+      await this.octokit.rest.issues.removeLabel({
+        owner: this.owner,
+        repo: this.repo,
+        issue_number: issueNumber,
+        name,
+      });
     }
     await this.octokit.rest.issues.addLabels({
       owner: this.owner,
       repo: this.repo,
       issue_number: issueNumber,
       labels: [label],
-    })
+    });
   }
 
   async listTransitions(): Promise<string[]> {
     // The vocabulary is repo-wide, so the ticket id is irrelevant; lowercased so the value round-trips through transitionTicket to the same label.
     return (await this.statusLabelNames()).map((name) =>
-      name.slice('status:'.length).replace(/-/g, ' ').toLowerCase(),
-    )
+      name.slice("status:".length).replace(/-/g, " ").toLowerCase(),
+    );
   }
 
   /**
@@ -307,64 +350,77 @@ export class GitHubTaskTracker implements TaskTracker {
   addLabel(ticketId: string, label: string): Promise<void> {
     return Promise.reject(
       new UnsupportedTrackerOperationError({
-        tracker: 'GitHub',
+        tracker: "GitHub",
         operation: `adding the label "${label}" to issue #${ticketId}`,
-        remedy: 'GitHub labels encode issue size and status and are owned by the tracker; use --tracker jira',
+        remedy:
+          "GitHub labels encode issue size and status and are owned by the tracker; use --tracker jira",
       }),
-    )
+    );
   }
 
   removeLabel(ticketId: string, label: string): Promise<void> {
     return Promise.reject(
       new UnsupportedTrackerOperationError({
-        tracker: 'GitHub',
+        tracker: "GitHub",
         operation: `removing the label "${label}" from issue #${ticketId}`,
-        remedy: 'GitHub labels encode issue size and status and are owned by the tracker; use --tracker jira',
+        remedy:
+          "GitHub labels encode issue size and status and are owned by the tracker; use --tracker jira",
       }),
-    )
+    );
   }
 
   async updateEpicMetadata(epicId: string, patch: Partial<EntityMetadata>): Promise<void> {
-    const issueNumber = parseInt(epicId, 10)
+    const issueNumber = parseInt(epicId, 10);
     const { data } = await this.octokit.rest.issues.get({
       owner: this.owner,
       repo: this.repo,
       issue_number: issueNumber,
-    })
+    });
     await this.octokit.rest.issues.update({
       owner: this.owner,
       repo: this.repo,
       issue_number: issueNumber,
-      body: this.bodyMetadata.splice(data.body ?? '', patch),
-    })
+      body: this.bodyMetadata.splice(data.body ?? "", patch),
+    });
   }
 
   async updateTicketMetadata(ticketId: string, patch: Partial<EntityMetadata>): Promise<void> {
-    const issueNumber = parseInt(ticketId, 10)
+    const issueNumber = parseInt(ticketId, 10);
     const { data } = await this.octokit.rest.issues.get({
       owner: this.owner,
       repo: this.repo,
       issue_number: issueNumber,
-    })
+    });
     await this.octokit.rest.issues.update({
       owner: this.owner,
       repo: this.repo,
       issue_number: issueNumber,
-      body: this.bodyMetadata.splice(data.body ?? '', patch),
-    })
+      body: this.bodyMetadata.splice(data.body ?? "", patch),
+    });
   }
 
   async updateEpicDescription(epicId: string, input: UpdateEpicInput): Promise<Epic> {
-    await this.replaceIssueBody(epicId, 'epic', input)
-    return this.getEpic(epicId)
+    await this.replaceIssueBody(epicId, "epic", input);
+    try {
+      return await this.getEpic(epicId);
+    } catch (cause) {
+      throw new TaskTrackerPartialWriteError({ id: epicId, cause });
+    }
   }
 
   async updateTicketDescription(ticketId: string, input: UpdateTicketInput): Promise<Ticket> {
-    await this.replaceIssueBody(ticketId, 'ticket', input)
-    return this.getTicket(ticketId)
+    await this.replaceIssueBody(ticketId, "ticket", input);
+    try {
+      return await this.getTicket(ticketId);
+    } catch (cause) {
+      throw new TaskTrackerPartialWriteError({ id: ticketId, cause });
+    }
   }
 
-  async updateInitiativeDescription(initiativeId: string, input: UpdateInitiativeInput): Promise<Initiative> {
+  async updateInitiativeDescription(
+    initiativeId: string,
+    input: UpdateInitiativeInput,
+  ): Promise<Initiative> {
     // Initiatives are milestones: a title and description, no labels or metadata.
     await this.octokit.rest.issues.updateMilestone({
       owner: this.owner,
@@ -372,13 +428,17 @@ export class GitHubTaskTracker implements TaskTracker {
       milestone_number: parseInt(initiativeId, 10),
       description: input.body,
       ...(input.title !== undefined ? { title: input.title } : {}),
-    })
-    return this.getInitiative(initiativeId)
+    });
+    try {
+      return await this.getInitiative(initiativeId);
+    } catch (cause) {
+      throw new TaskTrackerPartialWriteError({ id: initiativeId, cause });
+    }
   }
 
   async updateTddMetadata(tddId: string, patch: Partial<EntityMetadata>): Promise<void> {
     const fetchData = await this.gql<{
-      repository: { discussion: { id: string; body: string } | null }
+      repository: { discussion: { id: string; body: string } | null };
     }>(
       `query GetDiscussionForUpdate($owner: String!, $repo: String!, $number: Int!) {
         repository(owner: $owner, name: $repo) {
@@ -386,9 +446,9 @@ export class GitHubTaskTracker implements TaskTracker {
         }
       }`,
       { owner: this.owner, repo: this.repo, number: parseInt(tddId, 10) },
-    )
-    const discussion = fetchData.repository.discussion
-    if (discussion === null) throw new Error(`Discussion #${tddId} not found`)
+    );
+    const discussion = fetchData.repository.discussion;
+    if (discussion === null) throw new Error(`Discussion #${tddId} not found`);
     await this.gql(
       `mutation UpdateDiscussion($discussionId: ID!, $body: String!) {
         updateDiscussion(input: { discussionId: $discussionId, body: $body }) {
@@ -399,12 +459,12 @@ export class GitHubTaskTracker implements TaskTracker {
         discussionId: discussion.id,
         body: this.bodyMetadata.splice(discussion.body, patch),
       },
-    )
+    );
   }
 
   async createTechnicalDesign(input: CreateTechnicalDesignInput): Promise<TechnicalDesign> {
     const repoData = await this.gql<{
-      repository: { id: string; discussionCategory: { id: string } | null }
+      repository: { id: string; discussionCategory: { id: string } | null };
     }>(
       `query GetRepoAndCategory($owner: String!, $repo: String!, $slug: String!) {
         repository(owner: $owner, name: $repo) {
@@ -412,22 +472,24 @@ export class GitHubTaskTracker implements TaskTracker {
           discussionCategory(slug: $slug) { id }
         }
       }`,
-      { owner: this.owner, repo: this.repo, slug: 'tdds' },
-    )
+      { owner: this.owner, repo: this.repo, slug: "tdds" },
+    );
 
-    const categoryId = repoData.repository.discussionCategory?.id
+    const categoryId = repoData.repository.discussionCategory?.id;
     if (categoryId === undefined) {
-      throw new Error('No "TDDs" discussion category found. Create it in the repo\'s GitHub Discussions settings.')
+      throw new Error(
+        'No "TDDs" discussion category found. Create it in the repo\'s GitHub Discussions settings.',
+      );
     }
 
     const body = this.bodyMetadata.splice(input.body, {
       epicId: parseInt(input.epicId, 10),
       ...input.metadata,
-    })
+    });
     const createData = await this.gql<{
       createDiscussion: {
-        discussion: { number: number; body: string; updatedAt: string; url?: string }
-      }
+        discussion: { number: number; body: string; updatedAt: string; url?: string };
+      };
     }>(
       `mutation CreateDiscussion($repositoryId: ID!, $categoryId: ID!, $title: String!, $body: String!) {
         createDiscussion(input: { repositoryId: $repositoryId, categoryId: $categoryId, title: $title, body: $body }) {
@@ -435,11 +497,15 @@ export class GitHubTaskTracker implements TaskTracker {
         }
       }`,
       { repositoryId: repoData.repository.id, categoryId, title: input.title, body },
-    )
+    );
 
-    const discussion = createData.createDiscussion.discussion
+    const discussion = createData.createDiscussion.discussion;
 
-    await this.updateEpicMetadata(input.epicId, { tddId: discussion.number })
+    try {
+      await this.updateEpicMetadata(input.epicId, { tddId: discussion.number });
+    } catch (cause) {
+      throw new TaskTrackerPartialWriteError({ id: String(discussion.number), cause });
+    }
 
     return {
       id: String(discussion.number),
@@ -449,28 +515,28 @@ export class GitHubTaskTracker implements TaskTracker {
       comments: [],
       metadata: this.bodyMetadata.parse(discussion.body),
       updatedAt: discussion.updatedAt,
-    }
+    };
   }
 
   async getTechnicalDesign(id: string): Promise<TechnicalDesign> {
     const data = await this.gql<{
       repository: {
         discussion: {
-          number: number
-          body: string
-          updatedAt: string
-          url?: string
+          number: number;
+          body: string;
+          updatedAt: string;
+          url?: string;
           comments: {
             nodes: Array<{
-              id: string
-              body: string
-              author: { login: string } | null
-              createdAt: string
-              updatedAt: string
-            }>
-          }
-        } | null
-      }
+              id: string;
+              body: string;
+              author: { login: string } | null;
+              createdAt: string;
+              updatedAt: string;
+            }>;
+          };
+        } | null;
+      };
     }>(
       `query GetDiscussion($owner: String!, $repo: String!, $number: Int!) {
         repository(owner: $owner, name: $repo) {
@@ -483,14 +549,14 @@ export class GitHubTaskTracker implements TaskTracker {
         }
       }`,
       { owner: this.owner, repo: this.repo, number: parseInt(id, 10) },
-    )
+    );
 
-    const discussion = data.repository.discussion
+    const discussion = data.repository.discussion;
     if (discussion === null) {
-      throw new Error(`Discussion #${id} not found`)
+      throw new Error(`Discussion #${id} not found`);
     }
-    const metadata = this.bodyMetadata.parse(discussion.body)
-    const epicId = metadata.epicId !== undefined ? String(metadata.epicId) : ''
+    const metadata = this.bodyMetadata.parse(discussion.body);
+    const epicId = metadata.epicId !== undefined ? String(metadata.epicId) : "";
 
     return {
       id,
@@ -500,13 +566,13 @@ export class GitHubTaskTracker implements TaskTracker {
       comments: discussion.comments.nodes.map((n) => ({
         id: n.id,
         body: n.body,
-        author: n.author?.login ?? '',
+        author: n.author?.login ?? "",
         createdAt: n.createdAt,
         updatedAt: n.updatedAt,
       })),
       metadata,
       updatedAt: discussion.updatedAt,
-    }
+    };
   }
 
   async addComment(entityId: string, body: string): Promise<Comment> {
@@ -515,35 +581,40 @@ export class GitHubTaskTracker implements TaskTracker {
       repo: this.repo,
       issue_number: parseInt(entityId, 10),
       body,
-    })
+    });
     return {
       id: String(data.id),
-      body: data.body ?? '',
-      author: data.user?.login ?? '',
+      body: data.body ?? "",
+      author: data.user?.login ?? "",
       createdAt: data.created_at,
       updatedAt: data.updated_at,
-    }
+    };
   }
 
   // eslint-disable-next-line preflight/no-throw-helpers -- a capability stub's whole body is the throw
   async addAttachment(ticketId: string, filePath: string): Promise<Attachment> {
     throw new UnsupportedTrackerOperationError({
-      tracker: 'GitHub',
+      tracker: "GitHub",
       operation: `attaching ${filePath} to issue #${ticketId}`,
-      remedy: 'GitHub issues have no attachment API; use --tracker jira, or gh --attach for pull requests',
-    })
+      remedy:
+        "GitHub issues have no attachment API; use --tracker jira, or gh --attach for pull requests",
+    });
   }
 
   async getUsers(): Promise<TrackerUser[]> {
     const { data } = await this.octokit.rest.orgs.listMembers({
       org: this.owner,
       per_page: 100,
-    })
-    return data.map((member) => ({ accountId: member.login, displayName: member.login }))
+    });
+    return data.map((member) => ({ accountId: member.login, displayName: member.login }));
   }
 
   async ping(options?: { signal?: AbortSignal }): Promise<void> {
-    await this.octokit.rest.repos.get({ owner: this.owner, repo: this.repo, ...(options?.signal === undefined ? {} : { request: { signal: options.signal } }) })
+    await this.octokit.rest.repos.get({
+      owner: this.owner,
+      repo: this.repo,
+      ...(options?.signal === undefined ? {} : { request: { signal: options.signal } }),
+    });
   }
 
   private async replaceIssueBody(
@@ -551,23 +622,25 @@ export class GitHubTaskTracker implements TaskTracker {
     role: string,
     input: { body: string; title?: string | undefined; labels?: string[] | undefined },
   ): Promise<void> {
-    const issueNumber = parseInt(id, 10)
+    const issueNumber = parseInt(id, 10);
     const { data } = await this.octokit.rest.issues.get({
       owner: this.owner,
       repo: this.repo,
       issue_number: issueNumber,
-    })
+    });
     // Preserve the entity-metadata block: re-splice the metadata carried on the
     // existing body into the new body via the same path create uses.
-    const body = this.bodyMetadata.splice(input.body, this.bodyMetadata.parse(data.body ?? ''))
+    const body = this.bodyMetadata.splice(input.body, this.bodyMetadata.parse(data.body ?? ""));
     await this.octokit.rest.issues.update({
       owner: this.owner,
       repo: this.repo,
       issue_number: issueNumber,
       body,
       ...(input.title !== undefined ? { title: input.title } : {}),
-      ...(input.labels !== undefined ? { labels: this.mergeLabels(data.labels, role, input.labels) } : {}),
-    })
+      ...(input.labels !== undefined
+        ? { labels: this.mergeLabels(data.labels, role, input.labels) }
+        : {}),
+    });
   }
 
   /**
@@ -576,14 +649,14 @@ export class GitHubTaskTracker implements TaskTracker {
    * `--labels` edit replaces the free-form labels without dropping the ones the
    * factory manages.
    */
-  private mergeLabels(current: OctokitIssueData['labels'], role: string, next: string[]): string[] {
-    const preserved = new Set<string>([role])
+  private mergeLabels(current: OctokitIssueData["labels"], role: string, next: string[]): string[] {
+    const preserved = new Set<string>([role]);
     for (const label of current) {
-      const name = this.labelName(label)
-      if (name.startsWith('status:')) preserved.add(name)
+      const name = this.labelName(label);
+      if (name.startsWith("status:")) preserved.add(name);
     }
-    for (const name of next) preserved.add(name)
-    return [...preserved]
+    for (const name of next) preserved.add(name);
+    return [...preserved];
   }
 
   private async resolveIssueId(issueNumber: number): Promise<number> {
@@ -591,8 +664,8 @@ export class GitHubTaskTracker implements TaskTracker {
       owner: this.owner,
       repo: this.repo,
       issue_number: issueNumber,
-    })
-    return data.id
+    });
+    return data.id;
   }
 
   /**
@@ -601,28 +674,29 @@ export class GitHubTaskTracker implements TaskTracker {
    * which is why `listTransitions` ignores the ticket id it is handed.
    */
   private async statusLabelNames(): Promise<string[]> {
-    const labels = await this.octokit.paginate(
-      this.octokit.rest.issues.listLabelsForRepo,
-      { owner: this.owner, repo: this.repo, per_page: 100 },
-    )
+    const labels = await this.octokit.paginate(this.octokit.rest.issues.listLabelsForRepo, {
+      owner: this.owner,
+      repo: this.repo,
+      per_page: 100,
+    });
     return labels
       .map((label) => this.labelName(label))
-      .filter((name) => name.startsWith('status:'))
+      .filter((name) => name.startsWith("status:"));
   }
 
   private labelName(label: OctokitLabelData): string {
-    if (typeof label === 'string') return label
-    return label.name ?? ''
+    if (typeof label === "string") return label;
+    return label.name ?? "";
   }
 
   private mapComment(c: OctokitCommentData): Comment {
     return {
       id: String(c.id),
-      body: c.body ?? '',
-      author: c.user?.login ?? '',
+      body: c.body ?? "",
+      author: c.user?.login ?? "",
       createdAt: c.created_at,
       updatedAt: c.updated_at,
-    }
+    };
   }
 
   private mapTicket(
@@ -632,24 +706,24 @@ export class GitHubTaskTracker implements TaskTracker {
     blocking: string[] = [],
     metadata: EntityMetadata = {},
   ): Ticket {
-    const labels = issue.labels.map((l) => this.labelName(l)).filter(Boolean)
-    const statusLabel = labels.find((name) => name.startsWith('status:'))
+    const labels = issue.labels.map((l) => this.labelName(l)).filter(Boolean);
+    const statusLabel = labels.find((name) => name.startsWith("status:"));
     return {
       id: String(issue.number),
-      size: 'ticket',
-      status: statusLabel !== undefined ? statusLabel.slice('status:'.length) : issue.state,
+      size: "ticket",
+      status: statusLabel !== undefined ? statusLabel.slice("status:".length) : issue.state,
       labels,
       title: issue.title,
-      body: issue.body ?? '',
+      body: issue.body ?? "",
       comments: comments.map((c) => this.mapComment(c)),
       assignee: issue.assignee?.login ?? null,
       attachments: [],
       reporter: issue.user?.login ?? null,
-      issueType: issue.type?.name ?? 'Issue',
+      issueType: issue.type?.name ?? "Issue",
       blockedBy,
       blocking,
       metadata,
       updatedAt: issue.updated_at,
-    }
+    };
   }
 }

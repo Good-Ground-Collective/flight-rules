@@ -1,17 +1,19 @@
 import { Command } from "commander";
 import type { TaskTracker } from "../../task-tracker/task-tracker.js";
 import { resolveBody } from "../resolve-body.js";
-import { portableContextGuard } from "../../portable-context/portable-context.js";
 import type { PullRequestHost } from "../../../pr/pull-request-host/pull-request-host.js";
 import type { Config } from "../../../shared/config.js";
 import { z } from "zod";
 import { RegistryCommandOperationClient } from "../../../operations/command-operation-client.js";
 import {
-  DefaultTrackerReadOperations,
   TrackerDependencyPlanSchema,
   TrackerReviewPlanSchema,
 } from "../../../operations/tracker-read-operations.js";
-import type { OperationRegistry } from "../../../operations/operation-registry.js";
+import { DefaultTrackerEntityOperations } from "../../../operations/tracker-entity-operations.js";
+import {
+  LaunchOperationAccessPolicy,
+  type OperationRegistry,
+} from "../../../operations/operation-registry.js";
 
 type CreateInitiativeOptions = {
   title: string;
@@ -35,7 +37,17 @@ export function createInitiativeCommand(
   const initiative = new Command("initiative");
   const operations = new RegistryCommandOperationClient({
     registry:
-      registry ?? new DefaultTrackerReadOperations({ getTracker, getPrHost, getConfig }).registry(),
+      registry ??
+      new DefaultTrackerEntityOperations({
+        getTracker,
+        getPrHost,
+        getConfig,
+        cwd: process.cwd(),
+      }).registry(
+        new LaunchOperationAccessPolicy({
+          allowedEffects: ["read", "write", "network", "process"],
+        }),
+      ),
   });
 
   initiative
@@ -50,11 +62,15 @@ export function createInitiativeCommand(
     )
     .action(async (opts: CreateInitiativeOptions) => {
       const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
-      portableContextGuard.assertPortable(body, { allowLocalPaths: opts.allowLocalPaths });
-      const result = await getTracker().createInitiative({
-        title: opts.title,
-        body,
-      });
+      const result = await operations.invoke(
+        "initiative-create",
+        {
+          title: opts.title,
+          body,
+          allowLocalPaths: opts.allowLocalPaths ?? false,
+        },
+        z.unknown(),
+      );
       process.stdout.write(JSON.stringify(result) + "\n");
     });
 
@@ -71,11 +87,16 @@ export function createInitiativeCommand(
     )
     .action(async (id: string, opts: EditInitiativeOptions) => {
       const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
-      portableContextGuard.assertPortable(body, { allowLocalPaths: opts.allowLocalPaths });
-      const result = await getTracker().updateInitiativeDescription(id, {
-        body,
-        ...(opts.title !== undefined ? { title: opts.title } : {}),
-      });
+      const result = await operations.invoke(
+        "initiative-edit",
+        {
+          id,
+          body,
+          ...(opts.title !== undefined ? { title: opts.title } : {}),
+          allowLocalPaths: opts.allowLocalPaths ?? false,
+        },
+        z.unknown(),
+      );
       process.stdout.write(JSON.stringify(result) + "\n");
     });
 

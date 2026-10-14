@@ -115,6 +115,8 @@ export {
   cliRouteCoverage,
 } from "../operations/cli-coverage.js";
 export type { RouteDisposition, CliRouteCoverage } from "../operations/cli-coverage.js";
+export { DefaultTrackerEntityOperations } from "../operations/tracker-entity-operations.js";
+export type { TrackerEntityOperations } from "../operations/tracker-entity-operations.js";
 
 export interface OrderedDispatch<T> {
   index: number;
