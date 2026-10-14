@@ -1,6 +1,11 @@
 import { createFlightRules, type FlightRules } from "../flight-rules/flight-rules.js";
 import { Command } from "commander";
 import { createDocCommand } from "../bundled-docs/commands/doc/command.js";
+import { DocOperation } from "../operations/doc-operation.js";
+import {
+  LaunchOperationAccessPolicy,
+  MapOperationRegistry,
+} from "../operations/operation-registry.js";
 import { createCharterCommand } from "../bundled-docs/commands/charter/command.js";
 import { DocCharterCatalog } from "../bundled-docs/charter-catalog/charter-catalog.js";
 import { GitRepositoryPaths } from "../bundled-docs/charter-catalog/repository-paths.js";
@@ -31,6 +36,7 @@ import type { PullRequestHost } from "../pr/pull-request-host/pull-request-host.
 import { createPrCommand } from "../pr/commands/pr/command.js";
 import { appVersion } from "../version.js";
 import { createAgentsCommand } from "../plugins/commands/agents/command.js";
+import { cliRouteCoverage } from "../operations/cli-coverage.js";
 
 export function buildProgram(
   getTracker: (overrideTracker?: string) => TaskTracker,
@@ -97,7 +103,18 @@ export function buildProgram(
   );
   program.addCommand(createQaCommand(config, getConfigPath, undefined, () => services.evidence()));
   program.addCommand(createCompetenciesCommand(config));
-  program.addCommand(createDocCommand(() => services.docs()));
+  const docOperation = new DocOperation({ getResolver: () => services.docs() });
+  const operationRegistry = new MapOperationRegistry({
+    operations: [docOperation],
+    policy: new LaunchOperationAccessPolicy({ allowedEffects: ["read"] }),
+  });
+  program.addCommand(
+    createDocCommand({
+      getResolver: () => services.docs(),
+      operation: docOperation,
+      registry: operationRegistry,
+    }),
+  );
   program.addCommand(
     createCharterCommand(
       () => new DocCharterCatalog({ docs: services.docs() }),
@@ -105,7 +122,16 @@ export function buildProgram(
     ),
   );
   program.addCommand(createReviewCommand());
-  program.addCommand(createCheckCommand(config, tracker, getConfigPath, () => services.probe(), undefined, () => services.readiness()));
+  program.addCommand(
+    createCheckCommand(
+      config,
+      tracker,
+      getConfigPath,
+      () => services.probe(),
+      undefined,
+      () => services.readiness(),
+    ),
+  );
   program.addCommand(
     createBoardCommand(
       () => services.board(),
@@ -113,6 +139,7 @@ export function buildProgram(
     ),
   );
   program.addCommand(createPacketCommand(() => services.packets()));
+  cliRouteCoverage.check(program, operationRegistry);
   return program;
 }
 

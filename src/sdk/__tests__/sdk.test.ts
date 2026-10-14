@@ -18,6 +18,8 @@ import {
   UnknownInstructionError,
 } from "../instruction-catalog.js";
 import { InvalidWorkerReportError, ReportModeSchema, WorkerReportCodec } from "../report-codec.js";
+import { ManifestCliRouteCoverage, DocOperation, MapOperationRegistry } from "../index.js";
+import type { CliRouteCoverage, OperationRegistry } from "../index.js";
 
 const temporaryRoots: string[] = [];
 const makeRoot = (): string => {
@@ -31,6 +33,22 @@ afterEach(() => {
 });
 
 describe("neutral SDK instruction catalog", () => {
+  it("exports provider-free operation contracts for programmatic callers", () => {
+    const registry: OperationRegistry = new MapOperationRegistry({ operations: [] });
+    const coverage: CliRouteCoverage = new ManifestCliRouteCoverage({ entries: [] });
+
+    expect(typeof registry.invoke).toBe("function");
+    expect(typeof coverage.assertComplete).toBe("function");
+    expect(
+      new DocOperation({
+        getResolver: () => ({
+          list: () => [],
+          resolve: (id) => ({ id, path: `/docs/${id}.md`, contents: "Doc" }),
+        }),
+      }).id,
+    ).toBe("doc");
+  });
+
   it("lists canonical skills and all named agent variants with unchanged prompt bodies", () => {
     expect(instructionCatalog.listSkills()).toContain("execute-work");
     expect(instructionCatalog.listAgents()).toEqual([
@@ -138,10 +156,10 @@ describe("worker report codec", () => {
       preserved: ["The direct opening."],
     };
     expect(
-      codec.parse(
-        `\`\`\`yaml\n${JSON.stringify(rewritten)}\n\`\`\``,
-        { agent: "tech-writer", mode: "rewrite" },
-      ),
+      codec.parse(`\`\`\`yaml\n${JSON.stringify(rewritten)}\n\`\`\``, {
+        agent: "tech-writer",
+        mode: "rewrite",
+      }),
     ).toEqual(rewritten);
 
     const research = {
@@ -166,15 +184,12 @@ describe("worker report codec", () => {
 
   it("requires exactly one canonical rewrite payload", () => {
     const base = { summary: "Updated", verdict: "MINOR", preserved: [] };
-    for (const payload of [
-      { ...base },
-      { ...base, changes: [], rewritten: "Inline text" },
-    ]) {
+    for (const payload of [{ ...base }, { ...base, changes: [], rewritten: "Inline text" }]) {
       expect(() =>
-        codec.parse(
-          `\`\`\`yaml\n${JSON.stringify(payload)}\n\`\`\``,
-          { agent: "tech-writer", mode: "rewrite" },
-        ),
+        codec.parse(`\`\`\`yaml\n${JSON.stringify(payload)}\n\`\`\``, {
+          agent: "tech-writer",
+          mode: "rewrite",
+        }),
       ).toThrow(InvalidWorkerReportError);
     }
   });
@@ -277,10 +292,10 @@ describe("worker report codec", () => {
       codec.parse("```yaml\nsummary: [\n```", { agent: "code-implementation", mode: "implement" }),
     ).toThrow(InvalidWorkerReportError);
     expect(() =>
-      codec.parse(
-        "```yaml\nsummary: .inf\nfilesChanged: []\ntestsRun: []\napproach: Direct\n```",
-        { agent: "code-implementation", mode: "implement" },
-      ),
+      codec.parse("```yaml\nsummary: .inf\nfilesChanged: []\ntestsRun: []\napproach: Direct\n```", {
+        agent: "code-implementation",
+        mode: "implement",
+      }),
     ).toThrow(InvalidWorkerReportError);
     expect(() =>
       codec.parse(
@@ -315,10 +330,10 @@ describe("worker report codec", () => {
       otsMaterials: "No visual evidence: not needed",
     };
     expect(
-      codec.parse(
-        `\`\`\`yaml\n${JSON.stringify(report)}\n\`\`\``,
-        { agent: "tech-writer", mode: "author" },
-      ),
+      codec.parse(`\`\`\`yaml\n${JSON.stringify(report)}\n\`\`\``, {
+        agent: "tech-writer",
+        mode: "author",
+      }),
     ).toEqual(report);
   });
 });
