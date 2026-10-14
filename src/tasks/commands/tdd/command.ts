@@ -1,11 +1,13 @@
 import { Command } from "commander";
 import type { TaskTracker } from "../../task-tracker/task-tracker.js";
 import { resolveBody } from "../resolve-body.js";
-import { portableContextGuard } from "../../portable-context/portable-context.js";
 import { z } from "zod";
 import { RegistryCommandOperationClient } from "../../../operations/command-operation-client.js";
-import { DefaultTrackerReadOperations } from "../../../operations/tracker-read-operations.js";
-import type { OperationRegistry } from "../../../operations/operation-registry.js";
+import { DefaultTrackerEntityOperations } from "../../../operations/tracker-entity-operations.js";
+import {
+  LaunchOperationAccessPolicy,
+  type OperationRegistry,
+} from "../../../operations/operation-registry.js";
 
 type CreateTddOptions = {
   title: string;
@@ -21,7 +23,13 @@ export function createTddCommand(
 ): Command {
   const tdd = new Command("tdd");
   const operations = new RegistryCommandOperationClient({
-    registry: registry ?? new DefaultTrackerReadOperations({ getTracker }).registry(),
+    registry:
+      registry ??
+      new DefaultTrackerEntityOperations({ getTracker, cwd: process.cwd() }).registry(
+        new LaunchOperationAccessPolicy({
+          allowedEffects: ["read", "write", "network", "process"],
+        }),
+      ),
   });
 
   tdd
@@ -37,12 +45,16 @@ export function createTddCommand(
     )
     .action(async (opts: CreateTddOptions) => {
       const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
-      portableContextGuard.assertPortable(body, { allowLocalPaths: opts.allowLocalPaths });
-      const result = await getTracker().createTechnicalDesign({
-        title: opts.title,
-        body,
-        epicId: opts.epicId,
-      });
+      const result = await operations.invoke(
+        "tdd-create",
+        {
+          title: opts.title,
+          body,
+          epicId: opts.epicId,
+          allowLocalPaths: opts.allowLocalPaths ?? false,
+        },
+        z.unknown(),
+      );
       process.stdout.write(JSON.stringify(result) + "\n");
     });
 

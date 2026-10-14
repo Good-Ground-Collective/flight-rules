@@ -1,7 +1,6 @@
 import { Command } from "commander";
 import type { TaskTracker } from "../../task-tracker/task-tracker.js";
 import { resolveBody } from "../resolve-body.js";
-import { portableContextGuard } from "../../portable-context/portable-context.js";
 import type { PullRequestHost } from "../../../pr/pull-request-host/pull-request-host.js";
 import type { Config } from "../../../shared/config.js";
 import { z } from "zod";
@@ -9,9 +8,12 @@ import { RegistryCommandOperationClient } from "../../../operations/command-oper
 import {
   TrackerDependencyPlanSchema,
   TrackerReviewPlanSchema,
-  DefaultTrackerReadOperations,
 } from "../../../operations/tracker-read-operations.js";
-import type { OperationRegistry } from "../../../operations/operation-registry.js";
+import { DefaultTrackerEntityOperations } from "../../../operations/tracker-entity-operations.js";
+import {
+  LaunchOperationAccessPolicy,
+  type OperationRegistry,
+} from "../../../operations/operation-registry.js";
 
 type CreateEpicOptions = {
   title: string;
@@ -38,7 +40,17 @@ export function createEpicCommand(
   const epic = new Command("epic");
   const operations = new RegistryCommandOperationClient({
     registry:
-      registry ?? new DefaultTrackerReadOperations({ getTracker, getPrHost, getConfig }).registry(),
+      registry ??
+      new DefaultTrackerEntityOperations({
+        getTracker,
+        getPrHost,
+        getConfig,
+        cwd: process.cwd(),
+      }).registry(
+        new LaunchOperationAccessPolicy({
+          allowedEffects: ["read", "write", "network", "process"],
+        }),
+      ),
   });
 
   epic
@@ -54,12 +66,16 @@ export function createEpicCommand(
     )
     .action(async (opts: CreateEpicOptions) => {
       const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
-      portableContextGuard.assertPortable(body, { allowLocalPaths: opts.allowLocalPaths });
-      const result = await getTracker().createEpic({
-        title: opts.title,
-        body,
-        labels: opts.labels !== undefined ? opts.labels.split(",") : [],
-      });
+      const result = await operations.invoke(
+        "epic-create",
+        {
+          title: opts.title,
+          body,
+          labels: opts.labels !== undefined ? opts.labels.split(",") : [],
+          allowLocalPaths: opts.allowLocalPaths ?? false,
+        },
+        z.unknown(),
+      );
       process.stdout.write(JSON.stringify(result) + "\n");
     });
 
@@ -77,12 +93,17 @@ export function createEpicCommand(
     )
     .action(async (id: string, opts: EditEpicOptions) => {
       const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
-      portableContextGuard.assertPortable(body, { allowLocalPaths: opts.allowLocalPaths });
-      const result = await getTracker().updateEpicDescription(id, {
-        body,
-        ...(opts.title !== undefined ? { title: opts.title } : {}),
-        ...(opts.labels !== undefined ? { labels: opts.labels.split(",") } : {}),
-      });
+      const result = await operations.invoke(
+        "epic-edit",
+        {
+          id,
+          body,
+          ...(opts.title !== undefined ? { title: opts.title } : {}),
+          ...(opts.labels !== undefined ? { labels: opts.labels.split(",") } : {}),
+          allowLocalPaths: opts.allowLocalPaths ?? false,
+        },
+        z.unknown(),
+      );
       process.stdout.write(JSON.stringify(result) + "\n");
     });
 
@@ -144,7 +165,11 @@ export function createEpicCommand(
     .argument("<epicId>", "epic id")
     .requiredOption("--initiative <id>", "initiative (milestone) id")
     .action(async (epicId: string, opts: { initiative: string }) => {
-      await getTracker().linkEpicToInitiative(epicId, opts.initiative);
+      await operations.invoke(
+        "epic-link-initiative",
+        { epicId, initiativeId: opts.initiative },
+        z.unknown(),
+      );
     });
 
   return epic;
