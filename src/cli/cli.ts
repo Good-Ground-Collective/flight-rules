@@ -3,7 +3,7 @@ import { Command } from "commander";
 import { createDocCommand } from "../bundled-docs/commands/doc/command.js";
 import { DocOperation } from "../operations/doc-operation.js";
 import { DefaultLocalDiscoveryOperations } from "../operations/local-discovery-operations.js";
-import { LocalDiscoveryCli } from "../operations/local-discovery-cli.js";
+import { CommanderLocalDiscoveryCli } from "../operations/local-discovery-cli.js";
 import {
   LaunchOperationAccessPolicy,
   MapOperationRegistry,
@@ -113,9 +113,10 @@ export function buildProgram(
     operations: [docOperation, ...localOperations.operations()],
     policy: new LaunchOperationAccessPolicy({ allowedEffects: ["read", "process", "network"] }),
   });
-  new LocalDiscoveryCli({ operations: localOperations, registry: operationRegistry }).addTo(
-    program,
-  );
+  new CommanderLocalDiscoveryCli({
+    operations: localOperations,
+    registry: operationRegistry,
+  }).addTo(program);
   program.addCommand(
     createDocCommand({
       getResolver: () => services.docs(),

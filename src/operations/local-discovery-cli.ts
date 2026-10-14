@@ -7,7 +7,7 @@ import { configScopes, type ConfigScope } from "../shared/config-store.js";
 import { ReadinessFailedError } from "../tasks/commands/check/command.js";
 import { ReadinessOptionsSchema, WorkflowSchema } from "../tasks/readiness/readiness.schema.js";
 import { OperationCliError, type OperationRegistry } from "./operation-registry.js";
-import { DefaultLocalDiscoveryOperations } from "./local-discovery-operations.js";
+import type { LocalDiscoveryOperations } from "./local-discovery-operations.js";
 
 const RuntimeFailureReportSchema = z.object({
   tracker: z.null(),
@@ -52,13 +52,22 @@ const ReadinessResultSchema = z.object({
 });
 
 export interface LocalDiscoveryCliProps {
-  operations: DefaultLocalDiscoveryOperations;
+  operations: LocalDiscoveryOperations;
   registry: OperationRegistry;
   readStdin?: () => Promise<string>;
 }
+export interface LocalDiscoveryCommandAdapter {
+  addTo(program: Command): void;
+}
 const LocalDiscoveryCliPropsSchema = z.object({
-  operations: z.custom<DefaultLocalDiscoveryOperations>(
-    (value) => value instanceof DefaultLocalDiscoveryOperations,
+  operations: z.custom<LocalDiscoveryOperations>(
+    (value): value is LocalDiscoveryOperations =>
+      typeof value === "object" &&
+      value !== null &&
+      "operations" in value &&
+      typeof value.operations === "function" &&
+      "configStore" in value &&
+      typeof value.configStore === "function",
   ),
   registry: z.custom<OperationRegistry>(
     (value) => typeof value === "object" && value !== null && "invoke" in value,
@@ -67,8 +76,8 @@ const LocalDiscoveryCliPropsSchema = z.object({
 });
 
 /** Adapts Commander arguments and terminal rendering to the shared local operations. */
-export class LocalDiscoveryCli {
-  private readonly operations: DefaultLocalDiscoveryOperations;
+export class CommanderLocalDiscoveryCli implements LocalDiscoveryCommandAdapter {
+  private readonly operations: LocalDiscoveryOperations;
   private readonly registry: OperationRegistry;
   private readonly readStdin: () => Promise<string>;
 

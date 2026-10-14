@@ -82,14 +82,21 @@ export {
 } from "../operations/doc-operation.js";
 export {
   DefaultLocalDiscoveryOperations,
+  BlankQaRecipeError,
   QaInstructionsNotFoundError,
 } from "../operations/local-discovery-operations.js";
 export type {
   LocalWorkflowEvidence,
   LocalDiscoveryOperations,
 } from "../operations/local-discovery-operations.js";
-export { LocalDiscoveryCli, CharterSelectionError } from "../operations/local-discovery-cli.js";
-export type { LocalDiscoveryCliProps } from "../operations/local-discovery-cli.js";
+export {
+  CommanderLocalDiscoveryCli,
+  CharterSelectionError,
+} from "../operations/local-discovery-cli.js";
+export type {
+  LocalDiscoveryCommandAdapter,
+  LocalDiscoveryCliProps,
+} from "../operations/local-discovery-cli.js";
 export {
   WorkflowSchema,
   WorkflowEvidenceSchema,

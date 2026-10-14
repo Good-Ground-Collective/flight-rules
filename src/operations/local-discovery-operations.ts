@@ -1,4 +1,5 @@
 import { readdirSync } from "node:fs";
+import { resolve } from "node:path";
 import { z } from "zod";
 import type { Config } from "../shared/config.js";
 import { getQaRecipePath, getRfcDir } from "../shared/config.js";
@@ -129,7 +130,7 @@ export class DefaultLocalDiscoveryOperations implements LocalDiscoveryOperations
       this.descriptor(
         "charter",
         "Print the core and applicable language charters.",
-        ["process"],
+        ["read", "process"],
         ["charter"],
         CharterInputSchema,
         z.object({
@@ -143,7 +144,7 @@ export class DefaultLocalDiscoveryOperations implements LocalDiscoveryOperations
       this.descriptor(
         "competencies",
         "Read the configured worker competencies.",
-        ["read"],
+        ["read", "process"],
         ["competencies"],
         z.object({}),
         z.array(z.string()),
@@ -152,7 +153,7 @@ export class DefaultLocalDiscoveryOperations implements LocalDiscoveryOperations
       this.descriptor(
         "rfc-dir",
         "Resolve the RFC directory for this checkout.",
-        ["read"],
+        ["read", "process"],
         ["rfc", "dir"],
         z.object({}),
         RfcDirectoryOutputSchema,
@@ -161,7 +162,7 @@ export class DefaultLocalDiscoveryOperations implements LocalDiscoveryOperations
       this.descriptor(
         "rfc-next-id",
         "Find the next RFC number in the configured RFC directory.",
-        ["read"],
+        ["read", "process"],
         ["rfc", "next-id"],
         z.object({}),
         RfcNextIdOutputSchema,
@@ -170,7 +171,7 @@ export class DefaultLocalDiscoveryOperations implements LocalDiscoveryOperations
       this.descriptor(
         "qa-instructions",
         "Find QA instructions that apply to a directory.",
-        ["read"],
+        ["read", "process"],
         ["qa", "instructions"],
         QaInstructionsInputSchema,
         QaInstructionsSchema,
@@ -188,7 +189,7 @@ export class DefaultLocalDiscoveryOperations implements LocalDiscoveryOperations
       this.descriptor(
         "qa-recipe",
         "Resolve the nearest QA instruction path (deprecated CLI route).",
-        ["read"],
+        ["read", "process"],
         ["qa", "recipe"],
         z.object({}),
         QaRecipeOutputSchema,
@@ -197,7 +198,7 @@ export class DefaultLocalDiscoveryOperations implements LocalDiscoveryOperations
       this.descriptor(
         "config-path",
         "Resolve the config file path for this checkout.",
-        ["read"],
+        ["read", "process"],
         ["config", "path"],
         z.object({}),
         z.object({ path: z.string() }),
@@ -206,7 +207,7 @@ export class DefaultLocalDiscoveryOperations implements LocalDiscoveryOperations
       this.descriptor(
         "config-show",
         "Inspect merged configuration and its sources.",
-        ["read"],
+        ["read", "process"],
         ["config", "show"],
         z.object({}),
         ConfigInspectionSchema,
@@ -282,8 +283,13 @@ export class DefaultLocalDiscoveryOperations implements LocalDiscoveryOperations
 
   private qaInstructions(input: z.infer<typeof QaInstructionsInputSchema>): QaInstructions {
     const config = this.safeConfig();
+    if (config?.qaRecipe !== undefined && config.qaRecipe.trim() === "")
+      throw new BlankQaRecipeError(
+        "qaRecipe is set to a blank value — remove the key and move the recipe into a QA.md (see docs/qa-instructions.md)",
+      );
+
     return (this.props.getQaFinder?.() ?? new QaInstructionsFinder()).discover({
-      from: input.from ?? this.props.cwd,
+      from: input.from === undefined ? this.props.cwd : resolve(this.props.cwd, input.from),
       ...(config === undefined
         ? {}
         : { legacyRecipePath: getQaRecipePath(config, this.props.getConfigPath()) }),
@@ -322,6 +328,10 @@ export class DefaultLocalDiscoveryOperations implements LocalDiscoveryOperations
 
 export class QaInstructionsNotFoundError extends Error {
   override name = "QaInstructionsNotFoundError";
+}
+
+export class BlankQaRecipeError extends Error {
+  override name = "BlankQaRecipeError";
 }
 
 export type LocalWorkflowEvidence = z.infer<typeof WorkflowEvidenceSchema>;

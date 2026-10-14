@@ -8,6 +8,9 @@ import { createFlightRules } from "../../flight-rules/flight-rules.js";
 import { buildProgram } from "../../cli/cli.js";
 import { LaunchOperationAccessPolicy, MapOperationRegistry } from "../operation-registry.js";
 import type { ReadinessReport } from "../../tasks/readiness/readiness.schema.js";
+import { DocCharterCatalog } from "../../bundled-docs/charter-catalog/charter-catalog.js";
+import { GitRepositoryPaths } from "../../bundled-docs/charter-catalog/repository-paths.js";
+import { DefaultLocalDiscoveryOperations } from "../local-discovery-operations.js";
 
 let root: string;
 let configPath: string;
@@ -104,6 +107,157 @@ describe("local discovery operations", () => {
       status: "success",
       data: { id: "RFC-010" },
     });
+  });
+
+  it("resolves relative QA starts from its launch checkout", async () => {
+    mkdirSync(join(root, "sub"));
+    writeFileSync(join(root, "sub", "QA.md"), "Launch checkout QA notes.");
+
+    const registry = registryFor();
+    await expect(registry.invoke("qa-instructions", { from: "sub" })).resolves.toMatchObject({
+      status: "success",
+      data: {
+        found: true,
+        sources: [{ path: join(root, "sub", "QA.md"), content: "Launch checkout QA notes." }],
+      },
+    });
+  });
+
+  it("rejects incomplete effect grants before resolving local services", async () => {
+    const getConfig = vi.fn(() => core.config());
+    const getConfigStore = vi.fn(() => core.configStore());
+    const getCharters = vi.fn(() => new DocCharterCatalog({ docs: core.docs() }));
+    const getRepositoryPaths = vi.fn(() => new GitRepositoryPaths({ cwd: root }));
+    const getEvidence = vi.fn(() => core.evidence());
+    const getReadiness = vi.fn(() => core.readiness());
+    const getProbe = vi.fn(() => core.probe());
+    const getTracker = vi.fn(() => core.tracker());
+    const getConfigPath = vi.fn(() => core.configPath());
+    const operations = new DefaultLocalDiscoveryOperations({
+      cwd: root,
+      getConfig,
+      getConfigStore,
+      getCharters,
+      getRepositoryPaths,
+      getEvidence,
+      getReadiness,
+      getProbe,
+      getTracker,
+      getConfigPath,
+    });
+    const readOnlyRegistry = new MapOperationRegistry({
+      operations: operations.operations(),
+      policy: new LaunchOperationAccessPolicy({ allowedEffects: ["read"] }),
+    });
+    const routes = [
+      ["charter", { paths: ["sample.ts"] }],
+      ["competencies", {}],
+      ["rfc-dir", {}],
+      ["rfc-next-id", {}],
+      ["qa-instructions", {}],
+      ["qa-evidence-dir", { ticket: "FRT-256" }],
+      ["qa-recipe", {}],
+      ["config-path", {}],
+      ["config-show", {}],
+      ["check", {}],
+    ] as const;
+
+    for (const [id, input] of routes) {
+      await expect(readOnlyRegistry.invoke(id, input)).resolves.toMatchObject({
+        status: "error",
+        error: { name: "OperationAccessDeniedError" },
+      });
+    }
+    const processOnlyRegistry = new MapOperationRegistry({
+      operations: operations.operations(),
+      policy: new LaunchOperationAccessPolicy({ allowedEffects: ["process"] }),
+    });
+    await expect(
+      processOnlyRegistry.invoke("charter", { paths: ["sample.ts"] }),
+    ).resolves.toMatchObject({
+      status: "error",
+      error: { name: "OperationAccessDeniedError" },
+    });
+
+    for (const service of [
+      getConfig,
+      getConfigStore,
+      getCharters,
+      getRepositoryPaths,
+      getEvidence,
+      getReadiness,
+      getProbe,
+      getTracker,
+      getConfigPath,
+    ])
+      expect(service).not.toHaveBeenCalled();
+  });
+
+  it("preserves blank QA recipe errors in operations and migrated CLI routes", async () => {
+    const legacyPath = join(root, "home", "legacy-qa.md");
+    writeFileSync(legacyPath, "Legacy capture steps.");
+    writeFileSync(
+      configPath,
+      `---\ntracker: github\nrepo: acme/project\nqaRecipe: ${JSON.stringify(legacyPath)}\n---\n`,
+    );
+    const registry = registryFor();
+    await expect(registry.invoke("qa-instructions", {})).resolves.toMatchObject({
+      status: "success",
+      data: {
+        found: true,
+        sources: [{ path: legacyPath, kind: "legacy-recipe", legacy: true }],
+      },
+    });
+
+    const expectedDiagnostic =
+      "qaRecipe is set to a blank value — remove the key and move the recipe into a QA.md (see docs/qa-instructions.md)";
+
+    const cwd = vi.spyOn(process, "cwd").mockReturnValue(root);
+    const services = {
+      git: () => core.git(),
+      probe: () => ({ probe: vi.fn(async () => []) }),
+      readiness: () => core.readiness(),
+      docs: () => core.docs(),
+      configStore: () => core.configStore(),
+      installation: () => core.installation(),
+      evidence: () => core.evidence(),
+      board: () => core.board(),
+      packets: () => core.packets(),
+      ariadneTokens: () => core.ariadneTokens(),
+      boardSessions: () => core.boardSessions(),
+      boardAgents: () => core.boardAgents(),
+    };
+    const program = buildProgram(
+      (override) => core.tracker(override),
+      (override) => core.config(override),
+      (override) => core.prHost(override),
+      () => core.configPath(),
+      services,
+    );
+    try {
+      for (const recipe of ["", "   "]) {
+        writeFileSync(
+          configPath,
+          `---\ntracker: github\nrepo: acme/project\nqaRecipe: ${JSON.stringify(recipe)}\n---\n`,
+        );
+        for (const id of ["qa-instructions", "qa-recipe"] as const) {
+          await expect(registry.invoke(id, {})).resolves.toMatchObject({
+            status: "error",
+            error: { name: "BlankQaRecipeError", message: expectedDiagnostic },
+          });
+        }
+        for (const route of [
+          ["qa", "instructions"],
+          ["qa", "recipe"],
+        ]) {
+          await expect(program.parseAsync(route, { from: "user" })).rejects.toMatchObject({
+            message: expectedDiagnostic,
+          });
+        }
+      }
+    } finally {
+      cwd.mockRestore();
+    }
   });
 
   it("returns failed readiness checks as validated data and rejects malformed evidence before probing", async () => {
