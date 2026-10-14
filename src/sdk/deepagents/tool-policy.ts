@@ -56,6 +56,7 @@ export interface DeepAgentsToolPolicyContract {
     hostTools: readonly StructuredTool[],
     trackExecution: <T>(execution: () => Promise<T>) => Promise<T>,
     onCapabilityDenied: (error: CapabilityToolDeniedError) => void,
+    additionalToolNames?: readonly string[],
   ): readonly AnyAgentMiddleware[];
 }
 
@@ -92,6 +93,7 @@ export class CapabilityScopedDeepAgentsToolPolicy implements DeepAgentsToolPolic
     hostTools: readonly StructuredTool[],
     trackExecution: <T>(execution: () => Promise<T>) => Promise<T>,
     onCapabilityDenied: (error: CapabilityToolDeniedError) => void,
+    additionalToolNames: readonly string[] = [],
   ): readonly AnyAgentMiddleware[] {
     const permissions = new Set(definition.frontmatter.capabilities);
     const filesystemTools = [
@@ -109,7 +111,11 @@ export class CapabilityScopedDeepAgentsToolPolicy implements DeepAgentsToolPolic
       subagents: [],
       generalPurposeAgent: false,
     });
-    const allowedToolNames = new Set([...hostTools.map((tool) => tool.name), ...filesystemTools]);
+    const allowedToolNames = new Set([
+      ...hostTools.map((tool) => tool.name),
+      ...additionalToolNames,
+      ...filesystemTools,
+    ]);
 
     return [
       filesystem,
