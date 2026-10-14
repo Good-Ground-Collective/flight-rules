@@ -227,11 +227,28 @@ describe("shared operations", () => {
     });
     const routes = cliRouteCoverage.check(program, registry);
     expect(routes).toHaveLength(69);
+    expect(cliRouteCoverage.list().filter((item) => item.status === "supported")).toHaveLength(60);
+    expect(
+      cliRouteCoverage.list().filter((item) => item.status === "pending-migration"),
+    ).toHaveLength(0);
     expect(routes.filter((route) => route.aliases.length > 0)).toEqual([
       { path: ["hook", "pre-bash"], aliases: ["guard-commit"] },
     ]);
     const excluded = cliRouteCoverage.list().filter((item) => item.status === "excluded");
     expect(excluded).toHaveLength(9);
+    expect(excluded.map((item) => item.route.path.join(" ")).sort()).toEqual(
+      [
+        "agents install",
+        "agents status",
+        "board login",
+        "board logout",
+        "hook agent-dispatch",
+        "hook agent-stop",
+        "hook board-heartbeat",
+        "hook pre-bash",
+        "mcp",
+      ].sort(),
+    );
     expect(excluded.find((item) => item.route.path.join(" ") === "mcp")).toMatchObject({
       reason: expect.stringContaining("local stdio transport"),
     });
