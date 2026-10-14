@@ -1288,7 +1288,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.93.0";
+var appVersion = false ? "0.0.0-dev" : "1.94.0";
 
 // src/shared/ariadne/review-packet.schema.ts
 import { z as z14 } from "zod";
@@ -10464,6 +10464,7 @@ var VerifiedImplementationLoop = class {
       context: { ...run2.context, attempt },
       input: {
         ...run2.implementationInput,
+        mode: "implement",
         criteria: [...run2.criteria],
         ...failures.length ? { verifierFailures: failures } : {}
       }
@@ -10474,7 +10475,11 @@ var VerifiedImplementationLoop = class {
       id: `${run2.context.runId}:verification:${attempt}`,
       agent: "code-verifier",
       context: { ...run2.context, attempt },
-      input: { criteria: [...run2.criteria], filesChanged: filesChanged.map((path) => ({ path })) }
+      input: {
+        mode: "verify",
+        criteria: [...run2.criteria],
+        filesChanged: filesChanged.map((path) => ({ path }))
+      }
     };
   }
   readReport(expected, record, schema) {

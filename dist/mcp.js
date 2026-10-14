@@ -2159,8 +2159,360 @@ var DefaultReviewOperations = class {
   }
 };
 
-// src/operations/tracker-read-operations.ts
+// src/operations/tracker-entity-operations.ts
+import { existsSync as existsSync5, realpathSync as realpathSync5, statSync as statSync5 } from "node:fs";
+import { isAbsolute as isAbsolute4, relative as relative4, resolve as resolve6 } from "node:path";
+import { z as z25 } from "zod";
+
+// src/tasks/evidence/evidence.ts
+import { realpathSync as realpathSync3 } from "node:fs";
+import { basename } from "node:path/posix";
+import { z as z21 } from "zod";
+var mediaReference = /(!?)\[([^\]]*)\]\(\s*<?([^\s()<>]+)>?(?:\s+"[^"]*")?\s*\)/g;
+var absoluteTarget = /^[a-zA-Z][a-zA-Z0-9+.-]*:|^\/\/|^#/;
+var localPrefix = /^(?:\.\/)+/;
+var fenceRun2 = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+var AttachmentSpecSchema = z21.string().min(1).transform((spec) => {
+  const hash = spec.lastIndexOf("#");
+  const path = hash > 0 ? spec.slice(0, hash) : spec;
+  const caption = hash > 0 ? spec.slice(hash + 1).trim() : "";
+  return { path, caption: caption.length > 0 ? caption : basename(path) };
+});
+var DuplicateEvidenceNameError = class extends Error {
+  name = "DuplicateEvidenceNameError";
+  constructor(props) {
+    super(`Two attachments share the filename "${props.filename}": ${props.paths.join(", ")}`);
+  }
+};
+var EvidenceUploadFailure = class extends Error {
+  name = "EvidenceUploadFailure";
+  attachments;
+  constructor(props) {
+    super(
+      props.attachments.length === 0 && props.cause instanceof Error ? props.cause.message : "One or more attachments could not be uploaded",
+      { cause: props.cause }
+    );
+    this.attachments = props.attachments;
+  }
+};
+var TrackerEvidenceService = class {
+  tracker;
+  constructor(props) {
+    this.tracker = props.tracker;
+  }
+  async attach(input) {
+    const specs = this.parseSpecs(input.specs);
+    const attachments = [];
+    for (const spec of specs) {
+      try {
+        const uploaded = await this.tracker.addAttachment(input.ticketId, spec.path);
+        attachments.push({
+          ...uploaded,
+          path: spec.path,
+          caption: spec.caption,
+          referenced: false
+        });
+      } catch (cause) {
+        throw new EvidenceUploadFailure({ cause, attachments });
+      }
+    }
+    const byName = /* @__PURE__ */ new Map();
+    for (const attachment of attachments) byName.set(basename(attachment.path), attachment);
+    const rewritten = this.rewriteReferences(input.body, byName);
+    return { body: this.appendUnreferenced(rewritten, attachments), attachments };
+  }
+  prepareBody(input) {
+    const specs = this.parseSpecs(input.specs);
+    const attachments = specs.map((spec) => ({
+      id: "pending",
+      filename: basename(spec.path),
+      mimeType: "application/octet-stream",
+      path: spec.path,
+      caption: spec.caption,
+      referenced: false
+    }));
+    const byName = /* @__PURE__ */ new Map();
+    for (const attachment of attachments) byName.set(basename(attachment.path), attachment);
+    const rewritten = this.rewriteReferences(input.body, byName);
+    return this.appendUnreferenced(rewritten, attachments);
+  }
+  parseSpecs(specs) {
+    const parsed = specs.map((spec) => AttachmentSpecSchema.parse(spec));
+    this.rejectDuplicateNames(parsed);
+    return parsed;
+  }
+  rejectDuplicateNames(specs) {
+    const paths = /* @__PURE__ */ new Map();
+    for (const spec of specs) {
+      const name = basename(spec.path);
+      paths.set(name, [...paths.get(name) ?? [], spec.path]);
+    }
+    for (const [filename, group] of paths) {
+      if (group.length > 1) throw new DuplicateEvidenceNameError({ filename, paths: group });
+    }
+  }
+  rewriteReferences(body, byName) {
+    let fence;
+    return body.split("\n").map((line) => {
+      if (fence === void 0) {
+        const opened = this.openingFence(line);
+        if (opened !== void 0) {
+          fence = opened;
+          return line;
+        }
+        return this.rewriteLine(line, byName);
+      }
+      if (this.closesFence(line, fence)) fence = void 0;
+      return line;
+    }).join("\n");
+  }
+  /**
+   * A line opens a fence when it is a run of >=3 backticks or tildes; a backtick
+   * fence's info string may not itself contain a backtick, which keeps inline
+   * code from being read as a fence.
+   */
+  openingFence(line) {
+    const match = fenceRun2.exec(line);
+    if (match === null) return void 0;
+    const run2 = match[1];
+    const rest = match[2];
+    if (run2 === void 0 || rest === void 0) return void 0;
+    if (run2.charAt(0) === "`" && rest.includes("`")) return void 0;
+    return { char: run2.charAt(0), length: run2.length };
+  }
+  /**
+   * A line closes an open fence only when it is a run of the SAME character, at
+   * least as long as the opening run, with nothing but whitespace after it.
+   */
+  closesFence(line, fence) {
+    const match = fenceRun2.exec(line);
+    if (match === null) return false;
+    const run2 = match[1];
+    const rest = match[2];
+    if (run2 === void 0 || rest === void 0) return false;
+    return run2.charAt(0) === fence.char && run2.length >= fence.length && rest.trim().length === 0;
+  }
+  rewriteLine(line, byName) {
+    let result = "";
+    let last = 0;
+    mediaReference.lastIndex = 0;
+    for (let match = mediaReference.exec(line); match !== null; match = mediaReference.exec(line)) {
+      const whole = match[0];
+      const bang = match[1];
+      const label = match[2];
+      const target = match[3];
+      result += line.slice(last, match.index);
+      const attachment = bang !== void 0 && label !== void 0 && target !== void 0 ? this.resolve(target, byName) : void 0;
+      if (attachment === void 0 || bang === void 0 || label === void 0) {
+        result += whole;
+      } else {
+        attachment.referenced = true;
+        result += `${bang}[${label}](attachment:${attachment.filename})`;
+      }
+      last = match.index + whole.length;
+    }
+    return result + line.slice(last);
+  }
+  resolve(target, byName) {
+    if (absoluteTarget.test(target)) return void 0;
+    if (target.startsWith("/") || /^[a-zA-Z]:[\\/]/.test(target)) {
+      try {
+        const realTarget = realpathSync3(target);
+        return [...byName.values()].find((attachment) => {
+          try {
+            return realpathSync3(attachment.path) === realTarget;
+          } catch {
+            return false;
+          }
+        });
+      } catch {
+        return void 0;
+      }
+    }
+    return byName.get(basename(target.replace(localPrefix, "")));
+  }
+  appendUnreferenced(body, attachments) {
+    let result = body;
+    for (const attachment of attachments) {
+      if (!attachment.referenced)
+        result += `
+
+![${attachment.caption}](attachment:${attachment.filename})`;
+    }
+    return result;
+  }
+};
+
+// src/tasks/portable-context/portable-context.ts
+var tokenStart = String.raw`(?:^|(?<=[\s(\[<{"'\x60=,:;|]))`;
+var localReferencePatterns = [
+  /file:\/\/\S*/g,
+  new RegExp(`${tokenStart}/(?:Users|home)/[^\\s/)\\]>"'\\x60]+\\S*`, "g"),
+  new RegExp(`${tokenStart}~/\\S*`, "g"),
+  /\b[A-Za-z]:\\Users\\\S*/g
+];
+var trailingPunctuation = /[`.,;:!?)\]>"']+$/;
+var maxReported = 5;
+var RegexPortableContextGuard = class {
+  find(body) {
+    return body.split("\n").flatMap(
+      (text, index) => localReferencePatterns.flatMap(
+        (pattern) => [...text.matchAll(pattern)].map((m) => ({ line: index + 1, match: m[0].replace(trailingPunctuation, "") }))
+      )
+    );
+  }
+  assertPortable(body, opts = {}) {
+    if (opts.allowLocalPaths === true) return;
+    const found = this.find(body);
+    if (found.length === 0) return;
+    const listed = found.slice(0, maxReported).map((ref) => `  line ${ref.line}: ${ref.match}`).join("\n");
+    const more = found.length > maxReported ? `
+  \u2026and ${found.length - maxReported} more` : "";
+    throw new Error(
+      `body references files on this machine, which nobody else can open:
+${listed}${more}
+A tracker body must stand on its own for an engineer on a fresh clone. Inline the content, link a published artifact (\`flight-rules tdd create\`, a tracker issue, or a file on the default branch by URL), or use a repo-relative path for code that exists on the default branch. Pass --allow-local-paths only when the path is the subject of the work, not a pointer to context.`
+    );
+  }
+};
+var portableContextGuard = new RegexPortableContextGuard();
+
+// src/tasks/task-tracker/task-tracker.ts
 import { z as z22 } from "zod";
+var TrackerUserSchema = z22.object({
+  accountId: z22.string(),
+  displayName: z22.string()
+});
+var EntityMetadataSchema = z22.object({
+  tddId: z22.number().optional(),
+  epicId: z22.number().optional(),
+  notes: z22.string().optional(),
+  /** Explicit body-format override read first by BodyFormatDetector (docs/bug-report-format.md). */
+  kind: z22.enum(["bug", "story"]).optional(),
+  /** Why a blocked-by edge leaves this ticket's epic, keyed by blocker id (docs/epic-boundaries.md). */
+  crossEpicReasons: z22.record(z22.string(), z22.string()).optional()
+}).passthrough();
+var CommentSchema2 = z22.object({
+  id: z22.string(),
+  body: z22.string(),
+  author: z22.string(),
+  createdAt: z22.string(),
+  updatedAt: z22.string()
+});
+var AttachmentSchema = z22.object({
+  id: z22.string(),
+  filename: z22.string(),
+  mimeType: z22.string(),
+  size: z22.number().optional(),
+  mediaUuid: z22.string().optional()
+});
+var TechnicalDesignSchema = z22.object({
+  id: z22.string(),
+  epicId: z22.string(),
+  url: z22.string().optional(),
+  body: z22.string(),
+  comments: z22.array(CommentSchema2),
+  metadata: EntityMetadataSchema.default({}),
+  updatedAt: z22.string()
+});
+var TicketSchema = z22.object({
+  id: z22.string(),
+  size: z22.literal("ticket"),
+  status: z22.string(),
+  labels: z22.array(z22.string()),
+  title: z22.string(),
+  body: z22.string(),
+  comments: z22.array(CommentSchema2),
+  assignee: z22.string().nullable(),
+  attachments: z22.array(AttachmentSchema).default([]),
+  reporter: z22.string().nullable().default(null),
+  issueType: z22.string().default("unknown"),
+  blockedBy: z22.array(z22.string()).default([]),
+  blocking: z22.array(z22.string()).default([]),
+  metadata: EntityMetadataSchema.default({}),
+  updatedAt: z22.string()
+});
+var EpicSchema = z22.object({
+  id: z22.string(),
+  size: z22.literal("epic"),
+  status: z22.string(),
+  labels: z22.array(z22.string()),
+  title: z22.string(),
+  body: z22.string(),
+  childIssues: z22.array(TicketSchema),
+  comments: z22.array(CommentSchema2),
+  tdd: TechnicalDesignSchema.optional(),
+  metadata: EntityMetadataSchema.default({}),
+  updatedAt: z22.string()
+});
+var CreateEpicInputSchema = z22.object({
+  title: z22.string(),
+  body: z22.string(),
+  labels: z22.array(z22.string()).default([]),
+  metadata: EntityMetadataSchema.partial().optional()
+});
+var CreateTicketInputSchema = z22.object({
+  title: z22.string(),
+  body: z22.string(),
+  /** Absent for a standalone ticket: a ticket-sized RFC has no epic to parent to. */
+  epicId: z22.string().optional(),
+  labels: z22.array(z22.string()).default([]),
+  assignee: z22.string().optional(),
+  metadata: EntityMetadataSchema.partial().optional()
+});
+var CreateTechnicalDesignInputSchema = z22.object({
+  title: z22.string(),
+  body: z22.string(),
+  epicId: z22.string(),
+  metadata: EntityMetadataSchema.partial().optional()
+});
+var UpdateEpicInputSchema = z22.object({
+  body: z22.string(),
+  title: z22.string().optional(),
+  labels: z22.array(z22.string()).optional()
+});
+var UpdateTicketInputSchema = z22.object({
+  body: z22.string(),
+  title: z22.string().optional(),
+  labels: z22.array(z22.string()).optional()
+});
+var UpdateInitiativeInputSchema = z22.object({
+  body: z22.string(),
+  title: z22.string().optional()
+});
+var InitiativeSchema = z22.object({
+  id: z22.string(),
+  size: z22.literal("initiative"),
+  title: z22.string(),
+  body: z22.string(),
+  epics: z22.array(z22.object({ id: z22.string(), title: z22.string() })).default([])
+});
+var CreateInitiativeInputSchema = z22.object({
+  title: z22.string(),
+  body: z22.string()
+});
+var partialWriteErrorSchema = z22.object({
+  name: z22.literal("TaskTrackerPartialWriteError"),
+  id: z22.string().min(1),
+  message: z22.string()
+});
+var TaskTrackerPartialWriteError = class extends Error {
+  name = "TaskTrackerPartialWriteError";
+  id;
+  constructor(props) {
+    super(props.cause instanceof Error ? props.cause.message : String(props.cause), {
+      cause: props.cause
+    });
+    this.id = props.id;
+  }
+  /** Recognizes adapter failures across independently bundled package entry points. */
+  static isPartialWrite(error) {
+    return error instanceof Error && partialWriteErrorSchema.safeParse(error).success;
+  }
+};
+
+// src/operations/tracker-read-operations.ts
+import { z as z23 } from "zod";
 
 // src/tasks/epic-boundary/epic-boundary.ts
 var TrackerRefFormatter = class {
@@ -2619,145 +2971,11 @@ var PrecedenceBodyFormatDetector = class {
 };
 var bodyFormatDetector = new PrecedenceBodyFormatDetector();
 
-// src/tasks/task-tracker/task-tracker.ts
-import { z as z21 } from "zod";
-var TrackerUserSchema = z21.object({
-  accountId: z21.string(),
-  displayName: z21.string()
-});
-var EntityMetadataSchema = z21.object({
-  tddId: z21.number().optional(),
-  epicId: z21.number().optional(),
-  notes: z21.string().optional(),
-  /** Explicit body-format override read first by BodyFormatDetector (docs/bug-report-format.md). */
-  kind: z21.enum(["bug", "story"]).optional(),
-  /** Why a blocked-by edge leaves this ticket's epic, keyed by blocker id (docs/epic-boundaries.md). */
-  crossEpicReasons: z21.record(z21.string(), z21.string()).optional()
-}).passthrough();
-var CommentSchema2 = z21.object({
-  id: z21.string(),
-  body: z21.string(),
-  author: z21.string(),
-  createdAt: z21.string(),
-  updatedAt: z21.string()
-});
-var AttachmentSchema = z21.object({
-  id: z21.string(),
-  filename: z21.string(),
-  mimeType: z21.string(),
-  size: z21.number().optional(),
-  mediaUuid: z21.string().optional()
-});
-var TechnicalDesignSchema = z21.object({
-  id: z21.string(),
-  epicId: z21.string(),
-  url: z21.string().optional(),
-  body: z21.string(),
-  comments: z21.array(CommentSchema2),
-  metadata: EntityMetadataSchema.default({}),
-  updatedAt: z21.string()
-});
-var TicketSchema = z21.object({
-  id: z21.string(),
-  size: z21.literal("ticket"),
-  status: z21.string(),
-  labels: z21.array(z21.string()),
-  title: z21.string(),
-  body: z21.string(),
-  comments: z21.array(CommentSchema2),
-  assignee: z21.string().nullable(),
-  attachments: z21.array(AttachmentSchema).default([]),
-  reporter: z21.string().nullable().default(null),
-  issueType: z21.string().default("unknown"),
-  blockedBy: z21.array(z21.string()).default([]),
-  blocking: z21.array(z21.string()).default([]),
-  metadata: EntityMetadataSchema.default({}),
-  updatedAt: z21.string()
-});
-var EpicSchema = z21.object({
-  id: z21.string(),
-  size: z21.literal("epic"),
-  status: z21.string(),
-  labels: z21.array(z21.string()),
-  title: z21.string(),
-  body: z21.string(),
-  childIssues: z21.array(TicketSchema),
-  comments: z21.array(CommentSchema2),
-  tdd: TechnicalDesignSchema.optional(),
-  metadata: EntityMetadataSchema.default({}),
-  updatedAt: z21.string()
-});
-var CreateEpicInputSchema = z21.object({
-  title: z21.string(),
-  body: z21.string(),
-  labels: z21.array(z21.string()).default([]),
-  metadata: EntityMetadataSchema.partial().optional()
-});
-var CreateTicketInputSchema = z21.object({
-  title: z21.string(),
-  body: z21.string(),
-  /** Absent for a standalone ticket: a ticket-sized RFC has no epic to parent to. */
-  epicId: z21.string().optional(),
-  labels: z21.array(z21.string()).default([]),
-  assignee: z21.string().optional(),
-  metadata: EntityMetadataSchema.partial().optional()
-});
-var CreateTechnicalDesignInputSchema = z21.object({
-  title: z21.string(),
-  body: z21.string(),
-  epicId: z21.string(),
-  metadata: EntityMetadataSchema.partial().optional()
-});
-var UpdateEpicInputSchema = z21.object({
-  body: z21.string(),
-  title: z21.string().optional(),
-  labels: z21.array(z21.string()).optional()
-});
-var UpdateTicketInputSchema = z21.object({
-  body: z21.string(),
-  title: z21.string().optional(),
-  labels: z21.array(z21.string()).optional()
-});
-var UpdateInitiativeInputSchema = z21.object({
-  body: z21.string(),
-  title: z21.string().optional()
-});
-var InitiativeSchema = z21.object({
-  id: z21.string(),
-  size: z21.literal("initiative"),
-  title: z21.string(),
-  body: z21.string(),
-  epics: z21.array(z21.object({ id: z21.string(), title: z21.string() })).default([])
-});
-var CreateInitiativeInputSchema = z21.object({
-  title: z21.string(),
-  body: z21.string()
-});
-var partialWriteErrorSchema = z21.object({
-  name: z21.literal("TaskTrackerPartialWriteError"),
-  id: z21.string().min(1),
-  message: z21.string()
-});
-var TaskTrackerPartialWriteError = class extends Error {
-  name = "TaskTrackerPartialWriteError";
-  id;
-  constructor(props) {
-    super(props.cause instanceof Error ? props.cause.message : String(props.cause), {
-      cause: props.cause
-    });
-    this.id = props.id;
-  }
-  /** Recognizes adapter failures across independently bundled package entry points. */
-  static isPartialWrite(error) {
-    return error instanceof Error && partialWriteErrorSchema.safeParse(error).success;
-  }
-};
-
 // src/operations/tracker-read-operations.ts
-var propsSchema = z22.object({
-  getTracker: z22.custom((value) => typeof value === "function"),
-  getPrHost: z22.custom((value) => typeof value === "function").optional(),
-  getConfig: z22.custom((value) => typeof value === "function").optional()
+var propsSchema = z23.object({
+  getTracker: z23.custom((value) => typeof value === "function"),
+  getPrHost: z23.custom((value) => typeof value === "function").optional(),
+  getConfig: z23.custom((value) => typeof value === "function").optional()
 });
 var sectionNames = [
   "problem-statement",
@@ -2775,73 +2993,73 @@ var sectionNames = [
   "reproduction-notes"
 ];
 var sectionNameSet = new Set(sectionNames);
-var sectionName = z22.string().refine(
+var sectionName = z23.string().refine(
   (value) => sectionNameSet.has(value),
   `unknown section \u2014 expected one of: ${sectionNames.join(", ")}`
 );
-var entityInput = z22.strictObject({ id: z22.string().min(1) });
+var entityInput = z23.strictObject({ id: z23.string().min(1) });
 var ticketInput = entityInput.extend({
   section: sectionName.optional()
 });
 var ticketResult = TicketSchema.passthrough();
-var epicResult = EpicSchema.extend({ childIssues: z22.array(ticketResult) }).passthrough();
+var epicResult = EpicSchema.extend({ childIssues: z23.array(ticketResult) }).passthrough();
 var initiativeResult = InitiativeSchema.extend({
-  epics: z22.array(z22.object({ id: z22.string(), title: z22.string() }).passthrough())
+  epics: z23.array(z23.object({ id: z23.string(), title: z23.string() }).passthrough())
 }).passthrough();
 var tddResult = TechnicalDesignSchema.passthrough();
-var sectionResult = z22.object({
-  id: z22.string(),
-  section: z22.string(),
-  format: z22.enum(["layered-body", "bug-report"]),
-  markdown: z22.string().nullable(),
-  items: z22.array(z22.object({ text: z22.string(), done: z22.boolean() })).optional()
+var sectionResult = z23.object({
+  id: z23.string(),
+  section: z23.string(),
+  format: z23.enum(["layered-body", "bug-report"]),
+  markdown: z23.string().nullable(),
+  items: z23.array(z23.object({ text: z23.string(), done: z23.boolean() })).optional()
 });
-var edgeResult = z22.object({
-  ticket: z22.string(),
-  ticketEpic: z22.string(),
-  blockedBy: z22.string(),
-  blockerEpic: z22.string().nullable(),
-  justification: z22.string().nullable()
+var edgeResult = z23.object({
+  ticket: z23.string(),
+  ticketEpic: z23.string(),
+  blockedBy: z23.string(),
+  blockerEpic: z23.string().nullable(),
+  justification: z23.string().nullable()
 });
-var planTicket = z22.object({
-  id: z22.string(),
-  status: z22.string(),
-  blockedBy: z22.array(z22.string()),
-  epicId: z22.string().optional()
+var planTicket = z23.object({
+  id: z23.string(),
+  status: z23.string(),
+  blockedBy: z23.array(z23.string()),
+  epicId: z23.string().optional()
 });
-var dependencyPlan = z22.object({
-  waves: z22.array(z22.array(planTicket)),
-  cycles: z22.array(z22.string())
+var dependencyPlan = z23.object({
+  waves: z23.array(z23.array(planTicket)),
+  cycles: z23.array(z23.string())
 });
 var TrackerDependencyPlanSchema = dependencyPlan.extend({
-  crossEpicEdges: z22.array(edgeResult),
-  warnings: z22.array(z22.string())
+  crossEpicEdges: z23.array(edgeResult),
+  warnings: z23.array(z23.string())
 });
-var TrackerReviewPlanSchema = z22.object({
-  epic: z22.object({ id: z22.string(), title: z22.string() }).optional(),
-  initiative: z22.object({ id: z22.string(), title: z22.string() }).optional(),
-  defaultBranch: z22.string(),
-  route: z22.enum(["simple", "complex", "incomplete"]),
-  reasons: z22.array(z22.string()),
-  missing: z22.array(z22.string()),
-  blocked: z22.array(
-    z22.object({
-      ticketId: z22.string(),
-      title: z22.string(),
-      wave: z22.number(),
-      blockedBy: z22.array(z22.string()),
-      pr: z22.object({
-        number: z22.number(),
-        url: z22.string(),
-        headRefName: z22.string(),
-        baseRefName: z22.string()
+var TrackerReviewPlanSchema = z23.object({
+  epic: z23.object({ id: z23.string(), title: z23.string() }).optional(),
+  initiative: z23.object({ id: z23.string(), title: z23.string() }).optional(),
+  defaultBranch: z23.string(),
+  route: z23.enum(["simple", "complex", "incomplete"]),
+  reasons: z23.array(z23.string()),
+  missing: z23.array(z23.string()),
+  blocked: z23.array(
+    z23.object({
+      ticketId: z23.string(),
+      title: z23.string(),
+      wave: z23.number(),
+      blockedBy: z23.array(z23.string()),
+      pr: z23.object({
+        number: z23.number(),
+        url: z23.string(),
+        headRefName: z23.string(),
+        baseRefName: z23.string()
       }).nullable()
     })
   ),
-  unblocksOnMerge: z22.array(z22.string()),
-  crossEpicEdges: z22.array(edgeResult),
-  warnings: z22.array(z22.string()),
-  cycles: z22.array(z22.string())
+  unblocksOnMerge: z23.array(z23.string()),
+  crossEpicEdges: z23.array(edgeResult),
+  warnings: z23.array(z23.string()),
+  cycles: z23.array(z23.string())
 });
 var DefaultTrackerReadOperations = class {
   props;
@@ -2856,7 +3074,7 @@ var DefaultTrackerReadOperations = class {
         ["read", "network"],
         ["ticket", "get"],
         ticketInput,
-        z22.union([ticketResult, sectionResult]),
+        z23.union([ticketResult, sectionResult]),
         (input) => this.getTicket(input)
       ),
       this.descriptor(
@@ -2865,7 +3083,7 @@ var DefaultTrackerReadOperations = class {
         ["read", "network"],
         ["ticket", "transitions"],
         entityInput,
-        z22.object({ id: z22.string(), transitions: z22.array(z22.string()) }),
+        z23.object({ id: z23.string(), transitions: z23.array(z23.string()) }),
         async ({ id }) => ({ id, transitions: await this.props.getTracker().listTransitions(id) })
       ),
       this.descriptor(
@@ -2873,8 +3091,8 @@ var DefaultTrackerReadOperations = class {
         "List users available for tracker assignment.",
         ["read", "network"],
         ["users", "get"],
-        z22.strictObject({}),
-        z22.array(TrackerUserSchema.passthrough()),
+        z23.strictObject({}),
+        z23.array(TrackerUserSchema.passthrough()),
         () => this.props.getTracker().getUsers()
       ),
       this.descriptor(
@@ -3050,16 +3268,643 @@ var PullRequestHostUnavailableError = class extends Error {
   name = "PullRequestHostUnavailableError";
 };
 
-// src/operations/pr-operations.ts
-import { realpathSync as realpathSync3, statSync as statSync4 } from "node:fs";
+// src/operations/ticket-lifecycle-operations.ts
+import { existsSync as existsSync4, realpathSync as realpathSync4, statSync as statSync4 } from "node:fs";
 import { isAbsolute as isAbsolute3, relative as relative3, resolve as resolve5 } from "node:path";
-import { z as z25 } from "zod";
+import { z as z24 } from "zod";
+var propsSchema2 = z24.object({
+  getTracker: z24.custom((value) => typeof value === "function"),
+  cwd: z24.string().min(1),
+  trustedRoots: z24.array(z24.string().min(1)).default([])
+});
+var idSchema = z24.string().min(1);
+var blockInput = z24.object({ ticketId: idSchema, blockerId: idSchema, reason: z24.string().optional() }).strict();
+var ticketPairInput = z24.object({ ticketId: idSchema, blockerId: idSchema }).strict();
+var statusInput = z24.object({ id: idSchema, status: z24.string().min(1) }).strict();
+var commentInput = z24.object({
+  id: idSchema,
+  body: z24.string(),
+  attach: z24.array(z24.string().min(1)).default([])
+}).strict();
+var labelInput = z24.object({
+  id: idSchema,
+  add: z24.array(z24.string()).default([]),
+  remove: z24.array(z24.string()).default([])
+}).strict().refine((input) => input.add.length > 0 || input.remove.length > 0, {
+  message: "ticket label needs at least one --add or --remove"
+});
+var blockResult = z24.object({
+  ticketId: idSchema,
+  blockerId: idSchema,
+  ticketEpic: idSchema.nullable(),
+  blockerEpic: idSchema.nullable(),
+  crossEpic: z24.boolean(),
+  reasonRecorded: z24.boolean(),
+  warnings: z24.array(z24.string())
+});
+var blockPartial = z24.object({
+  ticketId: idSchema,
+  blockerId: idSchema,
+  completedSteps: z24.array(z24.string())
+});
+var ticketPairResult = z24.object({ ticketId: idSchema, blockerId: idSchema });
+var statusResult = z24.object({ id: idSchema, status: z24.string() });
+var commentPartial = z24.object({
+  id: idSchema,
+  attachments: z24.array(
+    AttachmentSchema.extend({ path: z24.string(), caption: z24.string(), referenced: z24.boolean() })
+  ),
+  body: z24.string(),
+  completedSteps: z24.array(z24.string())
+});
+var commentResult = z24.union([CommentSchema2, commentPartial]);
+var labelResult = z24.object({
+  id: idSchema,
+  added: z24.array(z24.string()),
+  removed: z24.array(z24.string())
+});
+var labelPartial = z24.object({
+  id: idSchema,
+  added: z24.array(z24.string()),
+  removed: z24.array(z24.string()),
+  requestedAdd: z24.array(z24.string()),
+  requestedRemove: z24.array(z24.string()),
+  completedSteps: z24.array(z24.string())
+});
+var DefaultTicketLifecycleOperations = class {
+  props;
+  roots;
+  constructor(props) {
+    this.props = propsSchema2.parse(props);
+    const roots = this.props.trustedRoots.length === 0 ? [this.props.cwd] : this.props.trustedRoots;
+    this.roots = [...new Set(roots.map((root) => realpathSync4(root)))];
+  }
+  operations() {
+    return [
+      this.descriptor(
+        "ticket-block",
+        "Block a ticket with an epic-boundary justification when needed.",
+        ["write", "network"],
+        ["ticket", "block"],
+        blockInput,
+        z24.union([blockResult, blockPartial]),
+        (input) => this.block(input)
+      ),
+      this.descriptor(
+        "ticket-unblock",
+        "Remove a blocked-by relationship from a ticket.",
+        ["write", "network"],
+        ["ticket", "unblock"],
+        ticketPairInput,
+        ticketPairResult,
+        (input) => this.unblock(input)
+      ),
+      this.descriptor(
+        "ticket-status",
+        "Transition a ticket to a supported tracker status.",
+        ["write", "network"],
+        ["ticket", "status"],
+        statusInput,
+        statusResult,
+        (input) => this.transition(input)
+      ),
+      this.descriptor(
+        "ticket-comment",
+        "Add a ticket comment with trusted evidence attachments.",
+        ["write", "network"],
+        ["ticket", "comment"],
+        commentInput,
+        commentResult,
+        (input) => this.comment(input)
+      ),
+      this.descriptor(
+        "ticket-label",
+        "Remove and add ticket labels in safe order.",
+        ["write", "network"],
+        ["ticket", "label"],
+        labelInput,
+        z24.union([labelPartial, labelResult]),
+        (input) => this.updateLabels(input)
+      )
+    ];
+  }
+  descriptor(id, description, effects, path, inputSchema, outputSchema, handler) {
+    return {
+      id,
+      description,
+      effects,
+      cli: { path, aliases: [] },
+      inputSchema,
+      outputSchema,
+      handler
+    };
+  }
+  async block(input) {
+    const completedSteps = [];
+    const tracker = this.props.getTracker();
+    const observed = {
+      getTicketEpicId: (ticketId) => tracker.getTicketEpicId(ticketId),
+      blockTicket: async (ticketId, blockerId) => {
+        await tracker.blockTicket(ticketId, blockerId);
+        completedSteps.push("blocked-by-linked");
+      },
+      getTicket: (ticketId) => tracker.getTicket(ticketId),
+      addComment: async (ticketId, body) => {
+        const result = await tracker.addComment(ticketId, body);
+        completedSteps.push("reason-commented");
+        return result;
+      },
+      updateTicketMetadata: async (ticketId, patch) => {
+        await tracker.updateTicketMetadata(ticketId, patch);
+        completedSteps.push("reason-recorded");
+      }
+    };
+    try {
+      const outcome = await new EpicBoundaryGuard(observed).block(input);
+      return {
+        ticketId: input.ticketId,
+        blockerId: input.blockerId,
+        ...outcome
+      };
+    } catch (error) {
+      if (completedSteps.length === 0) throw error;
+      return {
+        status: "partial",
+        data: {
+          ticketId: input.ticketId,
+          blockerId: input.blockerId,
+          completedSteps
+        },
+        error: {
+          name: error instanceof Error ? error.name : "Error",
+          message: error instanceof Error ? error.message : String(error)
+        }
+      };
+    }
+  }
+  async unblock(input) {
+    await this.props.getTracker().unblockTicket(input.ticketId, input.blockerId);
+    return input;
+  }
+  async transition(input) {
+    await this.props.getTracker().transitionTicket(input.id, input.status);
+    return input;
+  }
+  async comment(input) {
+    const tracker = this.props.getTracker();
+    const safeSpecs = input.attach.map((spec) => {
+      const parsed = AttachmentSpecSchema.parse(spec);
+      return `${this.trustedFilePath(parsed.path)}#${parsed.caption}`;
+    });
+    const evidence = new TrackerEvidenceService({ tracker });
+    let body = input.body;
+    let attachments = [];
+    if (safeSpecs.length > 0) {
+      try {
+        const attached = await evidence.attach({ ticketId: input.id, body, specs: safeSpecs });
+        body = attached.body;
+        attachments = attached.attachments;
+      } catch (error) {
+        if (!(error instanceof EvidenceUploadFailure) || error.attachments.length === 0)
+          throw error;
+        const rewritten = evidence.prepareBody({
+          body,
+          specs: error.attachments.map((attachment) => `${attachment.path}#${attachment.caption}`)
+        });
+        return {
+          status: "partial",
+          data: {
+            id: input.id,
+            attachments: error.attachments,
+            body: rewritten,
+            completedSteps: error.attachments.map(
+              (attachment) => `attachment-uploaded:${attachment.id}`
+            )
+          },
+          error: {
+            name: error.cause instanceof Error ? error.cause.name : "Error",
+            message: error.cause instanceof Error ? error.cause.message : String(error.cause)
+          }
+        };
+      }
+    }
+    try {
+      return await tracker.addComment(input.id, body);
+    } catch (error) {
+      if (attachments.length === 0) throw error;
+      return {
+        status: "partial",
+        data: {
+          id: input.id,
+          attachments,
+          body,
+          completedSteps: [
+            "attachments-uploaded",
+            ...attachments.map((attachment) => `attachment-uploaded:${attachment.id}`)
+          ]
+        },
+        error: {
+          name: error instanceof Error ? error.name : "Error",
+          message: error instanceof Error ? error.message : String(error)
+        }
+      };
+    }
+  }
+  async updateLabels(input) {
+    const tracker = this.props.getTracker();
+    const completedSteps = [];
+    const added = [];
+    const removed = [];
+    try {
+      for (const label of input.remove) {
+        await tracker.removeLabel(input.id, label);
+        removed.push(label);
+        completedSteps.push(`removed:${label}`);
+      }
+      for (const label of input.add) {
+        await tracker.addLabel(input.id, label);
+        added.push(label);
+        completedSteps.push(`added:${label}`);
+      }
+      return { id: input.id, added: input.add, removed: input.remove };
+    } catch (error) {
+      if (completedSteps.length === 0) throw error;
+      return {
+        status: "partial",
+        data: {
+          id: input.id,
+          added,
+          removed,
+          requestedAdd: input.add,
+          requestedRemove: input.remove,
+          completedSteps
+        },
+        error: {
+          name: error instanceof Error ? error.name : "Error",
+          message: error instanceof Error ? error.message : String(error)
+        }
+      };
+    }
+  }
+  trustedFilePath(path) {
+    const absolute = isAbsolute3(path) ? path : resolve5(this.props.cwd, path);
+    if (!existsSync4(absolute)) throw new Error(`Attachment file does not exist: ${path}`);
+    const realPath = realpathSync4(absolute);
+    const stat = statSync4(realPath);
+    const contained = this.roots.some((root) => {
+      const fromRoot = relative3(root, realPath);
+      return fromRoot === "" || !fromRoot.startsWith("..") && !isAbsolute3(fromRoot);
+    });
+    if (!contained || !stat.isFile())
+      throw new Error(`Attachment file is outside trusted roots: ${path}`);
+    return realPath;
+  }
+};
+
+// src/operations/tracker-entity-operations.ts
+var labelListSchema = z25.array(z25.string()).transform((labels) => [...new Set(labels.map((label) => label.trim()).filter(Boolean))]);
+var labelsSchema = labelListSchema.default([]);
+var createEpicInput = z25.object({
+  ...CreateEpicInputSchema.shape,
+  labels: labelsSchema,
+  allowLocalPaths: z25.boolean().default(false)
+}).strict();
+var updateEpicInput = z25.object({
+  ...UpdateEpicInputSchema.shape,
+  labels: labelListSchema.optional(),
+  allowLocalPaths: z25.boolean().default(false)
+}).strict();
+var createInitiativeInput = CreateInitiativeInputSchema.extend({
+  allowLocalPaths: z25.boolean().default(false)
+}).strict();
+var updateInitiativeInput = UpdateInitiativeInputSchema.extend({
+  allowLocalPaths: z25.boolean().default(false)
+}).strict();
+var createTicketInput = z25.object({
+  ...CreateTicketInputSchema.shape,
+  labels: labelsSchema,
+  allowLocalPaths: z25.boolean().default(false)
+}).strict();
+var updateTicketInput = z25.object({
+  ...UpdateTicketInputSchema.shape,
+  labels: labelListSchema.optional(),
+  allowLocalPaths: z25.boolean().default(false),
+  attach: z25.array(z25.string().min(1)).default([])
+}).strict();
+var createTddInput = CreateTechnicalDesignInputSchema.extend({
+  allowLocalPaths: z25.boolean().default(false)
+}).strict();
+var entityId = z25.string().min(1);
+var linkInput = z25.object({ epicId: entityId, initiativeId: entityId }).strict();
+var partialTicketEdit = z25.object({
+  id: entityId,
+  attachments: z25.array(AttachmentSchema),
+  body: z25.string()
+});
+var ticketEditResult = z25.union([TicketSchema, partialTicketEdit]);
+var partialTicketCreate = z25.object({ id: entityId, title: z25.string() });
+var ticketCreateResult = z25.union([TicketSchema, partialTicketCreate]);
+var partialEntityWrite = z25.object({
+  id: entityId,
+  title: z25.string().optional(),
+  body: z25.string().optional()
+});
+var partialTddCreate = z25.object({ id: entityId, epicId: entityId, body: z25.string() });
+var propsSchema3 = z25.object({
+  getTracker: z25.custom((value) => typeof value === "function"),
+  getPrHost: z25.custom((value) => typeof value === "function").optional(),
+  getConfig: z25.custom((value) => typeof value === "function").optional(),
+  cwd: z25.string().min(1),
+  trustedRoots: z25.array(z25.string().min(1)).default([])
+});
+var DefaultTrackerEntityOperations = class {
+  props;
+  roots;
+  constructor(props) {
+    this.props = propsSchema3.parse(props);
+    const roots = this.props.trustedRoots.length === 0 ? [this.props.cwd] : this.props.trustedRoots;
+    this.roots = [...new Set(roots.map((root) => realpathSync5(root)))];
+  }
+  operations() {
+    return [
+      ...new DefaultTrackerReadOperations({
+        getTracker: this.props.getTracker,
+        ...this.props.getPrHost === void 0 ? {} : { getPrHost: this.props.getPrHost },
+        ...this.props.getConfig === void 0 ? {} : { getConfig: this.props.getConfig }
+      }).operations(),
+      ...new DefaultTicketLifecycleOperations({
+        getTracker: this.props.getTracker,
+        cwd: this.props.cwd,
+        trustedRoots: this.props.trustedRoots
+      }).operations(),
+      this.descriptor(
+        "epic-create",
+        "Create an epic with portable context and labels.",
+        ["write", "network"],
+        ["epic", "create"],
+        createEpicInput,
+        z25.union([EpicSchema, partialEntityWrite]),
+        (input) => this.createEpic(input)
+      ),
+      this.descriptor(
+        "epic-edit",
+        "Update an epic description, title, or labels.",
+        ["write", "network"],
+        ["epic", "edit"],
+        z25.object({ id: entityId, ...updateEpicInput.shape }).strict(),
+        z25.union([EpicSchema, partialEntityWrite]),
+        ({ id, ...input }) => this.editEpic(id, input)
+      ),
+      this.descriptor(
+        "epic-link-initiative",
+        "Link an epic to an initiative.",
+        ["write", "network"],
+        ["epic", "link-initiative"],
+        linkInput,
+        z25.object({ epicId: entityId, initiativeId: entityId }),
+        async ({ epicId, initiativeId }) => {
+          await this.props.getTracker().linkEpicToInitiative(epicId, initiativeId);
+          return { epicId, initiativeId };
+        }
+      ),
+      this.descriptor(
+        "initiative-create",
+        "Create an initiative with portable context.",
+        ["write", "network"],
+        ["initiative", "create"],
+        createInitiativeInput,
+        z25.union([InitiativeSchema, partialEntityWrite]),
+        (input) => this.createInitiative(input)
+      ),
+      this.descriptor(
+        "initiative-edit",
+        "Update an initiative description or title.",
+        ["write", "network"],
+        ["initiative", "edit"],
+        z25.object({ id: entityId, ...updateInitiativeInput.shape }).strict(),
+        z25.union([InitiativeSchema, partialEntityWrite]),
+        ({ id, ...input }) => this.editInitiative(id, input)
+      ),
+      this.descriptor(
+        "ticket-create",
+        "Create a ticket with its parent, labels, and assignee.",
+        ["write", "network"],
+        ["ticket", "create"],
+        createTicketInput,
+        ticketCreateResult,
+        (input) => this.createTicket(input)
+      ),
+      this.descriptor(
+        "ticket-edit",
+        "Update a ticket and attach local evidence files.",
+        ["write", "network"],
+        ["ticket", "edit"],
+        z25.object({ id: entityId, ...updateTicketInput.shape }).strict(),
+        ticketEditResult,
+        ({ id, ...input }) => this.editTicket(id, input)
+      ),
+      this.descriptor(
+        "tdd-create",
+        "Create a technical design under its parent epic.",
+        ["write", "network"],
+        ["tdd", "create"],
+        createTddInput,
+        z25.union([TechnicalDesignSchema, partialTddCreate]),
+        (input) => this.createTdd(input)
+      )
+    ];
+  }
+  registry(policy) {
+    return new MapOperationRegistry({
+      operations: this.operations(),
+      policy: policy ?? new LaunchOperationAccessPolicy({ allowedEffects: ["read", "network", "process"] })
+    });
+  }
+  descriptor(id, description, effects, path, inputSchema, outputSchema, handler) {
+    return {
+      id,
+      description,
+      effects,
+      cli: { path, aliases: [] },
+      inputSchema,
+      outputSchema,
+      handler
+    };
+  }
+  async createEpic(input) {
+    this.assertPortable(input.body, input.allowLocalPaths);
+    const fields = CreateEpicInputSchema.parse(input);
+    try {
+      return await this.props.getTracker().createEpic(fields);
+    } catch (error) {
+      if (!TaskTrackerPartialWriteError.isPartialWrite(error)) throw error;
+      return {
+        status: "partial",
+        data: { id: error.id, title: fields.title, body: fields.body },
+        error: { name: error.name, message: error.message }
+      };
+    }
+  }
+  async editEpic(id, input) {
+    this.assertPortable(input.body, input.allowLocalPaths);
+    const fields = UpdateEpicInputSchema.parse(input);
+    try {
+      return await this.props.getTracker().updateEpicDescription(id, fields);
+    } catch (error) {
+      if (!TaskTrackerPartialWriteError.isPartialWrite(error)) throw error;
+      return {
+        status: "partial",
+        data: {
+          id,
+          ...fields.title === void 0 ? {} : { title: fields.title },
+          body: fields.body
+        },
+        error: { name: error.name, message: error.message }
+      };
+    }
+  }
+  async createInitiative(input) {
+    this.assertPortable(input.body, input.allowLocalPaths);
+    const fields = CreateInitiativeInputSchema.parse(input);
+    try {
+      return await this.props.getTracker().createInitiative(fields);
+    } catch (error) {
+      if (!TaskTrackerPartialWriteError.isPartialWrite(error)) throw error;
+      return {
+        status: "partial",
+        data: { id: error.id, title: fields.title, body: fields.body },
+        error: { name: error.name, message: error.message }
+      };
+    }
+  }
+  async editInitiative(id, input) {
+    this.assertPortable(input.body, input.allowLocalPaths);
+    const fields = UpdateInitiativeInputSchema.parse(input);
+    try {
+      return await this.props.getTracker().updateInitiativeDescription(id, fields);
+    } catch (error) {
+      if (!TaskTrackerPartialWriteError.isPartialWrite(error)) throw error;
+      return {
+        status: "partial",
+        data: {
+          id,
+          ...fields.title === void 0 ? {} : { title: fields.title },
+          body: fields.body
+        },
+        error: { name: error.name, message: error.message }
+      };
+    }
+  }
+  async createTicket(input) {
+    this.assertPortable(input.body, input.allowLocalPaths);
+    const fields = CreateTicketInputSchema.parse(input);
+    try {
+      return await this.props.getTracker().createTicket(fields);
+    } catch (error) {
+      if (!TaskTrackerPartialWriteError.isPartialWrite(error)) throw error;
+      return {
+        status: "partial",
+        data: { id: error.id, title: fields.title },
+        error: { name: error.name, message: error.message }
+      };
+    }
+  }
+  async editTicket(id, input) {
+    const specs = input.attach;
+    const safeSpecs = specs.map((spec) => {
+      const parsed = AttachmentSpecSchema.parse(spec);
+      return `${this.trustedFilePath(parsed.path)}#${parsed.caption}`;
+    });
+    const tracker = this.props.getTracker();
+    const evidence = new TrackerEvidenceService({ tracker });
+    let body = input.body;
+    let attachments = [];
+    if (safeSpecs.length > 0) {
+      body = evidence.prepareBody({ body, specs: safeSpecs });
+      this.assertPortable(body, input.allowLocalPaths);
+      try {
+        const result = await evidence.attach({
+          ticketId: id,
+          body: input.body,
+          specs: safeSpecs
+        });
+        body = result.body;
+        attachments = result.attachments;
+      } catch (error) {
+        if (!(error instanceof EvidenceUploadFailure) || error.attachments.length === 0) {
+          if (error instanceof EvidenceUploadFailure) throw error.cause;
+          throw error;
+        }
+        return {
+          status: "partial",
+          data: { id, attachments: error.attachments, body: input.body },
+          error: {
+            name: error.cause instanceof Error ? error.cause.name : "Error",
+            message: error.cause instanceof Error ? error.cause.message : String(error.cause)
+          }
+        };
+      }
+    } else {
+      this.assertPortable(body, input.allowLocalPaths);
+    }
+    try {
+      const fields = UpdateTicketInputSchema.parse(input);
+      return await tracker.updateTicketDescription(id, { ...fields, body });
+    } catch (error) {
+      if (attachments.length === 0 && !TaskTrackerPartialWriteError.isPartialWrite(error))
+        throw error;
+      return {
+        status: "partial",
+        data: { id, attachments, body },
+        error: {
+          name: error instanceof Error ? error.name : "Error",
+          message: error instanceof Error ? error.message : String(error)
+        }
+      };
+    }
+  }
+  async createTdd(input) {
+    this.assertPortable(input.body, input.allowLocalPaths);
+    const fields = CreateTechnicalDesignInputSchema.parse(input);
+    try {
+      return await this.props.getTracker().createTechnicalDesign(fields);
+    } catch (error) {
+      if (!TaskTrackerPartialWriteError.isPartialWrite(error)) throw error;
+      return {
+        status: "partial",
+        data: { id: error.id, epicId: fields.epicId, body: fields.body },
+        error: { name: error.name, message: error.message }
+      };
+    }
+  }
+  assertPortable(body, allowLocalPaths = false) {
+    portableContextGuard.assertPortable(body, { allowLocalPaths });
+  }
+  trustedFilePath(path) {
+    const absolute = isAbsolute4(path) ? path : resolve6(this.props.cwd, path);
+    if (!existsSync5(absolute)) throw new Error(`Attachment file does not exist: ${path}`);
+    const realPath = realpathSync5(absolute);
+    const stat = statSync5(realPath);
+    const contained = this.roots.some((root) => {
+      const fromRoot = relative4(root, realPath);
+      return fromRoot === "" || !fromRoot.startsWith("..") && !isAbsolute4(fromRoot);
+    });
+    if (!contained || !stat.isFile())
+      throw new Error(`Attachment file is outside trusted roots: ${path}`);
+    return realPath;
+  }
+};
+
+// src/operations/pr-operations.ts
+import { realpathSync as realpathSync6, statSync as statSync6 } from "node:fs";
+import { isAbsolute as isAbsolute5, relative as relative5, resolve as resolve7 } from "node:path";
+import { z as z28 } from "zod";
 
 // src/git/pr-template/pr-template.ts
-import { z as z24 } from "zod";
+import { z as z27 } from "zod";
 
 // src/git/semantic-types.ts
-import { z as z23 } from "zod";
+import { z as z26 } from "zod";
 var semanticTypes = [
   "feat",
   "fix",
@@ -3073,24 +3918,24 @@ var semanticTypes = [
   "style",
   "revert"
 ];
-var SemanticTypeSchema = z23.enum(semanticTypes);
+var SemanticTypeSchema = z26.enum(semanticTypes);
 
 // src/git/pr-template/pr-template.ts
 var maxChangeLineLength = 256;
 var maxChangeLines = 5;
-var PullRequestTemplateSchema = z24.object({
-  type: z24.enum(semanticTypes),
-  scope: z24.string().min(1),
-  description: z24.string().min(1),
-  whatWasChanged: z24.array(z24.string().min(1).max(maxChangeLineLength)).min(1).max(maxChangeLines),
-  whyWasItChanged: z24.string().min(1),
-  otsMaterials: z24.string().min(1).optional(),
-  ticketId: z24.string().min(1).optional(),
-  ticketUrl: z24.url().optional(),
-  baseBranch: z24.string().min(1),
-  headBranch: z24.string().min(1),
-  reviewers: z24.array(z24.string()).default([]),
-  labels: z24.array(z24.string()).default([])
+var PullRequestTemplateSchema = z27.object({
+  type: z27.enum(semanticTypes),
+  scope: z27.string().min(1),
+  description: z27.string().min(1),
+  whatWasChanged: z27.array(z27.string().min(1).max(maxChangeLineLength)).min(1).max(maxChangeLines),
+  whyWasItChanged: z27.string().min(1),
+  otsMaterials: z27.string().min(1).optional(),
+  ticketId: z27.string().min(1).optional(),
+  ticketUrl: z27.url().optional(),
+  baseBranch: z27.string().min(1),
+  headBranch: z27.string().min(1),
+  reviewers: z27.array(z27.string()).default([]),
+  labels: z27.array(z27.string()).default([])
 });
 var DefaultPullRequestBuilder = class {
   build(input) {
@@ -3138,49 +3983,49 @@ var DefaultPullRequestBuilder = class {
 var pullRequestBuilder = new DefaultPullRequestBuilder();
 
 // src/operations/pr-operations.ts
-var propsSchema2 = z25.strictObject({
-  cwd: z25.string().min(1),
-  getHost: z25.custom((value) => typeof value === "function")
+var propsSchema4 = z28.strictObject({
+  cwd: z28.string().min(1),
+  getHost: z28.custom((value) => typeof value === "function")
 });
-var createInput = z25.strictObject({
+var createInput = z28.strictObject({
   type: SemanticTypeSchema,
-  scope: z25.string().min(1),
-  description: z25.string().min(1),
-  why: z25.string().min(1),
-  what: z25.array(z25.string().min(1).max(256)).min(1).max(5),
-  ots: z25.string().min(1).optional(),
-  base: z25.string().min(1),
-  head: z25.string().min(1),
-  ticketId: z25.string().min(1).optional(),
-  ticketUrl: z25.url().optional(),
-  reviewer: z25.array(z25.string()).default([]),
-  label: z25.array(z25.string()).default([]),
-  attach: z25.array(z25.string()).default([])
+  scope: z28.string().min(1),
+  description: z28.string().min(1),
+  why: z28.string().min(1),
+  what: z28.array(z28.string().min(1).max(256)).min(1).max(5),
+  ots: z28.string().min(1).optional(),
+  base: z28.string().min(1),
+  head: z28.string().min(1),
+  ticketId: z28.string().min(1).optional(),
+  ticketUrl: z28.url().optional(),
+  reviewer: z28.array(z28.string()).default([]),
+  label: z28.array(z28.string()).default([]),
+  attach: z28.array(z28.string()).default([])
 });
-var commentInput = z25.strictObject({
-  number: z25.number().int().positive(),
-  body: z25.string(),
-  attach: z25.array(z25.string()).default([])
+var commentInput2 = z28.strictObject({
+  number: z28.number().int().positive(),
+  body: z28.string(),
+  attach: z28.array(z28.string()).default([])
 });
-var listInput = z25.strictObject({ ticket: z25.array(z25.string().min(1)).min(1) });
-var reviewInput2 = z25.strictObject({
-  number: z25.number().int().positive(),
-  reviewer: z25.array(z25.string().min(1)).min(1)
+var listInput = z28.strictObject({ ticket: z28.array(z28.string().min(1)).min(1) });
+var reviewInput2 = z28.strictObject({
+  number: z28.number().int().positive(),
+  reviewer: z28.array(z28.string().min(1)).min(1)
 });
-var createdSchema = z25.object({ number: z25.number().int().positive(), url: z25.string().url() });
-var commentResultSchema = z25.object({ url: z25.string() });
-var openPullRequestSchema = z25.object({
-  ticket: z25.string(),
-  number: z25.number(),
-  url: z25.string(),
-  headRefName: z25.string(),
-  baseRefName: z25.string(),
-  title: z25.string()
+var createdSchema = z28.object({ number: z28.number().int().positive(), url: z28.string().url() });
+var commentResultSchema = z28.object({ url: z28.string() });
+var openPullRequestSchema = z28.object({
+  ticket: z28.string(),
+  number: z28.number(),
+  url: z28.string(),
+  headRefName: z28.string(),
+  baseRefName: z28.string(),
+  title: z28.string()
 });
-var reviewerResultSchema = z25.object({
-  number: z25.number().int().positive(),
-  requested: z25.array(z25.string()),
-  failed: z25.array(z25.object({ login: z25.string(), error: z25.string() }))
+var reviewerResultSchema = z28.object({
+  number: z28.number().int().positive(),
+  requested: z28.array(z28.string()),
+  failed: z28.array(z28.object({ login: z28.string(), error: z28.string() }))
 });
 var PullRequestAttachmentPathError = class extends Error {
   name = "PullRequestAttachmentPathError";
@@ -3192,10 +4037,10 @@ var DefaultPrOperations = class {
   launchInode;
   getHost;
   constructor(props) {
-    const parsed = propsSchema2.parse(props);
-    this.cwd = resolve5(parsed.cwd);
-    this.launchRoot = realpathSync3(this.cwd);
-    const launchStat = statSync4(this.launchRoot);
+    const parsed = propsSchema4.parse(props);
+    this.cwd = resolve7(parsed.cwd);
+    this.launchRoot = realpathSync6(this.cwd);
+    const launchStat = statSync6(this.launchRoot);
     this.launchDevice = launchStat.dev;
     this.launchInode = launchStat.ino;
     this.getHost = parsed.getHost;
@@ -3221,11 +4066,11 @@ var DefaultPrOperations = class {
         this.validateAttachments(input.attach);
         return this.getHost().createPullRequest(template, { attach: input.attach });
       }),
-      this.descriptor("pr-comment", "Post a comment on a pull request.", effects, ["pr", "comment"], commentInput, commentResultSchema, (input) => {
+      this.descriptor("pr-comment", "Post a comment on a pull request.", effects, ["pr", "comment"], commentInput2, commentResultSchema, (input) => {
         this.validateAttachments(input.attach);
         return this.getHost().commentOnPullRequest(input.number, input.body, { attach: input.attach });
       }),
-      this.descriptor("pr-list", "List open pull requests matched to ticket identifiers.", ["read", "network", "process"], ["pr", "list"], listInput, z25.array(openPullRequestSchema), (input) => this.getHost().listOpenPullRequestsForTickets(input.ticket)),
+      this.descriptor("pr-list", "List open pull requests matched to ticket identifiers.", ["read", "network", "process"], ["pr", "list"], listInput, z28.array(openPullRequestSchema), (input) => this.getHost().listOpenPullRequestsForTickets(input.ticket)),
       this.descriptor("pr-request-review", "Request reviewers for a pull request and preserve each outcome.", effects, ["pr", "request-review"], reviewInput2, reviewerResultSchema, async (input) => {
         const result = await this.getHost().requestReviewers(input.number, input.reviewer);
         if (result.failed.length > 0) {
@@ -3253,24 +4098,24 @@ var DefaultPrOperations = class {
       if (pathname.length === 0 || split >= 0 && spec.slice(split + 1).length === 0) {
         throw new PullRequestAttachmentPathError(`Invalid attachment spec: ${spec}`);
       }
-      const candidate = isAbsolute3(pathname) ? pathname : resolve5(this.cwd, pathname);
+      const candidate = isAbsolute5(pathname) ? pathname : resolve7(this.cwd, pathname);
       let canonical;
       try {
-        canonical = realpathSync3(candidate);
-        if (!statSync4(canonical).isFile()) throw new Error("not a file");
+        canonical = realpathSync6(candidate);
+        if (!statSync6(canonical).isFile()) throw new Error("not a file");
       } catch {
         throw new PullRequestAttachmentPathError(`Attachment is not a readable file: ${pathname}`);
       }
-      const fromRoot = relative3(this.launchRoot, canonical);
-      if (fromRoot === ".." || fromRoot.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || isAbsolute3(fromRoot)) {
+      const fromRoot = relative5(this.launchRoot, canonical);
+      if (fromRoot === ".." || fromRoot.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || isAbsolute5(fromRoot)) {
         throw new PullRequestAttachmentPathError(`Attachment must be inside the launch checkout: ${pathname}`);
       }
     }
   }
   requireOriginalLaunchDirectory() {
     try {
-      const directory = statSync4(this.cwd);
-      if (realpathSync3(this.cwd) !== this.launchRoot || directory.dev !== this.launchDevice || directory.ino !== this.launchInode) {
+      const directory = statSync6(this.cwd);
+      if (realpathSync6(this.cwd) !== this.launchRoot || directory.dev !== this.launchDevice || directory.ino !== this.launchInode) {
         throw new Error("replaced");
       }
     } catch {
@@ -3287,7 +4132,7 @@ import { resolve as resolve11 } from "node:path";
 // src/git/git-executor/git-executor.ts
 import { execFile as execFile3 } from "node:child_process";
 import { promisify as promisify3 } from "node:util";
-import { z as z26 } from "zod";
+import { z as z29 } from "zod";
 
 // src/git/branch-namer/branch-namer.ts
 var BranchNamer = class {
@@ -3308,19 +4153,19 @@ var BranchNamer = class {
 var branchNamer = new BranchNamer();
 
 // src/git/git-executor/git-executor.ts
-var NodeGitExecutorPropsSchema = z26.object({
-  cwd: z26.string().min(1).optional(),
-  env: z26.record(z26.string(), z26.string().optional()).default(() => ({ ...process.env })),
-  execFile: z26.custom((value) => typeof value === "function").optional()
+var NodeGitExecutorPropsSchema = z29.object({
+  cwd: z29.string().min(1).optional(),
+  env: z29.record(z29.string(), z29.string().optional()).default(() => ({ ...process.env })),
+  execFile: z29.custom((value) => typeof value === "function").optional()
 });
-var PushSpecSchema = z26.object({
+var PushSpecSchema = z29.object({
   // A detached HEAD makes `rev-parse --abbrev-ref` yield the literal "HEAD", which would push a ref rather than a branch.
-  branch: z26.string().min(1, "branch is required").refine((branch) => branch !== "HEAD", {
+  branch: z29.string().min(1, "branch is required").refine((branch) => branch !== "HEAD", {
     message: "cannot push from a detached HEAD \u2014 check out a branch first"
   }),
-  remote: z26.string().min(1).default("origin"),
+  remote: z29.string().min(1).default("origin"),
   // Defaults true to match the CLI's `--no-set-upstream`, so a programmatic push tracks the branch too.
-  setUpstream: z26.boolean().default(true)
+  setUpstream: z29.boolean().default(true)
 });
 var NodeGitExecutor = class {
   execFile;
@@ -3435,21 +4280,21 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join as join5 } from "node:path";
 import { promisify as promisify4 } from "node:util";
-import { z as z27 } from "zod";
-var GhPullRequestHostPropsSchema = z27.object({
-  repo: z27.string().regex(/^[^/\s]+\/[^/\s]+$/, 'expected "owner/repo"'),
-  cwd: z27.string().min(1).optional(),
-  env: z27.custom(
+import { z as z30 } from "zod";
+var GhPullRequestHostPropsSchema = z30.object({
+  repo: z30.string().regex(/^[^/\s]+\/[^/\s]+$/, 'expected "owner/repo"'),
+  cwd: z30.string().min(1).optional(),
+  env: z30.custom(
     (value) => typeof value === "object" && value !== null && !Array.isArray(value)
   ).optional()
 });
-var GhPullRequestListSchema = z27.array(
-  z27.object({
-    number: z27.number(),
-    url: z27.string(),
-    headRefName: z27.string(),
-    baseRefName: z27.string(),
-    title: z27.string()
+var GhPullRequestListSchema = z30.array(
+  z30.object({
+    number: z30.number(),
+    url: z30.string(),
+    headRefName: z30.string(),
+    baseRefName: z30.string(),
+    title: z30.string()
   })
 );
 var pullUrl = /\/pull\/(\d+)\b/;
@@ -3615,18 +4460,18 @@ var GhPullRequestHost = class {
 };
 
 // src/shared/config-store.ts
-import { existsSync as existsSync7, mkdirSync as mkdirSync4, readFileSync as readFileSync8, writeFileSync as writeFileSync4 } from "node:fs";
+import { existsSync as existsSync9, mkdirSync as mkdirSync4, readFileSync as readFileSync8, writeFileSync as writeFileSync4 } from "node:fs";
 import { dirname as dirname8 } from "node:path";
 
 // src/shared/host-settings/claude-settings-source.ts
-import { existsSync as existsSync4, mkdirSync, readFileSync as readFileSync5, writeFileSync } from "node:fs";
+import { existsSync as existsSync6, mkdirSync, readFileSync as readFileSync5, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname as dirname5, join as join6 } from "node:path";
-import { z as z28 } from "zod";
+import { z as z31 } from "zod";
 var pluginId = "flight-rules@flight-rules";
 var pluginKeyPattern = /^flight-rules(@.+)?$/;
-var SettingsSchema = z28.looseObject({
-  pluginConfigs: z28.record(z28.string(), z28.looseObject({ options: z28.record(z28.string(), z28.unknown()).optional() })).optional()
+var SettingsSchema = z31.looseObject({
+  pluginConfigs: z31.record(z31.string(), z31.looseObject({ options: z31.record(z31.string(), z31.unknown()).optional() })).optional()
 });
 var ClaudeSettingsSource = class {
   host = "claude";
@@ -3652,14 +4497,14 @@ var ClaudeSettingsSource = class {
   }
   read(scope) {
     const path = this.pathFor(scope);
-    if (!existsSync4(path)) return void 0;
+    if (!existsSync6(path)) return void 0;
     const settings = this.parse(path, readFileSync5(path, "utf-8"));
     const key = this.pluginKey(settings);
     return key === void 0 ? void 0 : settings.pluginConfigs?.[key]?.options;
   }
   write(scope, update) {
     const path = this.pathFor(scope);
-    const settings = existsSync4(path) ? this.parse(path, readFileSync5(path, "utf-8")) : {};
+    const settings = existsSync6(path) ? this.parse(path, readFileSync5(path, "utf-8")) : {};
     const key = this.pluginKey(settings) ?? pluginId;
     const pluginConfigs = { ...settings.pluginConfigs };
     const entry = pluginConfigs[key] ?? {};
@@ -3674,7 +4519,7 @@ var ClaudeSettingsSource = class {
   /** settings.local.json is untracked, so a linked worktree starts without one. */
   localPath() {
     const here = join6(this.cwd, ".claude", "settings.local.json");
-    if (this.untrackedCwd === void 0 || existsSync4(here)) return here;
+    if (this.untrackedCwd === void 0 || existsSync6(here)) return here;
     return join6(this.untrackedCwd, ".claude", "settings.local.json");
   }
   parse(path, contents) {
@@ -3693,16 +4538,16 @@ var ClaudeSettingsSource = class {
 };
 
 // src/shared/host-settings/neutral-settings-source.ts
-import { existsSync as existsSync5, mkdirSync as mkdirSync2, readFileSync as readFileSync6, writeFileSync as writeFileSync2 } from "node:fs";
+import { existsSync as existsSync7, mkdirSync as mkdirSync2, readFileSync as readFileSync6, writeFileSync as writeFileSync2 } from "node:fs";
 import { homedir as homedir2 } from "node:os";
 import { dirname as dirname6, join as join7 } from "node:path";
-import { z as z29 } from "zod";
-var PropsSchema = z29.object({
-  cwd: z29.string().min(1),
-  home: z29.string().min(1).default(homedir2),
-  untrackedCwd: z29.string().min(1).optional()
+import { z as z32 } from "zod";
+var PropsSchema = z32.object({
+  cwd: z32.string().min(1),
+  home: z32.string().min(1).default(homedir2),
+  untrackedCwd: z32.string().min(1).optional()
 });
-var SettingsSchema2 = z29.record(z29.string(), z29.unknown());
+var SettingsSchema2 = z32.record(z32.string(), z32.unknown());
 var InvalidSettingsError = class extends Error {
   name = "InvalidSettingsError";
 };
@@ -3716,11 +4561,11 @@ var NeutralSettingsSource = class {
     if (scope === "user") return join7(this.props.home, ".agents", "flight-rules.settings.json");
     if (scope === "project") return join7(this.props.cwd, ".agents", "flight-rules.settings.json");
     const path = join7(this.props.cwd, ".agents", "flight-rules.settings.local.json");
-    return this.props.untrackedCwd === void 0 || existsSync5(path) ? path : join7(this.props.untrackedCwd, ".agents", "flight-rules.settings.local.json");
+    return this.props.untrackedCwd === void 0 || existsSync7(path) ? path : join7(this.props.untrackedCwd, ".agents", "flight-rules.settings.local.json");
   }
   read(scope) {
     const path = this.pathFor(scope);
-    if (!existsSync5(path)) return void 0;
+    if (!existsSync7(path)) return void 0;
     try {
       return SettingsSchema2.parse(JSON.parse(readFileSync6(path, "utf8")));
     } catch (cause) {
@@ -3741,26 +4586,26 @@ var NeutralSettingsSource = class {
 
 // src/plugins/native-installation/native-installation.ts
 import { createHash as createHash2 } from "node:crypto";
-import { existsSync as existsSync6, lstatSync, mkdirSync as mkdirSync3, readFileSync as readFileSync7, realpathSync as realpathSync4, writeFileSync as writeFileSync3 } from "node:fs";
+import { existsSync as existsSync8, lstatSync, mkdirSync as mkdirSync3, readFileSync as readFileSync7, realpathSync as realpathSync7, writeFileSync as writeFileSync3 } from "node:fs";
 import { homedir as homedir3 } from "node:os";
-import { dirname as dirname7, join as join8, resolve as resolve6 } from "node:path";
+import { dirname as dirname7, join as join8, resolve as resolve8 } from "node:path";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
-import { z as z30 } from "zod";
-var NativeHostSchema = z30.enum(["claude", "codex"]);
-var AgentInstallScopeSchema = z30.enum(["project", "user"]);
-var InstallationManifestSchema = z30.strictObject({
+import { z as z33 } from "zod";
+var NativeHostSchema = z33.enum(["claude", "codex"]);
+var AgentInstallScopeSchema = z33.enum(["project", "user"]);
+var InstallationManifestSchema = z33.strictObject({
   host: NativeHostSchema,
-  agents: z30.array(z30.strictObject({
-    name: z30.string().regex(/^[a-z][a-z0-9-]*$/),
-    sha256: z30.string().regex(/^[a-f0-9]{64}$/),
+  agents: z33.array(z33.strictObject({
+    name: z33.string().regex(/^[a-z][a-z0-9-]*$/),
+    sha256: z33.string().regex(/^[a-f0-9]{64}$/),
     registration: AgentRegistrationSchema
   })).min(1)
 }).refine((value) => new Set(value.agents.map((agent) => agent.name)).size === value.agents.length, "Duplicate agent names").refine((value) => value.agents.every((agent) => agent.name === agent.registration.name), "Registration name mismatch");
-var PropsSchema2 = z30.object({
-  root: z30.string().min(1),
-  cwd: z30.string().min(1),
-  home: z30.string().min(1).default(homedir3),
-  env: z30.record(z30.string(), z30.string().optional()).default({})
+var PropsSchema2 = z33.object({
+  root: z33.string().min(1),
+  cwd: z33.string().min(1),
+  home: z33.string().min(1).default(homedir3),
+  env: z33.record(z33.string(), z33.string().optional()).default({})
 });
 var NativeInstallationError = class extends Error {
   name = "NativeInstallationError";
@@ -3772,23 +4617,23 @@ var FileNativeInstallation = class _FileNativeInstallation {
   }
   host() {
     const path = join8(this.props.root, "flight-rules-install.json");
-    return existsSync6(path) ? this.manifest(this.props.root).host : void 0;
+    return existsSync8(path) ? this.manifest(this.props.root).host : void 0;
   }
   status(scope) {
     const selected = AgentInstallScopeSchema.parse(scope);
     const root = this.codexRoot();
     const manifest = this.manifest(root);
-    const directory = selected === "project" ? resolve6(this.props.cwd, ".codex", "agents") : resolve6(this.props.env["CODEX_HOME"] || join8(this.props.home, ".codex"), "agents");
+    const directory = selected === "project" ? resolve8(this.props.cwd, ".codex", "agents") : resolve8(this.props.env["CODEX_HOME"] || join8(this.props.home, ".codex"), "agents");
     this.assertRegularPath(directory);
     const agents = manifest.agents.map((agent) => {
       const source = join8(root, ".codex", "agents", `${agent.name}.toml`);
       this.assertRegularPath(source);
-      if (!existsSync6(source) || !lstatSync(source).isFile() || this.hash(readFileSync7(source)) !== agent.sha256) {
+      if (!existsSync8(source) || !lstatSync(source).isFile() || this.hash(readFileSync7(source)) !== agent.sha256) {
         throw new NativeInstallationError(`Bundled registration is missing or changed: ${source}. Rebuild or reinstall the Codex plugin.`);
       }
       const path = join8(directory, `${agent.name}.toml`);
       this.assertRegularPath(path);
-      const status = !existsSync6(path) ? "missing" : lstatSync(path).isFile() && this.hash(readFileSync7(path)) === agent.sha256 ? "present" : "conflict";
+      const status = !existsSync8(path) ? "missing" : lstatSync(path).isFile() && this.hash(readFileSync7(path)) === agent.sha256 ? "present" : "conflict";
       return { name: agent.name, path, status };
     });
     return {
@@ -3816,10 +4661,10 @@ var FileNativeInstallation = class _FileNativeInstallation {
     return this.status(scope);
   }
   codexRoot() {
-    const root = resolve6(this.props.root);
+    const root = resolve8(this.props.root);
     if (this.host() === "codex") return root;
     const target = join8(root, "dist", "codex");
-    if (existsSync6(join8(target, "flight-rules-install.json")) && this.manifest(target).host === "codex") return target;
+    if (existsSync8(join8(target, "flight-rules-install.json")) && this.manifest(target).host === "codex") return target;
     throw new NativeInstallationError("Codex registrations are unavailable in this installation. Run agents install from the Codex plugin or the complete npm package. Claude discovers agents through its native plugin installation.");
   }
   manifest(root) {
@@ -3833,8 +4678,8 @@ var FileNativeInstallation = class _FileNativeInstallation {
     return createHash2("sha256").update(contents).digest("hex");
   }
   assertRegularPath(path) {
-    let current = resolve6(path);
-    const anchors = [this.props.cwd, this.props.home, this.props.env["CODEX_HOME"], this.props.root].filter((anchor) => anchor !== void 0).map((anchor) => resolve6(anchor));
+    let current = resolve8(path);
+    const anchors = [this.props.cwd, this.props.home, this.props.env["CODEX_HOME"], this.props.root].filter((anchor) => anchor !== void 0).map((anchor) => resolve8(anchor));
     while (!anchors.includes(current) && dirname7(current) !== current) {
       try {
         if (lstatSync(current).isSymbolicLink()) throw new NativeInstallationError(`Refusing symlinked installation path: ${current}`);
@@ -3843,7 +4688,7 @@ var FileNativeInstallation = class _FileNativeInstallation {
       }
       current = dirname7(current);
     }
-    if (existsSync6(current)) realpathSync4(current);
+    if (existsSync8(current)) realpathSync7(current);
   }
   static fromInstall(props) {
     return new _FileNativeInstallation({
@@ -3883,7 +4728,7 @@ var ConfigStore = class {
     const host = this.hostSettings.host === "codex" ? "codex" : "claude";
     const here = resolveConfigPath(this.cwd, override, this.pathProbe, host);
     if (override !== void 0 || this.untrackedRoot === void 0) return here;
-    const isFile = this.pathProbe?.isFile.bind(this.pathProbe) ?? existsSync7;
+    const isFile = this.pathProbe?.isFile.bind(this.pathProbe) ?? existsSync9;
     return isFile(here) ? here : resolveConfigPath(this.untrackedRoot, void 0, this.pathProbe, host);
   }
   pathFor(scope) {
@@ -3971,7 +4816,7 @@ var ConfigStore = class {
   readLayer(scope) {
     const path = this.pathFor(scope);
     if (scope === "file") {
-      if (!existsSync7(path)) return { scope, path, present: false, values: {} };
+      if (!existsSync9(path)) return { scope, path, present: false, values: {} };
       return { scope, path, present: true, values: parseFrontmatter(readFileSync8(path, "utf-8")) };
     }
     const values = this.hostSettings.read(scope);
@@ -3983,7 +4828,7 @@ var ConfigStore = class {
       return;
     }
     const path = this.filePath();
-    const contents = existsSync7(path) ? readFileSync8(path, "utf-8") : void 0;
+    const contents = existsSync9(path) ? readFileSync8(path, "utf-8") : void 0;
     mkdirSync4(dirname8(path), { recursive: true });
     const values = update(contents === void 0 ? {} : parseFrontmatter(contents));
     const body = contents?.replace(/^---\n[\s\S]*?\n---\n?/, "") ?? "";
@@ -4023,7 +4868,7 @@ ${lines.join("\n")}
 
 // src/git/worktree-locator/worktree-locator.ts
 import { execFileSync as execFileSync2 } from "node:child_process";
-import { basename, dirname as dirname9 } from "node:path";
+import { basename as basename2, dirname as dirname9 } from "node:path";
 var WorktreeLocator = class {
   execFileSync;
   constructor(props = {}) {
@@ -4039,7 +4884,7 @@ var WorktreeLocator = class {
     }
     const [gitDir, commonDir] = output.trim().split("\n");
     if (gitDir === void 0 || commonDir === void 0 || gitDir === commonDir) return void 0;
-    if (basename(commonDir) !== ".git") return void 0;
+    if (basename2(commonDir) !== ".git") return void 0;
     return dirname9(commonDir);
   }
 };
@@ -4072,11 +4917,11 @@ var EvidenceLocation = class {
 };
 
 // src/shared/env.ts
-import { z as z31 } from "zod";
-var EnvSchema = z31.object({
-  githubToken: z31.string().optional(),
-  jiraToken: z31.string().optional(),
-  jiraEmail: z31.string().optional(),
+import { z as z34 } from "zod";
+var EnvSchema = z34.object({
+  githubToken: z34.string().optional(),
+  jiraToken: z34.string().optional(),
+  jiraEmail: z34.string().optional(),
   jiraHost: JiraHostSchema.optional()
 });
 var EnvLoader = class {
@@ -4105,7 +4950,7 @@ var EnvLoader = class {
 var appVersion = typeof _appVersion === "undefined" ? "0.0.0-dev" : _appVersion;
 
 // src/shared/ariadne/review-packet.schema.ts
-import { z as z32 } from "zod";
+import { z as z35 } from "zod";
 var packetLimits = {
   title: 200,
   objective: 600,
@@ -4121,74 +4966,74 @@ var packetLimits = {
 };
 var focusAreaKinds = ["design-pattern", "business-logic", "data-schema", "other"];
 var anchorSides = ["LEFT", "RIGHT"];
-var textSchema = (max) => z32.string().min(1, "must not be blank").max(max, `must be at most ${max} characters`);
+var textSchema = (max) => z35.string().min(1, "must not be blank").max(max, `must be at most ${max} characters`);
 var oneLineTextSchema = (max) => textSchema(max).refine((value) => !/[\r\n]/.test(value), "must be one line");
-var PositiveIntSchema = z32.number().int().positive();
+var PositiveIntSchema = z35.number().int().positive();
 var PacketIdSchema = AgentRecordIdSchema;
-var OperationIdSchema2 = z32.string().regex(/^[A-Za-z0-9_-]{16,80}$/, "must be 16\u201380 letters, digits, underscores or hyphens");
-var HeadShaSchema2 = z32.string().regex(/^[0-9a-f]{40}$/, "must be a 40-character lowercase hex commit sha");
-var GithubLoginSchema = z32.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/, "must be a GitHub login");
-var PacketAnchorSchema = z32.strictObject({
+var OperationIdSchema2 = z35.string().regex(/^[A-Za-z0-9_-]{16,80}$/, "must be 16\u201380 letters, digits, underscores or hyphens");
+var HeadShaSchema2 = z35.string().regex(/^[0-9a-f]{40}$/, "must be a 40-character lowercase hex commit sha");
+var GithubLoginSchema = z35.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/, "must be a GitHub login");
+var PacketAnchorSchema = z35.strictObject({
   path: textSchema(packetLimits.path),
   line: PositiveIntSchema,
   startLine: optionalSchema(PositiveIntSchema),
-  side: z32.enum(anchorSides)
+  side: z35.enum(anchorSides)
 }).refine((anchor) => anchor.startLine === void 0 || anchor.startLine < anchor.line, {
   path: ["startLine"],
   message: "must be before line"
 });
-var SignOffTimeSchema = z32.string().regex(/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,3})?Z$/, "must be an ISO 8601 UTC time ending in Z").refine((value) => {
+var SignOffTimeSchema = z35.string().regex(/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,3})?Z$/, "must be an ISO 8601 UTC time ending in Z").refine((value) => {
   const [year = 0, month = 0, day = 0] = value.slice(0, 10).split("-").map(Number);
   const date = new Date(Date.UTC(year, month - 1, day));
   return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
 }, "must be a real calendar date");
-var FocusAreaSchema = z32.strictObject({
+var FocusAreaSchema = z35.strictObject({
   id: AgentRecordIdSchema,
-  kind: z32.enum(focusAreaKinds),
+  kind: z35.enum(focusAreaKinds),
   title: oneLineTextSchema(packetLimits.title),
   rationale: textSchema(packetLimits.rationale),
-  anchors: z32.array(PacketAnchorSchema).max(packetLimits.anchors, `up to ${packetLimits.anchors} anchors`)
+  anchors: z35.array(PacketAnchorSchema).max(packetLimits.anchors, `up to ${packetLimits.anchors} anchors`)
 });
-var PacketPrSchema = z32.strictObject({
-  repo: z32.string().regex(/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9_.-]{1,100}$/, "must be owner/name"),
+var PacketPrSchema = z35.strictObject({
+  repo: z35.string().regex(/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9_.-]{1,100}$/, "must be owner/name"),
   number: PositiveIntSchema,
   headSha: HeadShaSchema2,
   title: oneLineTextSchema(packetLimits.title),
   ticket: optionalSchema(oneLineTextSchema(packetLimits.ticket)),
-  signOff: z32.strictObject({ at: SignOffTimeSchema, headSha: HeadShaSchema2 }).nullable().optional(),
-  focusAreas: z32.array(FocusAreaSchema).max(packetLimits.focusAreas, `up to ${packetLimits.focusAreas} focus areas per PR`)
+  signOff: z35.strictObject({ at: SignOffTimeSchema, headSha: HeadShaSchema2 }).nullable().optional(),
+  focusAreas: z35.array(FocusAreaSchema).max(packetLimits.focusAreas, `up to ${packetLimits.focusAreas} focus areas per PR`)
 });
-var PacketInputSchema = z32.strictObject({
+var PacketInputSchema = z35.strictObject({
   id: PacketIdSchema,
   title: oneLineTextSchema(packetLimits.title),
-  overview: z32.strictObject({
+  overview: z35.strictObject({
     objective: textSchema(packetLimits.objective),
-    highlights: z32.array(oneLineTextSchema(packetLimits.highlight)).min(1, "at least 1 highlight").max(packetLimits.highlights, `up to ${packetLimits.highlights} highlights`)
+    highlights: z35.array(oneLineTextSchema(packetLimits.highlight)).min(1, "at least 1 highlight").max(packetLimits.highlights, `up to ${packetLimits.highlights} highlights`)
   }),
-  prs: z32.array(PacketPrSchema).min(1, "at least 1 PR").max(packetLimits.prs, `up to ${packetLimits.prs} PRs`),
-  reviewers: z32.array(GithubLoginSchema).min(1, "at least 1 reviewer").max(packetLimits.reviewers, `up to ${packetLimits.reviewers} reviewers`)
+  prs: z35.array(PacketPrSchema).min(1, "at least 1 PR").max(packetLimits.prs, `up to ${packetLimits.prs} PRs`),
+  reviewers: z35.array(GithubLoginSchema).min(1, "at least 1 reviewer").max(packetLimits.reviewers, `up to ${packetLimits.reviewers} reviewers`)
 });
-var PacketUpdateSchema = z32.strictObject({
-  expectedRevision: z32.number().int().nonnegative(),
+var PacketUpdateSchema = z35.strictObject({
+  expectedRevision: z35.number().int().nonnegative(),
   operationId: OperationIdSchema2,
   packet: PacketInputSchema.omit({ id: true })
 });
-var GithubSnapshotSchema = z32.looseObject({ id: z32.union([z32.string(), z32.number()]), login: z32.string() });
-var PacketSchema = z32.looseObject({
-  id: z32.string(),
-  authorId: z32.string(),
-  title: z32.string(),
-  overview: z32.looseObject({ objective: z32.string(), highlights: z32.array(z32.string()) }),
-  prs: z32.array(z32.looseObject({ repo: z32.string(), number: z32.number() })),
-  reviewers: z32.array(z32.looseObject({ id: z32.string(), github: GithubSnapshotSchema })),
-  status: z32.enum(["open", "closed"]),
-  revision: z32.number().int(),
-  createdAt: z32.string(),
-  updatedAt: z32.string()
+var GithubSnapshotSchema = z35.looseObject({ id: z35.union([z35.string(), z35.number()]), login: z35.string() });
+var PacketSchema = z35.looseObject({
+  id: z35.string(),
+  authorId: z35.string(),
+  title: z35.string(),
+  overview: z35.looseObject({ objective: z35.string(), highlights: z35.array(z35.string()) }),
+  prs: z35.array(z35.looseObject({ repo: z35.string(), number: z35.number() })),
+  reviewers: z35.array(z35.looseObject({ id: z35.string(), github: GithubSnapshotSchema })),
+  status: z35.enum(["open", "closed"]),
+  revision: z35.number().int(),
+  createdAt: z35.string(),
+  updatedAt: z35.string()
 });
-var ReviewerSchema = z32.looseObject({ id: z32.string(), name: z32.string(), github: GithubSnapshotSchema });
-var PacketResponseSchema = z32.looseObject({ packet: PacketSchema }).transform((response) => response.packet);
-var ReviewerListResponseSchema = z32.looseObject({ reviewers: z32.array(ReviewerSchema) });
+var ReviewerSchema = z35.looseObject({ id: z35.string(), name: z35.string(), github: GithubSnapshotSchema });
+var PacketResponseSchema = z35.looseObject({ packet: PacketSchema }).transform((response) => response.packet);
+var ReviewerListResponseSchema = z35.looseObject({ reviewers: z35.array(ReviewerSchema) });
 
 // src/shared/ariadne/ariadne-transport.ts
 var FetchAriadneTransport = class {
@@ -4366,10 +5211,10 @@ var AriadneClient = class {
 };
 
 // src/shared/ariadne/board-session-store.ts
-import { z as z33 } from "zod";
+import { z as z36 } from "zod";
 
 // src/shared/ariadne/board-state-files.ts
-import { existsSync as existsSync8, mkdirSync as mkdirSync5, readFileSync as readFileSync9, readdirSync as readdirSync3, rmSync, statSync as statSync5, writeFileSync as writeFileSync5 } from "node:fs";
+import { existsSync as existsSync10, mkdirSync as mkdirSync5, readFileSync as readFileSync9, readdirSync as readdirSync3, rmSync, statSync as statSync7, writeFileSync as writeFileSync5 } from "node:fs";
 import { homedir as homedir4 } from "node:os";
 import { join as join10 } from "node:path";
 var stateIdPattern = /^[A-Za-z0-9_-]{1,80}$/;
@@ -4389,7 +5234,7 @@ var BoardStateFiles = class {
   }
   read(folder, id, schema) {
     const path = this.pathFor(folder, id);
-    if (path === void 0 || !existsSync8(path)) return void 0;
+    if (path === void 0 || !existsSync10(path)) return void 0;
     try {
       const parsed = schema.safeParse(JSON.parse(readFileSync9(path, "utf-8")));
       return parsed.success ? parsed.data : void 0;
@@ -4422,12 +5267,12 @@ var BoardStateFiles = class {
   /** Deletes a folder's files last written more than `maxAgeMs` ago. */
   prune(folder, maxAgeMs) {
     const dir = this.folder(folder);
-    if (!existsSync8(dir)) return;
+    if (!existsSync10(dir)) return;
     const cutoff = this.now() - maxAgeMs;
     for (const name of readdirSync3(dir)) {
       const path = join10(dir, name);
       try {
-        if (statSync5(path).mtimeMs < cutoff) rmSync(path, { force: true });
+        if (statSync7(path).mtimeMs < cutoff) rmSync(path, { force: true });
       } catch {
         continue;
       }
@@ -4442,35 +5287,35 @@ var BoardStateFiles = class {
 };
 
 // src/shared/ariadne/board-session-store.ts
-var HeartbeatRecordSchema = z33.object({
-  session: z33.string(),
-  step: z33.string(),
-  state: z33.enum(agentStates),
-  ticket: z33.string().optional(),
-  repo: z33.string().optional(),
-  branch: z33.string().optional(),
-  skill: z33.string().optional(),
-  detail: z33.string().optional()
+var HeartbeatRecordSchema = z36.object({
+  session: z36.string(),
+  step: z36.string(),
+  state: z36.enum(agentStates),
+  ticket: z36.string().optional(),
+  repo: z36.string().optional(),
+  branch: z36.string().optional(),
+  skill: z36.string().optional(),
+  detail: z36.string().optional()
 });
-var SessionRecordSchema = z33.object({
+var SessionRecordSchema = z36.object({
   heartbeat: HeartbeatRecordSchema,
   /** When a skill last posted this heartbeat. */
-  recordedAt: z33.number(),
+  recordedAt: z36.number(),
   /** When any heartbeat for the session was last sent, by a skill or the hook. */
-  sentAt: z33.number()
+  sentAt: z36.number()
 });
-var InferredRecordSchema = z33.object({
+var InferredRecordSchema = z36.object({
   heartbeat: HeartbeatRecordSchema,
   /** When the hook last sent this inferred heartbeat. */
-  sentAt: z33.number()
+  sentAt: z36.number()
 });
-var ThreadRecordSchema = z33.object({
+var ThreadRecordSchema = z36.object({
   /** The board session a skill last posted to by default from this Claude Code session. */
-  board: z33.string().optional(),
+  board: z36.string().optional(),
   /** When the hook last spawned a branch lookup for this Claude Code session's main thread. */
-  branchCheckedAt: z33.number().optional()
+  branchCheckedAt: z36.number().optional()
 });
-var ThreadSkillRecordSchema = z33.object({ skill: z33.string() });
+var ThreadSkillRecordSchema = z36.object({ skill: z36.string() });
 var inferredFolder = "inferred";
 var threadsFolder = "threads";
 var threadSkillsFolder = "thread-skills";
@@ -5102,7 +5947,7 @@ var AriadnePackets = class {
 };
 
 // src/shared/ariadne/ariadne-token-store.ts
-import { chmodSync, existsSync as existsSync9, mkdirSync as mkdirSync6, readFileSync as readFileSync10, rmSync as rmSync2, writeFileSync as writeFileSync6 } from "node:fs";
+import { chmodSync, existsSync as existsSync11, mkdirSync as mkdirSync6, readFileSync as readFileSync10, rmSync as rmSync2, writeFileSync as writeFileSync6 } from "node:fs";
 import { homedir as homedir5 } from "node:os";
 import { dirname as dirname11, join as join11 } from "node:path";
 var agentTokenPattern = /^ariadne_agent_[0-9a-f]{16}_[A-Za-z0-9_-]{43}$/;
@@ -5129,7 +5974,7 @@ var AriadneTokenStore = class {
       if (value2 !== void 0 && value2 !== "") return { token: value2, source: name };
     }
     const path = this.path();
-    if (!existsSync9(path)) return void 0;
+    if (!existsSync11(path)) return void 0;
     const value = readFileSync10(path, "utf-8").trim();
     return value === "" ? void 0 : { token: value, source: "file" };
   }
@@ -5155,37 +6000,37 @@ var AriadneTokenStore = class {
   /** Deletes the saved token; returns whether one existed. */
   remove() {
     const path = this.path();
-    if (!existsSync9(path)) return false;
+    if (!existsSync11(path)) return false;
     rmSync2(path);
     return true;
   }
 };
 
 // src/shared/ariadne/board-agent-store.ts
-import { existsSync as existsSync10, readdirSync as readdirSync4 } from "node:fs";
+import { existsSync as existsSync12, readdirSync as readdirSync4 } from "node:fs";
 import { join as join12 } from "node:path";
-import { z as z34 } from "zod";
-var DispatchRecordSchema = z34.object({
+import { z as z37 } from "zod";
+var DispatchRecordSchema = z37.object({
   /** The Jira key the dispatch named, or null when it named none. */
-  ticket: z34.string().nullable(),
-  description: z34.string(),
+  ticket: z37.string().nullable(),
+  description: z37.string(),
   /** The dispatching Claude Code session. */
-  session: z34.string(),
+  session: z37.string(),
   /** A digest of the prompt, so a sub-agent found only through its transcript still finds its dispatch. */
-  promptDigest: z34.string().optional(),
-  at: z34.number()
+  promptDigest: z37.string().optional(),
+  at: z37.number()
 });
-var AgentRecordSchema = z34.object({
+var AgentRecordSchema = z37.object({
   /** The Jira key the sub-agent works on, or null once resolved to none. */
-  ticket: z34.string().nullable(),
-  description: z34.string().optional(),
-  agentType: z34.string().optional(),
-  toolUseId: z34.string().optional(),
+  ticket: z37.string().nullable(),
+  description: z37.string().optional(),
+  agentType: z37.string().optional(),
+  toolUseId: z37.string().optional(),
   /** The Claude Code session the sub-agent runs in. */
-  session: z34.string(),
-  at: z34.number()
+  session: z37.string(),
+  at: z37.number()
 });
-var AgentSkillRecordSchema = z34.object({ skill: z34.string() });
+var AgentSkillRecordSchema = z37.object({ skill: z37.string() });
 var dispatchFolder = "dispatch";
 var agentsFolder = "agents";
 var agentSkillsFolder = "agent-skills";
@@ -5206,7 +6051,7 @@ var BoardAgentStore = class {
   /** The dispatch in `session` whose prompt has this digest; reads every dispatch file, so only a fallback uses it. */
   findDispatchByPrompt(session, promptDigest) {
     const dir = join12(this.files.root(), dispatchFolder);
-    if (!existsSync10(dir)) return void 0;
+    if (!existsSync12(dir)) return void 0;
     for (const name of readdirSync4(dir)) {
       if (!name.endsWith(".json")) continue;
       const record = this.readDispatch(name.slice(0, -".json".length));
@@ -5293,14 +6138,14 @@ ${block}`;
 };
 
 // src/tasks/github-task-tracker/github-task-tracker.ts
-import { z as z36 } from "zod";
+import { z as z39 } from "zod";
 
 // src/tasks/task-tracker/unsupported-tracker-operation-error.ts
-import { z as z35 } from "zod";
-var UnsupportedTrackerOperationPropsSchema = z35.object({
-  tracker: z35.string().min(1),
-  operation: z35.string().min(1),
-  remedy: z35.string().min(1).optional()
+import { z as z38 } from "zod";
+var UnsupportedTrackerOperationPropsSchema = z38.object({
+  tracker: z38.string().min(1),
+  operation: z38.string().min(1),
+  remedy: z38.string().min(1).optional()
 });
 var UnsupportedTrackerOperationError = class extends Error {
   tracker;
@@ -5317,9 +6162,9 @@ var UnsupportedTrackerOperationError = class extends Error {
 };
 
 // src/tasks/github-task-tracker/github-task-tracker.ts
-var IssueRefSchema = z36.object({ number: z36.number() });
-var IssueRefListSchema = z36.array(IssueRefSchema);
-var ParentNotFoundSchema = z36.object({ status: z36.literal(404) });
+var IssueRefSchema = z39.object({ number: z39.number() });
+var IssueRefListSchema = z39.array(IssueRefSchema);
+var ParentNotFoundSchema = z39.object({ status: z39.literal(404) });
 var GitHubTaskTracker = class {
   octokit;
   gql;
@@ -5908,11 +6753,11 @@ var GitHubTaskTracker = class {
 
 // src/tasks/jira-task-tracker/jira-task-tracker.ts
 import { readFileSync as readFileSync11 } from "node:fs";
-import { basename as basename2 } from "node:path";
-import { z as z40 } from "zod";
+import { basename as basename3 } from "node:path";
+import { z as z43 } from "zod";
 
 // src/tasks/jira-task-tracker/jira-client.ts
-import { z as z37 } from "zod";
+import { z as z40 } from "zod";
 
 // src/tasks/jira-task-tracker/jira-api-error.ts
 var JiraApiError = class extends Error {
@@ -5935,11 +6780,11 @@ var defaultRetryAfterSeconds = 2;
 var maxBackoffMs = 3e4;
 var attachmentXsrfHeader = "no-check";
 var redirectStatuses = /* @__PURE__ */ new Set([301, 302, 303, 307, 308]);
-var JiraErrorBodySchema = z37.object({
-  errorMessages: z37.array(z37.string()).optional(),
+var JiraErrorBodySchema = z40.object({
+  errorMessages: z40.array(z40.string()).optional(),
   // Caught per-field so an off-contract `errors` map cannot discard a valid sibling `errorMessages`.
-  errors: z37.record(z37.string(), z37.string()).optional().catch(void 0),
-  message: z37.string().optional()
+  errors: z40.record(z40.string(), z40.string()).optional().catch(void 0),
+  message: z40.string().optional()
 });
 var JiraClient = class {
   baseUrl;
@@ -6026,13 +6871,13 @@ var JiraClient = class {
 };
 
 // src/tasks/jira-task-tracker/confluence-client.ts
-import { z as z38 } from "zod";
+import { z as z41 } from "zod";
 var maxRetries2 = 4;
 var defaultRetryAfterSeconds2 = 2;
 var maxBackoffMs2 = 3e4;
-var ConfluenceErrorBodySchema = z38.object({
-  errors: z38.array(z38.object({ title: z38.string().optional(), detail: z38.string().optional() })).optional().catch(void 0),
-  message: z38.string().optional()
+var ConfluenceErrorBodySchema = z41.object({
+  errors: z41.array(z41.object({ title: z41.string().optional(), detail: z41.string().optional() })).optional().catch(void 0),
+  message: z41.string().optional()
 });
 var ConfluenceClient = class {
   siteBaseUrl;
@@ -6107,14 +6952,14 @@ import { fromMarkdown } from "mdast-util-from-markdown";
 import { gfmFromMarkdown } from "mdast-util-gfm";
 import { gfm } from "micromark-extension-gfm";
 import { decodeString } from "micromark-util-decode-string";
-import { z as z39 } from "zod";
-var MediaRefSchema = z39.object({
-  mediaUuid: z39.string().min(1),
-  collection: z39.string().default(""),
-  width: z39.number().int().positive().optional(),
-  height: z39.number().int().positive().optional()
+import { z as z42 } from "zod";
+var MediaRefSchema = z42.object({
+  mediaUuid: z42.string().min(1),
+  collection: z42.string().default(""),
+  width: z42.number().int().positive().optional(),
+  height: z42.number().int().positive().optional()
 });
-var MediaLookupSchema = z39.record(z39.string(), MediaRefSchema);
+var MediaLookupSchema = z42.record(z42.string(), MediaRefSchema);
 var attachmentPrefix = /^attachment:/;
 var externalTarget = /^[a-zA-Z][a-zA-Z0-9+.-]*:|^\/\//;
 var detailsOpen2 = /^<details>/;
@@ -7107,13 +7952,13 @@ var deliveryLinkOutward = "implements";
 var tddMetadataPropertyKey = "flight-rules-metadata";
 var mediaFilePath = /^\/file\/([0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12})\/binary$/;
 var mediaLocationBase = "https://media.invalid/";
-var JiraUploadedAttachmentSchema = z40.object({
-  id: z40.union([z40.string(), z40.number()]).transform(String),
-  filename: z40.string(),
-  mimeType: z40.string(),
-  size: z40.number().optional()
+var JiraUploadedAttachmentSchema = z43.object({
+  id: z43.union([z43.string(), z43.number()]).transform(String),
+  filename: z43.string(),
+  mimeType: z43.string(),
+  size: z43.number().optional()
 });
-var JiraUploadedAttachmentsSchema = z40.array(JiraUploadedAttachmentSchema);
+var JiraUploadedAttachmentsSchema = z43.array(JiraUploadedAttachmentSchema);
 var JiraTaskTracker = class {
   client;
   confluence;
@@ -7426,7 +8271,7 @@ var JiraTaskTracker = class {
    * redirect it issues for the attachment's content URL.
    */
   async addAttachment(ticketId, filePath) {
-    const filename = basename2(filePath);
+    const filename = basename3(filePath);
     const file = new File([readFileSync11(filePath)], filename, {
       type: this.mimeTypes.forFilename(filename)
     });
@@ -7715,20 +8560,20 @@ var JiraTaskTracker = class {
 // src/tasks/tool-probe/tool-probe.ts
 import { execFile as execFile5 } from "node:child_process";
 import { promisify as promisify5 } from "node:util";
-import { z as z42 } from "zod";
+import { z as z45 } from "zod";
 
 // src/tasks/readiness/probe-diagnostics.ts
-import { z as z41 } from "zod";
-var ProbeDiagnosticsPropsSchema = z41.object({ env: z41.record(z41.string(), z41.string().optional()) });
-var ErrorFactsSchema = z41.object({
-  code: z41.union([z41.string(), z41.number()]).nullable().optional(),
-  status: z41.number().optional(),
-  statusCode: z41.number().optional(),
-  killed: z41.boolean().optional(),
-  name: z41.string().optional(),
-  message: z41.string().optional(),
-  stderr: z41.string().optional(),
-  cause: z41.unknown().optional()
+import { z as z44 } from "zod";
+var ProbeDiagnosticsPropsSchema = z44.object({ env: z44.record(z44.string(), z44.string().optional()) });
+var ErrorFactsSchema = z44.object({
+  code: z44.union([z44.string(), z44.number()]).nullable().optional(),
+  status: z44.number().optional(),
+  statusCode: z44.number().optional(),
+  killed: z44.boolean().optional(),
+  name: z44.string().optional(),
+  message: z44.string().optional(),
+  stderr: z44.string().optional(),
+  cause: z44.unknown().optional()
 });
 var RedactedProbeDiagnostics = class {
   secrets;
@@ -7791,7 +8636,7 @@ var RedactedProbeDiagnostics = class {
 // src/tasks/tool-probe/tool-probe.ts
 var minimumGhVersion = [2, 99, 0];
 var ghVersionLine = /gh version (\d+)\.(\d+)\.(\d+)/;
-var NodeToolProbePropsSchema = z42.object({ cwd: z42.string().optional(), env: z42.record(z42.string(), z42.string().optional()).optional(), timeoutMs: z42.int().positive().max(6e4).default(1e4) });
+var NodeToolProbePropsSchema = z45.object({ cwd: z45.string().optional(), env: z45.record(z45.string(), z45.string().optional()).optional(), timeoutMs: z45.int().positive().max(6e4).default(1e4) });
 var NodeToolProbe = class {
   execFile;
   env;
@@ -7893,35 +8738,35 @@ var NodeToolProbe = class {
 var nodeToolProbe = new NodeToolProbe();
 
 // src/tasks/readiness/repository-readiness.ts
-import { z as z46 } from "zod";
+import { z as z49 } from "zod";
 
 // src/tasks/readiness/workflow-preflight.ts
 import { execFile as execFile6 } from "node:child_process";
 import { access, realpath } from "node:fs/promises";
 import { constants } from "node:fs";
-import { resolve as resolve7 } from "node:path";
+import { resolve as resolve9 } from "node:path";
 import { promisify as promisify6 } from "node:util";
-import { z as z45 } from "zod";
+import { z as z48 } from "zod";
 
 // src/orchestration/orchestration-policy.ts
 import { isDeepStrictEqual } from "node:util";
-import { z as z44 } from "zod";
+import { z as z47 } from "zod";
 
 // src/agents/agent-emitter/agent-emitter.schema.ts
-import { z as z43 } from "zod";
-var ModelBindingsSchema = z43.strictObject({
-  standard: z43.string().trim().min(1),
-  escalated: z43.string().trim().min(1),
-  expert: z43.string().trim().min(1)
+import { z as z46 } from "zod";
+var ModelBindingsSchema = z46.strictObject({
+  standard: z46.string().trim().min(1),
+  escalated: z46.string().trim().min(1),
+  expert: z46.string().trim().min(1)
 });
-var AgentDefinitionSchema = z43.strictObject({
+var AgentDefinitionSchema = z46.strictObject({
   frontmatter: AgentRegistrationSchema,
-  body: z43.string().refine((body) => body.trim() !== "", "agent prompt must not be empty")
+  body: z46.string().refine((body) => body.trim() !== "", "agent prompt must not be empty")
 });
 
 // src/orchestration/orchestration-policy.ts
-var RegistryOrchestrationPolicyPropsSchema = z44.strictObject({
-  agents: z44.array(AgentDefinitionSchema).min(1).refine(
+var RegistryOrchestrationPolicyPropsSchema = z47.strictObject({
+  agents: z47.array(AgentDefinitionSchema).min(1).refine(
     (agents) => new Set(agents.map((agent) => agent.frontmatter.name)).size === agents.length,
     "duplicate agent name"
   )
@@ -8075,10 +8920,10 @@ var RegistryOrchestrationPolicy = class {
 };
 
 // src/tasks/readiness/workflow-preflight.ts
-var WorkflowPreflightPropsSchema = z45.object({
-  cwd: z45.string(),
-  env: z45.record(z45.string(), z45.string().optional()),
-  timeoutMs: z45.int().positive().max(6e4).default(1e4)
+var WorkflowPreflightPropsSchema = z48.object({
+  cwd: z48.string(),
+  env: z48.record(z48.string(), z48.string().optional()),
+  timeoutMs: z48.int().positive().max(6e4).default(1e4)
 });
 var NodeWorkflowPreflight = class {
   cwd;
@@ -8100,7 +8945,7 @@ var NodeWorkflowPreflight = class {
     const codeWorkflow = selected === "execute-work" || selected === "execute-wave";
     const requiredAgents = codeWorkflow ? ["code-implementation", "code-implementation-escalated", "code-verifier", "tech-writer"] : selected === "break-down-work" ? ["research-agent"] : [selected === "reproduce-bug" ? "qa-engineer" : "qa-engineer-verify"];
     const checks = [];
-    const contextMatches = parsed !== void 0 && resolve7(parsed.context.cwd) === resolve7(this.cwd);
+    const contextMatches = parsed !== void 0 && resolve9(parsed.context.cwd) === resolve9(this.cwd);
     checks.push({
       name: "host:context",
       ok: contextMatches,
@@ -8260,7 +9105,7 @@ var NodeWorkflowPreflight = class {
   async gitWrite(diagnostics) {
     try {
       const paths = await this.command(["rev-parse", "--git-dir", "--git-common-dir"]);
-      const directories = paths.split("\n").map((path) => resolve7(this.cwd, path));
+      const directories = paths.split("\n").map((path) => resolve9(this.cwd, path));
       if (directories.length !== 2) {
         return {
           name: "local:git-write",
@@ -8286,10 +9131,10 @@ var NodeWorkflowPreflight = class {
 };
 
 // src/tasks/readiness/repository-readiness.ts
-var RepositoryReadinessPropsSchema = z46.object({
-  cwd: z46.string().optional(),
-  env: z46.record(z46.string(), z46.string().optional()).optional(),
-  timeoutMs: z46.int().positive().max(6e4).default(1e4)
+var RepositoryReadinessPropsSchema = z49.object({
+  cwd: z49.string().optional(),
+  env: z49.record(z49.string(), z49.string().optional()).optional(),
+  timeoutMs: z49.int().positive().max(6e4).default(1e4)
 });
 var NodeRepositoryReadiness = class {
   cwd;
@@ -8470,12 +9315,12 @@ var NodeRepositoryReadiness = class {
 };
 
 // src/flight-rules/flight-rules.schema.ts
-import { z as z49 } from "zod";
+import { z as z52 } from "zod";
 
 // src/operations/git-config-operations.ts
-import { existsSync as existsSync11, lstatSync as lstatSync2, realpathSync as realpathSync5 } from "node:fs";
-import { dirname as dirname13, isAbsolute as isAbsolute4, join as join14, parse, relative as relative4, resolve as resolve8, sep as sep3 } from "node:path";
-import { z as z48 } from "zod";
+import { existsSync as existsSync13, lstatSync as lstatSync2, realpathSync as realpathSync8 } from "node:fs";
+import { dirname as dirname13, isAbsolute as isAbsolute6, join as join14, parse, relative as relative6, resolve as resolve10, sep as sep3 } from "node:path";
+import { z as z51 } from "zod";
 
 // src/git/commit-message-builder/commit-message-builder.ts
 import { readFileSync as readFileSync12 } from "node:fs";
@@ -8510,25 +9355,25 @@ ${line.trim()}`) === "";
 };
 
 // src/git/commit-message-builder/commit-message.schema.ts
-import { z as z47 } from "zod";
-var CommitMessageInputSchema = z47.object({
+import { z as z50 } from "zod";
+var CommitMessageInputSchema = z50.object({
   type: SemanticTypeSchema,
   // Bare issue numbers make one-character scopes legitimate; 32 clears a 10-character tracker key plus a six-digit number.
-  scope: z47.string().min(1).max(32),
-  description: z47.string().min(2).max(50),
-  body: z47.string().optional(),
-  model: z47.string().max(72).optional(),
-  footers: z47.array(z47.string().regex(/^[a-zA-Z0-9-]+(: |=).*$/)).default([])
+  scope: z50.string().min(1).max(32),
+  description: z50.string().min(2).max(50),
+  body: z50.string().optional(),
+  model: z50.string().max(72).optional(),
+  footers: z50.array(z50.string().regex(/^[a-zA-Z0-9-]+(: |=).*$/)).default([])
 });
-var CommitMessageHeaderSchema = z47.preprocess(
+var CommitMessageHeaderSchema = z50.preprocess(
   (arg) => {
-    return z47.string({ error: "Git Commit headers should be 72 characters or less" }).max(72).parse(arg);
+    return z50.string({ error: "Git Commit headers should be 72 characters or less" }).max(72).parse(arg);
   },
-  z47.templateLiteral([SemanticTypeSchema, "(", z47.string(), "): ", z47.string()])
+  z50.templateLiteral([SemanticTypeSchema, "(", z50.string(), "): ", z50.string()])
 );
-var CommitMessageBuilderPropsSchema = z47.object({
-  binPath: z47.string().min(1),
-  agentEnv: z47.string().optional()
+var CommitMessageBuilderPropsSchema = z50.object({
+  binPath: z50.string().min(1),
+  agentEnv: z50.string().optional()
 });
 
 // src/git/commit-message-builder/commit-message-builder.ts
@@ -8585,36 +9430,36 @@ var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
 };
 
 // src/operations/git-config-operations.ts
-var ConfigScopeSchema = z48.enum(configScopes);
-var ConfigSetInputSchema = z48.object({
-  key: z48.string().min(1),
-  values: z48.array(z48.string()).min(1),
+var ConfigScopeSchema = z51.enum(configScopes);
+var ConfigSetInputSchema = z51.object({
+  key: z51.string().min(1),
+  values: z51.array(z51.string()).min(1),
   scope: ConfigScopeSchema.optional()
 }).strict();
-var ConfigUnsetInputSchema = z48.object({ key: z48.string().min(1), scope: ConfigScopeSchema.optional() }).strict();
+var ConfigUnsetInputSchema = z51.object({ key: z51.string().min(1), scope: ConfigScopeSchema.optional() }).strict();
 var GitCommitInputSchema = CommitMessageInputSchema.extend({
-  files: z48.array(z48.string()).default([])
+  files: z51.array(z51.string()).default([])
 }).strict();
-var GitCheckoutInputSchema = z48.object({
-  type: z48.string().min(1),
-  scope: z48.string().min(1),
-  description: z48.string().optional(),
-  from: z48.string().optional()
+var GitCheckoutInputSchema = z51.object({
+  type: z51.string().min(1),
+  scope: z51.string().min(1),
+  description: z51.string().optional(),
+  from: z51.string().optional()
 }).strict();
-var GitPushInputSchema = z48.object({ remote: z48.string().min(1).default("origin"), setUpstream: z48.boolean().default(true) }).strict();
-var CommitMessageOutputSchema = z48.object({ message: z48.string() });
-var BranchNameInputSchema = z48.object({ type: z48.string().min(1), scope: z48.string().min(1), description: z48.string().optional() }).strict();
-var ConfigOperationPolicySchema = z48.object({
-  scopes: z48.array(ConfigScopeSchema).default(["project", "local"]),
-  roots: z48.array(z48.string().min(1)).default([])
+var GitPushInputSchema = z51.object({ remote: z51.string().min(1).default("origin"), setUpstream: z51.boolean().default(true) }).strict();
+var CommitMessageOutputSchema = z51.object({ message: z51.string() });
+var BranchNameInputSchema = z51.object({ type: z51.string().min(1), scope: z51.string().min(1), description: z51.string().optional() }).strict();
+var ConfigOperationPolicySchema = z51.object({
+  scopes: z51.array(ConfigScopeSchema).default(["project", "local"]),
+  roots: z51.array(z51.string().min(1)).default([])
 }).strict();
-var GitConfigOperationsPropsSchema = z48.object({
-  cwd: z48.string().min(1),
-  configStore: z48.custom((value) => typeof value === "object" && value !== null),
-  git: z48.custom((value) => typeof value === "object" && value !== null),
+var GitConfigOperationsPropsSchema = z51.object({
+  cwd: z51.string().min(1),
+  configStore: z51.custom((value) => typeof value === "object" && value !== null),
+  git: z51.custom((value) => typeof value === "object" && value !== null),
   configPolicy: ConfigOperationPolicySchema.default({ scopes: ["project", "local"], roots: [] }),
-  binPath: z48.string().default(process.argv[1] ?? ""),
-  agentEnv: z48.string().optional()
+  binPath: z51.string().default(process.argv[1] ?? ""),
+  agentEnv: z51.string().optional()
 });
 var LaunchConfigOperationDeniedError = class extends Error {
   name = "LaunchConfigOperationDeniedError";
@@ -8627,7 +9472,7 @@ var DefaultGitConfigOperations = class {
     this.props = GitConfigOperationsPropsSchema.parse(props);
     this.allowedScopes = new Set(this.props.configPolicy.scopes);
     const roots = this.props.configPolicy.roots.length === 0 ? [this.props.cwd] : this.props.configPolicy.roots;
-    this.allowedRoots = [...new Set(roots.map((root) => realpathSync5(root)))];
+    this.allowedRoots = [...new Set(roots.map((root) => realpathSync8(root)))];
   }
   operations() {
     return [
@@ -8637,11 +9482,11 @@ var DefaultGitConfigOperations = class {
         ["write", "process"],
         ["config", "set"],
         ConfigSetInputSchema,
-        z48.object({
-          key: z48.string(),
+        z51.object({
+          key: z51.string(),
           scope: ConfigScopeSchema,
-          path: z48.string(),
-          warning: z48.string().optional()
+          path: z51.string(),
+          warning: z51.string().optional()
         }),
         (input) => this.setConfig(input)
       ),
@@ -8651,7 +9496,7 @@ var DefaultGitConfigOperations = class {
         ["write", "process"],
         ["config", "unset"],
         ConfigUnsetInputSchema,
-        z48.object({ key: z48.string(), scope: ConfigScopeSchema, path: z48.string() }),
+        z51.object({ key: z51.string(), scope: ConfigScopeSchema, path: z51.string() }),
         (input) => this.unsetConfig(input)
       ),
       this.descriptor(
@@ -8660,7 +9505,7 @@ var DefaultGitConfigOperations = class {
         ["write", "process"],
         ["git", "commit"],
         GitCommitInputSchema,
-        z48.object({ sha: z48.string(), message: z48.string() }),
+        z51.object({ sha: z51.string(), message: z51.string() }),
         (input) => this.commit(input)
       ),
       this.descriptor(
@@ -8669,10 +9514,10 @@ var DefaultGitConfigOperations = class {
         ["write", "process"],
         ["git", "checkout"],
         GitCheckoutInputSchema,
-        z48.object({
-          branch: z48.string(),
-          from: z48.string().nullable(),
-          renamedFrom: z48.string().nullable()
+        z51.object({
+          branch: z51.string(),
+          from: z51.string().nullable(),
+          renamedFrom: z51.string().nullable()
         }),
         (input) => this.checkout(input)
       ),
@@ -8682,7 +9527,7 @@ var DefaultGitConfigOperations = class {
         ["write", "network", "process"],
         ["git", "push"],
         GitPushInputSchema,
-        z48.object({ branch: z48.string(), remote: z48.string(), setUpstream: z48.boolean() }),
+        z51.object({ branch: z51.string(), remote: z51.string(), setUpstream: z51.boolean() }),
         (input) => this.push(input)
       ),
       this.descriptor(
@@ -8700,7 +9545,7 @@ var DefaultGitConfigOperations = class {
         ["read", "process"],
         ["branch-name"],
         BranchNameInputSchema,
-        z48.object({ branch: z48.string() }),
+        z51.object({ branch: z51.string() }),
         (input) => ({
           branch: branchNamer.name({
             type: input.type,
@@ -8748,10 +9593,10 @@ var DefaultGitConfigOperations = class {
         `Configuration scope "${scope}" is not allowed by launch policy`
       );
     const path = this.props.configStore.pathFor(scope);
-    const absolutePath = isAbsolute4(path) ? path : resolve8(this.props.cwd, path);
+    const absolutePath = isAbsolute6(path) ? path : resolve10(this.props.cwd, path);
     this.rejectDanglingSymlinks(absolutePath);
-    let existingPath = existsSync11(absolutePath) ? absolutePath : dirname13(absolutePath);
-    while (!existsSync11(existingPath)) {
+    let existingPath = existsSync13(absolutePath) ? absolutePath : dirname13(absolutePath);
+    while (!existsSync13(existingPath)) {
       const parent = dirname13(existingPath);
       if (parent === existingPath)
         throw new LaunchConfigOperationDeniedError(
@@ -8759,11 +9604,11 @@ var DefaultGitConfigOperations = class {
         );
       existingPath = parent;
     }
-    const resolvedExistingPath = realpathSync5(existingPath);
-    const target = existsSync11(absolutePath) ? resolvedExistingPath : resolve8(resolvedExistingPath, relative4(existingPath, absolutePath));
+    const resolvedExistingPath = realpathSync8(existingPath);
+    const target = existsSync13(absolutePath) ? resolvedExistingPath : resolve10(resolvedExistingPath, relative6(existingPath, absolutePath));
     if (!this.allowedRoots.some((root) => {
-      const rel = relative4(root, target);
-      return rel === "" || !rel.startsWith("..") && !isAbsolute4(rel);
+      const rel = relative6(root, target);
+      return rel === "" || !rel.startsWith("..") && !isAbsolute6(rel);
     }))
       throw new LaunchConfigOperationDeniedError(
         `Configuration path escapes launch roots: ${path}`
@@ -8781,7 +9626,7 @@ var DefaultGitConfigOperations = class {
         break;
       }
       try {
-        realpathSync5(current);
+        realpathSync8(current);
       } catch {
         throw new LaunchConfigOperationDeniedError(
           `Configuration path contains an unresolved symlink: ${path}`
@@ -8824,863 +9669,18 @@ var DefaultGitConfigOperations = class {
 };
 
 // src/flight-rules/flight-rules.schema.ts
-var FlightRulesPropsSchema = z49.object({
-  cwd: z49.string().optional().describe("Directory used for config discovery; defaults to process.cwd()"),
-  env: z49.record(z49.string(), z49.string().optional()).optional().describe("Live environment record; defaults to process.env"),
-  configPath: z49.string().optional().describe("Explicit config file, taking precedence over FLIGHT_RULES_CONFIG and discovery"),
+var FlightRulesPropsSchema = z52.object({
+  cwd: z52.string().optional().describe("Directory used for config discovery; defaults to process.cwd()"),
+  env: z52.record(z52.string(), z52.string().optional()).optional().describe("Live environment record; defaults to process.env"),
+  configPath: z52.string().optional().describe("Explicit config file, taking precedence over FLIGHT_RULES_CONFIG and discovery"),
   host: NativeHostSchema.optional().describe(
     "Explicit configuration host; otherwise FLIGHT_RULES_HOST, the native package host, or Claude for compatibility"
   ),
-  configWritePolicy: z49.object({
-    scopes: z49.array(ConfigScopeSchema).optional(),
-    roots: z49.array(z49.string().min(1)).optional()
+  configWritePolicy: z52.object({
+    scopes: z52.array(ConfigScopeSchema).optional(),
+    roots: z52.array(z52.string().min(1)).optional()
   }).strict().optional()
 });
-
-// src/operations/tracker-entity-operations.ts
-import { existsSync as existsSync13, realpathSync as realpathSync8, statSync as statSync7 } from "node:fs";
-import { isAbsolute as isAbsolute6, relative as relative6, resolve as resolve10 } from "node:path";
-import { z as z52 } from "zod";
-
-// src/tasks/evidence/evidence.ts
-import { realpathSync as realpathSync6 } from "node:fs";
-import { basename as basename3 } from "node:path/posix";
-import { z as z50 } from "zod";
-var mediaReference = /(!?)\[([^\]]*)\]\(\s*<?([^\s()<>]+)>?(?:\s+"[^"]*")?\s*\)/g;
-var absoluteTarget = /^[a-zA-Z][a-zA-Z0-9+.-]*:|^\/\/|^#/;
-var localPrefix = /^(?:\.\/)+/;
-var fenceRun2 = /^ {0,3}(`{3,}|~{3,})(.*)$/;
-var AttachmentSpecSchema = z50.string().min(1).transform((spec) => {
-  const hash = spec.lastIndexOf("#");
-  const path = hash > 0 ? spec.slice(0, hash) : spec;
-  const caption = hash > 0 ? spec.slice(hash + 1).trim() : "";
-  return { path, caption: caption.length > 0 ? caption : basename3(path) };
-});
-var DuplicateEvidenceNameError = class extends Error {
-  name = "DuplicateEvidenceNameError";
-  constructor(props) {
-    super(`Two attachments share the filename "${props.filename}": ${props.paths.join(", ")}`);
-  }
-};
-var EvidenceUploadFailure = class extends Error {
-  name = "EvidenceUploadFailure";
-  attachments;
-  constructor(props) {
-    super(
-      props.attachments.length === 0 && props.cause instanceof Error ? props.cause.message : "One or more attachments could not be uploaded",
-      { cause: props.cause }
-    );
-    this.attachments = props.attachments;
-  }
-};
-var TrackerEvidenceService = class {
-  tracker;
-  constructor(props) {
-    this.tracker = props.tracker;
-  }
-  async attach(input) {
-    const specs = this.parseSpecs(input.specs);
-    const attachments = [];
-    for (const spec of specs) {
-      try {
-        const uploaded = await this.tracker.addAttachment(input.ticketId, spec.path);
-        attachments.push({
-          ...uploaded,
-          path: spec.path,
-          caption: spec.caption,
-          referenced: false
-        });
-      } catch (cause) {
-        throw new EvidenceUploadFailure({ cause, attachments });
-      }
-    }
-    const byName = /* @__PURE__ */ new Map();
-    for (const attachment of attachments) byName.set(basename3(attachment.path), attachment);
-    const rewritten = this.rewriteReferences(input.body, byName);
-    return { body: this.appendUnreferenced(rewritten, attachments), attachments };
-  }
-  prepareBody(input) {
-    const specs = this.parseSpecs(input.specs);
-    const attachments = specs.map((spec) => ({
-      id: "pending",
-      filename: basename3(spec.path),
-      mimeType: "application/octet-stream",
-      path: spec.path,
-      caption: spec.caption,
-      referenced: false
-    }));
-    const byName = /* @__PURE__ */ new Map();
-    for (const attachment of attachments) byName.set(basename3(attachment.path), attachment);
-    const rewritten = this.rewriteReferences(input.body, byName);
-    return this.appendUnreferenced(rewritten, attachments);
-  }
-  parseSpecs(specs) {
-    const parsed = specs.map((spec) => AttachmentSpecSchema.parse(spec));
-    this.rejectDuplicateNames(parsed);
-    return parsed;
-  }
-  rejectDuplicateNames(specs) {
-    const paths = /* @__PURE__ */ new Map();
-    for (const spec of specs) {
-      const name = basename3(spec.path);
-      paths.set(name, [...paths.get(name) ?? [], spec.path]);
-    }
-    for (const [filename, group] of paths) {
-      if (group.length > 1) throw new DuplicateEvidenceNameError({ filename, paths: group });
-    }
-  }
-  rewriteReferences(body, byName) {
-    let fence;
-    return body.split("\n").map((line) => {
-      if (fence === void 0) {
-        const opened = this.openingFence(line);
-        if (opened !== void 0) {
-          fence = opened;
-          return line;
-        }
-        return this.rewriteLine(line, byName);
-      }
-      if (this.closesFence(line, fence)) fence = void 0;
-      return line;
-    }).join("\n");
-  }
-  /**
-   * A line opens a fence when it is a run of >=3 backticks or tildes; a backtick
-   * fence's info string may not itself contain a backtick, which keeps inline
-   * code from being read as a fence.
-   */
-  openingFence(line) {
-    const match = fenceRun2.exec(line);
-    if (match === null) return void 0;
-    const run2 = match[1];
-    const rest = match[2];
-    if (run2 === void 0 || rest === void 0) return void 0;
-    if (run2.charAt(0) === "`" && rest.includes("`")) return void 0;
-    return { char: run2.charAt(0), length: run2.length };
-  }
-  /**
-   * A line closes an open fence only when it is a run of the SAME character, at
-   * least as long as the opening run, with nothing but whitespace after it.
-   */
-  closesFence(line, fence) {
-    const match = fenceRun2.exec(line);
-    if (match === null) return false;
-    const run2 = match[1];
-    const rest = match[2];
-    if (run2 === void 0 || rest === void 0) return false;
-    return run2.charAt(0) === fence.char && run2.length >= fence.length && rest.trim().length === 0;
-  }
-  rewriteLine(line, byName) {
-    let result = "";
-    let last = 0;
-    mediaReference.lastIndex = 0;
-    for (let match = mediaReference.exec(line); match !== null; match = mediaReference.exec(line)) {
-      const whole = match[0];
-      const bang = match[1];
-      const label = match[2];
-      const target = match[3];
-      result += line.slice(last, match.index);
-      const attachment = bang !== void 0 && label !== void 0 && target !== void 0 ? this.resolve(target, byName) : void 0;
-      if (attachment === void 0 || bang === void 0 || label === void 0) {
-        result += whole;
-      } else {
-        attachment.referenced = true;
-        result += `${bang}[${label}](attachment:${attachment.filename})`;
-      }
-      last = match.index + whole.length;
-    }
-    return result + line.slice(last);
-  }
-  resolve(target, byName) {
-    if (absoluteTarget.test(target)) return void 0;
-    if (target.startsWith("/") || /^[a-zA-Z]:[\\/]/.test(target)) {
-      try {
-        const realTarget = realpathSync6(target);
-        return [...byName.values()].find((attachment) => {
-          try {
-            return realpathSync6(attachment.path) === realTarget;
-          } catch {
-            return false;
-          }
-        });
-      } catch {
-        return void 0;
-      }
-    }
-    return byName.get(basename3(target.replace(localPrefix, "")));
-  }
-  appendUnreferenced(body, attachments) {
-    let result = body;
-    for (const attachment of attachments) {
-      if (!attachment.referenced)
-        result += `
-
-![${attachment.caption}](attachment:${attachment.filename})`;
-    }
-    return result;
-  }
-};
-
-// src/tasks/portable-context/portable-context.ts
-var tokenStart = String.raw`(?:^|(?<=[\s(\[<{"'\x60=,:;|]))`;
-var localReferencePatterns = [
-  /file:\/\/\S*/g,
-  new RegExp(`${tokenStart}/(?:Users|home)/[^\\s/)\\]>"'\\x60]+\\S*`, "g"),
-  new RegExp(`${tokenStart}~/\\S*`, "g"),
-  /\b[A-Za-z]:\\Users\\\S*/g
-];
-var trailingPunctuation = /[`.,;:!?)\]>"']+$/;
-var maxReported = 5;
-var RegexPortableContextGuard = class {
-  find(body) {
-    return body.split("\n").flatMap(
-      (text, index) => localReferencePatterns.flatMap(
-        (pattern) => [...text.matchAll(pattern)].map((m) => ({ line: index + 1, match: m[0].replace(trailingPunctuation, "") }))
-      )
-    );
-  }
-  assertPortable(body, opts = {}) {
-    if (opts.allowLocalPaths === true) return;
-    const found = this.find(body);
-    if (found.length === 0) return;
-    const listed = found.slice(0, maxReported).map((ref) => `  line ${ref.line}: ${ref.match}`).join("\n");
-    const more = found.length > maxReported ? `
-  \u2026and ${found.length - maxReported} more` : "";
-    throw new Error(
-      `body references files on this machine, which nobody else can open:
-${listed}${more}
-A tracker body must stand on its own for an engineer on a fresh clone. Inline the content, link a published artifact (\`flight-rules tdd create\`, a tracker issue, or a file on the default branch by URL), or use a repo-relative path for code that exists on the default branch. Pass --allow-local-paths only when the path is the subject of the work, not a pointer to context.`
-    );
-  }
-};
-var portableContextGuard = new RegexPortableContextGuard();
-
-// src/operations/ticket-lifecycle-operations.ts
-import { existsSync as existsSync12, realpathSync as realpathSync7, statSync as statSync6 } from "node:fs";
-import { isAbsolute as isAbsolute5, relative as relative5, resolve as resolve9 } from "node:path";
-import { z as z51 } from "zod";
-var propsSchema3 = z51.object({
-  getTracker: z51.custom((value) => typeof value === "function"),
-  cwd: z51.string().min(1),
-  trustedRoots: z51.array(z51.string().min(1)).default([])
-});
-var idSchema = z51.string().min(1);
-var blockInput = z51.object({ ticketId: idSchema, blockerId: idSchema, reason: z51.string().optional() }).strict();
-var ticketPairInput = z51.object({ ticketId: idSchema, blockerId: idSchema }).strict();
-var statusInput = z51.object({ id: idSchema, status: z51.string().min(1) }).strict();
-var commentInput2 = z51.object({
-  id: idSchema,
-  body: z51.string(),
-  attach: z51.array(z51.string().min(1)).default([])
-}).strict();
-var labelInput = z51.object({
-  id: idSchema,
-  add: z51.array(z51.string()).default([]),
-  remove: z51.array(z51.string()).default([])
-}).strict().refine((input) => input.add.length > 0 || input.remove.length > 0, {
-  message: "ticket label needs at least one --add or --remove"
-});
-var blockResult = z51.object({
-  ticketId: idSchema,
-  blockerId: idSchema,
-  ticketEpic: idSchema.nullable(),
-  blockerEpic: idSchema.nullable(),
-  crossEpic: z51.boolean(),
-  reasonRecorded: z51.boolean(),
-  warnings: z51.array(z51.string())
-});
-var blockPartial = z51.object({
-  ticketId: idSchema,
-  blockerId: idSchema,
-  completedSteps: z51.array(z51.string())
-});
-var ticketPairResult = z51.object({ ticketId: idSchema, blockerId: idSchema });
-var statusResult = z51.object({ id: idSchema, status: z51.string() });
-var commentPartial = z51.object({
-  id: idSchema,
-  attachments: z51.array(
-    AttachmentSchema.extend({ path: z51.string(), caption: z51.string(), referenced: z51.boolean() })
-  ),
-  body: z51.string(),
-  completedSteps: z51.array(z51.string())
-});
-var commentResult = z51.union([CommentSchema2, commentPartial]);
-var labelResult = z51.object({
-  id: idSchema,
-  added: z51.array(z51.string()),
-  removed: z51.array(z51.string())
-});
-var labelPartial = z51.object({
-  id: idSchema,
-  added: z51.array(z51.string()),
-  removed: z51.array(z51.string()),
-  requestedAdd: z51.array(z51.string()),
-  requestedRemove: z51.array(z51.string()),
-  completedSteps: z51.array(z51.string())
-});
-var DefaultTicketLifecycleOperations = class {
-  props;
-  roots;
-  constructor(props) {
-    this.props = propsSchema3.parse(props);
-    const roots = this.props.trustedRoots.length === 0 ? [this.props.cwd] : this.props.trustedRoots;
-    this.roots = [...new Set(roots.map((root) => realpathSync7(root)))];
-  }
-  operations() {
-    return [
-      this.descriptor(
-        "ticket-block",
-        "Block a ticket with an epic-boundary justification when needed.",
-        ["write", "network"],
-        ["ticket", "block"],
-        blockInput,
-        z51.union([blockResult, blockPartial]),
-        (input) => this.block(input)
-      ),
-      this.descriptor(
-        "ticket-unblock",
-        "Remove a blocked-by relationship from a ticket.",
-        ["write", "network"],
-        ["ticket", "unblock"],
-        ticketPairInput,
-        ticketPairResult,
-        (input) => this.unblock(input)
-      ),
-      this.descriptor(
-        "ticket-status",
-        "Transition a ticket to a supported tracker status.",
-        ["write", "network"],
-        ["ticket", "status"],
-        statusInput,
-        statusResult,
-        (input) => this.transition(input)
-      ),
-      this.descriptor(
-        "ticket-comment",
-        "Add a ticket comment with trusted evidence attachments.",
-        ["write", "network"],
-        ["ticket", "comment"],
-        commentInput2,
-        commentResult,
-        (input) => this.comment(input)
-      ),
-      this.descriptor(
-        "ticket-label",
-        "Remove and add ticket labels in safe order.",
-        ["write", "network"],
-        ["ticket", "label"],
-        labelInput,
-        z51.union([labelPartial, labelResult]),
-        (input) => this.updateLabels(input)
-      )
-    ];
-  }
-  descriptor(id, description, effects, path, inputSchema, outputSchema, handler) {
-    return {
-      id,
-      description,
-      effects,
-      cli: { path, aliases: [] },
-      inputSchema,
-      outputSchema,
-      handler
-    };
-  }
-  async block(input) {
-    const completedSteps = [];
-    const tracker = this.props.getTracker();
-    const observed = {
-      getTicketEpicId: (ticketId) => tracker.getTicketEpicId(ticketId),
-      blockTicket: async (ticketId, blockerId) => {
-        await tracker.blockTicket(ticketId, blockerId);
-        completedSteps.push("blocked-by-linked");
-      },
-      getTicket: (ticketId) => tracker.getTicket(ticketId),
-      addComment: async (ticketId, body) => {
-        const result = await tracker.addComment(ticketId, body);
-        completedSteps.push("reason-commented");
-        return result;
-      },
-      updateTicketMetadata: async (ticketId, patch) => {
-        await tracker.updateTicketMetadata(ticketId, patch);
-        completedSteps.push("reason-recorded");
-      }
-    };
-    try {
-      const outcome = await new EpicBoundaryGuard(observed).block(input);
-      return {
-        ticketId: input.ticketId,
-        blockerId: input.blockerId,
-        ...outcome
-      };
-    } catch (error) {
-      if (completedSteps.length === 0) throw error;
-      return {
-        status: "partial",
-        data: {
-          ticketId: input.ticketId,
-          blockerId: input.blockerId,
-          completedSteps
-        },
-        error: {
-          name: error instanceof Error ? error.name : "Error",
-          message: error instanceof Error ? error.message : String(error)
-        }
-      };
-    }
-  }
-  async unblock(input) {
-    await this.props.getTracker().unblockTicket(input.ticketId, input.blockerId);
-    return input;
-  }
-  async transition(input) {
-    await this.props.getTracker().transitionTicket(input.id, input.status);
-    return input;
-  }
-  async comment(input) {
-    const tracker = this.props.getTracker();
-    const safeSpecs = input.attach.map((spec) => {
-      const parsed = AttachmentSpecSchema.parse(spec);
-      return `${this.trustedFilePath(parsed.path)}#${parsed.caption}`;
-    });
-    const evidence = new TrackerEvidenceService({ tracker });
-    let body = input.body;
-    let attachments = [];
-    if (safeSpecs.length > 0) {
-      try {
-        const attached = await evidence.attach({ ticketId: input.id, body, specs: safeSpecs });
-        body = attached.body;
-        attachments = attached.attachments;
-      } catch (error) {
-        if (!(error instanceof EvidenceUploadFailure) || error.attachments.length === 0)
-          throw error;
-        const rewritten = evidence.prepareBody({
-          body,
-          specs: error.attachments.map((attachment) => `${attachment.path}#${attachment.caption}`)
-        });
-        return {
-          status: "partial",
-          data: {
-            id: input.id,
-            attachments: error.attachments,
-            body: rewritten,
-            completedSteps: error.attachments.map(
-              (attachment) => `attachment-uploaded:${attachment.id}`
-            )
-          },
-          error: {
-            name: error.cause instanceof Error ? error.cause.name : "Error",
-            message: error.cause instanceof Error ? error.cause.message : String(error.cause)
-          }
-        };
-      }
-    }
-    try {
-      return await tracker.addComment(input.id, body);
-    } catch (error) {
-      if (attachments.length === 0) throw error;
-      return {
-        status: "partial",
-        data: {
-          id: input.id,
-          attachments,
-          body,
-          completedSteps: [
-            "attachments-uploaded",
-            ...attachments.map((attachment) => `attachment-uploaded:${attachment.id}`)
-          ]
-        },
-        error: {
-          name: error instanceof Error ? error.name : "Error",
-          message: error instanceof Error ? error.message : String(error)
-        }
-      };
-    }
-  }
-  async updateLabels(input) {
-    const tracker = this.props.getTracker();
-    const completedSteps = [];
-    const added = [];
-    const removed = [];
-    try {
-      for (const label of input.remove) {
-        await tracker.removeLabel(input.id, label);
-        removed.push(label);
-        completedSteps.push(`removed:${label}`);
-      }
-      for (const label of input.add) {
-        await tracker.addLabel(input.id, label);
-        added.push(label);
-        completedSteps.push(`added:${label}`);
-      }
-      return { id: input.id, added: input.add, removed: input.remove };
-    } catch (error) {
-      if (completedSteps.length === 0) throw error;
-      return {
-        status: "partial",
-        data: {
-          id: input.id,
-          added,
-          removed,
-          requestedAdd: input.add,
-          requestedRemove: input.remove,
-          completedSteps
-        },
-        error: {
-          name: error instanceof Error ? error.name : "Error",
-          message: error instanceof Error ? error.message : String(error)
-        }
-      };
-    }
-  }
-  trustedFilePath(path) {
-    const absolute = isAbsolute5(path) ? path : resolve9(this.props.cwd, path);
-    if (!existsSync12(absolute)) throw new Error(`Attachment file does not exist: ${path}`);
-    const realPath = realpathSync7(absolute);
-    const stat = statSync6(realPath);
-    const contained = this.roots.some((root) => {
-      const fromRoot = relative5(root, realPath);
-      return fromRoot === "" || !fromRoot.startsWith("..") && !isAbsolute5(fromRoot);
-    });
-    if (!contained || !stat.isFile())
-      throw new Error(`Attachment file is outside trusted roots: ${path}`);
-    return realPath;
-  }
-};
-
-// src/operations/tracker-entity-operations.ts
-var labelListSchema = z52.array(z52.string()).transform((labels) => [...new Set(labels.map((label) => label.trim()).filter(Boolean))]);
-var labelsSchema = labelListSchema.default([]);
-var createEpicInput = z52.object({
-  ...CreateEpicInputSchema.shape,
-  labels: labelsSchema,
-  allowLocalPaths: z52.boolean().default(false)
-}).strict();
-var updateEpicInput = z52.object({
-  ...UpdateEpicInputSchema.shape,
-  labels: labelListSchema.optional(),
-  allowLocalPaths: z52.boolean().default(false)
-}).strict();
-var createInitiativeInput = CreateInitiativeInputSchema.extend({
-  allowLocalPaths: z52.boolean().default(false)
-}).strict();
-var updateInitiativeInput = UpdateInitiativeInputSchema.extend({
-  allowLocalPaths: z52.boolean().default(false)
-}).strict();
-var createTicketInput = z52.object({
-  ...CreateTicketInputSchema.shape,
-  labels: labelsSchema,
-  allowLocalPaths: z52.boolean().default(false)
-}).strict();
-var updateTicketInput = z52.object({
-  ...UpdateTicketInputSchema.shape,
-  labels: labelListSchema.optional(),
-  allowLocalPaths: z52.boolean().default(false),
-  attach: z52.array(z52.string().min(1)).default([])
-}).strict();
-var createTddInput = CreateTechnicalDesignInputSchema.extend({
-  allowLocalPaths: z52.boolean().default(false)
-}).strict();
-var entityId = z52.string().min(1);
-var linkInput = z52.object({ epicId: entityId, initiativeId: entityId }).strict();
-var partialTicketEdit = z52.object({
-  id: entityId,
-  attachments: z52.array(AttachmentSchema),
-  body: z52.string()
-});
-var ticketEditResult = z52.union([TicketSchema, partialTicketEdit]);
-var partialTicketCreate = z52.object({ id: entityId, title: z52.string() });
-var ticketCreateResult = z52.union([TicketSchema, partialTicketCreate]);
-var partialEntityWrite = z52.object({
-  id: entityId,
-  title: z52.string().optional(),
-  body: z52.string().optional()
-});
-var partialTddCreate = z52.object({ id: entityId, epicId: entityId, body: z52.string() });
-var propsSchema4 = z52.object({
-  getTracker: z52.custom((value) => typeof value === "function"),
-  getPrHost: z52.custom((value) => typeof value === "function").optional(),
-  getConfig: z52.custom((value) => typeof value === "function").optional(),
-  cwd: z52.string().min(1),
-  trustedRoots: z52.array(z52.string().min(1)).default([])
-});
-var DefaultTrackerEntityOperations = class {
-  props;
-  roots;
-  constructor(props) {
-    this.props = propsSchema4.parse(props);
-    const roots = this.props.trustedRoots.length === 0 ? [this.props.cwd] : this.props.trustedRoots;
-    this.roots = [...new Set(roots.map((root) => realpathSync8(root)))];
-  }
-  operations() {
-    return [
-      ...new DefaultTrackerReadOperations({
-        getTracker: this.props.getTracker,
-        ...this.props.getPrHost === void 0 ? {} : { getPrHost: this.props.getPrHost },
-        ...this.props.getConfig === void 0 ? {} : { getConfig: this.props.getConfig }
-      }).operations(),
-      ...new DefaultTicketLifecycleOperations({
-        getTracker: this.props.getTracker,
-        cwd: this.props.cwd,
-        trustedRoots: this.props.trustedRoots
-      }).operations(),
-      this.descriptor(
-        "epic-create",
-        "Create an epic with portable context and labels.",
-        ["write", "network"],
-        ["epic", "create"],
-        createEpicInput,
-        z52.union([EpicSchema, partialEntityWrite]),
-        (input) => this.createEpic(input)
-      ),
-      this.descriptor(
-        "epic-edit",
-        "Update an epic description, title, or labels.",
-        ["write", "network"],
-        ["epic", "edit"],
-        z52.object({ id: entityId, ...updateEpicInput.shape }).strict(),
-        z52.union([EpicSchema, partialEntityWrite]),
-        ({ id, ...input }) => this.editEpic(id, input)
-      ),
-      this.descriptor(
-        "epic-link-initiative",
-        "Link an epic to an initiative.",
-        ["write", "network"],
-        ["epic", "link-initiative"],
-        linkInput,
-        z52.object({ epicId: entityId, initiativeId: entityId }),
-        async ({ epicId, initiativeId }) => {
-          await this.props.getTracker().linkEpicToInitiative(epicId, initiativeId);
-          return { epicId, initiativeId };
-        }
-      ),
-      this.descriptor(
-        "initiative-create",
-        "Create an initiative with portable context.",
-        ["write", "network"],
-        ["initiative", "create"],
-        createInitiativeInput,
-        z52.union([InitiativeSchema, partialEntityWrite]),
-        (input) => this.createInitiative(input)
-      ),
-      this.descriptor(
-        "initiative-edit",
-        "Update an initiative description or title.",
-        ["write", "network"],
-        ["initiative", "edit"],
-        z52.object({ id: entityId, ...updateInitiativeInput.shape }).strict(),
-        z52.union([InitiativeSchema, partialEntityWrite]),
-        ({ id, ...input }) => this.editInitiative(id, input)
-      ),
-      this.descriptor(
-        "ticket-create",
-        "Create a ticket with its parent, labels, and assignee.",
-        ["write", "network"],
-        ["ticket", "create"],
-        createTicketInput,
-        ticketCreateResult,
-        (input) => this.createTicket(input)
-      ),
-      this.descriptor(
-        "ticket-edit",
-        "Update a ticket and attach local evidence files.",
-        ["write", "network"],
-        ["ticket", "edit"],
-        z52.object({ id: entityId, ...updateTicketInput.shape }).strict(),
-        ticketEditResult,
-        ({ id, ...input }) => this.editTicket(id, input)
-      ),
-      this.descriptor(
-        "tdd-create",
-        "Create a technical design under its parent epic.",
-        ["write", "network"],
-        ["tdd", "create"],
-        createTddInput,
-        z52.union([TechnicalDesignSchema, partialTddCreate]),
-        (input) => this.createTdd(input)
-      )
-    ];
-  }
-  registry(policy) {
-    return new MapOperationRegistry({
-      operations: this.operations(),
-      policy: policy ?? new LaunchOperationAccessPolicy({ allowedEffects: ["read", "network", "process"] })
-    });
-  }
-  descriptor(id, description, effects, path, inputSchema, outputSchema, handler) {
-    return {
-      id,
-      description,
-      effects,
-      cli: { path, aliases: [] },
-      inputSchema,
-      outputSchema,
-      handler
-    };
-  }
-  async createEpic(input) {
-    this.assertPortable(input.body, input.allowLocalPaths);
-    const fields = CreateEpicInputSchema.parse(input);
-    try {
-      return await this.props.getTracker().createEpic(fields);
-    } catch (error) {
-      if (!TaskTrackerPartialWriteError.isPartialWrite(error)) throw error;
-      return {
-        status: "partial",
-        data: { id: error.id, title: fields.title, body: fields.body },
-        error: { name: error.name, message: error.message }
-      };
-    }
-  }
-  async editEpic(id, input) {
-    this.assertPortable(input.body, input.allowLocalPaths);
-    const fields = UpdateEpicInputSchema.parse(input);
-    try {
-      return await this.props.getTracker().updateEpicDescription(id, fields);
-    } catch (error) {
-      if (!TaskTrackerPartialWriteError.isPartialWrite(error)) throw error;
-      return {
-        status: "partial",
-        data: {
-          id,
-          ...fields.title === void 0 ? {} : { title: fields.title },
-          body: fields.body
-        },
-        error: { name: error.name, message: error.message }
-      };
-    }
-  }
-  async createInitiative(input) {
-    this.assertPortable(input.body, input.allowLocalPaths);
-    const fields = CreateInitiativeInputSchema.parse(input);
-    try {
-      return await this.props.getTracker().createInitiative(fields);
-    } catch (error) {
-      if (!TaskTrackerPartialWriteError.isPartialWrite(error)) throw error;
-      return {
-        status: "partial",
-        data: { id: error.id, title: fields.title, body: fields.body },
-        error: { name: error.name, message: error.message }
-      };
-    }
-  }
-  async editInitiative(id, input) {
-    this.assertPortable(input.body, input.allowLocalPaths);
-    const fields = UpdateInitiativeInputSchema.parse(input);
-    try {
-      return await this.props.getTracker().updateInitiativeDescription(id, fields);
-    } catch (error) {
-      if (!TaskTrackerPartialWriteError.isPartialWrite(error)) throw error;
-      return {
-        status: "partial",
-        data: {
-          id,
-          ...fields.title === void 0 ? {} : { title: fields.title },
-          body: fields.body
-        },
-        error: { name: error.name, message: error.message }
-      };
-    }
-  }
-  async createTicket(input) {
-    this.assertPortable(input.body, input.allowLocalPaths);
-    const fields = CreateTicketInputSchema.parse(input);
-    try {
-      return await this.props.getTracker().createTicket(fields);
-    } catch (error) {
-      if (!TaskTrackerPartialWriteError.isPartialWrite(error)) throw error;
-      return {
-        status: "partial",
-        data: { id: error.id, title: fields.title },
-        error: { name: error.name, message: error.message }
-      };
-    }
-  }
-  async editTicket(id, input) {
-    const specs = input.attach;
-    const safeSpecs = specs.map((spec) => {
-      const parsed = AttachmentSpecSchema.parse(spec);
-      return `${this.trustedFilePath(parsed.path)}#${parsed.caption}`;
-    });
-    const tracker = this.props.getTracker();
-    const evidence = new TrackerEvidenceService({ tracker });
-    let body = input.body;
-    let attachments = [];
-    if (safeSpecs.length > 0) {
-      body = evidence.prepareBody({ body, specs: safeSpecs });
-      this.assertPortable(body, input.allowLocalPaths);
-      try {
-        const result = await evidence.attach({
-          ticketId: id,
-          body: input.body,
-          specs: safeSpecs
-        });
-        body = result.body;
-        attachments = result.attachments;
-      } catch (error) {
-        if (!(error instanceof EvidenceUploadFailure) || error.attachments.length === 0) {
-          if (error instanceof EvidenceUploadFailure) throw error.cause;
-          throw error;
-        }
-        return {
-          status: "partial",
-          data: { id, attachments: error.attachments, body: input.body },
-          error: {
-            name: error.cause instanceof Error ? error.cause.name : "Error",
-            message: error.cause instanceof Error ? error.cause.message : String(error.cause)
-          }
-        };
-      }
-    } else {
-      this.assertPortable(body, input.allowLocalPaths);
-    }
-    try {
-      const fields = UpdateTicketInputSchema.parse(input);
-      return await tracker.updateTicketDescription(id, { ...fields, body });
-    } catch (error) {
-      if (attachments.length === 0 && !TaskTrackerPartialWriteError.isPartialWrite(error))
-        throw error;
-      return {
-        status: "partial",
-        data: { id, attachments, body },
-        error: {
-          name: error instanceof Error ? error.name : "Error",
-          message: error instanceof Error ? error.message : String(error)
-        }
-      };
-    }
-  }
-  async createTdd(input) {
-    this.assertPortable(input.body, input.allowLocalPaths);
-    const fields = CreateTechnicalDesignInputSchema.parse(input);
-    try {
-      return await this.props.getTracker().createTechnicalDesign(fields);
-    } catch (error) {
-      if (!TaskTrackerPartialWriteError.isPartialWrite(error)) throw error;
-      return {
-        status: "partial",
-        data: { id: error.id, epicId: fields.epicId, body: fields.body },
-        error: { name: error.name, message: error.message }
-      };
-    }
-  }
-  assertPortable(body, allowLocalPaths = false) {
-    portableContextGuard.assertPortable(body, { allowLocalPaths });
-  }
-  trustedFilePath(path) {
-    const absolute = isAbsolute6(path) ? path : resolve10(this.props.cwd, path);
-    if (!existsSync13(absolute)) throw new Error(`Attachment file does not exist: ${path}`);
-    const realPath = realpathSync8(absolute);
-    const stat = statSync7(realPath);
-    const contained = this.roots.some((root) => {
-      const fromRoot = relative6(root, realPath);
-      return fromRoot === "" || !fromRoot.startsWith("..") && !isAbsolute6(fromRoot);
-    });
-    if (!contained || !stat.isFile())
-      throw new Error(`Attachment file is outside trusted roots: ${path}`);
-    return realPath;
-  }
-};
 
 // src/operations/ariadne-operations.ts
 import { z as z53 } from "zod";
@@ -10450,10 +10450,11 @@ var FlightRulesMcpServer = class {
     return [
       doc,
       ...local.operations(),
-      ...new DefaultTrackerReadOperations({
+      ...new DefaultTrackerEntityOperations({
         getTracker: () => core.tracker(),
         getPrHost: () => core.prHost(),
-        getConfig: () => core.config()
+        getConfig: () => core.config(),
+        cwd
       }).operations(),
       ...new DefaultPrOperations({ cwd, getHost: () => core.prHost() }).operations(),
       ...core.ariadneOperations().operations(),

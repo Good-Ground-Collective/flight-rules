@@ -4,6 +4,9 @@ export { WorkerReportCodec, workerReportCodec, InvalidWorkerReportError, ReportM
 export type { WorkerReportParser } from "./report-codec.js";
 export type { ReportMode, ValidatedWorkerReport } from "./report-codec.js";
 export { ImplementationReportSchema, VerificationReportSchema, } from "../orchestration/implementation-loop.schema.js";
+export { VerifiedImplementationLoop } from "../orchestration/implementation-loop.js";
+export type { ImplementationLoop } from "../orchestration/implementation-loop.js";
+export type { HandoffRecord, ImplementationReport, ImplementationRun, VerificationReport, } from "../orchestration/implementation-loop.schema.js";
 export { RunContextSchema, CallerContextSchema, RuntimeSnapshotSchema, DispatchRequestSchema, DispatchOutcomeSchema, QuestionRequestSchema, SiblingSkillRequestSchema, } from "../orchestration/orchestration.schema.js";
 export type { RunContext, CallerContext, RuntimeSnapshot, DispatchRequest, DispatchOutcome, QuestionRequest, SiblingSkillRequest, } from "../orchestration/orchestration.schema.js";
 import type { CallerContext, DispatchOutcome, DispatchRequest, QuestionRequest, SiblingSkillRequest } from "../orchestration/orchestration.schema.js";
@@ -24,6 +27,14 @@ export { DefaultTrackerEntityOperations } from "../operations/tracker-entity-ope
 export type { TrackerEntityOperations } from "../operations/tracker-entity-operations.js";
 export { DefaultTicketLifecycleOperations } from "../operations/ticket-lifecycle-operations.js";
 export type { TicketLifecycleOperations } from "../operations/ticket-lifecycle-operations.js";
+export { DefaultTrackerReadOperations } from "../operations/tracker-read-operations.js";
+export { DefaultPrOperations } from "../operations/pr-operations.js";
+export { DefaultAriadneOperations } from "../operations/ariadne-operations.js";
+export type { AriadneOperations } from "../operations/ariadne-operations.js";
+export { DefaultGitConfigOperations } from "../operations/git-config-operations.js";
+export type { GitConfigOperations } from "../operations/git-config-operations.js";
+export { DefaultReviewOperations } from "../operations/review-operations.js";
+export type { ReviewOperations } from "../operations/review-operations.js";
 export interface OrderedDispatch<T> {
     index: number;
     request: DispatchRequest;

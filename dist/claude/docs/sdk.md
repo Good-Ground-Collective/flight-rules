@@ -18,6 +18,8 @@ The catalog reads from the installed package, so callers can run from any workin
 
 The SDK also exports the existing run context, dispatch, outcome, question, sibling skill, implementation, and verification contracts. `SkillInvocationResult` represents a skill that completes, fails, or pauses at a human question boundary. A host must retain the context and pause identity when it resumes that skill.
 
+The SDK exposes the validated operation registry and each shared operation family, including tracker reads, plans and writes, ticket lifecycle, Git/configuration, pull requests, review, and Ariadne. Compose these services with a launch-bound `LaunchOperationAccessPolicy`; an operation's presence in the registry does not itself authorize a write or network effect. `DefaultTrackerEntityOperations` is the aggregate for tracker reads, ticket lifecycle and entity writes, so consumers should register that aggregate once.
+
 `DefaultFlightRules.localOperations()` supplies the shared charter, competency, RFC, QA, config-read, and readiness operations. A host can register them alongside the existing document operation and invoke normalized inputs through the same validated registry used by the CLI:
 
 ```ts

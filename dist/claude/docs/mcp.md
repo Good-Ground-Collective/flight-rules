@@ -10,7 +10,7 @@ For example, allow a local configuration edit in the checkout's project scope:
 flight-rules mcp --allow-operation config-set --allow-config-scope project
 ```
 
-The server publishes one MCP tool per completed operation descriptor. Each call goes through the shared input and output schemas and returns structured data with a text representation. An operation failure returns its domain error name and message without terminating the server. Pending CLI routes remain unavailable until their shared operation handlers are complete.
+The server publishes one MCP tool for each of the 60 shared core routes. The eight host-local hook/registration/credential routes and the MCP launcher remain transport exclusions. Each call goes through the shared input and output schemas and returns structured data with a text representation. An operation failure returns its domain error name and message without terminating the server. The route inventory and tests reject new unclassified routes.
 
 The review tools can bind trusted authority when the server starts. Pass `--review-ref` followed by the full 40-character commit SHA to enable `review-context`; the server reads review guidance from that committed tree even when the working copy has changed. Without a trusted ref, the server still starts and `review-context` returns `MissingTrustedReviewRefError`. A malformed ref or malformed owner mapping prevents stdio startup.
 

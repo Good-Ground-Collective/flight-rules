@@ -1,0 +1,100 @@
+{
+  "ticket": 267,
+  "runId": "e6-267-20261013",
+  "dispatchId": "e6-267-implement-1",
+  "baseRef": "33e0c2930ff3e4c487ea9a48788f3dbdf6f11109",
+  "node": "v24.10.0",
+  "command": "npm run test:installed-consumers",
+  "archive": {
+    "filename": "good-ground-collective-flight-rules-1.92.0.tgz",
+    "sha256": "82ae7e584e3b3addef7673e96a877c04d9c0ee5a01f003620816899d45c89eb5",
+    "packedBytes": 2638586,
+    "unpackedBytes": 13177965
+  },
+  "baseline": {
+    "cliBytes": 1918978,
+    "distFiles": 244,
+    "distBytes": 6768467,
+    "claudeFiles": 61,
+    "claudeBytes": 3083539,
+    "codexFiles": 64,
+    "codexBytes": 3083315,
+    "productionDependencies": 9,
+    "lockProductionEntries": 81
+  },
+  "measured": {
+    "cliBytes": 2659599,
+    "distFiles": 294,
+    "distBytes": 9247068,
+    "claudeBytes": 3877263,
+    "codexBytes": 3877039,
+    "productionDependencies": 10,
+    "lockProductionEntries": 83
+  },
+  "consumerProof": {
+    "isolatedLeanInstallWithoutOptionalPeers": true,
+    "checkoutNodeModulesSymlink": false,
+    "rootReviewAndNeutralSdkImports": true,
+    "productionOnlyDeclarationsSkipLibCheckFalse": true,
+    "peerInstalledDeclarationsSkipLibCheckFalse": true,
+    "typescriptExampleCompiled": true,
+    "providerNetworkRequests": 0,
+    "reviewPolicyAndTrustedRepositoryContext": true,
+    "reviewContractAndCodecRoundTrip": true,
+    "humanQuestionResumedOriginalCheckpoint": true,
+    "firstReviewPassOpenThenEvidenceResolved": true,
+    "workerEvents": [
+      "implementation",
+      "code-verifier",
+      "directed-implementation-retry",
+      "code-verifier"
+    ],
+    "workerFinalState": "verified",
+    "mcp": {
+      "packedAndRelocatedBinaries": 3,
+      "versions": ["auto", "legacy"],
+      "toolsPerBinary": 60,
+      "validAndInvalidInputsPerRoute": true,
+      "routeContractCalls": 720,
+      "invalidToolInputRejected": true,
+      "defaultFixtureWriteDeniedWithoutSideEffect": true,
+      "explicitlyAllowedFixtureWriteSucceeded": true,
+      "clientStdoutFramingErrors": 0,
+      "eofProbes": [
+        {
+          "binary": "package/bin/flight-rules.mjs",
+          "initialized": true,
+          "stdoutRecords": 1,
+          "exitCode": 0,
+          "signal": null
+        },
+        {
+          "binary": "claude/bin/flight-rules.mjs",
+          "initialized": true,
+          "stdoutRecords": 1,
+          "exitCode": 0,
+          "signal": null
+        },
+        {
+          "binary": "codex/bin/flight-rules.mjs",
+          "initialized": true,
+          "stdoutRecords": 1,
+          "exitCode": 0,
+          "signal": null
+        }
+      ]
+    },
+    "routeCoverage": {
+      "supportedRoutes": 60,
+      "pendingRoutes": 0,
+      "hostLocalExclusions": 8,
+      "mcpLauncherExclusion": 1
+    },
+    "importGraph": {
+      "bundledCliCheckedWithEsbuildMetafile": true,
+      "externalEntryImportsChecked": true,
+      "relativeAndAbsoluteNegativeControls": true
+    }
+  },
+  "evidenceArchiveRetainedInLocalRunScratch": true
+}

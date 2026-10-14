@@ -31684,7 +31684,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.93.0";
+var appVersion = false ? "0.0.0-dev" : "1.94.0";
 
 // src/shared/ariadne/review-packet.schema.ts
 var packetLimits = {
@@ -70938,10 +70938,11 @@ var FlightRulesMcpServer = class {
     return [
       doc,
       ...local.operations(),
-      ...new DefaultTrackerReadOperations({
+      ...new DefaultTrackerEntityOperations({
         getTracker: () => core.tracker(),
         getPrHost: () => core.prHost(),
-        getConfig: () => core.config()
+        getConfig: () => core.config(),
+        cwd
       }).operations(),
       ...new DefaultPrOperations({ cwd, getHost: () => core.prHost() }).operations(),
       ...core.ariadneOperations().operations(),
