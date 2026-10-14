@@ -7,7 +7,6 @@ import { configScopes, type ConfigScope } from "../shared/config-store.js";
 import { ReadinessFailedError } from "../tasks/commands/check/command.js";
 import { ReadinessOptionsSchema, WorkflowSchema } from "../tasks/readiness/readiness.schema.js";
 import { OperationCliError, type OperationRegistry } from "./operation-registry.js";
-import type { LocalDiscoveryOperations } from "./local-discovery-operations.js";
 
 const RuntimeFailureReportSchema = z.object({
   tracker: z.null(),
@@ -52,7 +51,6 @@ const ReadinessResultSchema = z.object({
 });
 
 export interface LocalDiscoveryCliProps {
-  operations: LocalDiscoveryOperations;
   registry: OperationRegistry;
   readStdin?: () => Promise<string>;
 }
@@ -60,15 +58,6 @@ export interface LocalDiscoveryCommandAdapter {
   addTo(program: Command): void;
 }
 const LocalDiscoveryCliPropsSchema = z.object({
-  operations: z.custom<LocalDiscoveryOperations>(
-    (value): value is LocalDiscoveryOperations =>
-      typeof value === "object" &&
-      value !== null &&
-      "operations" in value &&
-      typeof value.operations === "function" &&
-      "configStore" in value &&
-      typeof value.configStore === "function",
-  ),
   registry: z.custom<OperationRegistry>(
     (value) => typeof value === "object" && value !== null && "invoke" in value,
   ),
@@ -77,13 +66,11 @@ const LocalDiscoveryCliPropsSchema = z.object({
 
 /** Adapts Commander arguments and terminal rendering to the shared local operations. */
 export class CommanderLocalDiscoveryCli implements LocalDiscoveryCommandAdapter {
-  private readonly operations: LocalDiscoveryOperations;
   private readonly registry: OperationRegistry;
   private readonly readStdin: () => Promise<string>;
 
   constructor(props: LocalDiscoveryCliProps) {
     const parsed = LocalDiscoveryCliPropsSchema.parse(props);
-    this.operations = parsed.operations;
     this.registry = parsed.registry;
     this.readStdin = parsed.readStdin ?? (() => text(process.stdin));
   }
@@ -240,14 +227,18 @@ export class CommanderLocalDiscoveryCli implements LocalDiscoveryCommandAdapter 
       .argument("<values...>")
       .addOption(new Option("--scope <scope>", scopeHelp).choices(configScopes))
       .exitOverride()
-      .action((key: string, values: string[], options: { scope?: ConfigScope }) => {
-        const store = this.operations.configStore();
-        const scope = options.scope ?? store.defaultScopeFor(key);
-        store.set(key, values, scope);
-        const shadowedBy = store.shadowingScope(key, scope);
-        process.stdout.write(
-          `${JSON.stringify({ key, scope, path: store.pathFor(scope), ...(shadowedBy === undefined ? {} : { warning: `${key} is also set in ${shadowedBy} scope (${store.pathFor(shadowedBy)}), which takes precedence` }) })}\n`,
+      .action(async (key: string, values: string[], options: { scope?: ConfigScope }) => {
+        const result = await this.invoke(
+          "config-set",
+          { key, values, ...(options.scope === undefined ? {} : { scope: options.scope }) },
+          z.object({
+            key: z.string(),
+            scope: z.enum(configScopes),
+            path: z.string(),
+            warning: z.string().optional(),
+          }),
         );
+        process.stdout.write(`${JSON.stringify(result)}\n`);
       });
     config
       .command("unset")
@@ -255,11 +246,13 @@ export class CommanderLocalDiscoveryCli implements LocalDiscoveryCommandAdapter 
       .argument("<key>")
       .addOption(new Option("--scope <scope>", scopeHelp).choices(configScopes))
       .exitOverride()
-      .action((key: string, options: { scope?: ConfigScope }) => {
-        const store = this.operations.configStore();
-        const scope = options.scope ?? store.defaultScopeFor(key);
-        store.unset(key, scope);
-        process.stdout.write(`${JSON.stringify({ key, scope, path: store.pathFor(scope) })}\n`);
+      .action(async (key: string, options: { scope?: ConfigScope }) => {
+        const result = await this.invoke(
+          "config-unset",
+          { key, ...(options.scope === undefined ? {} : { scope: options.scope }) },
+          z.object({ key: z.string(), scope: z.enum(configScopes), path: z.string() }),
+        );
+        process.stdout.write(`${JSON.stringify(result)}\n`);
       });
   }
 
