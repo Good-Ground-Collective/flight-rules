@@ -1953,13 +1953,34 @@ var cliRouteCoverage = new ManifestCliRouteCoverage({
       ["pr create", "pr-create"],
       ["pr comment", "pr-comment"],
       ["pr list", "pr-list"],
-      ["pr request-review", "pr-request-review"]
+      ["pr request-review", "pr-request-review"],
+      ["board post heartbeat", "board-post-heartbeat"],
+      ["board post item", "board-post-item"],
+      ["board post activity", "board-post-activity"],
+      ["board items", "board-items"],
+      ["packet create", "packet-create"],
+      ["packet new-id", "packet-new-id"],
+      ["packet update", "packet-update"],
+      ["packet get", "packet-get"],
+      ["packet reviewers", "packet-reviewers"]
     ].map(([path, operationId]) => ({
       status: "supported",
       route: { path: (path ?? "").split(" "), aliases: [] },
       operationId: operationId ?? ""
     })),
-    ...pendingRoutes.map((path) => ({
+    ...pendingRoutes.filter(
+      (path) => !(/* @__PURE__ */ new Set([
+        "board post heartbeat",
+        "board post item",
+        "board post activity",
+        "board items",
+        "packet create",
+        "packet new-id",
+        "packet update",
+        "packet get",
+        "packet reviewers"
+      ])).has(path)
+    ).map((path) => ({
       status: "pending-migration",
       route: { path: path.split(" "), aliases: [] },
       operationId: `cli-${path.replaceAll(" ", "-")}`

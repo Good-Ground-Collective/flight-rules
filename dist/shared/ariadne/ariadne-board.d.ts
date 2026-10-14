@@ -21,6 +21,8 @@ export interface BoardCallOptions {
 export interface BoardReportOptions extends BoardCallOptions {
     /** The skill reporting, so a session this post creates names it instead of showing none. */
     skill?: string | undefined;
+    /** Lets a shared operation avoid repeating an external post after its session was absent. */
+    bootstrapMissingSession?: boolean;
 }
 /**
  * `notices` name config the board ignored. They are diagnostics: callers

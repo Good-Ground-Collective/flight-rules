@@ -31684,7 +31684,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.92.0";
+var appVersion = false ? "0.0.0-dev" : "1.93.0";
 
 // src/shared/ariadne/review-packet.schema.ts
 var packetLimits = {
@@ -31828,7 +31828,11 @@ var AriadneClient = class {
   /** GET /v1/agents/items?session=…: every item of the session, open and resolved, oldest first. */
   async listItems(session) {
     const id = this.validate(AgentSessionIdSchema, session, "session");
-    return this.request("GET", `/v1/agents/items?session=${encodeURIComponent(id)}`, ItemListResponseSchema);
+    return this.request(
+      "GET",
+      `/v1/agents/items?session=${encodeURIComponent(id)}`,
+      ItemListResponseSchema
+    );
   }
   /** POST /v1/review-packets: ids are global; replaying an id and body is idempotent, a different body is 409 `packet_exists`, another author's id is 409 `packet_id_taken`. */
   async createPacket(input2) {
@@ -31839,12 +31843,21 @@ var AriadneClient = class {
   async updatePacket(id, input2) {
     const packetId = this.validate(PacketIdSchema, id, "packet id");
     const body = this.validate(PacketUpdateSchema, input2, "packet update");
-    return this.request("PUT", `/v1/review-packets/${encodeURIComponent(packetId)}`, PacketResponseSchema, body);
+    return this.request(
+      "PUT",
+      `/v1/review-packets/${encodeURIComponent(packetId)}`,
+      PacketResponseSchema,
+      body
+    );
   }
   /** GET /v1/review-packets/{id}. */
   async getPacket(id) {
     const packetId = this.validate(PacketIdSchema, id, "packet id");
-    return this.request("GET", `/v1/review-packets/${encodeURIComponent(packetId)}`, PacketResponseSchema);
+    return this.request(
+      "GET",
+      `/v1/review-packets/${encodeURIComponent(packetId)}`,
+      PacketResponseSchema
+    );
   }
   /** GET /v1/review-packets/reviewers: active members with a linked GitHub login. */
   async listReviewers() {
@@ -31875,7 +31888,11 @@ var AriadneClient = class {
     try {
       json2 = JSON.parse(response.body);
     } catch (err) {
-      throw new AriadneError({ failure: "bad-response", message: `${method} ${path3} returned a body that is not JSON`, cause: err });
+      throw new AriadneError({
+        failure: "bad-response",
+        message: `${method} ${path3} returned a body that is not JSON`,
+        cause: err
+      });
     }
     const parsed = schema.safeParse(json2);
     if (!parsed.success) {
@@ -31888,17 +31905,18 @@ var AriadneClient = class {
   }
   async send(request2) {
     let lastError;
-    for (let attempt = 1; attempt <= ariadneAttempts; attempt++) {
+    const attempts = request2.method === "GET" ? ariadneAttempts : 1;
+    for (let attempt = 1; attempt <= attempts; attempt++) {
       try {
         const response = await this.transport.send(request2);
-        if (response.status < 500 || attempt === ariadneAttempts) return response;
+        if (response.status < 500 || attempt === attempts) return response;
       } catch (err) {
         lastError = err;
       }
     }
     throw new AriadneError({
       failure: "network",
-      message: `no response from ${this.baseUrl} after ${ariadneAttempts} attempts (${this.describeNetworkError(lastError)})`,
+      message: `no response from ${this.baseUrl} after ${attempts} attempt${attempts === 1 ? "" : "s"} (${this.describeNetworkError(lastError)})`,
       cause: lastError
     });
   }
@@ -32236,7 +32254,9 @@ var AriadneBoard = class {
       else if (value === false || value === "false") enabled = false;
       else {
         enabled = false;
-        notices.push(`ignored ${enabledKey} from ${scopeLabels[rawEnabled.scope]}: expected true or false; reporting is off until it is fixed`);
+        notices.push(
+          `ignored ${enabledKey} from ${scopeLabels[rawEnabled.scope]}: expected true or false; reporting is off until it is fixed`
+        );
       }
     }
     return { url: url2, enabled, notices };
@@ -32283,7 +32303,8 @@ var AriadneBoard = class {
           this.remember(sent, input2.session === void 0);
           return response;
         } catch (err) {
-          if (!(err instanceof AriadneError) || err.failure !== "invalid-input") this.remember(sent, input2.session === void 0);
+          if (!(err instanceof AriadneError) || err.failure !== "invalid-input")
+            this.remember(sent, input2.session === void 0);
           throw err;
         }
       },
@@ -32299,7 +32320,12 @@ var AriadneBoard = class {
   async replay(session, options = {}) {
     const record2 = this.sessions?.read(session) ?? this.sessions?.readInferred(session);
     if (record2 === void 0) return { status: "skipped", reason: "nothing-recorded" };
-    return this.call(options, session, (client) => client.heartbeat(record2.heartbeat), record2.heartbeat.ticket);
+    return this.call(
+      options,
+      session,
+      (client) => client.heartbeat(record2.heartbeat),
+      record2.heartbeat.ticket
+    );
   }
   /**
    * Posts an item. A session that has never sent a heartbeat (or has aged
@@ -32313,7 +32339,13 @@ var AriadneBoard = class {
       input2.session,
       (client, session) => this.withSession(
         client,
-        { session, ticket: input2.ticket, skill: options.skill, defaulted: input2.session === void 0 },
+        {
+          session,
+          ticket: input2.ticket,
+          skill: options.skill,
+          defaulted: input2.session === void 0,
+          bootstrapMissingSession: options.bootstrapMissingSession !== false
+        },
         () => client.postItem({ ...input2, session })
       ),
       input2.ticket
@@ -32326,7 +32358,13 @@ var AriadneBoard = class {
       input2.session,
       (client, session) => this.withSession(
         client,
-        { session, ticket: input2.ticket, skill: options.skill, defaulted: input2.session === void 0 },
+        {
+          session,
+          ticket: input2.ticket,
+          skill: options.skill,
+          defaulted: input2.session === void 0,
+          bootstrapMissingSession: options.bootstrapMissingSession !== false
+        },
         () => client.postActivity({ ...input2, session })
       ),
       input2.ticket
@@ -32370,6 +32408,7 @@ var AriadneBoard = class {
       return await post();
     } catch (err) {
       if (!(err instanceof AriadneError) || err.code !== "session_not_found") throw err;
+      if (!target.bootstrapMissingSession) throw err;
     }
     const { session, ticket, skill, defaulted } = target;
     const recorded = this.bestEffort(() => this.sessions?.recent(session, bootstrapRecoveryMs));
@@ -32378,13 +32417,21 @@ var AriadneBoard = class {
       return post();
     }
     const named = skill !== void 0 && skill !== "";
-    const heartbeat = { session, ticket, step: bootstrapStep, state: "nominal", ...named ? { skill } : {} };
+    const heartbeat = {
+      session,
+      ticket,
+      step: bootstrapStep,
+      state: "nominal",
+      ...named ? { skill } : {}
+    };
     await client.heartbeat(heartbeat);
     if (named) this.rememberPlaceholder(heartbeat, defaulted);
     return post();
   }
   rememberPlaceholder(heartbeat, defaulted) {
-    const remembered = this.bestEffort(() => this.sessions?.recordIfAbsent(heartbeat, bootstrapRecoveryMs));
+    const remembered = this.bestEffort(
+      () => this.sessions?.recordIfAbsent(heartbeat, bootstrapRecoveryMs)
+    );
     const claudeSession = this.defaultSession();
     if (remembered === true && defaulted && claudeSession !== void 0 && claudeSession !== heartbeat.session) {
       this.bestEffort(() => this.sessions?.pointThread(claudeSession, heartbeat.session));
@@ -32413,7 +32460,10 @@ var AriadneBoard = class {
       return {
         status: "skipped",
         reason: "not-jira-ticket",
-        notices: [...settings.notices, `skipped: ${ticket} is not a Jira issue key, and Ariadne tracks only Jira tickets`]
+        notices: [
+          ...settings.notices,
+          `skipped: ${ticket} is not a Jira issue key, and Ariadne tracks only Jira tickets`
+        ]
       };
     }
     let token;
@@ -32422,7 +32472,8 @@ var AriadneBoard = class {
     } catch (err) {
       return noted({ status: "failed", message: err instanceof Error ? err.message : String(err) });
     }
-    if (token === void 0 && options.strict !== true) return noted({ status: "skipped", reason: "no-token" });
+    if (token === void 0 && options.strict !== true)
+      return noted({ status: "skipped", reason: "no-token" });
     const session = requestedSession ?? this.defaultSession(ticket);
     if (session === void 0) {
       return noted({
@@ -32439,7 +32490,10 @@ var AriadneBoard = class {
     try {
       return noted({ status: "posted", value: await run3(client, session) });
     } catch (err) {
-      return noted({ status: "failed", message: this.redact(this.describe(err, url2, token !== void 0), token) });
+      return noted({
+        status: "failed",
+        message: this.redact(this.describe(err, url2, token !== void 0), token)
+      });
     }
   }
   describe(err, url2, hasToken) {
@@ -32513,35 +32567,19 @@ var AriadnePackets = class {
   }
   /**
    * Publishes a packet, generating its id from the title when the file has none.
-   * When another author already holds the id (409 `packet_id_taken`) the random
-   * suffix is regenerated and the create is retried once.
    */
   async create(packet) {
     const first = this.withId(packet);
-    return this.call(async (client) => {
-      try {
-        return await client.createPacket(first.packet);
-      } catch (err) {
-        if (!(err instanceof AriadneError) || err.code !== "packet_id_taken") throw err;
-      }
-      const retryId = packetIdGenerator.regenerate(first.id);
-      try {
-        return await client.createPacket(Object.assign({}, first.packet, { id: retryId }));
-      } catch (err) {
-        if (err instanceof AriadneError && err.code === "packet_id_taken") {
-          throw new AriadnePacketError(
-            `the packet id is taken by another author (409 packet_id_taken; tried ${first.id} and ${retryId}); change the title in the packet file or run \`flight-rules packet new-id --title <title>\` and set its id, then retry`,
-            { cause: err }
-          );
-        }
-        throw err;
-      }
-    });
+    return this.call((client) => client.createPacket(first.packet));
   }
   async update(id, input2) {
     const operationId = input2.operationId ?? randomUUID().replaceAll("-", "");
     return this.call(
-      (client) => client.updatePacket(id, { expectedRevision: input2.expectedRevision, operationId, packet: input2.packet })
+      (client) => client.updatePacket(id, {
+        expectedRevision: input2.expectedRevision,
+        operationId,
+        packet: input2.packet
+      })
     );
   }
   async get(id) {
@@ -32552,7 +32590,8 @@ var AriadnePackets = class {
   }
   /** The packet carrying an id: the file's own, or one generated from its title. Anything else is left for validation to reject. */
   withId(packet) {
-    if (typeof packet !== "object" || packet === null || Array.isArray(packet)) return { packet, id: "" };
+    if (typeof packet !== "object" || packet === null || Array.isArray(packet))
+      return { packet, id: "" };
     const fields = { ...packet };
     if (typeof fields["id"] === "string") return { packet: fields, id: fields["id"] };
     if (fields["id"] === void 0 && typeof fields["title"] === "string") {
@@ -32604,7 +32643,8 @@ var AriadnePackets = class {
   }
   describe(err, url2) {
     if (!(err instanceof AriadneError)) return err instanceof Error ? err.message : String(err);
-    if (err.failure === "invalid-input") return `${err.message}; fix the packet file and retry, nothing was sent`;
+    if (err.failure === "invalid-input")
+      return `${err.message}; fix the packet file and retry, nothing was sent`;
     if (err.failure === "network") {
       return `could not reach Ariadne at ${url2}: ${err.message}; check the network and \`ariadne.url\`, then retry`;
     }
@@ -32629,7 +32669,8 @@ var AriadnePackets = class {
     if (err.code === "reviewer_not_found") {
       return `a reviewer is not an active Ariadne member with a linked GitHub login (422 reviewer_not_found): ${err.message}; list valid logins with \`flight-rules packet reviewers\``;
     }
-    if (err.failure === "http") return `Ariadne returned ${err.message}; check the packet and retry`;
+    if (err.failure === "http")
+      return `Ariadne returned ${err.message}; check the packet and retry`;
     return `Ariadne request failed: ${err.message}`;
   }
   /** Belt and braces: no message may ever carry the token. */
@@ -52756,6 +52797,204 @@ var DefaultTrackerEntityOperations = class {
   }
 };
 
+// src/operations/ariadne-operations.ts
+var BoardResultSchema = (value) => external_exports.discriminatedUnion("status", [
+  external_exports.object({
+    status: external_exports.literal("skipped"),
+    reason: external_exports.enum([
+      "disabled",
+      "no-token",
+      "invalid-url",
+      "not-jira-ticket",
+      "nothing-recorded"
+    ]),
+    notices: external_exports.array(external_exports.string()).optional()
+  }),
+  external_exports.object({
+    status: external_exports.literal("failed"),
+    message: external_exports.string(),
+    notices: external_exports.array(external_exports.string()).optional()
+  }),
+  external_exports.object({ status: external_exports.literal("ok"), value, notices: external_exports.array(external_exports.string()).optional() })
+]);
+var packetInput = external_exports.unknown();
+var packetIdInput = external_exports.strictObject({ title: external_exports.string() });
+var packetUpdateInput = external_exports.strictObject({
+  id: external_exports.string().min(1),
+  packet: external_exports.unknown(),
+  expectedRevision: external_exports.number().int().nonnegative()
+});
+var packetOutput = PacketSchema;
+var reviewersOutput = ReviewerListResponseSchema;
+var AriadneOperationsPropsSchema = external_exports.object({
+  getBoard: external_exports.custom((value) => typeof value === "function"),
+  getPackets: external_exports.custom((value) => typeof value === "function")
+});
+var inputSchemas = {
+  heartbeat: external_exports.object({
+    input: HeartbeatInputSchema.omit({ session: true }).extend({
+      session: external_exports.string().optional(),
+      ticket: external_exports.string().optional(),
+      step: external_exports.string(),
+      repo: external_exports.string().optional(),
+      branch: external_exports.string().optional(),
+      skill: external_exports.string().optional(),
+      detail: external_exports.string().optional()
+    }),
+    options: external_exports.object({ strict: external_exports.boolean().optional(), skill: external_exports.string().optional() }).optional()
+  }),
+  item: external_exports.object({
+    input: ItemInputSchema.omit({ session: true }).extend({
+      session: external_exports.string().optional(),
+      ticket: external_exports.string().optional(),
+      title: external_exports.string(),
+      detail: external_exports.string().optional(),
+      options: external_exports.array(external_exports.string()).optional(),
+      id: external_exports.string().optional()
+    }),
+    options: external_exports.object({ strict: external_exports.boolean().optional(), skill: external_exports.string().optional() }).optional()
+  }),
+  activity: external_exports.object({
+    input: ActivityInputSchema.omit({ session: true }).extend({
+      session: external_exports.string().optional(),
+      ticket: external_exports.string().optional(),
+      text: external_exports.string(),
+      id: external_exports.string().optional()
+    }),
+    options: external_exports.object({ strict: external_exports.boolean().optional(), skill: external_exports.string().optional() }).optional()
+  }),
+  items: external_exports.strictObject({
+    session: external_exports.string().optional(),
+    ticket: external_exports.string().optional(),
+    strict: external_exports.boolean().optional()
+  })
+};
+var DefaultAriadneOperations = class {
+  props;
+  constructor(props) {
+    this.props = AriadneOperationsPropsSchema.parse(props);
+  }
+  operations() {
+    return [
+      this.descriptor(
+        "board-post-heartbeat",
+        "Report a run heartbeat to Ariadne.",
+        ["write", "network"],
+        ["board", "post", "heartbeat"],
+        inputSchemas.heartbeat,
+        BoardResultSchema(HeartbeatResponseSchema),
+        ({ input: input2, options }) => this.mapBoard(this.props.getBoard().heartbeat(input2, this.boardOptions(options)))
+      ),
+      this.descriptor(
+        "board-post-item",
+        "Post a question or request to an Ariadne run.",
+        ["write", "network"],
+        ["board", "post", "item"],
+        inputSchemas.item,
+        BoardResultSchema(ItemResponseSchema),
+        ({ input: input2, options }) => this.mapBoard(
+          this.props.getBoard().item(input2, {
+            ...this.boardOptions(options),
+            bootstrapMissingSession: false
+          })
+        )
+      ),
+      this.descriptor(
+        "board-post-activity",
+        "Add activity to an Ariadne run.",
+        ["write", "network"],
+        ["board", "post", "activity"],
+        inputSchemas.activity,
+        BoardResultSchema(ActivityResponseSchema),
+        ({ input: input2, options }) => this.mapBoard(
+          this.props.getBoard().activity(input2, {
+            ...this.boardOptions(options),
+            bootstrapMissingSession: false
+          })
+        )
+      ),
+      this.descriptor(
+        "board-items",
+        "List items for an Ariadne run.",
+        ["read", "network"],
+        ["board", "items"],
+        inputSchemas.items,
+        BoardResultSchema(ItemListResponseSchema),
+        ({ session, ticket, strict }) => this.mapBoard(
+          this.props.getBoard().items(session, strict === void 0 ? {} : { strict }, ticket)
+        )
+      ),
+      this.descriptor(
+        "packet-create",
+        "Publish a validated Ariadne review packet.",
+        ["write", "network"],
+        ["packet", "create"],
+        external_exports.strictObject({ packet: packetInput }),
+        packetOutput,
+        ({ packet }) => this.props.getPackets().create(packet)
+      ),
+      this.descriptor(
+        "packet-new-id",
+        "Generate a reusable Ariadne review packet id.",
+        [],
+        ["packet", "new-id"],
+        packetIdInput,
+        external_exports.object({ id: external_exports.string() }),
+        ({ title }) => ({ id: packetIdGenerator.generate(title) })
+      ),
+      this.descriptor(
+        "packet-update",
+        "Replace a review packet at its expected revision.",
+        ["write", "network"],
+        ["packet", "update"],
+        packetUpdateInput,
+        packetOutput,
+        ({ id, packet, expectedRevision }) => this.props.getPackets().update(id, { packet, expectedRevision })
+      ),
+      this.descriptor(
+        "packet-get",
+        "Read an Ariadne review packet and its revision.",
+        ["read", "network"],
+        ["packet", "get"],
+        external_exports.object({ id: external_exports.string().min(1) }),
+        packetOutput,
+        ({ id }) => this.props.getPackets().get(id)
+      ),
+      this.descriptor(
+        "packet-reviewers",
+        "List Ariadne members who can review packets.",
+        ["read", "network"],
+        ["packet", "reviewers"],
+        external_exports.strictObject({}),
+        reviewersOutput,
+        () => this.props.getPackets().reviewers()
+      )
+    ];
+  }
+  boardOptions(options) {
+    return {
+      ...options?.strict === void 0 ? {} : { strict: options.strict },
+      ...options?.skill === void 0 ? {} : { skill: options.skill }
+    };
+  }
+  async mapBoard(outcome) {
+    const result = await outcome;
+    if (result.status === "posted") return { ...result, status: "ok" };
+    return result;
+  }
+  descriptor(id, description, effects, path3, inputSchema, outputSchema, handler2) {
+    return {
+      id,
+      description,
+      effects,
+      cli: { path: path3, aliases: [] },
+      inputSchema,
+      outputSchema,
+      handler: handler2
+    };
+  }
+};
+
 // src/flight-rules/flight-rules.ts
 var DefaultFlightRules = class {
   cwd;
@@ -52911,6 +53150,12 @@ var DefaultFlightRules = class {
       getPrHost: () => this.prHost(),
       getConfig: () => this.config(),
       cwd: this.cwd
+    });
+  }
+  ariadneOperations() {
+    return new DefaultAriadneOperations({
+      getBoard: () => this.board(),
+      getPackets: () => this.packets()
     });
   }
   board() {
@@ -53376,6 +53621,79 @@ function collect(value, previous3) {
   return [...previous3, value];
 }
 
+// src/operations/ariadne-command-client.ts
+var ClientPropsSchema = external_exports.object({
+  registry: external_exports.custom(
+    (value) => typeof value === "object" && value !== null && "invoke" in value
+  )
+});
+var BoardOperationResultSchema = external_exports.discriminatedUnion("status", [
+  external_exports.object({
+    status: external_exports.literal("skipped"),
+    reason: external_exports.enum(["disabled", "no-token", "invalid-url", "not-jira-ticket", "nothing-recorded"]),
+    notices: external_exports.array(external_exports.string()).optional()
+  }),
+  external_exports.object({
+    status: external_exports.literal("failed"),
+    message: external_exports.string(),
+    notices: external_exports.array(external_exports.string()).optional()
+  }),
+  external_exports.object({
+    status: external_exports.literal("ok"),
+    value: external_exports.unknown(),
+    notices: external_exports.array(external_exports.string()).optional()
+  })
+]);
+var RegistryAriadneCommandClient = class {
+  registry;
+  constructor(props) {
+    this.registry = ClientPropsSchema.parse(props).registry;
+  }
+  async board(id, input2, valueSchema) {
+    const result = await this.registry.invoke(id, input2);
+    if (result.status !== "success") {
+      throw new OperationCliError({
+        operationId: id,
+        errorName: result.error.name,
+        message: result.error.message,
+        ...result.status === "partial" ? { partialData: result.data } : {}
+      });
+    }
+    const parsed = BoardOperationResultSchema.parse(result.data);
+    if (parsed.status === "ok") {
+      return {
+        status: "posted",
+        value: valueSchema.parse(parsed.value),
+        ...parsed.notices === void 0 ? {} : { notices: parsed.notices }
+      };
+    }
+    if (parsed.status === "skipped") {
+      return {
+        status: "skipped",
+        reason: parsed.reason,
+        ...parsed.notices === void 0 ? {} : { notices: parsed.notices }
+      };
+    }
+    return {
+      status: "failed",
+      message: parsed.message,
+      ...parsed.notices === void 0 ? {} : { notices: parsed.notices }
+    };
+  }
+  async packet(id, input2, outputSchema) {
+    const result = await this.registry.invoke(id, input2);
+    if (result.status !== "success") {
+      throw new OperationCliError({
+        operationId: id,
+        errorName: result.error.name,
+        message: result.error.message,
+        ...result.status === "partial" ? { partialData: result.data } : {}
+      });
+    }
+    return outputSchema.parse(result.data);
+  }
+};
+
 // src/shared/commands/board/command.ts
 var HiddenPrompt = class {
   async read(label) {
@@ -53397,8 +53715,11 @@ var itemsSessionHelp = "session id; defaults to <$CLAUDE_CODE_SESSION_ID>-<TICKE
 var skillHelp = "the skill reporting, e.g. flight-rules:execute-work";
 var bootstrapSkillHelp = `${skillHelp}; names the skill on a session this post has to create`;
 var strictHelp = "exit 1 when the post fails, and post even without a token so a missing one fails with 401";
-function createBoardCommand(getBoard, getTokens = () => new AriadneTokenStore(), readSecret = () => new HiddenPrompt().read("Ariadne agent token: ")) {
-  const board = new Command("board").description("report this run to Ariadne's Agents page (opt-in; silent unless an Ariadne token is set)").addHelpText(
+function createBoardCommand(getBoard, getTokens = () => new AriadneTokenStore(), readSecret = () => new HiddenPrompt().read("Ariadne agent token: "), registry2) {
+  const operations = registry2 === void 0 ? void 0 : new RegistryAriadneCommandClient({ registry: registry2 });
+  const board = new Command("board").description(
+    "report this run to Ariadne's Agents page (opt-in; silent unless an Ariadne token is set)"
+  ).addHelpText(
     "after",
     [
       "",
@@ -53414,7 +53735,9 @@ function createBoardCommand(getBoard, getTokens = () => new AriadneTokenStore(),
   board.exitOverride();
   const withReportOptions = (command, jsonHelp, session = sessionHelp) => command.option("--session <id>", session).option("--strict", strictHelp).option("--json", jsonHelp).exitOverride();
   const finish = (outcome, opts, print, loud = opts.strict === true) => {
-    if (loud) for (const notice of outcome.notices ?? []) process.stderr.write(`flight-rules board: ${notice}
+    if (loud)
+      for (const notice of outcome.notices ?? [])
+        process.stderr.write(`flight-rules board: ${notice}
 `);
     if (outcome.status === "skipped") return;
     if (outcome.status === "failed") {
@@ -53432,42 +53755,74 @@ function createBoardCommand(getBoard, getTokens = () => new AriadneTokenStore(),
     const answer = item.chosenOption !== null ? ` -> ${item.chosenOption}` : item.options.length > 0 ? ` [${item.options.join(" | ")}]` : "";
     return `${item.status}	${item.kind}	${item.ticket ?? "-"}	${item.id}	${item.title}${answer}`;
   };
-  const post = new Command("post").description("send a heartbeat, an item that needs a person, or an activity line");
+  const post = new Command("post").description(
+    "send a heartbeat, an item that needs a person, or an activity line"
+  );
   post.exitOverride();
   withReportOptions(
-    post.command("heartbeat").description("create or update this session: ticket, step and state").requiredOption("--ticket <key>", ticketHelp).requiredOption("--step <step>", "one line up to 60 characters: implement, verify 2/3, pr, qa").addOption(new Option("--state <state>", "how the run is going").choices(agentStates).makeOptionMandatory()).option("--branch <branch>", "the branch as git prints it").option("--repo <repo>", "owner/name").option("--skill <skill>", skillHelp).option("--detail <line>", "one line up to 500 characters"),
+    post.command("heartbeat").description("create or update this session: ticket, step and state").requiredOption("--ticket <key>", ticketHelp).requiredOption(
+      "--step <step>",
+      "one line up to 60 characters: implement, verify 2/3, pr, qa"
+    ).addOption(
+      new Option("--state <state>", "how the run is going").choices(agentStates).makeOptionMandatory()
+    ).option("--branch <branch>", "the branch as git prints it").option("--repo <repo>", "owner/name").option("--skill <skill>", skillHelp).option("--detail <line>", "one line up to 500 characters"),
     "print the API response {session} as JSON"
   ).action(async (opts) => {
-    const outcome = await getBoard().heartbeat(
+    const input2 = {
+      session: opts.session,
+      ticket: opts.ticket,
+      step: opts.step,
+      state: opts.state,
+      branch: opts.branch,
+      repo: opts.repo,
+      skill: opts.skill,
+      detail: opts.detail
+    };
+    const outcome = operations === void 0 ? await getBoard().heartbeat(input2, { strict: opts.strict === true }) : await operations.board(
+      "board-post-heartbeat",
       {
-        session: opts.session,
-        ticket: opts.ticket,
-        step: opts.step,
-        state: opts.state,
-        branch: opts.branch,
-        repo: opts.repo,
-        skill: opts.skill,
-        detail: opts.detail
+        input: input2,
+        options: { strict: opts.strict === true }
       },
-      { strict: opts.strict === true }
+      HeartbeatResponseSchema
     );
     finish(outcome, opts, printJson(opts));
   });
   withReportOptions(
-    post.command("item").description("ask a person for something: a question, blocker, testable or wave gate, with up to 6 options").addOption(new Option("--kind <kind>", "what the person is asked for").choices(agentItemKinds).makeOptionMandatory()).requiredOption("--ticket <key>", ticketHelp).requiredOption("--title <text>", "one line up to 200 characters").option("--detail <text>", "up to 2,000 characters; line breaks allowed").option("--option <label>", "an answer the person can choose (repeatable, up to 6)", collect, []).option("--id <id>", "client id; reposting the same id returns the stored item and its chosenOption").option("--skill <skill>", bootstrapSkillHelp),
+    post.command("item").description(
+      "ask a person for something: a question, blocker, testable or wave gate, with up to 6 options"
+    ).addOption(
+      new Option("--kind <kind>", "what the person is asked for").choices(agentItemKinds).makeOptionMandatory()
+    ).requiredOption("--ticket <key>", ticketHelp).requiredOption("--title <text>", "one line up to 200 characters").option("--detail <text>", "up to 2,000 characters; line breaks allowed").option(
+      "--option <label>",
+      "an answer the person can choose (repeatable, up to 6)",
+      collect,
+      []
+    ).option(
+      "--id <id>",
+      "client id; reposting the same id returns the stored item and its chosenOption"
+    ).option("--skill <skill>", bootstrapSkillHelp),
     "print the API response {item, created} as JSON, including any chosenOption"
   ).action(async (opts) => {
-    const outcome = await getBoard().item(
+    const input2 = {
+      session: opts.session,
+      kind: opts.kind,
+      ticket: opts.ticket,
+      title: opts.title,
+      detail: opts.detail,
+      ...opts.option.length > 0 ? { options: opts.option } : {},
+      id: opts.id
+    };
+    const outcome = operations === void 0 ? await getBoard().item(input2, { strict: opts.strict === true, skill: opts.skill }) : await operations.board(
+      "board-post-item",
       {
-        session: opts.session,
-        kind: opts.kind,
-        ticket: opts.ticket,
-        title: opts.title,
-        detail: opts.detail,
-        ...opts.option.length > 0 ? { options: opts.option } : {},
-        id: opts.id
+        input: input2,
+        options: {
+          strict: opts.strict === true,
+          ...opts.skill === void 0 ? {} : { skill: opts.skill }
+        }
       },
-      { strict: opts.strict === true, skill: opts.skill }
+      ItemResponseSchema
     );
     finish(outcome, opts, printJson(opts));
   });
@@ -53475,19 +53830,44 @@ function createBoardCommand(getBoard, getTokens = () => new AriadneTokenStore(),
     post.command("activity").description("add one line to the session's activity stream").requiredOption("--ticket <key>", ticketHelp).requiredOption("--text <line>", "one line up to 500 characters").addOption(new Option("--level <level>", "defaults to info").choices(agentActivityLevels)).option("--id <id>", "client id; reposting the same id stores nothing new").option("--skill <skill>", bootstrapSkillHelp),
     "print the API response {activity, created} as JSON"
   ).action(async (opts) => {
-    const outcome = await getBoard().activity(
-      { session: opts.session, ticket: opts.ticket, text: opts.text, level: opts.level, id: opts.id },
-      { strict: opts.strict === true, skill: opts.skill }
+    const input2 = {
+      session: opts.session,
+      ticket: opts.ticket,
+      text: opts.text,
+      level: opts.level,
+      id: opts.id
+    };
+    const outcome = operations === void 0 ? await getBoard().activity(input2, { strict: opts.strict === true, skill: opts.skill }) : await operations.board(
+      "board-post-activity",
+      {
+        input: input2,
+        options: {
+          strict: opts.strict === true,
+          ...opts.skill === void 0 ? {} : { skill: opts.skill }
+        }
+      },
+      ActivityResponseSchema
     );
     finish(outcome, opts, printJson(opts));
   });
   board.addCommand(post);
   withReportOptions(
-    board.command("items").description("list a session's items, open and resolved, with any chosen option").option("--ticket <key>", "the Jira key the items were posted on; picks the same default session as the post"),
+    board.command("items").description("list a session's items, open and resolved, with any chosen option").option(
+      "--ticket <key>",
+      "the Jira key the items were posted on; picks the same default session as the post"
+    ),
     "print {items} as JSON",
     itemsSessionHelp
   ).action(async (opts) => {
-    const outcome = await getBoard().items(opts.session, { strict: opts.strict === true }, opts.ticket);
+    const outcome = operations === void 0 ? await getBoard().items(opts.session, { strict: opts.strict === true }, opts.ticket) : await operations.board(
+      "board-items",
+      {
+        session: opts.session,
+        ticket: opts.ticket,
+        strict: opts.strict === true
+      },
+      ItemListResponseSchema
+    );
     finish(
       outcome,
       opts,
@@ -53516,7 +53896,9 @@ function createBoardCommand(getBoard, getTokens = () => new AriadneTokenStore(),
   });
   board.command("logout").description("delete the agent token saved by `board login`").exitOverride().action(() => {
     const tokens = getTokens();
-    process.stdout.write(JSON.stringify({ removed: tokens.remove(), path: tokens.path() }) + "\n");
+    process.stdout.write(
+      JSON.stringify({ removed: tokens.remove(), path: tokens.path() }) + "\n"
+    );
   });
   return board;
 }
@@ -53543,12 +53925,23 @@ var DecimalIntegerParser = class {
 var decimalIntegers = new DecimalIntegerParser();
 
 // src/shared/commands/packet/command.ts
-var serverOwnedFields = /* @__PURE__ */ new Set(["id", "authorId", "status", "revision", "createdAt", "updatedAt"]);
+var serverOwnedFields = /* @__PURE__ */ new Set([
+  "id",
+  "authorId",
+  "status",
+  "revision",
+  "createdAt",
+  "updatedAt"
+]);
 var ReviewerEntrySchema = external_exports.union([
   external_exports.string(),
   external_exports.looseObject({ github: external_exports.looseObject({ login: external_exports.string() }) }).transform((reviewer) => reviewer.github.login)
 ]);
-var UpdateFileSchema = external_exports.looseObject({ id: external_exports.string().optional(), revision: external_exports.number().int().optional(), reviewers: external_exports.array(ReviewerEntrySchema).optional() }).transform((file2) => ({
+var UpdateFileSchema = external_exports.looseObject({
+  id: external_exports.string().optional(),
+  revision: external_exports.number().int().optional(),
+  reviewers: external_exports.array(ReviewerEntrySchema).optional()
+}).transform((file2) => ({
   id: file2.id,
   revision: file2.revision,
   packet: {
@@ -53571,12 +53964,18 @@ var PacketFile = class {
     try {
       text7 = readFileSync15(this.path, "utf8");
     } catch (err) {
-      throw new Error(`cannot read ${this.path}: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
+      throw new Error(
+        `cannot read ${this.path}: ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err }
+      );
     }
     try {
       return JSON.parse(text7);
     } catch (err) {
-      throw new Error(`${this.path} is not valid JSON: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
+      throw new Error(
+        `${this.path} is not valid JSON: ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err }
+      );
     }
   }
   /** Runs after the packet is stored, so a failure says so and names the id the file still needs. */
@@ -53599,7 +53998,8 @@ var PacketFile = class {
   }
 };
 var PacketCommandFactory = class {
-  create(getPackets) {
+  create(getPackets, registry2) {
+    const operations = registry2 === void 0 ? void 0 : new RegistryAriadneCommandClient({ registry: registry2 });
     const packet = new Command("packet").description("publish and revise a Review Packet in Ariadne, as its author").addHelpText(
       "after",
       [
@@ -53620,22 +54020,38 @@ var PacketCommandFactory = class {
     ).requiredOption("--file <path>", "the packet JSON").exitOverride().action(async (opts) => {
       const packetFile = new PacketFile(opts.file);
       const input2 = packetFile.read();
-      const published = await getPackets().create(input2);
+      const published = operations === void 0 ? await getPackets().create(input2) : await operations.packet("packet-create", { packet: input2 }, PacketSchema);
       print(published);
       const written = JsonObjectSchema.safeParse(input2);
-      if (written.success && written.data.id !== published.id) packetFile.writeId(written.data, published.id);
+      if (written.success && written.data.id !== published.id)
+        packetFile.writeId(written.data, published.id);
     });
-    packet.command("new-id").description('print {"id": "<slug>-<8 hex>"}: a globally unique packet id to write into the packet file once and reuse for every retry').requiredOption("--title <title>", "the packet title").exitOverride().action((opts) => {
-      print({ id: packetIdGenerator.generate(opts.title) });
+    packet.command("new-id").description(
+      'print {"id": "<slug>-<8 hex>"}: a globally unique packet id to write into the packet file once and reuse for every retry'
+    ).requiredOption("--title <title>", "the packet title").exitOverride().action(async (opts) => {
+      print(
+        operations === void 0 ? { id: packetIdGenerator.generate(opts.title) } : await operations.packet(
+          "packet-new-id",
+          { title: opts.title },
+          external_exports.object({ id: external_exports.string() })
+        )
+      );
     });
-    packet.command("update").description("revise a packet from a JSON file; a stale revision fails with 409 revision_conflict").argument("<id>", "the packet id").requiredOption("--file <path>", "the packet JSON; `packet get` output works, and its revision is used").option(
+    packet.command("update").description(
+      "revise a packet from a JSON file; a stale revision fails with 409 revision_conflict"
+    ).argument("<id>", "the packet id").requiredOption(
+      "--file <path>",
+      "the packet JSON; `packet get` output works, and its revision is used"
+    ).option(
       "--expected-revision <n>",
       "the revision you read, in decimal digits; defaults to the file's `revision`",
       (value) => decimalIntegers.nonNegative(value)
     ).exitOverride().action(async (id, opts) => {
       const file2 = new PacketFile(opts.file).readForUpdate();
       if (file2.id !== void 0 && file2.id !== id) {
-        throw new Error(`${opts.file} holds packet ${file2.id} but the command names ${id}; nothing was sent`);
+        throw new Error(
+          `${opts.file} holds packet ${file2.id} but the command names ${id}; nothing was sent`
+        );
       }
       const expectedRevision = opts.expectedRevision ?? file2.revision;
       if (expectedRevision === void 0 || !Number.isInteger(expectedRevision) || expectedRevision < 0) {
@@ -53643,18 +54059,30 @@ var PacketCommandFactory = class {
           "no expected revision: pass --expected-revision <n>, or use a file with a numeric `revision` such as `flight-rules packet get` output; nothing was sent"
         );
       }
-      print(await getPackets().update(id, { packet: file2.packet, expectedRevision }));
+      print(
+        operations === void 0 ? await getPackets().update(id, { packet: file2.packet, expectedRevision }) : await operations.packet(
+          "packet-update",
+          { id, packet: file2.packet, expectedRevision },
+          PacketSchema
+        )
+      );
     });
     packet.command("get").description("print a packet, including its revision").argument("<id>", "the packet id").exitOverride().action(async (id) => {
-      print(await getPackets().get(id));
+      print(
+        operations === void 0 ? await getPackets().get(id) : await operations.packet("packet-get", { id }, PacketSchema)
+      );
     });
-    packet.command("reviewers").description("list the Ariadne members you can name as reviewers: {id, name, github: {id, login}}").exitOverride().action(async () => {
-      print(await getPackets().reviewers());
+    packet.command("reviewers").description(
+      "list the Ariadne members you can name as reviewers: {id, name, github: {id, login}}"
+    ).exitOverride().action(async () => {
+      print(
+        operations === void 0 ? await getPackets().reviewers() : await operations.packet("packet-reviewers", {}, ReviewerListResponseSchema)
+      );
     });
     return packet;
   }
 };
-var createPacketCommand = (getPackets) => new PacketCommandFactory().create(getPackets);
+var createPacketCommand = (getPackets, registry2) => new PacketCommandFactory().create(getPackets, registry2);
 
 // src/tasks/commands/resolve-body.ts
 import { readFileSync as readFileSync16 } from "node:fs";
@@ -55169,13 +55597,34 @@ var cliRouteCoverage = new ManifestCliRouteCoverage({
       ["pr create", "pr-create"],
       ["pr comment", "pr-comment"],
       ["pr list", "pr-list"],
-      ["pr request-review", "pr-request-review"]
+      ["pr request-review", "pr-request-review"],
+      ["board post heartbeat", "board-post-heartbeat"],
+      ["board post item", "board-post-item"],
+      ["board post activity", "board-post-activity"],
+      ["board items", "board-items"],
+      ["packet create", "packet-create"],
+      ["packet new-id", "packet-new-id"],
+      ["packet update", "packet-update"],
+      ["packet get", "packet-get"],
+      ["packet reviewers", "packet-reviewers"]
     ].map(([path3, operationId]) => ({
       status: "supported",
       route: { path: (path3 ?? "").split(" "), aliases: [] },
       operationId: operationId ?? ""
     })),
-    ...pendingRoutes.map((path3) => ({
+    ...pendingRoutes.filter(
+      (path3) => !(/* @__PURE__ */ new Set([
+        "board post heartbeat",
+        "board post item",
+        "board post activity",
+        "board items",
+        "packet create",
+        "packet new-id",
+        "packet update",
+        "packet get",
+        "packet reviewers"
+      ])).has(path3)
+    ).map((path3) => ({
       status: "pending-migration",
       route: { path: path3.split(" "), aliases: [] },
       operationId: `cli-${path3.replaceAll(" ", "-")}`
@@ -70495,6 +70944,7 @@ var FlightRulesMcpServer = class {
         getConfig: () => core.config()
       }).operations(),
       ...new DefaultPrOperations({ cwd, getHost: () => core.prHost() }).operations(),
+      ...core.ariadneOperations().operations(),
       ...core.gitConfigOperations({ scopes: this.props.allowedConfigScopes, roots: [cwd] }).operations(),
       ...core.reviewOperations({
         cwd,
@@ -70650,7 +71100,11 @@ function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = () => cr
         getConfig: config2,
         cwd: launchCwd
       }).operations(),
-      ...new DefaultPrOperations({ cwd: launchCwd, getHost: prHost }).operations()
+      ...new DefaultPrOperations({ cwd: launchCwd, getHost: prHost }).operations(),
+      ...(services.ariadneOperations?.() ?? new DefaultAriadneOperations({
+        getBoard: () => services.board(),
+        getPackets: () => services.packets()
+      })).operations()
     ],
     policy: new LaunchOperationAccessPolicy({
       allowedEffects: ["read", "write", "process", "network"]
@@ -70690,10 +71144,12 @@ function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = () => cr
   program2.addCommand(
     createBoardCommand(
       () => services.board(),
-      () => services.ariadneTokens()
+      () => services.ariadneTokens(),
+      void 0,
+      operationRegistry
     )
   );
-  program2.addCommand(createPacketCommand(() => services.packets()));
+  program2.addCommand(createPacketCommand(() => services.packets(), operationRegistry));
   program2.addCommand(createMcpCommand());
   cliRouteCoverage.check(program2, operationRegistry);
   return program2;

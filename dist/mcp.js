@@ -2,7 +2,7 @@
 import { existsSync as existsSync15, readFileSync as readFileSync15, realpathSync as realpathSync10, statSync as statSync9 } from "node:fs";
 import { dirname as dirname15, isAbsolute as isAbsolute8, relative as relative8, resolve as resolve13, sep as sep5 } from "node:path";
 import { McpServer } from "@modelcontextprotocol/server";
-import { z as z55 } from "zod";
+import { z as z56 } from "zod";
 
 // src/bundled-docs/charter-catalog/charter-catalog.ts
 import { matchesGlob } from "node:path";
@@ -4247,7 +4247,11 @@ var AriadneClient = class {
   /** GET /v1/agents/items?session=…: every item of the session, open and resolved, oldest first. */
   async listItems(session) {
     const id = this.validate(AgentSessionIdSchema, session, "session");
-    return this.request("GET", `/v1/agents/items?session=${encodeURIComponent(id)}`, ItemListResponseSchema);
+    return this.request(
+      "GET",
+      `/v1/agents/items?session=${encodeURIComponent(id)}`,
+      ItemListResponseSchema
+    );
   }
   /** POST /v1/review-packets: ids are global; replaying an id and body is idempotent, a different body is 409 `packet_exists`, another author's id is 409 `packet_id_taken`. */
   async createPacket(input) {
@@ -4258,12 +4262,21 @@ var AriadneClient = class {
   async updatePacket(id, input) {
     const packetId = this.validate(PacketIdSchema, id, "packet id");
     const body = this.validate(PacketUpdateSchema, input, "packet update");
-    return this.request("PUT", `/v1/review-packets/${encodeURIComponent(packetId)}`, PacketResponseSchema, body);
+    return this.request(
+      "PUT",
+      `/v1/review-packets/${encodeURIComponent(packetId)}`,
+      PacketResponseSchema,
+      body
+    );
   }
   /** GET /v1/review-packets/{id}. */
   async getPacket(id) {
     const packetId = this.validate(PacketIdSchema, id, "packet id");
-    return this.request("GET", `/v1/review-packets/${encodeURIComponent(packetId)}`, PacketResponseSchema);
+    return this.request(
+      "GET",
+      `/v1/review-packets/${encodeURIComponent(packetId)}`,
+      PacketResponseSchema
+    );
   }
   /** GET /v1/review-packets/reviewers: active members with a linked GitHub login. */
   async listReviewers() {
@@ -4294,7 +4307,11 @@ var AriadneClient = class {
     try {
       json = JSON.parse(response.body);
     } catch (err) {
-      throw new AriadneError({ failure: "bad-response", message: `${method} ${path} returned a body that is not JSON`, cause: err });
+      throw new AriadneError({
+        failure: "bad-response",
+        message: `${method} ${path} returned a body that is not JSON`,
+        cause: err
+      });
     }
     const parsed = schema.safeParse(json);
     if (!parsed.success) {
@@ -4307,17 +4324,18 @@ var AriadneClient = class {
   }
   async send(request) {
     let lastError;
-    for (let attempt = 1; attempt <= ariadneAttempts; attempt++) {
+    const attempts = request.method === "GET" ? ariadneAttempts : 1;
+    for (let attempt = 1; attempt <= attempts; attempt++) {
       try {
         const response = await this.transport.send(request);
-        if (response.status < 500 || attempt === ariadneAttempts) return response;
+        if (response.status < 500 || attempt === attempts) return response;
       } catch (err) {
         lastError = err;
       }
     }
     throw new AriadneError({
       failure: "network",
-      message: `no response from ${this.baseUrl} after ${ariadneAttempts} attempts (${this.describeNetworkError(lastError)})`,
+      message: `no response from ${this.baseUrl} after ${attempts} attempt${attempts === 1 ? "" : "s"} (${this.describeNetworkError(lastError)})`,
       cause: lastError
     });
   }
@@ -4658,7 +4676,9 @@ var AriadneBoard = class {
       else if (value === false || value === "false") enabled = false;
       else {
         enabled = false;
-        notices.push(`ignored ${enabledKey} from ${scopeLabels[rawEnabled.scope]}: expected true or false; reporting is off until it is fixed`);
+        notices.push(
+          `ignored ${enabledKey} from ${scopeLabels[rawEnabled.scope]}: expected true or false; reporting is off until it is fixed`
+        );
       }
     }
     return { url, enabled, notices };
@@ -4705,7 +4725,8 @@ var AriadneBoard = class {
           this.remember(sent, input.session === void 0);
           return response;
         } catch (err) {
-          if (!(err instanceof AriadneError) || err.failure !== "invalid-input") this.remember(sent, input.session === void 0);
+          if (!(err instanceof AriadneError) || err.failure !== "invalid-input")
+            this.remember(sent, input.session === void 0);
           throw err;
         }
       },
@@ -4721,7 +4742,12 @@ var AriadneBoard = class {
   async replay(session, options = {}) {
     const record = this.sessions?.read(session) ?? this.sessions?.readInferred(session);
     if (record === void 0) return { status: "skipped", reason: "nothing-recorded" };
-    return this.call(options, session, (client) => client.heartbeat(record.heartbeat), record.heartbeat.ticket);
+    return this.call(
+      options,
+      session,
+      (client) => client.heartbeat(record.heartbeat),
+      record.heartbeat.ticket
+    );
   }
   /**
    * Posts an item. A session that has never sent a heartbeat (or has aged
@@ -4735,7 +4761,13 @@ var AriadneBoard = class {
       input.session,
       (client, session) => this.withSession(
         client,
-        { session, ticket: input.ticket, skill: options.skill, defaulted: input.session === void 0 },
+        {
+          session,
+          ticket: input.ticket,
+          skill: options.skill,
+          defaulted: input.session === void 0,
+          bootstrapMissingSession: options.bootstrapMissingSession !== false
+        },
         () => client.postItem({ ...input, session })
       ),
       input.ticket
@@ -4748,7 +4780,13 @@ var AriadneBoard = class {
       input.session,
       (client, session) => this.withSession(
         client,
-        { session, ticket: input.ticket, skill: options.skill, defaulted: input.session === void 0 },
+        {
+          session,
+          ticket: input.ticket,
+          skill: options.skill,
+          defaulted: input.session === void 0,
+          bootstrapMissingSession: options.bootstrapMissingSession !== false
+        },
         () => client.postActivity({ ...input, session })
       ),
       input.ticket
@@ -4792,6 +4830,7 @@ var AriadneBoard = class {
       return await post();
     } catch (err) {
       if (!(err instanceof AriadneError) || err.code !== "session_not_found") throw err;
+      if (!target.bootstrapMissingSession) throw err;
     }
     const { session, ticket, skill, defaulted } = target;
     const recorded = this.bestEffort(() => this.sessions?.recent(session, bootstrapRecoveryMs));
@@ -4800,13 +4839,21 @@ var AriadneBoard = class {
       return post();
     }
     const named = skill !== void 0 && skill !== "";
-    const heartbeat = { session, ticket, step: bootstrapStep, state: "nominal", ...named ? { skill } : {} };
+    const heartbeat = {
+      session,
+      ticket,
+      step: bootstrapStep,
+      state: "nominal",
+      ...named ? { skill } : {}
+    };
     await client.heartbeat(heartbeat);
     if (named) this.rememberPlaceholder(heartbeat, defaulted);
     return post();
   }
   rememberPlaceholder(heartbeat, defaulted) {
-    const remembered = this.bestEffort(() => this.sessions?.recordIfAbsent(heartbeat, bootstrapRecoveryMs));
+    const remembered = this.bestEffort(
+      () => this.sessions?.recordIfAbsent(heartbeat, bootstrapRecoveryMs)
+    );
     const claudeSession = this.defaultSession();
     if (remembered === true && defaulted && claudeSession !== void 0 && claudeSession !== heartbeat.session) {
       this.bestEffort(() => this.sessions?.pointThread(claudeSession, heartbeat.session));
@@ -4835,7 +4882,10 @@ var AriadneBoard = class {
       return {
         status: "skipped",
         reason: "not-jira-ticket",
-        notices: [...settings.notices, `skipped: ${ticket} is not a Jira issue key, and Ariadne tracks only Jira tickets`]
+        notices: [
+          ...settings.notices,
+          `skipped: ${ticket} is not a Jira issue key, and Ariadne tracks only Jira tickets`
+        ]
       };
     }
     let token;
@@ -4844,7 +4894,8 @@ var AriadneBoard = class {
     } catch (err) {
       return noted({ status: "failed", message: err instanceof Error ? err.message : String(err) });
     }
-    if (token === void 0 && options.strict !== true) return noted({ status: "skipped", reason: "no-token" });
+    if (token === void 0 && options.strict !== true)
+      return noted({ status: "skipped", reason: "no-token" });
     const session = requestedSession ?? this.defaultSession(ticket);
     if (session === void 0) {
       return noted({
@@ -4861,7 +4912,10 @@ var AriadneBoard = class {
     try {
       return noted({ status: "posted", value: await run2(client, session) });
     } catch (err) {
-      return noted({ status: "failed", message: this.redact(this.describe(err, url, token !== void 0), token) });
+      return noted({
+        status: "failed",
+        message: this.redact(this.describe(err, url, token !== void 0), token)
+      });
     }
   }
   describe(err, url, hasToken) {
@@ -4935,35 +4989,19 @@ var AriadnePackets = class {
   }
   /**
    * Publishes a packet, generating its id from the title when the file has none.
-   * When another author already holds the id (409 `packet_id_taken`) the random
-   * suffix is regenerated and the create is retried once.
    */
   async create(packet) {
     const first = this.withId(packet);
-    return this.call(async (client) => {
-      try {
-        return await client.createPacket(first.packet);
-      } catch (err) {
-        if (!(err instanceof AriadneError) || err.code !== "packet_id_taken") throw err;
-      }
-      const retryId = packetIdGenerator.regenerate(first.id);
-      try {
-        return await client.createPacket(Object.assign({}, first.packet, { id: retryId }));
-      } catch (err) {
-        if (err instanceof AriadneError && err.code === "packet_id_taken") {
-          throw new AriadnePacketError(
-            `the packet id is taken by another author (409 packet_id_taken; tried ${first.id} and ${retryId}); change the title in the packet file or run \`flight-rules packet new-id --title <title>\` and set its id, then retry`,
-            { cause: err }
-          );
-        }
-        throw err;
-      }
-    });
+    return this.call((client) => client.createPacket(first.packet));
   }
   async update(id, input) {
     const operationId = input.operationId ?? randomUUID().replaceAll("-", "");
     return this.call(
-      (client) => client.updatePacket(id, { expectedRevision: input.expectedRevision, operationId, packet: input.packet })
+      (client) => client.updatePacket(id, {
+        expectedRevision: input.expectedRevision,
+        operationId,
+        packet: input.packet
+      })
     );
   }
   async get(id) {
@@ -4974,7 +5012,8 @@ var AriadnePackets = class {
   }
   /** The packet carrying an id: the file's own, or one generated from its title. Anything else is left for validation to reject. */
   withId(packet) {
-    if (typeof packet !== "object" || packet === null || Array.isArray(packet)) return { packet, id: "" };
+    if (typeof packet !== "object" || packet === null || Array.isArray(packet))
+      return { packet, id: "" };
     const fields = { ...packet };
     if (typeof fields["id"] === "string") return { packet: fields, id: fields["id"] };
     if (fields["id"] === void 0 && typeof fields["title"] === "string") {
@@ -5026,7 +5065,8 @@ var AriadnePackets = class {
   }
   describe(err, url) {
     if (!(err instanceof AriadneError)) return err instanceof Error ? err.message : String(err);
-    if (err.failure === "invalid-input") return `${err.message}; fix the packet file and retry, nothing was sent`;
+    if (err.failure === "invalid-input")
+      return `${err.message}; fix the packet file and retry, nothing was sent`;
     if (err.failure === "network") {
       return `could not reach Ariadne at ${url}: ${err.message}; check the network and \`ariadne.url\`, then retry`;
     }
@@ -5051,7 +5091,8 @@ var AriadnePackets = class {
     if (err.code === "reviewer_not_found") {
       return `a reviewer is not an active Ariadne member with a linked GitHub login (422 reviewer_not_found): ${err.message}; list valid logins with \`flight-rules packet reviewers\``;
     }
-    if (err.failure === "http") return `Ariadne returned ${err.message}; check the packet and retry`;
+    if (err.failure === "http")
+      return `Ariadne returned ${err.message}; check the packet and retry`;
     return `Ariadne request failed: ${err.message}`;
   }
   /** Belt and braces: no message may ever carry the token. */
@@ -9641,6 +9682,205 @@ var DefaultTrackerEntityOperations = class {
   }
 };
 
+// src/operations/ariadne-operations.ts
+import { z as z53 } from "zod";
+var BoardResultSchema = (value) => z53.discriminatedUnion("status", [
+  z53.object({
+    status: z53.literal("skipped"),
+    reason: z53.enum([
+      "disabled",
+      "no-token",
+      "invalid-url",
+      "not-jira-ticket",
+      "nothing-recorded"
+    ]),
+    notices: z53.array(z53.string()).optional()
+  }),
+  z53.object({
+    status: z53.literal("failed"),
+    message: z53.string(),
+    notices: z53.array(z53.string()).optional()
+  }),
+  z53.object({ status: z53.literal("ok"), value, notices: z53.array(z53.string()).optional() })
+]);
+var packetInput = z53.unknown();
+var packetIdInput = z53.strictObject({ title: z53.string() });
+var packetUpdateInput = z53.strictObject({
+  id: z53.string().min(1),
+  packet: z53.unknown(),
+  expectedRevision: z53.number().int().nonnegative()
+});
+var packetOutput = PacketSchema;
+var reviewersOutput = ReviewerListResponseSchema;
+var AriadneOperationsPropsSchema = z53.object({
+  getBoard: z53.custom((value) => typeof value === "function"),
+  getPackets: z53.custom((value) => typeof value === "function")
+});
+var inputSchemas = {
+  heartbeat: z53.object({
+    input: HeartbeatInputSchema.omit({ session: true }).extend({
+      session: z53.string().optional(),
+      ticket: z53.string().optional(),
+      step: z53.string(),
+      repo: z53.string().optional(),
+      branch: z53.string().optional(),
+      skill: z53.string().optional(),
+      detail: z53.string().optional()
+    }),
+    options: z53.object({ strict: z53.boolean().optional(), skill: z53.string().optional() }).optional()
+  }),
+  item: z53.object({
+    input: ItemInputSchema.omit({ session: true }).extend({
+      session: z53.string().optional(),
+      ticket: z53.string().optional(),
+      title: z53.string(),
+      detail: z53.string().optional(),
+      options: z53.array(z53.string()).optional(),
+      id: z53.string().optional()
+    }),
+    options: z53.object({ strict: z53.boolean().optional(), skill: z53.string().optional() }).optional()
+  }),
+  activity: z53.object({
+    input: ActivityInputSchema.omit({ session: true }).extend({
+      session: z53.string().optional(),
+      ticket: z53.string().optional(),
+      text: z53.string(),
+      id: z53.string().optional()
+    }),
+    options: z53.object({ strict: z53.boolean().optional(), skill: z53.string().optional() }).optional()
+  }),
+  items: z53.strictObject({
+    session: z53.string().optional(),
+    ticket: z53.string().optional(),
+    strict: z53.boolean().optional()
+  })
+};
+var DefaultAriadneOperations = class {
+  props;
+  constructor(props) {
+    this.props = AriadneOperationsPropsSchema.parse(props);
+  }
+  operations() {
+    return [
+      this.descriptor(
+        "board-post-heartbeat",
+        "Report a run heartbeat to Ariadne.",
+        ["write", "network"],
+        ["board", "post", "heartbeat"],
+        inputSchemas.heartbeat,
+        BoardResultSchema(HeartbeatResponseSchema),
+        ({ input, options }) => this.mapBoard(this.props.getBoard().heartbeat(input, this.boardOptions(options)))
+      ),
+      this.descriptor(
+        "board-post-item",
+        "Post a question or request to an Ariadne run.",
+        ["write", "network"],
+        ["board", "post", "item"],
+        inputSchemas.item,
+        BoardResultSchema(ItemResponseSchema),
+        ({ input, options }) => this.mapBoard(
+          this.props.getBoard().item(input, {
+            ...this.boardOptions(options),
+            bootstrapMissingSession: false
+          })
+        )
+      ),
+      this.descriptor(
+        "board-post-activity",
+        "Add activity to an Ariadne run.",
+        ["write", "network"],
+        ["board", "post", "activity"],
+        inputSchemas.activity,
+        BoardResultSchema(ActivityResponseSchema),
+        ({ input, options }) => this.mapBoard(
+          this.props.getBoard().activity(input, {
+            ...this.boardOptions(options),
+            bootstrapMissingSession: false
+          })
+        )
+      ),
+      this.descriptor(
+        "board-items",
+        "List items for an Ariadne run.",
+        ["read", "network"],
+        ["board", "items"],
+        inputSchemas.items,
+        BoardResultSchema(ItemListResponseSchema),
+        ({ session, ticket, strict }) => this.mapBoard(
+          this.props.getBoard().items(session, strict === void 0 ? {} : { strict }, ticket)
+        )
+      ),
+      this.descriptor(
+        "packet-create",
+        "Publish a validated Ariadne review packet.",
+        ["write", "network"],
+        ["packet", "create"],
+        z53.strictObject({ packet: packetInput }),
+        packetOutput,
+        ({ packet }) => this.props.getPackets().create(packet)
+      ),
+      this.descriptor(
+        "packet-new-id",
+        "Generate a reusable Ariadne review packet id.",
+        [],
+        ["packet", "new-id"],
+        packetIdInput,
+        z53.object({ id: z53.string() }),
+        ({ title }) => ({ id: packetIdGenerator.generate(title) })
+      ),
+      this.descriptor(
+        "packet-update",
+        "Replace a review packet at its expected revision.",
+        ["write", "network"],
+        ["packet", "update"],
+        packetUpdateInput,
+        packetOutput,
+        ({ id, packet, expectedRevision }) => this.props.getPackets().update(id, { packet, expectedRevision })
+      ),
+      this.descriptor(
+        "packet-get",
+        "Read an Ariadne review packet and its revision.",
+        ["read", "network"],
+        ["packet", "get"],
+        z53.object({ id: z53.string().min(1) }),
+        packetOutput,
+        ({ id }) => this.props.getPackets().get(id)
+      ),
+      this.descriptor(
+        "packet-reviewers",
+        "List Ariadne members who can review packets.",
+        ["read", "network"],
+        ["packet", "reviewers"],
+        z53.strictObject({}),
+        reviewersOutput,
+        () => this.props.getPackets().reviewers()
+      )
+    ];
+  }
+  boardOptions(options) {
+    return {
+      ...options?.strict === void 0 ? {} : { strict: options.strict },
+      ...options?.skill === void 0 ? {} : { skill: options.skill }
+    };
+  }
+  async mapBoard(outcome) {
+    const result = await outcome;
+    if (result.status === "posted") return { ...result, status: "ok" };
+    return result;
+  }
+  descriptor(id, description, effects, path, inputSchema, outputSchema, handler) {
+    return {
+      id,
+      description,
+      effects,
+      cli: { path, aliases: [] },
+      inputSchema,
+      outputSchema,
+      handler
+    };
+  }
+};
+
 // src/flight-rules/flight-rules.ts
 var DefaultFlightRules = class {
   cwd;
@@ -9798,6 +10038,12 @@ var DefaultFlightRules = class {
       cwd: this.cwd
     });
   }
+  ariadneOperations() {
+    return new DefaultAriadneOperations({
+      getBoard: () => this.board(),
+      getPackets: () => this.packets()
+    });
+  }
   board() {
     return new AriadneBoard({
       readLayers: () => this.configStore().layers(),
@@ -9827,12 +10073,12 @@ var DefaultFlightRules = class {
 import { existsSync as existsSync14, readFileSync as readFileSync14, readdirSync as readdirSync6, realpathSync as realpathSync9, statSync as statSync8 } from "node:fs";
 import { basename as basename5, dirname as dirname14, isAbsolute as isAbsolute7, join as join16, relative as relative7, resolve as resolve12, sep as sep4 } from "node:path";
 import { fileURLToPath as fileURLToPath4 } from "node:url";
-import { z as z54 } from "zod";
+import { z as z55 } from "zod";
 
 // src/agents/agent-registry/agent-registry.ts
 import { readFileSync as readFileSync13, readdirSync as readdirSync5 } from "node:fs";
 import { basename as basename4, join as join15 } from "node:path";
-import { z as z53 } from "zod";
+import { z as z54 } from "zod";
 
 // src/agents/agent-frontmatter/agent-frontmatter.ts
 import { parse as parseYaml4 } from "yaml";
@@ -9856,14 +10102,14 @@ var agentFrontmatterParser = new YamlAgentFrontmatterParser();
 
 // src/agents/agent-registry/agent-registry.ts
 var AgentNameSchema = AgentFrontmatterSchema.shape.name;
-var AgentVariantSchema = z53.strictObject({
+var AgentVariantSchema = z54.strictObject({
   name: AgentNameSchema,
   extends: AgentNameSchema,
   description: AgentFrontmatterSchema.shape.description,
   model: ModelTierSchema,
-  modelReason: z53.string().trim().min(1).optional()
+  modelReason: z54.string().trim().min(1).optional()
 });
-var AgentVariantsSchema = z53.array(AgentVariantSchema);
+var AgentVariantsSchema = z54.array(AgentVariantSchema);
 var InvalidAgentDefinitionError = class extends Error {
   name = "InvalidAgentDefinitionError";
 };
@@ -9902,11 +10148,11 @@ var FileAgentRegistry = class {
 };
 
 // src/sdk/instruction-catalog-core.ts
-var CatalogPropsSchema = z54.strictObject({
-  moduleUrl: z54.string().min(1),
-  env: z54.record(z54.string(), z54.string().optional())
+var CatalogPropsSchema = z55.strictObject({
+  moduleUrl: z55.string().min(1),
+  env: z55.record(z55.string(), z55.string().optional())
 });
-var ResourceNameSchema = z54.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
+var ResourceNameSchema = z55.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
 var UnknownInstructionError = class extends Error {
   name = "UnknownInstructionError";
 };
@@ -9995,20 +10241,20 @@ var FileInstructionCatalog = class {
 };
 
 // src/mcp/mcp-server.ts
-var McpLaunchPropsSchema = z55.strictObject({
-  cwd: z55.string().min(1),
-  env: z55.record(z55.string(), z55.string().optional()),
-  allowedOperationIds: z55.array(z55.string()).default([]),
-  allowedEffects: z55.array(z55.enum(["read", "write", "network", "process"])).default(["read", "process", "network"]),
-  allowedConfigScopes: z55.array(z55.enum(configScopes)).default([]),
+var McpLaunchPropsSchema = z56.strictObject({
+  cwd: z56.string().min(1),
+  env: z56.record(z56.string(), z56.string().optional()),
+  allowedOperationIds: z56.array(z56.string()).default([]),
+  allowedEffects: z56.array(z56.enum(["read", "write", "network", "process"])).default(["read", "process", "network"]),
+  allowedConfigScopes: z56.array(z56.enum(configScopes)).default([]),
   ...ReviewOperationsLaunchPropsSchema.pick({
     trustedRef: true,
     owners: true,
     requireMapping: true
   }).shape
 });
-var resourceId = z55.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
-var LaunchBoundQaFileSystemPropsSchema = z55.object({ root: z55.string().min(1) });
+var resourceId = z56.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
+var LaunchBoundQaFileSystemPropsSchema = z56.object({ root: z56.string().min(1) });
 var LaunchCheckoutChangedError = class extends Error {
   name = "LaunchCheckoutChangedError";
 };
@@ -10080,7 +10326,7 @@ var FlightRulesMcpServer = class {
     const server = new McpServer({ name: "flight-rules", version: "1.0.0" });
     for (const operation of registry.list()) {
       const descriptor = this.findOperation(operation.id);
-      if (!(descriptor.inputSchema instanceof z55.ZodObject)) {
+      if (!(descriptor.inputSchema instanceof z56.ZodObject)) {
         throw new Error(`MCP operation input must be an object schema: ${operation.id}`);
       }
       server.registerTool(
@@ -10210,6 +10456,7 @@ var FlightRulesMcpServer = class {
         getConfig: () => core.config()
       }).operations(),
       ...new DefaultPrOperations({ cwd, getHost: () => core.prHost() }).operations(),
+      ...core.ariadneOperations().operations(),
       ...core.gitConfigOperations({ scopes: this.props.allowedConfigScopes, roots: [cwd] }).operations(),
       ...core.reviewOperations({
         cwd,
@@ -10235,7 +10482,7 @@ var FlightRulesMcpServer = class {
   }
   validateLocalPaths(id, input) {
     if (id !== "qa-instructions") return;
-    const parsedInput = z55.object({ from: z55.string().optional() }).safeParse(input);
+    const parsedInput = z56.object({ from: z56.string().optional() }).safeParse(input);
     if (!parsedInput.success) return;
     const from = parsedInput.data.from;
     if (typeof from !== "string") return;
@@ -10253,10 +10500,10 @@ var FlightRulesMcpServer = class {
 
 // src/mcp/stdio.ts
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
-import { z as z56 } from "zod";
+import { z as z57 } from "zod";
 var StdioLaunchPropsSchema = McpLaunchPropsSchema.extend({
-  cwd: z56.string().min(1).default(process.cwd()),
-  env: z56.record(z56.string(), z56.string().optional()).default(() => ({ ...process.env }))
+  cwd: z57.string().min(1).default(process.cwd()),
+  env: z57.record(z57.string(), z57.string().optional()).default(() => ({ ...process.env }))
 });
 var StdioFlightRulesMcpTransport = class {
   launch;

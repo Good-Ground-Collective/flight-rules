@@ -34,8 +34,6 @@ export declare class AriadnePackets {
     constructor(props: AriadnePacketsProps);
     /**
      * Publishes a packet, generating its id from the title when the file has none.
-     * When another author already holds the id (409 `packet_id_taken`) the random
-     * suffix is regenerated and the create is retried once.
      */
     create(packet: unknown): Promise<Packet>;
     update(id: string, input: PacketUpdate): Promise<Packet>;

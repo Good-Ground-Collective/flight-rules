@@ -1288,7 +1288,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.92.0";
+var appVersion = false ? "0.0.0-dev" : "1.93.0";
 
 // src/shared/ariadne/review-packet.schema.ts
 import { z as z14 } from "zod";
@@ -1433,7 +1433,11 @@ var AriadneClient = class {
   /** GET /v1/agents/items?session=…: every item of the session, open and resolved, oldest first. */
   async listItems(session) {
     const id = this.validate(AgentSessionIdSchema, session, "session");
-    return this.request("GET", `/v1/agents/items?session=${encodeURIComponent(id)}`, ItemListResponseSchema);
+    return this.request(
+      "GET",
+      `/v1/agents/items?session=${encodeURIComponent(id)}`,
+      ItemListResponseSchema
+    );
   }
   /** POST /v1/review-packets: ids are global; replaying an id and body is idempotent, a different body is 409 `packet_exists`, another author's id is 409 `packet_id_taken`. */
   async createPacket(input) {
@@ -1444,12 +1448,21 @@ var AriadneClient = class {
   async updatePacket(id, input) {
     const packetId = this.validate(PacketIdSchema, id, "packet id");
     const body = this.validate(PacketUpdateSchema, input, "packet update");
-    return this.request("PUT", `/v1/review-packets/${encodeURIComponent(packetId)}`, PacketResponseSchema, body);
+    return this.request(
+      "PUT",
+      `/v1/review-packets/${encodeURIComponent(packetId)}`,
+      PacketResponseSchema,
+      body
+    );
   }
   /** GET /v1/review-packets/{id}. */
   async getPacket(id) {
     const packetId = this.validate(PacketIdSchema, id, "packet id");
-    return this.request("GET", `/v1/review-packets/${encodeURIComponent(packetId)}`, PacketResponseSchema);
+    return this.request(
+      "GET",
+      `/v1/review-packets/${encodeURIComponent(packetId)}`,
+      PacketResponseSchema
+    );
   }
   /** GET /v1/review-packets/reviewers: active members with a linked GitHub login. */
   async listReviewers() {
@@ -1480,7 +1493,11 @@ var AriadneClient = class {
     try {
       json = JSON.parse(response.body);
     } catch (err) {
-      throw new AriadneError({ failure: "bad-response", message: `${method} ${path} returned a body that is not JSON`, cause: err });
+      throw new AriadneError({
+        failure: "bad-response",
+        message: `${method} ${path} returned a body that is not JSON`,
+        cause: err
+      });
     }
     const parsed = schema.safeParse(json);
     if (!parsed.success) {
@@ -1493,17 +1510,18 @@ var AriadneClient = class {
   }
   async send(request) {
     let lastError;
-    for (let attempt = 1; attempt <= ariadneAttempts; attempt++) {
+    const attempts = request.method === "GET" ? ariadneAttempts : 1;
+    for (let attempt = 1; attempt <= attempts; attempt++) {
       try {
         const response = await this.transport.send(request);
-        if (response.status < 500 || attempt === ariadneAttempts) return response;
+        if (response.status < 500 || attempt === attempts) return response;
       } catch (err) {
         lastError = err;
       }
     }
     throw new AriadneError({
       failure: "network",
-      message: `no response from ${this.baseUrl} after ${ariadneAttempts} attempts (${this.describeNetworkError(lastError)})`,
+      message: `no response from ${this.baseUrl} after ${attempts} attempt${attempts === 1 ? "" : "s"} (${this.describeNetworkError(lastError)})`,
       cause: lastError
     });
   }
@@ -1844,7 +1862,9 @@ var AriadneBoard = class {
       else if (value === false || value === "false") enabled = false;
       else {
         enabled = false;
-        notices.push(`ignored ${enabledKey} from ${scopeLabels[rawEnabled.scope]}: expected true or false; reporting is off until it is fixed`);
+        notices.push(
+          `ignored ${enabledKey} from ${scopeLabels[rawEnabled.scope]}: expected true or false; reporting is off until it is fixed`
+        );
       }
     }
     return { url, enabled, notices };
@@ -1891,7 +1911,8 @@ var AriadneBoard = class {
           this.remember(sent, input.session === void 0);
           return response;
         } catch (err) {
-          if (!(err instanceof AriadneError) || err.failure !== "invalid-input") this.remember(sent, input.session === void 0);
+          if (!(err instanceof AriadneError) || err.failure !== "invalid-input")
+            this.remember(sent, input.session === void 0);
           throw err;
         }
       },
@@ -1907,7 +1928,12 @@ var AriadneBoard = class {
   async replay(session, options = {}) {
     const record = this.sessions?.read(session) ?? this.sessions?.readInferred(session);
     if (record === void 0) return { status: "skipped", reason: "nothing-recorded" };
-    return this.call(options, session, (client) => client.heartbeat(record.heartbeat), record.heartbeat.ticket);
+    return this.call(
+      options,
+      session,
+      (client) => client.heartbeat(record.heartbeat),
+      record.heartbeat.ticket
+    );
   }
   /**
    * Posts an item. A session that has never sent a heartbeat (or has aged
@@ -1921,7 +1947,13 @@ var AriadneBoard = class {
       input.session,
       (client, session) => this.withSession(
         client,
-        { session, ticket: input.ticket, skill: options.skill, defaulted: input.session === void 0 },
+        {
+          session,
+          ticket: input.ticket,
+          skill: options.skill,
+          defaulted: input.session === void 0,
+          bootstrapMissingSession: options.bootstrapMissingSession !== false
+        },
         () => client.postItem({ ...input, session })
       ),
       input.ticket
@@ -1934,7 +1966,13 @@ var AriadneBoard = class {
       input.session,
       (client, session) => this.withSession(
         client,
-        { session, ticket: input.ticket, skill: options.skill, defaulted: input.session === void 0 },
+        {
+          session,
+          ticket: input.ticket,
+          skill: options.skill,
+          defaulted: input.session === void 0,
+          bootstrapMissingSession: options.bootstrapMissingSession !== false
+        },
         () => client.postActivity({ ...input, session })
       ),
       input.ticket
@@ -1978,6 +2016,7 @@ var AriadneBoard = class {
       return await post();
     } catch (err) {
       if (!(err instanceof AriadneError) || err.code !== "session_not_found") throw err;
+      if (!target.bootstrapMissingSession) throw err;
     }
     const { session, ticket, skill, defaulted } = target;
     const recorded = this.bestEffort(() => this.sessions?.recent(session, bootstrapRecoveryMs));
@@ -1986,13 +2025,21 @@ var AriadneBoard = class {
       return post();
     }
     const named = skill !== void 0 && skill !== "";
-    const heartbeat = { session, ticket, step: bootstrapStep, state: "nominal", ...named ? { skill } : {} };
+    const heartbeat = {
+      session,
+      ticket,
+      step: bootstrapStep,
+      state: "nominal",
+      ...named ? { skill } : {}
+    };
     await client.heartbeat(heartbeat);
     if (named) this.rememberPlaceholder(heartbeat, defaulted);
     return post();
   }
   rememberPlaceholder(heartbeat, defaulted) {
-    const remembered = this.bestEffort(() => this.sessions?.recordIfAbsent(heartbeat, bootstrapRecoveryMs));
+    const remembered = this.bestEffort(
+      () => this.sessions?.recordIfAbsent(heartbeat, bootstrapRecoveryMs)
+    );
     const claudeSession = this.defaultSession();
     if (remembered === true && defaulted && claudeSession !== void 0 && claudeSession !== heartbeat.session) {
       this.bestEffort(() => this.sessions?.pointThread(claudeSession, heartbeat.session));
@@ -2021,7 +2068,10 @@ var AriadneBoard = class {
       return {
         status: "skipped",
         reason: "not-jira-ticket",
-        notices: [...settings.notices, `skipped: ${ticket} is not a Jira issue key, and Ariadne tracks only Jira tickets`]
+        notices: [
+          ...settings.notices,
+          `skipped: ${ticket} is not a Jira issue key, and Ariadne tracks only Jira tickets`
+        ]
       };
     }
     let token;
@@ -2030,7 +2080,8 @@ var AriadneBoard = class {
     } catch (err) {
       return noted({ status: "failed", message: err instanceof Error ? err.message : String(err) });
     }
-    if (token === void 0 && options.strict !== true) return noted({ status: "skipped", reason: "no-token" });
+    if (token === void 0 && options.strict !== true)
+      return noted({ status: "skipped", reason: "no-token" });
     const session = requestedSession ?? this.defaultSession(ticket);
     if (session === void 0) {
       return noted({
@@ -2047,7 +2098,10 @@ var AriadneBoard = class {
     try {
       return noted({ status: "posted", value: await run2(client, session) });
     } catch (err) {
-      return noted({ status: "failed", message: this.redact(this.describe(err, url, token !== void 0), token) });
+      return noted({
+        status: "failed",
+        message: this.redact(this.describe(err, url, token !== void 0), token)
+      });
     }
   }
   describe(err, url, hasToken) {
@@ -2121,35 +2175,19 @@ var AriadnePackets = class {
   }
   /**
    * Publishes a packet, generating its id from the title when the file has none.
-   * When another author already holds the id (409 `packet_id_taken`) the random
-   * suffix is regenerated and the create is retried once.
    */
   async create(packet) {
     const first = this.withId(packet);
-    return this.call(async (client) => {
-      try {
-        return await client.createPacket(first.packet);
-      } catch (err) {
-        if (!(err instanceof AriadneError) || err.code !== "packet_id_taken") throw err;
-      }
-      const retryId = packetIdGenerator.regenerate(first.id);
-      try {
-        return await client.createPacket(Object.assign({}, first.packet, { id: retryId }));
-      } catch (err) {
-        if (err instanceof AriadneError && err.code === "packet_id_taken") {
-          throw new AriadnePacketError(
-            `the packet id is taken by another author (409 packet_id_taken; tried ${first.id} and ${retryId}); change the title in the packet file or run \`flight-rules packet new-id --title <title>\` and set its id, then retry`,
-            { cause: err }
-          );
-        }
-        throw err;
-      }
-    });
+    return this.call((client) => client.createPacket(first.packet));
   }
   async update(id, input) {
     const operationId = input.operationId ?? randomUUID().replaceAll("-", "");
     return this.call(
-      (client) => client.updatePacket(id, { expectedRevision: input.expectedRevision, operationId, packet: input.packet })
+      (client) => client.updatePacket(id, {
+        expectedRevision: input.expectedRevision,
+        operationId,
+        packet: input.packet
+      })
     );
   }
   async get(id) {
@@ -2160,7 +2198,8 @@ var AriadnePackets = class {
   }
   /** The packet carrying an id: the file's own, or one generated from its title. Anything else is left for validation to reject. */
   withId(packet) {
-    if (typeof packet !== "object" || packet === null || Array.isArray(packet)) return { packet, id: "" };
+    if (typeof packet !== "object" || packet === null || Array.isArray(packet))
+      return { packet, id: "" };
     const fields = { ...packet };
     if (typeof fields["id"] === "string") return { packet: fields, id: fields["id"] };
     if (fields["id"] === void 0 && typeof fields["title"] === "string") {
@@ -2212,7 +2251,8 @@ var AriadnePackets = class {
   }
   describe(err, url) {
     if (!(err instanceof AriadneError)) return err instanceof Error ? err.message : String(err);
-    if (err.failure === "invalid-input") return `${err.message}; fix the packet file and retry, nothing was sent`;
+    if (err.failure === "invalid-input")
+      return `${err.message}; fix the packet file and retry, nothing was sent`;
     if (err.failure === "network") {
       return `could not reach Ariadne at ${url}: ${err.message}; check the network and \`ariadne.url\`, then retry`;
     }
@@ -2237,7 +2277,8 @@ var AriadnePackets = class {
     if (err.code === "reviewer_not_found") {
       return `a reviewer is not an active Ariadne member with a linked GitHub login (422 reviewer_not_found): ${err.message}; list valid logins with \`flight-rules packet reviewers\``;
     }
-    if (err.failure === "http") return `Ariadne returned ${err.message}; check the packet and retry`;
+    if (err.failure === "http")
+      return `Ariadne returned ${err.message}; check the packet and retry`;
     return `Ariadne request failed: ${err.message}`;
   }
   /** Belt and braces: no message may ever carry the token. */
@@ -9468,6 +9509,205 @@ var DefaultTrackerEntityOperations = class {
   }
 };
 
+// src/operations/ariadne-operations.ts
+import { z as z51 } from "zod";
+var BoardResultSchema = (value) => z51.discriminatedUnion("status", [
+  z51.object({
+    status: z51.literal("skipped"),
+    reason: z51.enum([
+      "disabled",
+      "no-token",
+      "invalid-url",
+      "not-jira-ticket",
+      "nothing-recorded"
+    ]),
+    notices: z51.array(z51.string()).optional()
+  }),
+  z51.object({
+    status: z51.literal("failed"),
+    message: z51.string(),
+    notices: z51.array(z51.string()).optional()
+  }),
+  z51.object({ status: z51.literal("ok"), value, notices: z51.array(z51.string()).optional() })
+]);
+var packetInput = z51.unknown();
+var packetIdInput = z51.strictObject({ title: z51.string() });
+var packetUpdateInput = z51.strictObject({
+  id: z51.string().min(1),
+  packet: z51.unknown(),
+  expectedRevision: z51.number().int().nonnegative()
+});
+var packetOutput = PacketSchema;
+var reviewersOutput = ReviewerListResponseSchema;
+var AriadneOperationsPropsSchema = z51.object({
+  getBoard: z51.custom((value) => typeof value === "function"),
+  getPackets: z51.custom((value) => typeof value === "function")
+});
+var inputSchemas = {
+  heartbeat: z51.object({
+    input: HeartbeatInputSchema.omit({ session: true }).extend({
+      session: z51.string().optional(),
+      ticket: z51.string().optional(),
+      step: z51.string(),
+      repo: z51.string().optional(),
+      branch: z51.string().optional(),
+      skill: z51.string().optional(),
+      detail: z51.string().optional()
+    }),
+    options: z51.object({ strict: z51.boolean().optional(), skill: z51.string().optional() }).optional()
+  }),
+  item: z51.object({
+    input: ItemInputSchema.omit({ session: true }).extend({
+      session: z51.string().optional(),
+      ticket: z51.string().optional(),
+      title: z51.string(),
+      detail: z51.string().optional(),
+      options: z51.array(z51.string()).optional(),
+      id: z51.string().optional()
+    }),
+    options: z51.object({ strict: z51.boolean().optional(), skill: z51.string().optional() }).optional()
+  }),
+  activity: z51.object({
+    input: ActivityInputSchema.omit({ session: true }).extend({
+      session: z51.string().optional(),
+      ticket: z51.string().optional(),
+      text: z51.string(),
+      id: z51.string().optional()
+    }),
+    options: z51.object({ strict: z51.boolean().optional(), skill: z51.string().optional() }).optional()
+  }),
+  items: z51.strictObject({
+    session: z51.string().optional(),
+    ticket: z51.string().optional(),
+    strict: z51.boolean().optional()
+  })
+};
+var DefaultAriadneOperations = class {
+  props;
+  constructor(props) {
+    this.props = AriadneOperationsPropsSchema.parse(props);
+  }
+  operations() {
+    return [
+      this.descriptor(
+        "board-post-heartbeat",
+        "Report a run heartbeat to Ariadne.",
+        ["write", "network"],
+        ["board", "post", "heartbeat"],
+        inputSchemas.heartbeat,
+        BoardResultSchema(HeartbeatResponseSchema),
+        ({ input, options }) => this.mapBoard(this.props.getBoard().heartbeat(input, this.boardOptions(options)))
+      ),
+      this.descriptor(
+        "board-post-item",
+        "Post a question or request to an Ariadne run.",
+        ["write", "network"],
+        ["board", "post", "item"],
+        inputSchemas.item,
+        BoardResultSchema(ItemResponseSchema),
+        ({ input, options }) => this.mapBoard(
+          this.props.getBoard().item(input, {
+            ...this.boardOptions(options),
+            bootstrapMissingSession: false
+          })
+        )
+      ),
+      this.descriptor(
+        "board-post-activity",
+        "Add activity to an Ariadne run.",
+        ["write", "network"],
+        ["board", "post", "activity"],
+        inputSchemas.activity,
+        BoardResultSchema(ActivityResponseSchema),
+        ({ input, options }) => this.mapBoard(
+          this.props.getBoard().activity(input, {
+            ...this.boardOptions(options),
+            bootstrapMissingSession: false
+          })
+        )
+      ),
+      this.descriptor(
+        "board-items",
+        "List items for an Ariadne run.",
+        ["read", "network"],
+        ["board", "items"],
+        inputSchemas.items,
+        BoardResultSchema(ItemListResponseSchema),
+        ({ session, ticket, strict }) => this.mapBoard(
+          this.props.getBoard().items(session, strict === void 0 ? {} : { strict }, ticket)
+        )
+      ),
+      this.descriptor(
+        "packet-create",
+        "Publish a validated Ariadne review packet.",
+        ["write", "network"],
+        ["packet", "create"],
+        z51.strictObject({ packet: packetInput }),
+        packetOutput,
+        ({ packet }) => this.props.getPackets().create(packet)
+      ),
+      this.descriptor(
+        "packet-new-id",
+        "Generate a reusable Ariadne review packet id.",
+        [],
+        ["packet", "new-id"],
+        packetIdInput,
+        z51.object({ id: z51.string() }),
+        ({ title }) => ({ id: packetIdGenerator.generate(title) })
+      ),
+      this.descriptor(
+        "packet-update",
+        "Replace a review packet at its expected revision.",
+        ["write", "network"],
+        ["packet", "update"],
+        packetUpdateInput,
+        packetOutput,
+        ({ id, packet, expectedRevision }) => this.props.getPackets().update(id, { packet, expectedRevision })
+      ),
+      this.descriptor(
+        "packet-get",
+        "Read an Ariadne review packet and its revision.",
+        ["read", "network"],
+        ["packet", "get"],
+        z51.object({ id: z51.string().min(1) }),
+        packetOutput,
+        ({ id }) => this.props.getPackets().get(id)
+      ),
+      this.descriptor(
+        "packet-reviewers",
+        "List Ariadne members who can review packets.",
+        ["read", "network"],
+        ["packet", "reviewers"],
+        z51.strictObject({}),
+        reviewersOutput,
+        () => this.props.getPackets().reviewers()
+      )
+    ];
+  }
+  boardOptions(options) {
+    return {
+      ...options?.strict === void 0 ? {} : { strict: options.strict },
+      ...options?.skill === void 0 ? {} : { skill: options.skill }
+    };
+  }
+  async mapBoard(outcome) {
+    const result = await outcome;
+    if (result.status === "posted") return { ...result, status: "ok" };
+    return result;
+  }
+  descriptor(id, description, effects, path, inputSchema, outputSchema, handler) {
+    return {
+      id,
+      description,
+      effects,
+      cli: { path, aliases: [] },
+      inputSchema,
+      outputSchema,
+      handler
+    };
+  }
+};
+
 // src/flight-rules/flight-rules.ts
 var DefaultFlightRules = class {
   cwd;
@@ -9625,6 +9865,12 @@ var DefaultFlightRules = class {
       cwd: this.cwd
     });
   }
+  ariadneOperations() {
+    return new DefaultAriadneOperations({
+      getBoard: () => this.board(),
+      getPackets: () => this.packets()
+    });
+  }
   board() {
     return new AriadneBoard({
       readLayers: () => this.configStore().layers(),
@@ -9679,16 +9925,16 @@ var agentFrontmatterParser = new YamlAgentFrontmatterParser();
 // src/agents/agent-registry/agent-registry.ts
 import { readFileSync as readFileSync13, readdirSync as readdirSync5 } from "node:fs";
 import { basename as basename4, join as join15 } from "node:path";
-import { z as z51 } from "zod";
+import { z as z52 } from "zod";
 var AgentNameSchema = AgentFrontmatterSchema.shape.name;
-var AgentVariantSchema = z51.strictObject({
+var AgentVariantSchema = z52.strictObject({
   name: AgentNameSchema,
   extends: AgentNameSchema,
   description: AgentFrontmatterSchema.shape.description,
   model: ModelTierSchema,
-  modelReason: z51.string().trim().min(1).optional()
+  modelReason: z52.string().trim().min(1).optional()
 });
-var AgentVariantsSchema = z51.array(AgentVariantSchema);
+var AgentVariantsSchema = z52.array(AgentVariantSchema);
 var InvalidAgentDefinitionError = class extends Error {
   name = "InvalidAgentDefinitionError";
 };
@@ -9728,7 +9974,7 @@ var FileAgentRegistry = class {
 
 // src/agents/agent-emitter/claude-agent-emitter.ts
 import { stringify as stringifyYaml3 } from "yaml";
-import { z as z52 } from "zod";
+import { z as z53 } from "zod";
 
 // src/agents/agent-emitter/agent-emitter.ts
 var UnsupportedAgentSettingError = class extends Error {
@@ -9736,7 +9982,7 @@ var UnsupportedAgentSettingError = class extends Error {
 };
 
 // src/agents/agent-emitter/claude-agent-emitter.ts
-var ClaudeAgentEmitterPropsSchema = z52.strictObject({ models: ModelBindingsSchema });
+var ClaudeAgentEmitterPropsSchema = z53.strictObject({ models: ModelBindingsSchema });
 var MarkdownClaudeAgentEmitter = class {
   models;
   constructor(props) {
@@ -9769,13 +10015,13 @@ ${body}`;
 };
 
 // src/agents/agent-emitter/codex-agent-emitter.ts
-import { z as z53 } from "zod";
-var ReasoningBindingsSchema = z53.strictObject({
-  standard: z53.enum(reasoningLevels),
-  escalated: z53.enum(reasoningLevels),
-  expert: z53.enum(reasoningLevels)
+import { z as z54 } from "zod";
+var ReasoningBindingsSchema = z54.strictObject({
+  standard: z54.enum(reasoningLevels),
+  escalated: z54.enum(reasoningLevels),
+  expert: z54.enum(reasoningLevels)
 });
-var CodexAgentEmitterPropsSchema = z53.strictObject({
+var CodexAgentEmitterPropsSchema = z54.strictObject({
   models: ModelBindingsSchema,
   reasoning: ReasoningBindingsSchema
 });
@@ -9829,16 +10075,16 @@ import {
 } from "node:fs";
 import { join as join16, resolve as resolve11 } from "node:path";
 import { createHash as createHash3 } from "node:crypto";
-import { z as z54 } from "zod";
-var NativePluginCompilerPropsSchema = z54.strictObject({ sourceDir: z54.string().min(1) });
-var PluginHostSchema = z54.enum(["claude", "codex"]);
-var PackageVersionSchema = z54.object({ version: z54.string().min(1) });
-var PluginIdentitySchema = z54.strictObject({
-  name: z54.string().regex(/^[a-z][a-z0-9-]*$/),
-  description: z54.string().min(1),
-  repository: z54.url(),
-  author: z54.strictObject({ name: z54.string().min(1) }),
-  license: z54.string().min(1)
+import { z as z55 } from "zod";
+var NativePluginCompilerPropsSchema = z55.strictObject({ sourceDir: z55.string().min(1) });
+var PluginHostSchema = z55.enum(["claude", "codex"]);
+var PackageVersionSchema = z55.object({ version: z55.string().min(1) });
+var PluginIdentitySchema = z55.strictObject({
+  name: z55.string().regex(/^[a-z][a-z0-9-]*$/),
+  description: z55.string().min(1),
+  repository: z55.url(),
+  author: z55.strictObject({ name: z55.string().min(1) }),
+  license: z55.string().min(1)
 });
 var InvalidPluginSourceError = class extends Error {
   name = "InvalidPluginSourceError";
@@ -10039,46 +10285,46 @@ var ValidatedReportHandoff = class {
 };
 
 // src/orchestration/implementation-loop.schema.ts
-import { z as z55 } from "zod";
-var ImplementationReportSchema = z55.strictObject({
+import { z as z56 } from "zod";
+var ImplementationReportSchema = z56.strictObject({
   summary: OrchestrationTextSchema,
-  filesChanged: z55.array(
-    z55.strictObject({ path: OrchestrationTextSchema, why: OrchestrationTextSchema })
+  filesChanged: z56.array(
+    z56.strictObject({ path: OrchestrationTextSchema, why: OrchestrationTextSchema })
   ),
-  testsRun: z55.array(
-    z55.strictObject({ command: OrchestrationTextSchema, result: OrchestrationTextSchema })
+  testsRun: z56.array(
+    z56.strictObject({ command: OrchestrationTextSchema, result: OrchestrationTextSchema })
   ),
   approach: OrchestrationTextSchema,
-  openQuestions: z55.array(OrchestrationTextSchema).optional()
+  openQuestions: z56.array(OrchestrationTextSchema).optional()
 });
-var CriterionResultSchema = z55.strictObject({
+var CriterionResultSchema = z56.strictObject({
   criterion: OrchestrationTextSchema,
-  verdict: z55.enum(["PASS", "FAIL", "UNVERIFIABLE"]),
+  verdict: z56.enum(["PASS", "FAIL", "UNVERIFIABLE"]),
   evidence: OrchestrationTextSchema
 });
-var VerificationReportSchema = z55.strictObject({
+var VerificationReportSchema = z56.strictObject({
   summary: OrchestrationTextSchema,
-  criteria: z55.array(CriterionResultSchema).min(1),
-  charterConcerns: z55.array(OrchestrationTextSchema).optional(),
-  openQuestions: z55.array(OrchestrationTextSchema).optional(),
-  verified: z55.boolean()
+  criteria: z56.array(CriterionResultSchema).min(1),
+  charterConcerns: z56.array(OrchestrationTextSchema).optional(),
+  openQuestions: z56.array(OrchestrationTextSchema).optional(),
+  verified: z56.boolean()
 }).refine(
   (report) => report.verified === report.criteria.every((criterion) => criterion.verdict === "PASS"),
   "verified must agree with every itemized verdict"
 );
-var HandoffRecordSchema = z55.strictObject({
+var HandoffRecordSchema = z56.strictObject({
   request: DispatchRequestSchema,
-  outcome: z55.unknown()
+  outcome: z56.unknown()
 });
-var ImplementationRunSchema = z55.strictObject({
+var ImplementationRunSchema = z56.strictObject({
   context: RunContextSchema,
-  criteria: z55.array(OrchestrationTextSchema).min(1).refine((criteria) => new Set(criteria).size === criteria.length, "criteria must be distinct"),
-  implementationInput: z55.record(z55.string(), z55.json()).refine(
+  criteria: z56.array(OrchestrationTextSchema).min(1).refine((criteria) => new Set(criteria).size === criteria.length, "criteria must be distinct"),
+  implementationInput: z56.record(z56.string(), z56.json()).refine(
     (input) => !Object.hasOwn(input, "verifierFailures"),
     "verifierFailures is reserved for validated retry evidence"
   ),
-  history: z55.array(
-    z55.strictObject({ implementation: HandoffRecordSchema, verification: HandoffRecordSchema })
+  history: z56.array(
+    z56.strictObject({ implementation: HandoffRecordSchema, verification: HandoffRecordSchema })
   ).max(3)
 });
 
@@ -10261,16 +10507,16 @@ var VerifiedImplementationLoop = class {
 };
 
 // src/orchestration/dispatch-queue.ts
-import { z as z56 } from "zod";
-var DispatchQueuePropsSchema = z56.strictObject({
-  agents: z56.array(AgentDefinitionSchema).min(1),
-  requests: z56.array(DispatchRequestSchema).refine(
+import { z as z57 } from "zod";
+var DispatchQueuePropsSchema = z57.strictObject({
+  agents: z57.array(AgentDefinitionSchema).min(1),
+  requests: z57.array(DispatchRequestSchema).refine(
     (requests) => new Set(requests.map((request) => request.id)).size === requests.length,
     "dispatch IDs must be unique"
   ),
-  maxConcurrent: z56.int().positive()
+  maxConcurrent: z57.int().positive()
 });
-var ObservedDispatchIdsSchema = z56.array(z56.string().min(1)).refine((ids) => new Set(ids).size === ids.length, "observed dispatch IDs must be unique");
+var ObservedDispatchIdsSchema = z57.array(z57.string().min(1)).refine((ids) => new Set(ids).size === ids.length, "observed dispatch IDs must be unique");
 var InvalidDispatchQueueStateError = class extends Error {
   name = "InvalidDispatchQueueStateError";
 };
@@ -10401,6 +10647,7 @@ export {
   CreateTechnicalDesignInputSchema,
   CreateTicketInputSchema,
   CriterionResultSchema,
+  DefaultAriadneOperations,
   DefaultCommitMessageBuilder,
   DefaultFlightRules,
   DefaultGitConfigOperations,

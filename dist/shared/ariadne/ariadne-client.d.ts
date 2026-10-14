@@ -3,7 +3,7 @@ import type { Packet, ReviewerListResponse } from "./review-packet.schema.js";
 import type { AriadneTransport } from "./ariadne-transport.js";
 /**
  * Why a call failed: the input broke the contract before anything was sent,
- * no response arrived after the retry, the API answered with an error status,
+ * no response arrived, the API answered with an error status,
  * or it answered 2xx with a body this client cannot read.
  */
 export type AriadneFailure = "invalid-input" | "network" | "http" | "bad-response";
@@ -23,7 +23,7 @@ export declare class AriadneError extends Error {
 }
 /** Each attempt's timeout. */
 export declare const ariadneTimeoutMs = 5000;
-/** One try and one retry. */
+/** Maximum attempts for reads. Writes are sent once so callers can reconcile uncertain outcomes. */
 export declare const ariadneAttempts = 2;
 export interface AriadneClientProps {
     baseUrl: string;
@@ -35,11 +35,8 @@ export interface AriadneClientProps {
 }
 /**
  * Ariadne's Agents API, contract version 1. Each request times out after
- * `timeoutMs` and is retried once when no response arrived or the server
- * answered 5xx. Retrying is safe: heartbeats are upserts, items and
- * activity are keyed by session and id (or their natural key without one),
- * packet creates are keyed by the packet id, and packet updates carry an
- * `operationId` the server replays.
+ * `timeoutMs`; reads retry once after a missing response or 5xx. Writes are
+ * sent once because a lost response can follow a successful external change.
  */
 export declare class AriadneClient {
     private readonly baseUrl;
