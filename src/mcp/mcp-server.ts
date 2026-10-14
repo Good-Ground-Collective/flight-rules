@@ -13,6 +13,7 @@ import {
   type OperationRegistry,
 } from "../operations/operation-registry.js";
 import { ReviewOperationsLaunchPropsSchema } from "../operations/review-operations.js";
+import { DefaultTrackerReadOperations } from "../operations/tracker-read-operations.js";
 import { DefaultFlightRules } from "../flight-rules/flight-rules.js";
 import { configScopes } from "../shared/config-store.js";
 import {
@@ -269,6 +270,11 @@ export class FlightRulesMcpServer implements McpProtocolServerFactory {
     return [
       doc,
       ...local.operations(),
+      ...new DefaultTrackerReadOperations({
+        getTracker: () => core.tracker(),
+        getPrHost: () => core.prHost(),
+        getConfig: () => core.config(),
+      }).operations(),
       ...core
         .gitConfigOperations({ scopes: this.props.allowedConfigScopes, roots: [cwd] })
         .operations(),

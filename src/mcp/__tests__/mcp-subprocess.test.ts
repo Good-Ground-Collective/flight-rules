@@ -89,7 +89,24 @@ describe("MCP stdio subprocess", () => {
       const { tools } = await client.listTools();
       const toolNames = tools.map((tool) => tool.name);
       expect(toolNames).toContain("branch-name");
-      expect(toolNames).not.toContain("ticket-get");
+      expect(toolNames).toEqual(
+        expect.arrayContaining([
+          "ticket-get",
+          "ticket-transitions",
+          "users-get",
+          "tdd-get",
+          "epic-get",
+          "initiative-get",
+          "epic-plan",
+          "epic-review-plan",
+          "initiative-plan",
+          "initiative-review-plan",
+        ]),
+      );
+      expect(toolNames).not.toContain("ticket-create");
+
+      const invalidTrackerInput = await client.callTool({ name: "ticket-get", arguments: {} });
+      expect(invalidTrackerInput.isError).toBe(true);
 
       const unconfiguredReview = await client.callTool({
         name: "review-context",

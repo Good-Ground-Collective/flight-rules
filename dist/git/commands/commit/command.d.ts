@@ -1,3 +1,3 @@
-import { Command } from 'commander';
-import type { GitExecutor } from '../../git-executor/git-executor.js';
-export declare function createGitCommand(getExecutor: () => GitExecutor): Command;
+import { Command } from "commander";
+import type { OperationRegistry } from "../../../operations/operation-registry.js";
+export declare function createGitCommand(registry: OperationRegistry): Command;

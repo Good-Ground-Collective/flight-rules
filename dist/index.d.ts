@@ -14,6 +14,8 @@ export type { GhPullRequestHostProps } from "./pr/pull-request-host/gh-pull-requ
 export type { PullRequestHost, CreatedPullRequest, PullRequestComment, PullRequestAttachOptions, } from "./pr/pull-request-host/pull-request-host.js";
 export { NodeGitExecutor, PushSpecSchema } from "./git/git-executor/git-executor.js";
 export type { GitExecutor, BranchSpec, PushSpec } from "./git/git-executor/git-executor.js";
+export { DefaultGitConfigOperations, LaunchConfigOperationDeniedError, ConfigScopeSchema, } from "./operations/git-config-operations.js";
+export type { GitConfigOperations, ConfigOperationPolicy, } from "./operations/git-config-operations.js";
 export { DefaultCommitMessageBuilder } from "./git/commit-message-builder/commit-message-builder.js";
 export type { CommitMessageBuilder } from "./git/commit-message-builder/commit-message-builder.js";
 export { CommitMessageInputSchema } from "./git/commit-message-builder/commit-message.schema.js";

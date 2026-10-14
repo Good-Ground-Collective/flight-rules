@@ -37,6 +37,7 @@ import { appVersion } from "../version.js";
 import { createAgentsCommand } from "../plugins/commands/agents/command.js";
 import { cliRouteCoverage } from "../operations/cli-coverage.js";
 import { createMcpCommand } from "../mcp/command.js";
+import { DefaultTrackerReadOperations } from "../operations/tracker-read-operations.js";
 
 export function buildProgram(
   getTracker: (overrideTracker?: string) => TaskTracker,
@@ -77,12 +78,7 @@ export function buildProgram(
   const config = (): Config => getConfig(overrideTracker);
   const prHost = (): PullRequestHost => getPrHost(overrideTracker);
 
-  program.addCommand(createEpicCommand(tracker, prHost, config));
-  program.addCommand(createInitiativeCommand(tracker, prHost, config));
-  program.addCommand(createTicketCommand(tracker));
-  program.addCommand(createTddCommand(tracker));
   program.addCommand(createPrCommand(prHost));
-  program.addCommand(createUsersCommand(tracker));
   program.addCommand(createAgentsCommand(() => services.installation()));
   const boardHooks = (): BoardHookKit =>
     new BoardHookKit({
@@ -127,11 +123,21 @@ export function buildProgram(
         })
       ).operations(),
       ...new DefaultReviewOperations({ cwd: launchCwd }).operations(),
+      ...new DefaultTrackerReadOperations({
+        getTracker: tracker,
+        getPrHost: prHost,
+        getConfig: config,
+      }).operations(),
     ],
     policy: new LaunchOperationAccessPolicy({
       allowedEffects: ["read", "write", "process", "network"],
     }),
   });
+  program.addCommand(createEpicCommand(tracker, prHost, config, operationRegistry));
+  program.addCommand(createInitiativeCommand(tracker, prHost, config, operationRegistry));
+  program.addCommand(createTicketCommand(tracker, operationRegistry));
+  program.addCommand(createTddCommand(tracker, operationRegistry));
+  program.addCommand(createUsersCommand(tracker, operationRegistry));
   program.addCommand(createGitCommand(operationRegistry));
   program.addCommand(createCommitMessageCommand(operationRegistry));
   program.addCommand(createBranchNameCommand(operationRegistry));
