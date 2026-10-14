@@ -49,6 +49,9 @@ jobs:
       - name: Verify release artifacts against a local remote
         run: npm run test:release:artifacts
 
+      - name: Verify installed consumers and relocated MCP CLIs
+        run: npm run test:installed-consumers
+
   release:
     needs: ci
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'

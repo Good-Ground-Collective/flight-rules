@@ -20,6 +20,26 @@ import * as esbuild from "esbuild";
 const pkg = JSON.parse(
   readFileSync(fileURLToPath(new URL("../package.json", import.meta.url)), "utf8"),
 );
+const forbiddenIntegration =
+  /(?:^|\/)(?:node_modules\/)?(?:deepagents|langchain|@langchain|openai|@anthropic-ai|@google\/generative-ai|@aws-sdk|@mistralai)(?:\/|$)/;
+for (const negativeControl of [
+  "node_modules/deepagents/dist/index.js",
+  "/tmp/consumer/node_modules/@langchain/core/dist/index.js",
+  "@anthropic-ai/sdk",
+]) {
+  if (!forbiddenIntegration.test(negativeControl)) {
+    throw new Error(`Optional model import guard missed negative control: ${negativeControl}`);
+  }
+}
+const assertNoIntegrationImports = (name, metafile) => {
+  const inputs = Object.keys(metafile.inputs);
+  const imports = Object.values(metafile.outputs).flatMap(({ imports }) =>
+    imports.map(({ path }) => path),
+  );
+  const leaked = [...inputs, ...imports].filter((path) => forbiddenIntegration.test(path));
+  if (leaked.length > 0)
+    throw new Error(`${name} imports optional model integration packages: ${leaked.join(", ")}`);
+};
 // Release preparation owns these trees. Rebuild from sources so removed
 // modules/resources cannot survive an earlier build.
 for (const resource of ["../bin/", "../dist/"]) {
@@ -39,12 +59,13 @@ chmodSync(shim, 0o755);
 // .mjs, not extensionless: Node refuses extensionless ESM entries under "type": "module"
 const outfile = fileURLToPath(new URL("../bin/flight-rules.mjs", import.meta.url));
 
-await esbuild.build({
+const cliBuild = await esbuild.build({
   entryPoints: [fileURLToPath(new URL("../src/main.ts", import.meta.url))],
   bundle: true,
   platform: "node",
   format: "esm",
   outfile,
+  metafile: true,
   // Bundled CommonJS deps (yaml, @octokit/*) call require() at runtime; under
   // "type": "module" the ESM binary has no global require without this.
   banner: {
@@ -52,6 +73,7 @@ await esbuild.build({
   },
   define: { _appVersion: JSON.stringify(pkg.version) },
 });
+assertNoIntegrationImports("CLI", cliBuild.metafile);
 
 const canonicalAgents = fileURLToPath(new URL("../agents", import.meta.url));
 const generatedAgents = fileURLToPath(new URL("../bin/resources/agents", import.meta.url));
@@ -60,24 +82,28 @@ cpSync(canonicalAgents, generatedAgents, { recursive: true });
 
 chmodSync(outfile, 0o755);
 
-await esbuild.build({
+const rootBuild = await esbuild.build({
   entryPoints: [fileURLToPath(new URL("../src/index.ts", import.meta.url))],
   bundle: true,
   platform: "node",
   format: "esm",
   packages: "external",
   outfile: fileURLToPath(new URL("../dist/index.js", import.meta.url)),
+  metafile: true,
   define: { _appVersion: JSON.stringify(pkg.version) },
 });
+assertNoIntegrationImports("root package", rootBuild.metafile);
 
-await esbuild.build({
+const sdkBuild = await esbuild.build({
   entryPoints: [fileURLToPath(new URL("../src/sdk/index.ts", import.meta.url))],
   bundle: true,
   platform: "node",
   format: "esm",
   packages: "external",
   outfile: fileURLToPath(new URL("../dist/sdk.js", import.meta.url)),
+  metafile: true,
 });
+assertNoIntegrationImports("neutral SDK", sdkBuild.metafile);
 
 await esbuild.build({
   entryPoints: [fileURLToPath(new URL("../src/sdk/deepagents/index.ts", import.meta.url))],
@@ -88,23 +114,27 @@ await esbuild.build({
   outfile: fileURLToPath(new URL("../dist/sdk-deepagents.js", import.meta.url)),
 });
 
-await esbuild.build({
+const mcpBuild = await esbuild.build({
   entryPoints: [fileURLToPath(new URL("../src/mcp/index.ts", import.meta.url))],
   bundle: true,
   platform: "node",
   format: "esm",
   packages: "external",
   outfile: fileURLToPath(new URL("../dist/mcp.js", import.meta.url)),
+  metafile: true,
 });
+assertNoIntegrationImports("MCP entry", mcpBuild.metafile);
 
-await esbuild.build({
+const reviewBuild = await esbuild.build({
   entryPoints: [fileURLToPath(new URL("../src/code-review/index.ts", import.meta.url))],
   bundle: true,
   platform: "node",
   format: "esm",
   packages: "external",
   outfile: fileURLToPath(new URL("../dist/review.js", import.meta.url)),
+  metafile: true,
 });
+assertNoIntegrationImports("review entry", reviewBuild.metafile);
 const { reviewContract } = await import(new URL("../dist/review.js", import.meta.url));
 const contractsDir = fileURLToPath(new URL("../contracts/code-review", import.meta.url));
 mkdirSync(contractsDir, { recursive: true });

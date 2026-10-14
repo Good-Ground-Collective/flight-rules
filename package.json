@@ -41,6 +41,7 @@
   "files": [
     "bin/",
     "docs/",
+    "!docs/validation/e6-installed-consumer-proof.json",
     "skills/",
     "agents/",
     "adapters/",
@@ -59,6 +60,7 @@
     "test:agents:codex-config": "npm run build && node scripts/test-codex-agent-config.mjs",
     "test:agents:live": "npm run build && node scripts/test-agents-live.mjs",
     "test:installation:native": "npm run build && node scripts/test-native-installation.mjs",
+    "test:installed-consumers": "node scripts/test-installed-consumers.mjs",
     "test:release:artifacts": "node scripts/test-release-artifacts.mjs",
     "typecheck": "tsc --noEmit"
   },

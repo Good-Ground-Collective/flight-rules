@@ -68,6 +68,7 @@ describe("run", () => {
       }),
     );
     vi.stubEnv("CLAUDE_CONFIG_DIR", userDir);
+    vi.stubEnv("FLIGHT_RULES_HOST", "claude");
     vi.stubEnv("FLIGHT_RULES_CONFIG", undefined);
     const cwd = vi.spyOn(process, "cwd").mockReturnValue(dir);
 

@@ -114,6 +114,7 @@ describe("verified implementation loop", () => {
     });
     if (verification.status !== "verify") throw new Error("expected verifier dispatch");
     expect(verification.request.input).toEqual({
+      mode: "verify",
       criteria: input.criteria,
       filesChanged: [{ path: "src/first.ts" }, { path: "src/second.ts" }],
     });

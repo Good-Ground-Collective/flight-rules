@@ -89,7 +89,11 @@ describe("built library smoke test", () => {
     expect(JSON.parse(output)).toEqual({
       doc: "orchestration-interface",
       agent: "code-verifier",
-      input: { criteria: ["Keeps the input"], filesChanged: [{ path: "input.ts" }] },
+      input: {
+        criteria: ["Keeps the input"],
+        filesChanged: [{ path: "input.ts" }],
+        mode: "verify",
+      },
     });
   });
 
@@ -148,6 +152,19 @@ describe("built library smoke test", () => {
     expect(readFileSync(new URL("sdk/deepagents/index.d.ts", dist), "utf8")).toContain(
       "DeepAgentsWorkerRuntime",
     );
+  });
+
+  it("keeps provider runtimes out of the CLI and both native launchers", () => {
+    for (const path of [
+      "../bin/flight-rules.mjs",
+      "claude/bin/flight-rules.mjs",
+      "codex/bin/flight-rules.mjs",
+    ]) {
+      const bundle = readFileSync(new URL(path, dist), "utf8");
+      expect(bundle).not.toMatch(
+        /(?:from\s*|import\s*\(|require\s*\()["'](?:deepagents|langchain|@langchain\/)/,
+      );
+    }
   });
 
   it("loads canonical resources from relocated Claude and Codex installations", async () => {

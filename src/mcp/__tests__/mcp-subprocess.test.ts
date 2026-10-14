@@ -88,6 +88,7 @@ describe("MCP stdio subprocess", () => {
     try {
       const { tools } = await client.listTools();
       const toolNames = tools.map((tool) => tool.name);
+      expect(toolNames).toHaveLength(60);
       expect(toolNames).toContain("branch-name");
       expect(toolNames).toEqual(
         expect.arrayContaining([
@@ -103,7 +104,9 @@ describe("MCP stdio subprocess", () => {
           "initiative-review-plan",
         ]),
       );
-      expect(toolNames).not.toContain("ticket-create");
+      expect(toolNames).toContain("ticket-create");
+      expect(toolNames).toContain("ticket-block");
+      expect(toolNames).toContain("packet-create");
 
       const invalidTrackerInput = await client.callTool({ name: "ticket-get", arguments: {} });
       expect(invalidTrackerInput.isError).toBe(true);

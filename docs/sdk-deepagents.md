@@ -2,6 +2,21 @@
 
 `@good-ground-collective/flight-rules/sdk/deepagents` runs the neutral worker registrations through Deep Agents graphs. It is an optional peer entry: applications that only use the root library, review entry or neutral SDK do not load LangChain packages.
 
+The package is published to GitHub Packages. Configure the `@good-ground-collective` scope registry and a read token first; [the shared package guide](code-review-package.md#consumer-entry-points) documents that prerequisite. Then install the optional runtime with the versions exercised by the consumer proof:
+
+```sh
+npm install @good-ground-collective/flight-rules deepagents@1.15.0 langchain@1.5.16 @langchain/core@1.2.17 @langchain/langgraph@1.5.0
+```
+
+The optional peers are needed only by the Deep Agents entry. Root, review and neutral SDK consumers install the package's production dependencies without these packages. The example and build script live in this repository's source checkout; they are not included in the published package. From the checkout, build and run the runnable reference example with scripted models and no provider credentials:
+
+```sh
+npm run build
+node --experimental-strip-types examples/deepagents/iterative-review.ts
+```
+
+It pauses at a real human question, resumes the same checkpoint, carries the clarify finding into a later pass, and resolves it after accepted code evidence. It also runs the registered implementation and verifier workers through `VerifiedImplementationLoop`, including a FAIL, directed retry and independent PASS. This is deterministic SDK execution; it does not evaluate model judgment or call a provider.
+
 Create one `DeepAgentsWorkerRuntime` with the seven registrations from `FileAgentRegistry`, one model instance for each tier, a host observation callback and capability-scoped tools. The registration chooses its model tier when the runtime is constructed; a dispatch request cannot replace that binding.
 
 ```ts

@@ -184,6 +184,7 @@ export class VerifiedImplementationLoop implements ImplementationLoop {
       context: { ...run.context, attempt },
       input: {
         ...run.implementationInput,
+        mode: "implement",
         criteria: [...run.criteria],
         ...(failures.length ? { verifierFailures: failures } : {}),
       },
@@ -199,7 +200,11 @@ export class VerifiedImplementationLoop implements ImplementationLoop {
       id: `${run.context.runId}:verification:${attempt}`,
       agent: "code-verifier",
       context: { ...run.context, attempt },
-      input: { criteria: [...run.criteria], filesChanged: filesChanged.map((path) => ({ path })) },
+      input: {
+        mode: "verify",
+        criteria: [...run.criteria],
+        filesChanged: filesChanged.map((path) => ({ path })),
+      },
     };
   }
 
