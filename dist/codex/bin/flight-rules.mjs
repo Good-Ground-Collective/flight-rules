@@ -31653,7 +31653,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.84.0";
+var appVersion = false ? "0.0.0-dev" : "1.85.0";
 
 // src/shared/ariadne/review-packet.schema.ts
 var packetLimits = {
@@ -49451,6 +49451,997 @@ var RepositoryPathsError = class extends Error {
   name = "RepositoryPathsError";
 };
 
+// src/code-review/review-policy.ts
+import { execFileSync as execFileSync3 } from "node:child_process";
+import { readFileSync as readFileSync11, realpathSync as realpathSync3 } from "node:fs";
+import { dirname as dirname11, join as join12, relative as relative2 } from "node:path";
+import { fileURLToPath as fileURLToPath3 } from "node:url";
+
+// src/code-review/review.schema.ts
+var reviewContractVersion = 1;
+var reviewSchemaRevision = 1;
+var ReviewOutcomeSchema = external_exports.enum(["APPROVED", "CHANGES_NEEDED", "ESCALATE", "INCOMPLETE"]);
+var FindingIdSchema = external_exports.string().regex(/^f-[a-f0-9]{10}$/);
+var HeadShaSchema2 = external_exports.string().regex(/^[a-f0-9]{40}$/);
+var ReviewPathSchema = external_exports.string().max(400).regex(/^(?!\/)(?!.*\\)(?!.*(?:^|\/)\.{1,2}(?:\/|$))[^\p{Cc}]*$/u);
+var TextSchema = external_exports.string().min(1).max(16e3);
+var LineTextSchema = external_exports.string().min(1).max(400).regex(/^[^\r\n]+$/);
+var PositiveIdSchema = external_exports.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+var HttpsUrlSchema = external_exports.url().regex(/^https:\/\//);
+var CategorySchema = external_exports.enum([
+  "security",
+  "correctness",
+  "data",
+  "deployment",
+  "design",
+  "testing",
+  "performance",
+  "readability",
+  "docs"
+]);
+var ActionLabelSchema = external_exports.enum([
+  "issue",
+  "todo",
+  "suggestion",
+  "question",
+  "chore",
+  "nitpick",
+  "typo",
+  "polish"
+]);
+var InformationLabelSchema = external_exports.enum(["praise", "note", "thought"]);
+var SeveritySchema = external_exports.enum(["critical", "major", "minor", "trivial"]);
+var DecisionOptionsSchema = external_exports.array(
+  external_exports.strictObject({ id: external_exports.string().regex(/^[a-z][a-z0-9-]{0,79}$/), description: TextSchema })
+).min(2);
+var findingFields = {
+  path: ReviewPathSchema,
+  line: external_exports.number().int().nonnegative(),
+  start_line: external_exports.number().int().positive().optional(),
+  category: CategorySchema.optional(),
+  subject: LineTextSchema,
+  discussion: TextSchema,
+  related_finding_id: FindingIdSchema.optional()
+};
+var actionFields = {
+  ...findingFields,
+  label: ActionLabelSchema,
+  type: external_exports.enum(["fix", "clarify"]),
+  blocking: external_exports.boolean(),
+  severity: SeveritySchema,
+  details: TextSchema,
+  resolved_when: TextSchema
+};
+var decisionFields = {
+  ...actionFields,
+  type: external_exports.literal("decide"),
+  decision_owner: LineTextSchema,
+  decision_options: DecisionOptionsSchema
+};
+var informationFields = {
+  ...findingFields,
+  label: InformationLabelSchema,
+  blocking: external_exports.literal(false),
+  details: TextSchema.optional()
+};
+var NewFindingSchema = external_exports.union([
+  external_exports.strictObject(actionFields),
+  external_exports.strictObject(decisionFields),
+  external_exports.strictObject(informationFields)
+]);
+var ActionableFindingSchema = external_exports.union([
+  external_exports.strictObject({ ...actionFields, id: FindingIdSchema }),
+  external_exports.strictObject({ ...decisionFields, id: FindingIdSchema })
+]);
+var StoredFindingSchema = external_exports.union([
+  ...ActionableFindingSchema.options,
+  external_exports.strictObject({ ...informationFields, id: FindingIdSchema })
+]);
+var ReviewEvidenceSchema = external_exports.discriminatedUnion("kind", [
+  external_exports.strictObject({
+    kind: external_exports.literal("github_comment"),
+    comment_id: PositiveIdSchema,
+    url: HttpsUrlSchema
+  }),
+  external_exports.strictObject({
+    kind: external_exports.literal("code"),
+    commit_sha: HeadShaSchema2,
+    path: ReviewPathSchema.min(1),
+    line: external_exports.number().int().positive()
+  }),
+  external_exports.strictObject({ kind: external_exports.literal("commit"), sha: HeadShaSchema2 }),
+  external_exports.strictObject({
+    kind: external_exports.literal("check_run"),
+    check_run_id: PositiveIdSchema,
+    commit_sha: HeadShaSchema2
+  }),
+  external_exports.strictObject({ kind: external_exports.literal("document"), url: HttpsUrlSchema }),
+  external_exports.strictObject({
+    kind: external_exports.literal("verification"),
+    commit_sha: HeadShaSchema2,
+    command: TextSchema,
+    result: external_exports.literal("passed"),
+    report_url: HttpsUrlSchema
+  }),
+  external_exports.strictObject({
+    kind: external_exports.literal("thread_resolution"),
+    thread_id: external_exports.string().min(1),
+    author_id: PositiveIdSchema
+  })
+]);
+var DecisionAnswerSchema = external_exports.strictObject({
+  comment_id: PositiveIdSchema,
+  author_id: PositiveIdSchema,
+  option_id: external_exports.string().min(1)
+});
+var transitionFields = {
+  id: FindingIdSchema,
+  reason: TextSchema,
+  reply: TextSchema.optional(),
+  decision: DecisionAnswerSchema.optional()
+};
+var PriorFindingSchema = external_exports.union([
+  external_exports.strictObject({
+    ...transitionFields,
+    status: external_exports.literal("resolved"),
+    evidence: external_exports.array(ReviewEvidenceSchema).min(1)
+  }),
+  external_exports.strictObject({
+    ...transitionFields,
+    status: external_exports.literal("withdrawn"),
+    evidence: external_exports.array(ReviewEvidenceSchema).min(1),
+    withdrawal_basis: external_exports.enum(["incorrect", "no_longer_applicable", "dismissed"])
+  }),
+  external_exports.strictObject({
+    ...transitionFields,
+    status: external_exports.literal("still_open"),
+    evidence: external_exports.array(ReviewEvidenceSchema).optional(),
+    updated_finding: ActionableFindingSchema.optional()
+  })
+]);
+var reviewFields = {
+  contract_version: external_exports.literal(reviewContractVersion),
+  schema_revision: external_exports.literal(reviewSchemaRevision),
+  head_sha: HeadShaSchema2,
+  review_complete: external_exports.boolean(),
+  incomplete_reason: external_exports.string().max(16e3).optional(),
+  summary: TextSchema,
+  outcome: ReviewOutcomeSchema,
+  outcome_reason: TextSchema,
+  remaining_risk: TextSchema,
+  extensions: external_exports.record(external_exports.string(), external_exports.json()).optional()
+};
+var ReviewSchema = external_exports.strictObject({
+  ...reviewFields,
+  findings: external_exports.array(NewFindingSchema),
+  prior_findings: external_exports.array(PriorFindingSchema)
+});
+var FindingRecordSchema = external_exports.strictObject({
+  v: external_exports.literal(reviewContractVersion),
+  schema_revision: external_exports.literal(reviewSchemaRevision),
+  finding: ActionableFindingSchema,
+  status: external_exports.enum(["open", "resolved", "withdrawn"]),
+  evidence: external_exports.array(ReviewEvidenceSchema),
+  decision: DecisionAnswerSchema.optional()
+});
+var ReviewStateSchema = external_exports.strictObject({
+  v: external_exports.literal(reviewContractVersion),
+  schema_revision: external_exports.literal(reviewSchemaRevision),
+  sha: HeadShaSchema2,
+  outcome: ReviewOutcomeSchema,
+  records: external_exports.array(
+    external_exports.union([
+      external_exports.strictObject({
+        id: FindingIdSchema,
+        status: external_exports.enum(["open", "resolved", "withdrawn"]),
+        location: external_exports.union([
+          external_exports.strictObject({ kind: external_exports.literal("review_comment"), comment_id: PositiveIdSchema }),
+          external_exports.strictObject({ kind: external_exports.literal("review_body"), review_id: PositiveIdSchema })
+        ])
+      }),
+      external_exports.strictObject({
+        id: FindingIdSchema,
+        status: external_exports.literal("informational"),
+        fingerprint: external_exports.string().min(1),
+        finding: external_exports.strictObject({ ...informationFields, id: FindingIdSchema }).optional()
+      })
+    ])
+  )
+});
+var TransportReviewSchema = external_exports.strictObject({
+  ...reviewFields,
+  findings: external_exports.array(
+    external_exports.strictObject({
+      ...actionFields,
+      type: external_exports.enum(["fix", "clarify", "decide"]).optional(),
+      label: external_exports.enum([...ActionLabelSchema.options, ...InformationLabelSchema.options]),
+      severity: SeveritySchema.optional(),
+      details: TextSchema.optional(),
+      resolved_when: TextSchema.optional(),
+      decision_owner: LineTextSchema.optional(),
+      decision_options: DecisionOptionsSchema.optional()
+    })
+  ),
+  prior_findings: external_exports.array(
+    external_exports.strictObject({
+      ...transitionFields,
+      status: external_exports.enum(["resolved", "still_open", "withdrawn"]),
+      evidence: external_exports.array(ReviewEvidenceSchema).optional(),
+      withdrawal_basis: external_exports.enum(["incorrect", "no_longer_applicable", "dismissed"]).optional(),
+      updated_finding: StoredFindingSchema.optional()
+    })
+  )
+});
+
+// src/code-review/review-policy.ts
+var ReviewPolicyPropsSchema = external_exports.strictObject({
+  home: external_exports.string().min(1).optional(),
+  env: external_exports.custom(
+    (value) => typeof value === "object" && value !== null && !Array.isArray(value)
+  ).optional()
+});
+var LoadPolicyPropsSchema = external_exports.strictObject({ paths: external_exports.array(external_exports.string()).optional() });
+var RepositoryContextPropsSchema = external_exports.strictObject({
+  cwd: external_exports.string().min(1),
+  trustedRef: HeadShaSchema2,
+  contextPath: ReviewPathSchema.min(1).default("CODE-REVIEW.md")
+});
+var FileReviewPolicy = class {
+  home;
+  env;
+  constructor(props = {}) {
+    const parsed = ReviewPolicyPropsSchema.parse(props);
+    this.home = parsed.home ?? join12(dirname11(fileURLToPath3(import.meta.url)), "..");
+    this.env = props.env ?? process.env;
+  }
+  load(input2 = {}) {
+    const { paths } = LoadPolicyPropsSchema.parse(input2);
+    const docs = realpathSync3(join12(this.home, "docs"));
+    const read = (id) => {
+      const path3 = realpathSync3(join12(docs, `${id}.md`));
+      if (relative2(docs, path3).startsWith(".."))
+        throw new ReviewPolicyError("review policy path leaves the installed docs directory");
+      return readFileSync11(path3, "utf8");
+    };
+    const catalog = new DocCharterCatalog({ docs: new FileDocResolver({ docsDir: docs }) });
+    const charters = (paths === void 0 ? catalog.all() : catalog.select(paths)).map(
+      ({ id, language, appliesTo, tierA, contents }) => ({
+        id,
+        language,
+        appliesTo,
+        tierA,
+        contents
+      })
+    );
+    return {
+      method: read("autonomous-review-method"),
+      charter: charters.map(({ contents }) => contents.endsWith("\n") ? contents : `${contents}
+`).join("\n"),
+      charters,
+      tierA: [...new Set(charters.flatMap(({ tierA }) => tierA))],
+      contract: read("code-review-findings-contract")
+    };
+  }
+  repository(input2) {
+    const props = RepositoryContextPropsSchema.parse(input2);
+    const paths = [
+      .../* @__PURE__ */ new Set([
+        props.contextPath,
+        "AGENTS.md",
+        "CLAUDE.md",
+        ".github/CODEOWNERS",
+        "CODEOWNERS",
+        "docs/CODEOWNERS"
+      ])
+    ];
+    const sources = [];
+    const missing = [];
+    for (const path3 of paths) {
+      const tree = execFileSync3("git", ["ls-tree", "-z", props.trustedRef, "--", path3], {
+        cwd: props.cwd,
+        env: this.env,
+        encoding: "utf8"
+      });
+      if (!tree) {
+        missing.push(path3);
+        continue;
+      }
+      if (!/^100(?:644|755) blob [a-f0-9]+\t/.test(tree))
+        throw new ReviewPolicyError(`review rules must be a regular file: ${path3}`);
+      sources.push({
+        path: path3,
+        contents: execFileSync3("git", ["show", `${props.trustedRef}:${path3}`], {
+          cwd: props.cwd,
+          env: this.env,
+          encoding: "utf8",
+          maxBuffer: 1e7
+        })
+      });
+    }
+    return { trustedRef: props.trustedRef, contextPath: props.contextPath, sources, missing };
+  }
+};
+var ReviewPolicyError = class extends Error {
+  name = "ReviewPolicyError";
+};
+
+// src/code-review/github-review-verifier.ts
+import { execFile as execFile6 } from "node:child_process";
+import { promisify as promisify6 } from "node:util";
+var GhReviewGitHubApiPropsSchema = external_exports.strictObject({
+  cwd: external_exports.string().min(1).optional(),
+  env: external_exports.custom(
+    (value) => typeof value === "object" && value !== null && !Array.isArray(value)
+  ).optional()
+});
+var GhReviewGitHubApi = class {
+  cwd;
+  env;
+  constructor(props = {}) {
+    const parsed = GhReviewGitHubApiPropsSchema.parse(props);
+    this.cwd = parsed.cwd ?? process.cwd();
+    this.env = props.env ?? process.env;
+  }
+  async get(path3) {
+    return this.run(["api", path3]);
+  }
+  async graphql(query, variables) {
+    return this.run([
+      "api",
+      "graphql",
+      "-f",
+      `query=${query}`,
+      ...Object.entries(variables).flatMap(([key, value]) => [
+        typeof value === "number" ? "-F" : "-f",
+        `${key}=${value}`
+      ])
+    ]);
+  }
+  async run(args) {
+    const { stdout } = await promisify6(execFile6)("gh", args, {
+      maxBuffer: 2e7,
+      cwd: this.cwd,
+      env: this.env
+    });
+    return JSON.parse(stdout);
+  }
+};
+var GitHubReviewVerifierPropsSchema = external_exports.strictObject({
+  repo: external_exports.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
+  prNumber: external_exports.number().int().positive(),
+  prAuthorId: external_exports.number().int().positive(),
+  owners: external_exports.record(external_exports.string(), external_exports.array(external_exports.string().min(1))).default({}),
+  requireMapping: external_exports.boolean().default(false)
+});
+var UserSchema = external_exports.looseObject({ id: external_exports.number(), login: external_exports.string(), type: external_exports.string() });
+var CommentSchema2 = external_exports.looseObject({
+  id: external_exports.number(),
+  user: UserSchema,
+  issue_url: external_exports.string().optional(),
+  pull_request_url: external_exports.string().optional(),
+  body: external_exports.string()
+});
+var GitHubReviewVerifier = class {
+  props;
+  api;
+  constructor(props) {
+    const { api, ...values } = props;
+    this.props = GitHubReviewVerifierPropsSchema.parse(values);
+    this.api = api ?? new GhReviewGitHubApi();
+  }
+  async verify(evidence, headSha) {
+    if (evidence.kind === "document") return true;
+    if (evidence.kind === "verification") return false;
+    if (evidence.kind === "github_comment") {
+      const comment = await this.comment(evidence.comment_id, evidence.url);
+      return comment !== void 0;
+    }
+    if (evidence.kind === "thread_resolution") return this.dismissal(evidence);
+    if (evidence.kind === "commit") return this.reaches(evidence.sha, headSha);
+    if (evidence.kind === "check_run") {
+      if (evidence.commit_sha !== headSha) return false;
+      const check2 = external_exports.looseObject({
+        head_sha: external_exports.string(),
+        status: external_exports.string(),
+        conclusion: external_exports.string().nullable()
+      }).parse(await this.api.get(`/repos/${this.props.repo}/check-runs/${evidence.check_run_id}`));
+      return check2.head_sha === headSha && check2.status === "completed" && check2.conclusion === "success";
+    }
+    if (!await this.reaches(evidence.commit_sha, headSha)) return false;
+    return (evidence.commit_sha === headSha || await this.hasLine(evidence.path, evidence.line, evidence.commit_sha)) && await this.hasLine(evidence.path, evidence.line, headSha);
+  }
+  async authorize(answer, finding) {
+    if (finding.type !== "decide" || !finding.decision_options.some((option) => option.id === answer.option_id))
+      return false;
+    const comment = await this.comment(answer.comment_id);
+    if (comment === void 0 || comment.user.id !== answer.author_id || comment.user.type !== "User" || !comment.body.trim())
+      return false;
+    const owners = this.props.owners[finding.decision_owner];
+    if (owners !== void 0)
+      return owners.some((login) => login.toLowerCase() === comment.user.login.toLowerCase());
+    if (this.props.requireMapping || comment.user.id === this.props.prAuthorId) return false;
+    const permission = external_exports.looseObject({ permission: external_exports.string() }).parse(
+      await this.api.get(
+        `/repos/${this.props.repo}/collaborators/${encodeURIComponent(comment.user.login)}/permission`
+      )
+    );
+    return ["write", "maintain", "admin"].includes(permission.permission);
+  }
+  async dismissal(evidence) {
+    if (evidence.kind !== "thread_resolution" || evidence.author_id === this.props.prAuthorId)
+      return false;
+    const result = external_exports.looseObject({
+      data: external_exports.looseObject({
+        node: external_exports.looseObject({
+          isResolved: external_exports.boolean(),
+          resolvedBy: external_exports.looseObject({ databaseId: external_exports.number(), actorType: external_exports.string() }).nullable(),
+          pullRequest: external_exports.looseObject({
+            number: external_exports.number(),
+            repository: external_exports.looseObject({ nameWithOwner: external_exports.string() })
+          })
+        }).nullable()
+      })
+    }).parse(
+      await this.api.graphql(
+        "query($id: ID!) { node(id: $id) { ... on PullRequestReviewThread { isResolved resolvedBy { actorType: __typename ... on User { databaseId } } pullRequest { number repository { nameWithOwner } } } } }",
+        { id: evidence.thread_id }
+      )
+    );
+    const thread = result.data.node;
+    return thread !== null && thread.isResolved && thread.resolvedBy?.actorType === "User" && thread.resolvedBy.databaseId === evidence.author_id && thread.pullRequest.number === this.props.prNumber && thread.pullRequest.repository.nameWithOwner.toLowerCase() === this.props.repo.toLowerCase();
+  }
+  /** True when `sha` is the head or an ancestor of it, so the head contains that commit. */
+  async reaches(sha, headSha) {
+    if (sha === headSha) return true;
+    const comparison = external_exports.looseObject({ status: external_exports.string() }).parse(await this.api.get(`/repos/${this.props.repo}/compare/${sha}...${headSha}`));
+    return ["ahead", "identical"].includes(comparison.status);
+  }
+  /** True when `ref` has `path` as a file with at least `line` lines. */
+  async hasLine(path3, line, ref) {
+    const file2 = external_exports.looseObject({ type: external_exports.string(), encoding: external_exports.string(), content: external_exports.string() }).parse(
+      await this.api.get(
+        `/repos/${this.props.repo}/contents/${path3.split("/").map(encodeURIComponent).join("/")}?ref=${ref}`
+      )
+    );
+    if (file2.type !== "file" || file2.encoding !== "base64") return false;
+    const text7 = Buffer.from(file2.content, "base64").toString("utf8");
+    const lines = text7 === "" ? 0 : text7.split("\n").length - (text7.endsWith("\n") ? 1 : 0);
+    return line <= lines;
+  }
+  async comment(id, url2) {
+    if (url2 !== void 0 && !url2.toLowerCase().startsWith(
+      `https://github.com/${this.props.repo.toLowerCase()}/pull/${this.props.prNumber}#`
+    ))
+      return void 0;
+    const endpoints = url2?.includes("#discussion_r") ? ["pulls/comments"] : url2?.includes("#issuecomment-") ? ["issues/comments"] : ["issues/comments", "pulls/comments"];
+    for (const endpoint2 of endpoints) {
+      try {
+        const comment = CommentSchema2.parse(
+          await this.api.get(`/repos/${this.props.repo}/${endpoint2}/${id}`)
+        );
+        const expected = `https://api.github.com/repos/${this.props.repo.toLowerCase()}`;
+        if (comment.id === id && (comment.issue_url?.toLowerCase() === `${expected}/issues/${this.props.prNumber}` || comment.pull_request_url?.toLowerCase() === `${expected}/pulls/${this.props.prNumber}`))
+          return comment;
+      } catch {
+        continue;
+      }
+    }
+    return void 0;
+  }
+};
+
+// src/code-review/review-planner.ts
+import { randomBytes as randomBytes2 } from "node:crypto";
+
+// src/code-review/review-contract.ts
+var InvalidReviewError = class extends Error {
+  name = "InvalidReviewError";
+};
+var ZodReviewContract = class {
+  parse(value) {
+    const result = ReviewSchema.parse(value);
+    const ids = result.prior_findings.map((finding) => finding.id);
+    if (new Set(ids).size !== ids.length)
+      throw new InvalidReviewError("duplicate prior finding IDs");
+    if (!result.review_complete && !result.incomplete_reason?.trim()) {
+      throw new InvalidReviewError("an incomplete review must explain what could not be reviewed");
+    }
+    const findings = result.findings.map((finding) => this.normalize(finding));
+    const priorFindings = result.prior_findings.map((transition) => {
+      if (transition.status !== "still_open") return transition;
+      if ((transition.decision !== void 0 || transition.updated_finding !== void 0) && !transition.evidence?.length) {
+        throw new InvalidReviewError(`transition ${transition.id} requires evidence`);
+      }
+      if (transition.updated_finding === void 0) return transition;
+      if (transition.id !== transition.updated_finding.id)
+        throw new InvalidReviewError("a replacement must preserve the finding ID");
+      return {
+        ...transition,
+        updated_finding: this.normalizeActionable(transition.updated_finding)
+      };
+    });
+    for (const transition of priorFindings) {
+      if (transition.decision !== void 0 && !transition.evidence?.some(
+        (evidence) => evidence.kind === "github_comment" && evidence.comment_id === transition.decision?.comment_id
+      )) {
+        throw new InvalidReviewError(
+          `decision ${transition.id} must reference its human comment in evidence`
+        );
+      }
+    }
+    return { ...result, findings, prior_findings: priorFindings };
+  }
+  record(value) {
+    const result = FindingRecordSchema.parse(value);
+    if (result.status !== "open" && result.evidence.length === 0)
+      throw new InvalidReviewError("closed records require evidence");
+    return { ...result, finding: this.normalizeActionable(result.finding) };
+  }
+  state(value) {
+    const result = ReviewStateSchema.parse(value);
+    const ids = result.records.map((record2) => record2.id);
+    if (new Set(ids).size !== ids.length)
+      throw new InvalidReviewError("duplicate finding IDs in state");
+    for (const record2 of result.records) {
+      if (record2.status === "informational" && record2.finding !== void 0 && record2.id !== record2.finding.id) {
+        throw new InvalidReviewError("informational index ID does not match its finding");
+      }
+    }
+    return result;
+  }
+  schemas() {
+    return {
+      full: external_exports.toJSONSchema(ReviewSchema, { target: "draft-07" }),
+      transport: external_exports.toJSONSchema(TransportReviewSchema, { target: "draft-07" })
+    };
+  }
+  normalize(finding) {
+    this.checkRange(finding);
+    if (!("type" in finding)) return finding;
+    if (finding.type === "decide") this.checkOptions(finding);
+    const blocking = finding.blocking || finding.severity === "critical" || finding.severity === "major";
+    const label = blocking && ["nitpick", "typo", "polish"].includes(finding.label) ? "issue" : finding.label;
+    return { ...finding, blocking, label };
+  }
+  normalizeActionable(finding) {
+    return ActionableFindingSchema.parse({ ...this.normalize(finding), id: finding.id });
+  }
+  checkRange(finding) {
+    if (finding.start_line !== void 0 && (finding.line === 0 || finding.start_line > finding.line)) {
+      throw new InvalidReviewError("start_line must not exceed a positive line anchor");
+    }
+  }
+  checkOptions(finding) {
+    const ids = finding.decision_options.map((option) => option.id);
+    if (new Set(ids).size !== ids.length)
+      throw new InvalidReviewError("decision option IDs must be unique");
+  }
+};
+var reviewContract = new ZodReviewContract();
+
+// src/code-review/review-planner.ts
+var EvidenceReviewPlanner = class {
+  verifier;
+  constructor(props) {
+    this.verifier = props.verifier;
+  }
+  async plan(input2) {
+    const headSha = HeadShaSchema2.parse(input2.headSha);
+    const review = reviewContract.parse(input2.review);
+    const records = input2.records.map((record2) => reviewContract.record(record2));
+    const known = new Map(records.map((record2) => [record2.finding.id, record2]));
+    if (known.size !== records.length) throw new InvalidReviewError("duplicate stored finding IDs");
+    if (review.head_sha !== headSha)
+      throw new InvalidReviewError("reviewed head is stale; rerun against the current PR head");
+    for (const entry of review.prior_findings) {
+      if (known.get(entry.id)?.status !== "open")
+        throw new InvalidReviewError(`unknown or closed prior finding: ${entry.id}`);
+    }
+    const problems = [];
+    const updates = new Map(review.prior_findings.map((entry) => [entry.id, entry]));
+    const retained = [];
+    for (const record2 of records) {
+      if (record2.status !== "open") {
+        retained.push(record2);
+        continue;
+      }
+      const entry = updates.get(record2.finding.id);
+      if (entry === void 0) {
+        problems.push(`omitted open finding ${record2.finding.id}`);
+        retained.push(record2);
+        continue;
+      }
+      const evidence = entry.evidence ?? [];
+      let valid = true;
+      for (const reference of evidence) {
+        try {
+          if (!await this.verifier.verify(reference, headSha)) valid = false;
+        } catch {
+          valid = false;
+        }
+      }
+      const changed = entry.status !== "still_open" || entry.updated_finding !== void 0 || entry.decision !== void 0;
+      if (!valid && changed) {
+        problems.push(`evidence could not be validated for ${entry.id}`);
+        retained.push(record2);
+        continue;
+      }
+      let authorized = false;
+      if (entry.decision !== void 0) {
+        try {
+          authorized = await this.verifier.authorize(entry.decision, record2.finding);
+        } catch {
+          authorized = false;
+        }
+        if (!authorized) {
+          problems.push(`decision authorization was not verified for ${entry.id}`);
+          retained.push(record2);
+          continue;
+        }
+      }
+      if (entry.status === "withdrawn" && entry.withdrawal_basis === "dismissed") {
+        let dismissed = false;
+        for (const reference of evidence) {
+          try {
+            if (await this.verifier.dismissal(reference)) dismissed = true;
+          } catch {
+            continue;
+          }
+        }
+        if (record2.finding.blocking || record2.finding.type === "decide" || !dismissed) {
+          problems.push(`manual dismissal cannot close ${entry.id}`);
+          retained.push(record2);
+          continue;
+        }
+      }
+      const withdrawal = entry.status === "withdrawn" && entry.withdrawal_basis !== "dismissed";
+      const decisionChanged = record2.finding.type === "decide" && changed;
+      if (decisionChanged && !authorized && !withdrawal) {
+        problems.push(`decision ${entry.id} still needs an authorized human answer`);
+        retained.push(record2);
+        continue;
+      }
+      const finding = entry.status === "still_open" && entry.updated_finding !== void 0 ? entry.updated_finding : record2.finding;
+      retained.push(
+        FindingRecordSchema.parse({
+          ...record2,
+          finding,
+          status: entry.status === "still_open" ? "open" : entry.status,
+          evidence: changed ? evidence : record2.evidence,
+          ...entry.decision !== void 0 ? { decision: entry.decision } : {}
+        })
+      );
+    }
+    const ids = new Set(known.keys());
+    const informational = [];
+    for (const finding of review.findings) {
+      const id = this.newId(ids);
+      if (!("type" in finding)) {
+        informational.push({ ...finding, id });
+        continue;
+      }
+      retained.push(
+        FindingRecordSchema.parse({
+          v: 1,
+          schema_revision: 1,
+          finding: { ...finding, id },
+          status: "open",
+          evidence: []
+        })
+      );
+    }
+    const outcome = this.outcome(review, retained, problems);
+    return { review, records: retained, informational, outcome, problems };
+  }
+  newId(ids) {
+    let id = `f-${randomBytes2(5).toString("hex")}`;
+    while (ids.has(id)) id = `f-${randomBytes2(5).toString("hex")}`;
+    ids.add(id);
+    return id;
+  }
+  outcome(review, records, problems) {
+    if (!review.review_complete || problems.length > 0 || review.outcome === "INCOMPLETE")
+      return "INCOMPLETE";
+    const blockers = records.filter(
+      (record2) => record2.status === "open" && record2.finding.blocking
+    );
+    if (blockers.some((record2) => record2.finding.type === "decide")) return "ESCALATE";
+    if (review.outcome === "ESCALATE") {
+      problems.push("claimed escalation has no matching open blocking decision");
+      return "INCOMPLETE";
+    }
+    if (blockers.length > 0) return "CHANGES_NEEDED";
+    if (review.outcome !== "APPROVED") {
+      problems.push("claimed outcome has no matching open blocking finding");
+      return "INCOMPLETE";
+    }
+    return "APPROVED";
+  }
+};
+var ValidatedEvidencePropsSchema = external_exports.strictObject({
+  verified: external_exports.array(external_exports.string()),
+  authorizedDecisions: external_exports.array(external_exports.string()),
+  dismissals: external_exports.array(external_exports.string())
+});
+
+// src/code-review/review-codec.ts
+import { createHash as createHash2 } from "node:crypto";
+var MarkerInputSchema = external_exports.strictObject({
+  body: external_exports.string(),
+  authorId: external_exports.number().int().positive(),
+  trustedAuthorIds: external_exports.array(external_exports.number().int().positive())
+});
+var JsonReviewCodec = class {
+  finding(record2) {
+    return this.marker("finding", reviewContract.record(record2));
+  }
+  state(state) {
+    return this.marker("state", reviewContract.state(state));
+  }
+  readFindings(input2) {
+    const parsed = MarkerInputSchema.parse(input2);
+    if (!parsed.trustedAuthorIds.includes(parsed.authorId)) return [];
+    return this.readMarkers(parsed.body, "finding").map((value) => reviewContract.record(value));
+  }
+  readState(input2) {
+    const parsed = MarkerInputSchema.parse(input2);
+    if (!parsed.trustedAuthorIds.includes(parsed.authorId)) return void 0;
+    const states = this.readMarkers(parsed.body, "state");
+    if (states.length > 1)
+      throw new InvalidReviewError("multiple review state markers in one summary");
+    return states.length === 0 ? void 0 : reviewContract.state(states[0]);
+  }
+  render(record2) {
+    const validated = reviewContract.record(record2);
+    const finding = validated.finding;
+    const decorations = [
+      ...["nitpick", "typo", "polish"].includes(finding.label) ? [] : [finding.blocking ? "blocking" : "non-blocking"],
+      finding.type
+    ];
+    if (finding.category !== void 0) decorations.push(finding.category);
+    const owner = finding.type === "decide" ? `
+
+**Decision owner:** ${finding.decision_owner}
+**Decision options:** ${finding.decision_options.map((option) => `\`${option.id}\`: ${option.description}`).join("; ")}` : "";
+    return `**${finding.label} (${decorations.join(", ")}):** ${finding.subject}
+
+${finding.discussion}
+
+<details>
+<summary>Details For LLM</summary>
+
+${finding.details}${owner}
+
+**Resolved when:** ${finding.resolved_when}
+</details>
+
+${this.finding(validated)}`;
+  }
+  fingerprint(finding) {
+    return createHash2("sha256").update(`${finding.path}|${finding.label}|${finding.subject.trim().toLowerCase()}`).digest("hex");
+  }
+  marker(kind, value) {
+    return `<!-- code-review:${kind} ${JSON.stringify(value).replaceAll(">", "\\u003e")} -->`;
+  }
+  readMarkers(body, kind) {
+    const prefix = `<!-- code-review:${kind} `;
+    const matches = [...body.matchAll(new RegExp(`${prefix}([\\s\\S]*?) -->`, "g"))];
+    if (body.split(prefix).length - 1 !== matches.length)
+      throw new InvalidReviewError("unterminated review marker");
+    return matches.map((match) => {
+      try {
+        return JSON.parse(match[1] ?? "");
+      } catch {
+        throw new InvalidReviewError(
+          "review marker contains invalid JSON; recover state before approving"
+        );
+      }
+    });
+  }
+};
+
+// src/operations/review-operations.ts
+var ReviewOperationsLaunchPropsSchema = external_exports.strictObject({
+  cwd: external_exports.string().min(1).optional(),
+  trustedRef: HeadShaSchema2.optional(),
+  owners: external_exports.record(external_exports.string(), external_exports.array(external_exports.string().min(1))).default({}),
+  requireMapping: external_exports.boolean().default(false)
+});
+var ReviewOperationsPropsSchema = ReviewOperationsLaunchPropsSchema.extend({
+  cwd: external_exports.string().min(1),
+  env: external_exports.custom(
+    (value) => typeof value === "object" && value !== null && !Array.isArray(value)
+  ).optional(),
+  policy: external_exports.custom(
+    (value) => typeof value === "object" && value !== null && "repository" in value && "load" in value
+  ).optional(),
+  api: external_exports.custom(
+    (value) => typeof value === "object" && value !== null && "get" in value && "graphql" in value
+  ).optional()
+});
+var JsonValueSchema = external_exports.json();
+var schemaInput = external_exports.strictObject({ transport: external_exports.boolean().default(false) });
+var reviewInput = external_exports.strictObject({ review: JsonValueSchema });
+var reviewOutput = ReviewSchema;
+var stateInput = external_exports.strictObject({ state: JsonValueSchema });
+var stateOutput = external_exports.string();
+var contextInput = external_exports.strictObject({
+  contextPath: external_exports.string().min(1).default("CODE-REVIEW.md")
+});
+var contextOutput = external_exports.object({
+  trustedRef: HeadShaSchema2,
+  contextPath: external_exports.string(),
+  sources: external_exports.array(external_exports.object({ path: external_exports.string(), contents: external_exports.string() })),
+  missing: external_exports.array(external_exports.string())
+});
+var planInput = external_exports.strictObject({
+  number: external_exports.number().int().positive(),
+  repo: external_exports.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
+  review: JsonValueSchema,
+  records: external_exports.array(JsonValueSchema)
+});
+var renderInput = external_exports.strictObject({
+  review: JsonValueSchema,
+  records: external_exports.array(FindingRecordSchema),
+  outcome: external_exports.string(),
+  problems: external_exports.array(external_exports.string())
+});
+var renderOutput = external_exports.object({
+  headSha: external_exports.string(),
+  outcome: external_exports.string(),
+  problems: external_exports.array(external_exports.string()),
+  findings: external_exports.array(
+    external_exports.object({
+      id: external_exports.string(),
+      status: external_exports.string(),
+      path: external_exports.string(),
+      line: external_exports.number(),
+      body: external_exports.string()
+    })
+  )
+});
+var planOutput = external_exports.object({
+  review: ReviewSchema,
+  records: external_exports.array(FindingRecordSchema),
+  informational: external_exports.array(StoredFindingSchema),
+  outcome: external_exports.enum(["APPROVED", "CHANGES_NEEDED", "ESCALATE", "INCOMPLETE"]),
+  problems: external_exports.array(external_exports.string())
+});
+var MissingTrustedReviewRefError = class extends Error {
+  name = "MissingTrustedReviewRefError";
+};
+var DefaultReviewOperations = class {
+  cwd;
+  policy;
+  api;
+  trustedRef;
+  owners;
+  requireMapping;
+  constructor(props) {
+    const parsed = ReviewOperationsPropsSchema.parse(props);
+    this.cwd = parsed.cwd ?? process.cwd();
+    this.trustedRef = parsed.trustedRef;
+    this.owners = parsed.owners;
+    this.requireMapping = parsed.requireMapping;
+    const env = props.env ?? process.env;
+    this.policy = parsed.policy ?? new FileReviewPolicy({ env });
+    this.api = parsed.api ?? new GhReviewGitHubApi({ cwd: this.cwd, env });
+  }
+  operations() {
+    return [
+      this.descriptor(
+        "review-schema",
+        "Return the canonical full or model-facing review contract schema.",
+        ["read", "process"],
+        ["review", "schema"],
+        schemaInput,
+        JsonValueSchema,
+        ({ transport }) => {
+          const schemas = reviewContract.schemas();
+          return JsonValueSchema.parse(
+            JSON.parse(JSON.stringify(transport ? schemas.transport : schemas.full))
+          );
+        }
+      ),
+      this.descriptor(
+        "review-validate",
+        "Validate and normalize a review against the canonical contract.",
+        ["read", "process"],
+        ["review", "validate"],
+        reviewInput,
+        reviewOutput,
+        ({ review }) => reviewContract.parse(review)
+      ),
+      this.descriptor(
+        "review-render",
+        "Render persisted findings from a validated review plan.",
+        ["read", "process"],
+        ["review", "render"],
+        renderInput,
+        renderOutput,
+        ({ review, records, outcome, problems }) => {
+          const parsedReview = reviewContract.parse(review);
+          const codec2 = new JsonReviewCodec();
+          return {
+            headSha: parsedReview.head_sha,
+            outcome,
+            problems,
+            findings: records.map((record2) => ({
+              id: record2.finding.id,
+              status: record2.status,
+              path: record2.finding.path,
+              line: record2.finding.line,
+              body: codec2.render(record2)
+            }))
+          };
+        }
+      ),
+      this.descriptor(
+        "review-state",
+        "Validate a persisted review state index and return its canonical marker.",
+        ["read", "process"],
+        ["review", "state"],
+        stateInput,
+        stateOutput,
+        ({ state }) => new JsonReviewCodec().state(ReviewStateSchema.parse(state))
+      ),
+      this.descriptor(
+        "review-context",
+        "Read repository review rules from a pinned commit in the launch checkout.",
+        ["read", "process"],
+        ["review", "context"],
+        contextInput,
+        contextOutput,
+        ({ contextPath }) => {
+          if (this.trustedRef === void 0)
+            throw new MissingTrustedReviewRefError("trusted review ref was not bound at launch");
+          return this.policy.repository({
+            cwd: this.cwd,
+            trustedRef: this.trustedRef,
+            contextPath
+          });
+        }
+      ),
+      this.descriptor(
+        "review-plan",
+        "Plan review transitions after checking current GitHub head and evidence authority.",
+        ["read", "network", "process"],
+        ["review", "plan"],
+        planInput,
+        planOutput,
+        async ({ number: number4, repo, review, records }) => {
+          const pullRequest = external_exports.looseObject({
+            head: external_exports.looseObject({ sha: HeadShaSchema2 }),
+            user: external_exports.looseObject({ id: external_exports.number().int().positive() })
+          }).parse(await this.api.get(`/repos/${repo}/pulls/${number4}`));
+          const planner = new EvidenceReviewPlanner({
+            verifier: new GitHubReviewVerifier({
+              api: this.api,
+              repo,
+              prNumber: number4,
+              prAuthorId: pullRequest.user.id,
+              owners: this.owners,
+              requireMapping: this.requireMapping
+            })
+          });
+          return planner.plan({ review, records, headSha: pullRequest.head.sha });
+        }
+      )
+    ];
+  }
+  descriptor(id, description, effects, path3, inputSchema, outputSchema, handler2) {
+    return {
+      id,
+      description,
+      effects,
+      cli: { path: path3, aliases: [] },
+      inputSchema,
+      outputSchema,
+      handler: handler2
+    };
+  }
+};
+
 // src/flight-rules/flight-rules.ts
 var DefaultFlightRules = class {
   cwd;
@@ -49575,6 +50566,14 @@ var DefaultFlightRules = class {
       getProbe: () => this.probe(),
       getTracker: () => this.tracker(),
       getConfigPath: () => this.configPath()
+    });
+  }
+  reviewOperations(props = {}) {
+    const launch = ReviewOperationsLaunchPropsSchema.parse(props);
+    return new DefaultReviewOperations({
+      ...launch,
+      cwd: launch.cwd ?? this.cwd,
+      env: this.env
     });
   }
   board() {
@@ -49816,7 +50815,7 @@ function createDocCommand(props) {
 }
 
 // src/operations/local-discovery-cli.ts
-import { readFileSync as readFileSync11 } from "node:fs";
+import { readFileSync as readFileSync12 } from "node:fs";
 import { text as text4 } from "node:stream/consumers";
 
 // src/tasks/commands/check/command.ts
@@ -50020,7 +51019,7 @@ var CommanderLocalDiscoveryCli = class {
     ).exitOverride().action(async (options) => {
       let evidence;
       try {
-        evidence = options.runtimeFile === void 0 ? void 0 : JSON.parse(readFileSync11(options.runtimeFile, "utf8"));
+        evidence = options.runtimeFile === void 0 ? void 0 : JSON.parse(readFileSync12(options.runtimeFile, "utf8"));
       } catch {
         this.writeRuntimeFailure(
           "Cannot read a JSON runtime evidence file",
@@ -50073,850 +51072,112 @@ var CharterSelectionError = class extends Error {
 
 // src/code-review/commands/command.ts
 import { readFileSync as readFileSync13 } from "node:fs";
-
-// src/code-review/review.schema.ts
-var reviewContractVersion = 1;
-var reviewSchemaRevision = 1;
-var ReviewOutcomeSchema = external_exports.enum(["APPROVED", "CHANGES_NEEDED", "ESCALATE", "INCOMPLETE"]);
-var FindingIdSchema = external_exports.string().regex(/^f-[a-f0-9]{10}$/);
-var HeadShaSchema2 = external_exports.string().regex(/^[a-f0-9]{40}$/);
-var ReviewPathSchema = external_exports.string().max(400).regex(/^(?!\/)(?!.*\\)(?!.*(?:^|\/)\.{1,2}(?:\/|$))[^\p{Cc}]*$/u);
-var TextSchema = external_exports.string().min(1).max(16e3);
-var LineTextSchema = external_exports.string().min(1).max(400).regex(/^[^\r\n]+$/);
-var PositiveIdSchema = external_exports.number().int().positive().max(Number.MAX_SAFE_INTEGER);
-var HttpsUrlSchema = external_exports.url().regex(/^https:\/\//);
-var CategorySchema = external_exports.enum([
-  "security",
-  "correctness",
-  "data",
-  "deployment",
-  "design",
-  "testing",
-  "performance",
-  "readability",
-  "docs"
-]);
-var ActionLabelSchema = external_exports.enum([
-  "issue",
-  "todo",
-  "suggestion",
-  "question",
-  "chore",
-  "nitpick",
-  "typo",
-  "polish"
-]);
-var InformationLabelSchema = external_exports.enum(["praise", "note", "thought"]);
-var SeveritySchema = external_exports.enum(["critical", "major", "minor", "trivial"]);
-var DecisionOptionsSchema = external_exports.array(
-  external_exports.strictObject({ id: external_exports.string().regex(/^[a-z][a-z0-9-]{0,79}$/), description: TextSchema })
-).min(2);
-var findingFields = {
-  path: ReviewPathSchema,
-  line: external_exports.number().int().nonnegative(),
-  start_line: external_exports.number().int().positive().optional(),
-  category: CategorySchema.optional(),
-  subject: LineTextSchema,
-  discussion: TextSchema,
-  related_finding_id: FindingIdSchema.optional()
-};
-var actionFields = {
-  ...findingFields,
-  label: ActionLabelSchema,
-  type: external_exports.enum(["fix", "clarify"]),
-  blocking: external_exports.boolean(),
-  severity: SeveritySchema,
-  details: TextSchema,
-  resolved_when: TextSchema
-};
-var decisionFields = {
-  ...actionFields,
-  type: external_exports.literal("decide"),
-  decision_owner: LineTextSchema,
-  decision_options: DecisionOptionsSchema
-};
-var informationFields = {
-  ...findingFields,
-  label: InformationLabelSchema,
-  blocking: external_exports.literal(false),
-  details: TextSchema.optional()
-};
-var NewFindingSchema = external_exports.union([
-  external_exports.strictObject(actionFields),
-  external_exports.strictObject(decisionFields),
-  external_exports.strictObject(informationFields)
-]);
-var ActionableFindingSchema = external_exports.union([
-  external_exports.strictObject({ ...actionFields, id: FindingIdSchema }),
-  external_exports.strictObject({ ...decisionFields, id: FindingIdSchema })
-]);
-var StoredFindingSchema = external_exports.union([
-  ...ActionableFindingSchema.options,
-  external_exports.strictObject({ ...informationFields, id: FindingIdSchema })
-]);
-var ReviewEvidenceSchema = external_exports.discriminatedUnion("kind", [
-  external_exports.strictObject({
-    kind: external_exports.literal("github_comment"),
-    comment_id: PositiveIdSchema,
-    url: HttpsUrlSchema
-  }),
-  external_exports.strictObject({
-    kind: external_exports.literal("code"),
-    commit_sha: HeadShaSchema2,
-    path: ReviewPathSchema.min(1),
-    line: external_exports.number().int().positive()
-  }),
-  external_exports.strictObject({ kind: external_exports.literal("commit"), sha: HeadShaSchema2 }),
-  external_exports.strictObject({
-    kind: external_exports.literal("check_run"),
-    check_run_id: PositiveIdSchema,
-    commit_sha: HeadShaSchema2
-  }),
-  external_exports.strictObject({ kind: external_exports.literal("document"), url: HttpsUrlSchema }),
-  external_exports.strictObject({
-    kind: external_exports.literal("verification"),
-    commit_sha: HeadShaSchema2,
-    command: TextSchema,
-    result: external_exports.literal("passed"),
-    report_url: HttpsUrlSchema
-  }),
-  external_exports.strictObject({
-    kind: external_exports.literal("thread_resolution"),
-    thread_id: external_exports.string().min(1),
-    author_id: PositiveIdSchema
-  })
-]);
-var DecisionAnswerSchema = external_exports.strictObject({
-  comment_id: PositiveIdSchema,
-  author_id: PositiveIdSchema,
-  option_id: external_exports.string().min(1)
-});
-var transitionFields = {
-  id: FindingIdSchema,
-  reason: TextSchema,
-  reply: TextSchema.optional(),
-  decision: DecisionAnswerSchema.optional()
-};
-var PriorFindingSchema = external_exports.union([
-  external_exports.strictObject({
-    ...transitionFields,
-    status: external_exports.literal("resolved"),
-    evidence: external_exports.array(ReviewEvidenceSchema).min(1)
-  }),
-  external_exports.strictObject({
-    ...transitionFields,
-    status: external_exports.literal("withdrawn"),
-    evidence: external_exports.array(ReviewEvidenceSchema).min(1),
-    withdrawal_basis: external_exports.enum(["incorrect", "no_longer_applicable", "dismissed"])
-  }),
-  external_exports.strictObject({
-    ...transitionFields,
-    status: external_exports.literal("still_open"),
-    evidence: external_exports.array(ReviewEvidenceSchema).optional(),
-    updated_finding: ActionableFindingSchema.optional()
-  })
-]);
-var reviewFields = {
-  contract_version: external_exports.literal(reviewContractVersion),
-  schema_revision: external_exports.literal(reviewSchemaRevision),
-  head_sha: HeadShaSchema2,
-  review_complete: external_exports.boolean(),
-  incomplete_reason: external_exports.string().max(16e3).optional(),
-  summary: TextSchema,
-  outcome: ReviewOutcomeSchema,
-  outcome_reason: TextSchema,
-  remaining_risk: TextSchema,
-  extensions: external_exports.record(external_exports.string(), external_exports.json()).optional()
-};
-var ReviewSchema = external_exports.strictObject({
-  ...reviewFields,
-  findings: external_exports.array(NewFindingSchema),
-  prior_findings: external_exports.array(PriorFindingSchema)
-});
-var FindingRecordSchema = external_exports.strictObject({
-  v: external_exports.literal(reviewContractVersion),
-  schema_revision: external_exports.literal(reviewSchemaRevision),
-  finding: ActionableFindingSchema,
-  status: external_exports.enum(["open", "resolved", "withdrawn"]),
-  evidence: external_exports.array(ReviewEvidenceSchema),
-  decision: DecisionAnswerSchema.optional()
-});
-var ReviewStateSchema = external_exports.strictObject({
-  v: external_exports.literal(reviewContractVersion),
-  schema_revision: external_exports.literal(reviewSchemaRevision),
-  sha: HeadShaSchema2,
-  outcome: ReviewOutcomeSchema,
-  records: external_exports.array(
-    external_exports.union([
-      external_exports.strictObject({
-        id: FindingIdSchema,
-        status: external_exports.enum(["open", "resolved", "withdrawn"]),
-        location: external_exports.union([
-          external_exports.strictObject({ kind: external_exports.literal("review_comment"), comment_id: PositiveIdSchema }),
-          external_exports.strictObject({ kind: external_exports.literal("review_body"), review_id: PositiveIdSchema })
-        ])
-      }),
-      external_exports.strictObject({
-        id: FindingIdSchema,
-        status: external_exports.literal("informational"),
-        fingerprint: external_exports.string().min(1),
-        finding: external_exports.strictObject({ ...informationFields, id: FindingIdSchema }).optional()
-      })
-    ])
-  )
-});
-var TransportReviewSchema = external_exports.strictObject({
-  ...reviewFields,
-  findings: external_exports.array(
-    external_exports.strictObject({
-      ...actionFields,
-      type: external_exports.enum(["fix", "clarify", "decide"]).optional(),
-      label: external_exports.enum([...ActionLabelSchema.options, ...InformationLabelSchema.options]),
-      severity: SeveritySchema.optional(),
-      details: TextSchema.optional(),
-      resolved_when: TextSchema.optional(),
-      decision_owner: LineTextSchema.optional(),
-      decision_options: DecisionOptionsSchema.optional()
-    })
+var ReviewCommandPropsSchema = external_exports.object({
+  registry: external_exports.custom(
+    (value) => Boolean(value && typeof value === "object" && "invoke" in value)
   ),
-  prior_findings: external_exports.array(
-    external_exports.strictObject({
-      ...transitionFields,
-      status: external_exports.enum(["resolved", "still_open", "withdrawn"]),
-      evidence: external_exports.array(ReviewEvidenceSchema).optional(),
-      withdrawal_basis: external_exports.enum(["incorrect", "no_longer_applicable", "dismissed"]).optional(),
-      updated_finding: StoredFindingSchema.optional()
-    })
+  defaultCwd: external_exports.string().min(1),
+  createTrustedRegistry: external_exports.custom(
+    (value) => typeof value === "function"
   )
 });
-
-// src/code-review/review-contract.ts
-var InvalidReviewError = class extends Error {
-  name = "InvalidReviewError";
-};
-var ZodReviewContract = class {
-  parse(value) {
-    const result = ReviewSchema.parse(value);
-    const ids = result.prior_findings.map((finding) => finding.id);
-    if (new Set(ids).size !== ids.length)
-      throw new InvalidReviewError("duplicate prior finding IDs");
-    if (!result.review_complete && !result.incomplete_reason?.trim()) {
-      throw new InvalidReviewError("an incomplete review must explain what could not be reviewed");
-    }
-    const findings = result.findings.map((finding) => this.normalize(finding));
-    const priorFindings = result.prior_findings.map((transition) => {
-      if (transition.status !== "still_open") return transition;
-      if ((transition.decision !== void 0 || transition.updated_finding !== void 0) && !transition.evidence?.length) {
-        throw new InvalidReviewError(`transition ${transition.id} requires evidence`);
-      }
-      if (transition.updated_finding === void 0) return transition;
-      if (transition.id !== transition.updated_finding.id)
-        throw new InvalidReviewError("a replacement must preserve the finding ID");
-      return {
-        ...transition,
-        updated_finding: this.normalizeActionable(transition.updated_finding)
-      };
-    });
-    for (const transition of priorFindings) {
-      if (transition.decision !== void 0 && !transition.evidence?.some(
-        (evidence) => evidence.kind === "github_comment" && evidence.comment_id === transition.decision?.comment_id
-      )) {
-        throw new InvalidReviewError(
-          `decision ${transition.id} must reference its human comment in evidence`
-        );
-      }
-    }
-    return { ...result, findings, prior_findings: priorFindings };
-  }
-  record(value) {
-    const result = FindingRecordSchema.parse(value);
-    if (result.status !== "open" && result.evidence.length === 0)
-      throw new InvalidReviewError("closed records require evidence");
-    return { ...result, finding: this.normalizeActionable(result.finding) };
-  }
-  state(value) {
-    const result = ReviewStateSchema.parse(value);
-    const ids = result.records.map((record2) => record2.id);
-    if (new Set(ids).size !== ids.length)
-      throw new InvalidReviewError("duplicate finding IDs in state");
-    for (const record2 of result.records) {
-      if (record2.status === "informational" && record2.finding !== void 0 && record2.id !== record2.finding.id) {
-        throw new InvalidReviewError("informational index ID does not match its finding");
-      }
-    }
-    return result;
-  }
-  schemas() {
-    return {
-      full: external_exports.toJSONSchema(ReviewSchema, { target: "draft-07" }),
-      transport: external_exports.toJSONSchema(TransportReviewSchema, { target: "draft-07" })
-    };
-  }
-  normalize(finding) {
-    this.checkRange(finding);
-    if (!("type" in finding)) return finding;
-    if (finding.type === "decide") this.checkOptions(finding);
-    const blocking = finding.blocking || finding.severity === "critical" || finding.severity === "major";
-    const label = blocking && ["nitpick", "typo", "polish"].includes(finding.label) ? "issue" : finding.label;
-    return { ...finding, blocking, label };
-  }
-  normalizeActionable(finding) {
-    return ActionableFindingSchema.parse({ ...this.normalize(finding), id: finding.id });
-  }
-  checkRange(finding) {
-    if (finding.start_line !== void 0 && (finding.line === 0 || finding.start_line > finding.line)) {
-      throw new InvalidReviewError("start_line must not exceed a positive line anchor");
-    }
-  }
-  checkOptions(finding) {
-    const ids = finding.decision_options.map((option) => option.id);
-    if (new Set(ids).size !== ids.length)
-      throw new InvalidReviewError("decision option IDs must be unique");
-  }
-};
-var reviewContract = new ZodReviewContract();
-
-// src/code-review/review-policy.ts
-import { execFileSync as execFileSync3 } from "node:child_process";
-import { readFileSync as readFileSync12, realpathSync as realpathSync3 } from "node:fs";
-import { dirname as dirname11, join as join12, relative as relative2 } from "node:path";
-import { fileURLToPath as fileURLToPath3 } from "node:url";
-var ReviewPolicyPropsSchema = external_exports.strictObject({ home: external_exports.string().min(1).optional() });
-var LoadPolicyPropsSchema = external_exports.strictObject({ paths: external_exports.array(external_exports.string()).optional() });
-var RepositoryContextPropsSchema = external_exports.strictObject({
-  cwd: external_exports.string().min(1),
-  trustedRef: HeadShaSchema2,
-  contextPath: ReviewPathSchema.min(1).default("CODE-REVIEW.md")
-});
-var FileReviewPolicy = class {
-  home;
-  constructor(props = {}) {
-    const parsed = ReviewPolicyPropsSchema.parse(props);
-    this.home = parsed.home ?? join12(dirname11(fileURLToPath3(import.meta.url)), "..");
-  }
-  load(input2 = {}) {
-    const { paths } = LoadPolicyPropsSchema.parse(input2);
-    const docs = realpathSync3(join12(this.home, "docs"));
-    const read = (id) => {
-      const path3 = realpathSync3(join12(docs, `${id}.md`));
-      if (relative2(docs, path3).startsWith(".."))
-        throw new ReviewPolicyError("review policy path leaves the installed docs directory");
-      return readFileSync12(path3, "utf8");
-    };
-    const catalog = new DocCharterCatalog({ docs: new FileDocResolver({ docsDir: docs }) });
-    const charters = (paths === void 0 ? catalog.all() : catalog.select(paths)).map(
-      ({ id, language, appliesTo, tierA, contents }) => ({ id, language, appliesTo, tierA, contents })
-    );
-    return {
-      method: read("autonomous-review-method"),
-      charter: charters.map(({ contents }) => contents.endsWith("\n") ? contents : `${contents}
-`).join("\n"),
-      charters,
-      tierA: [...new Set(charters.flatMap(({ tierA }) => tierA))],
-      contract: read("code-review-findings-contract")
-    };
-  }
-  repository(input2) {
-    const props = RepositoryContextPropsSchema.parse(input2);
-    const paths = [
-      .../* @__PURE__ */ new Set([
-        props.contextPath,
-        "AGENTS.md",
-        "CLAUDE.md",
-        ".github/CODEOWNERS",
-        "CODEOWNERS",
-        "docs/CODEOWNERS"
-      ])
-    ];
-    const sources = [];
-    const missing = [];
-    for (const path3 of paths) {
-      const tree = execFileSync3("git", ["ls-tree", "-z", props.trustedRef, "--", path3], {
-        cwd: props.cwd,
-        encoding: "utf8"
-      });
-      if (!tree) {
-        missing.push(path3);
-        continue;
-      }
-      if (!/^100(?:644|755) blob [a-f0-9]+\t/.test(tree))
-        throw new ReviewPolicyError(`review rules must be a regular file: ${path3}`);
-      sources.push({
-        path: path3,
-        contents: execFileSync3("git", ["show", `${props.trustedRef}:${path3}`], {
-          cwd: props.cwd,
-          encoding: "utf8",
-          maxBuffer: 1e7
-        })
-      });
-    }
-    return { trustedRef: props.trustedRef, contextPath: props.contextPath, sources, missing };
-  }
-};
-var ReviewPolicyError = class extends Error {
-  name = "ReviewPolicyError";
-};
-
-// src/code-review/review-planner.ts
-import { randomBytes as randomBytes2 } from "node:crypto";
-var EvidenceReviewPlanner = class {
-  verifier;
+var CommanderReviewCommand = class {
+  registry;
+  defaultCwd;
+  createTrustedRegistry;
   constructor(props) {
-    this.verifier = props.verifier;
+    const parsed = ReviewCommandPropsSchema.parse(props);
+    this.registry = parsed.registry;
+    this.defaultCwd = parsed.defaultCwd;
+    this.createTrustedRegistry = parsed.createTrustedRegistry;
   }
-  async plan(input2) {
-    const headSha = HeadShaSchema2.parse(input2.headSha);
-    const review = reviewContract.parse(input2.review);
-    const records = input2.records.map((record2) => reviewContract.record(record2));
-    const known = new Map(records.map((record2) => [record2.finding.id, record2]));
-    if (known.size !== records.length) throw new InvalidReviewError("duplicate stored finding IDs");
-    if (review.head_sha !== headSha)
-      throw new InvalidReviewError("reviewed head is stale; rerun against the current PR head");
-    for (const entry of review.prior_findings) {
-      if (known.get(entry.id)?.status !== "open")
-        throw new InvalidReviewError(`unknown or closed prior finding: ${entry.id}`);
-    }
-    const problems = [];
-    const updates = new Map(review.prior_findings.map((entry) => [entry.id, entry]));
-    const retained = [];
-    for (const record2 of records) {
-      if (record2.status !== "open") {
-        retained.push(record2);
-        continue;
-      }
-      const entry = updates.get(record2.finding.id);
-      if (entry === void 0) {
-        problems.push(`omitted open finding ${record2.finding.id}`);
-        retained.push(record2);
-        continue;
-      }
-      const evidence = entry.evidence ?? [];
-      let valid = true;
-      for (const reference of evidence) {
-        try {
-          if (!await this.verifier.verify(reference, headSha)) valid = false;
-        } catch {
-          valid = false;
-        }
-      }
-      const changed = entry.status !== "still_open" || entry.updated_finding !== void 0 || entry.decision !== void 0;
-      if (!valid && changed) {
-        problems.push(`evidence could not be validated for ${entry.id}`);
-        retained.push(record2);
-        continue;
-      }
-      let authorized = false;
-      if (entry.decision !== void 0) {
-        try {
-          authorized = await this.verifier.authorize(entry.decision, record2.finding);
-        } catch {
-          authorized = false;
-        }
-        if (!authorized) {
-          problems.push(`decision authorization was not verified for ${entry.id}`);
-          retained.push(record2);
-          continue;
-        }
-      }
-      if (entry.status === "withdrawn" && entry.withdrawal_basis === "dismissed") {
-        let dismissed = false;
-        for (const reference of evidence) {
-          try {
-            if (await this.verifier.dismissal(reference)) dismissed = true;
-          } catch {
-            continue;
-          }
-        }
-        if (record2.finding.blocking || record2.finding.type === "decide" || !dismissed) {
-          problems.push(`manual dismissal cannot close ${entry.id}`);
-          retained.push(record2);
-          continue;
-        }
-      }
-      const withdrawal = entry.status === "withdrawn" && entry.withdrawal_basis !== "dismissed";
-      const decisionChanged = record2.finding.type === "decide" && changed;
-      if (decisionChanged && !authorized && !withdrawal) {
-        problems.push(`decision ${entry.id} still needs an authorized human answer`);
-        retained.push(record2);
-        continue;
-      }
-      const finding = entry.status === "still_open" && entry.updated_finding !== void 0 ? entry.updated_finding : record2.finding;
-      retained.push(
-        FindingRecordSchema.parse({
-          ...record2,
-          finding,
-          status: entry.status === "still_open" ? "open" : entry.status,
-          evidence: changed ? evidence : record2.evidence,
-          ...entry.decision !== void 0 ? { decision: entry.decision } : {}
-        })
-      );
-    }
-    const ids = new Set(known.keys());
-    const informational = [];
-    for (const finding of review.findings) {
-      const id = this.newId(ids);
-      if (!("type" in finding)) {
-        informational.push({ ...finding, id });
-        continue;
-      }
-      retained.push(
-        FindingRecordSchema.parse({
-          v: 1,
-          schema_revision: 1,
-          finding: { ...finding, id },
-          status: "open",
-          evidence: []
-        })
-      );
-    }
-    const outcome = this.outcome(review, retained, problems);
-    return { review, records: retained, informational, outcome, problems };
-  }
-  newId(ids) {
-    let id = `f-${randomBytes2(5).toString("hex")}`;
-    while (ids.has(id)) id = `f-${randomBytes2(5).toString("hex")}`;
-    ids.add(id);
-    return id;
-  }
-  outcome(review, records, problems) {
-    if (!review.review_complete || problems.length > 0 || review.outcome === "INCOMPLETE")
-      return "INCOMPLETE";
-    const blockers = records.filter(
-      (record2) => record2.status === "open" && record2.finding.blocking
+  create() {
+    const review = new Command("review").description(
+      "shared autonomous review contract, policy and evidence-checked plans"
     );
-    if (blockers.some((record2) => record2.finding.type === "decide")) return "ESCALATE";
-    if (review.outcome === "ESCALATE") {
-      problems.push("claimed escalation has no matching open blocking decision");
-      return "INCOMPLETE";
-    }
-    if (blockers.length > 0) return "CHANGES_NEEDED";
-    if (review.outcome !== "APPROVED") {
-      problems.push("claimed outcome has no matching open blocking finding");
-      return "INCOMPLETE";
-    }
-    return "APPROVED";
-  }
-};
-var ValidatedEvidencePropsSchema = external_exports.strictObject({
-  verified: external_exports.array(external_exports.string()),
-  authorizedDecisions: external_exports.array(external_exports.string()),
-  dismissals: external_exports.array(external_exports.string())
-});
-
-// src/code-review/github-review-verifier.ts
-import { execFile as execFile6 } from "node:child_process";
-import { promisify as promisify6 } from "node:util";
-var GhReviewGitHubApi = class {
-  async get(path3) {
-    return this.run(["api", path3]);
-  }
-  async graphql(query, variables) {
-    return this.run([
-      "api",
-      "graphql",
-      "-f",
-      `query=${query}`,
-      ...Object.entries(variables).flatMap(([key, value]) => [
-        typeof value === "number" ? "-F" : "-f",
-        `${key}=${value}`
-      ])
-    ]);
-  }
-  async run(args) {
-    const { stdout } = await promisify6(execFile6)("gh", args, { maxBuffer: 2e7 });
-    return JSON.parse(stdout);
-  }
-};
-var GitHubReviewVerifierPropsSchema = external_exports.strictObject({
-  repo: external_exports.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
-  prNumber: external_exports.number().int().positive(),
-  prAuthorId: external_exports.number().int().positive(),
-  owners: external_exports.record(external_exports.string(), external_exports.array(external_exports.string().min(1))).default({}),
-  requireMapping: external_exports.boolean().default(false)
-});
-var UserSchema = external_exports.looseObject({ id: external_exports.number(), login: external_exports.string(), type: external_exports.string() });
-var CommentSchema2 = external_exports.looseObject({
-  id: external_exports.number(),
-  user: UserSchema,
-  issue_url: external_exports.string().optional(),
-  pull_request_url: external_exports.string().optional(),
-  body: external_exports.string()
-});
-var GitHubReviewVerifier = class {
-  props;
-  api;
-  constructor(props) {
-    const { api, ...values } = props;
-    this.props = GitHubReviewVerifierPropsSchema.parse(values);
-    this.api = api ?? new GhReviewGitHubApi();
-  }
-  async verify(evidence, headSha) {
-    if (evidence.kind === "document") return true;
-    if (evidence.kind === "verification") return false;
-    if (evidence.kind === "github_comment") {
-      const comment = await this.comment(evidence.comment_id, evidence.url);
-      return comment !== void 0;
-    }
-    if (evidence.kind === "thread_resolution") return this.dismissal(evidence);
-    if (evidence.kind === "commit") return this.reaches(evidence.sha, headSha);
-    if (evidence.kind === "check_run") {
-      if (evidence.commit_sha !== headSha) return false;
-      const check2 = external_exports.looseObject({
-        head_sha: external_exports.string(),
-        status: external_exports.string(),
-        conclusion: external_exports.string().nullable()
-      }).parse(await this.api.get(`/repos/${this.props.repo}/check-runs/${evidence.check_run_id}`));
-      return check2.head_sha === headSha && check2.status === "completed" && check2.conclusion === "success";
-    }
-    if (!await this.reaches(evidence.commit_sha, headSha)) return false;
-    return (evidence.commit_sha === headSha || await this.hasLine(evidence.path, evidence.line, evidence.commit_sha)) && await this.hasLine(evidence.path, evidence.line, headSha);
-  }
-  async authorize(answer, finding) {
-    if (finding.type !== "decide" || !finding.decision_options.some((option) => option.id === answer.option_id))
-      return false;
-    const comment = await this.comment(answer.comment_id);
-    if (comment === void 0 || comment.user.id !== answer.author_id || comment.user.type !== "User" || !comment.body.trim())
-      return false;
-    const owners = this.props.owners[finding.decision_owner];
-    if (owners !== void 0)
-      return owners.some((login) => login.toLowerCase() === comment.user.login.toLowerCase());
-    if (this.props.requireMapping || comment.user.id === this.props.prAuthorId) return false;
-    const permission = external_exports.looseObject({ permission: external_exports.string() }).parse(
-      await this.api.get(
-        `/repos/${this.props.repo}/collaborators/${encodeURIComponent(comment.user.login)}/permission`
-      )
-    );
-    return ["write", "maintain", "admin"].includes(permission.permission);
-  }
-  async dismissal(evidence) {
-    if (evidence.kind !== "thread_resolution" || evidence.author_id === this.props.prAuthorId)
-      return false;
-    const result = external_exports.looseObject({
-      data: external_exports.looseObject({
-        node: external_exports.looseObject({
-          isResolved: external_exports.boolean(),
-          resolvedBy: external_exports.looseObject({ databaseId: external_exports.number(), actorType: external_exports.string() }).nullable(),
-          pullRequest: external_exports.looseObject({
-            number: external_exports.number(),
-            repository: external_exports.looseObject({ nameWithOwner: external_exports.string() })
-          })
-        }).nullable()
-      })
-    }).parse(
-      await this.api.graphql(
-        "query($id: ID!) { node(id: $id) { ... on PullRequestReviewThread { isResolved resolvedBy { actorType: __typename ... on User { databaseId } } pullRequest { number repository { nameWithOwner } } } } }",
-        { id: evidence.thread_id }
-      )
-    );
-    const thread = result.data.node;
-    return thread !== null && thread.isResolved && thread.resolvedBy?.actorType === "User" && thread.resolvedBy.databaseId === evidence.author_id && thread.pullRequest.number === this.props.prNumber && thread.pullRequest.repository.nameWithOwner.toLowerCase() === this.props.repo.toLowerCase();
-  }
-  /** True when `sha` is the head or an ancestor of it, so the head contains that commit. */
-  async reaches(sha, headSha) {
-    if (sha === headSha) return true;
-    const comparison = external_exports.looseObject({ status: external_exports.string() }).parse(await this.api.get(`/repos/${this.props.repo}/compare/${sha}...${headSha}`));
-    return ["ahead", "identical"].includes(comparison.status);
-  }
-  /** True when `ref` has `path` as a file with at least `line` lines. */
-  async hasLine(path3, line, ref) {
-    const file2 = external_exports.looseObject({ type: external_exports.string(), encoding: external_exports.string(), content: external_exports.string() }).parse(
-      await this.api.get(
-        `/repos/${this.props.repo}/contents/${path3.split("/").map(encodeURIComponent).join("/")}?ref=${ref}`
-      )
-    );
-    if (file2.type !== "file" || file2.encoding !== "base64") return false;
-    const text7 = Buffer.from(file2.content, "base64").toString("utf8");
-    const lines = text7 === "" ? 0 : text7.split("\n").length - (text7.endsWith("\n") ? 1 : 0);
-    return line <= lines;
-  }
-  async comment(id, url2) {
-    if (url2 !== void 0 && !url2.toLowerCase().startsWith(
-      `https://github.com/${this.props.repo.toLowerCase()}/pull/${this.props.prNumber}#`
-    ))
-      return void 0;
-    const endpoints = url2?.includes("#discussion_r") ? ["pulls/comments"] : url2?.includes("#issuecomment-") ? ["issues/comments"] : ["issues/comments", "pulls/comments"];
-    for (const endpoint2 of endpoints) {
-      try {
-        const comment = CommentSchema2.parse(
-          await this.api.get(`/repos/${this.props.repo}/${endpoint2}/${id}`)
-        );
-        const expected = `https://api.github.com/repos/${this.props.repo.toLowerCase()}`;
-        if (comment.id === id && (comment.issue_url?.toLowerCase() === `${expected}/issues/${this.props.prNumber}` || comment.pull_request_url?.toLowerCase() === `${expected}/pulls/${this.props.prNumber}`))
-          return comment;
-      } catch {
-        continue;
-      }
-    }
-    return void 0;
-  }
-};
-
-// src/code-review/review-codec.ts
-import { createHash as createHash2 } from "node:crypto";
-var MarkerInputSchema = external_exports.strictObject({
-  body: external_exports.string(),
-  authorId: external_exports.number().int().positive(),
-  trustedAuthorIds: external_exports.array(external_exports.number().int().positive())
-});
-var JsonReviewCodec = class {
-  finding(record2) {
-    return this.marker("finding", reviewContract.record(record2));
-  }
-  state(state) {
-    return this.marker("state", reviewContract.state(state));
-  }
-  readFindings(input2) {
-    const parsed = MarkerInputSchema.parse(input2);
-    if (!parsed.trustedAuthorIds.includes(parsed.authorId)) return [];
-    return this.readMarkers(parsed.body, "finding").map((value) => reviewContract.record(value));
-  }
-  readState(input2) {
-    const parsed = MarkerInputSchema.parse(input2);
-    if (!parsed.trustedAuthorIds.includes(parsed.authorId)) return void 0;
-    const states = this.readMarkers(parsed.body, "state");
-    if (states.length > 1)
-      throw new InvalidReviewError("multiple review state markers in one summary");
-    return states.length === 0 ? void 0 : reviewContract.state(states[0]);
-  }
-  render(record2) {
-    const validated = reviewContract.record(record2);
-    const finding = validated.finding;
-    const decorations = [
-      ...["nitpick", "typo", "polish"].includes(finding.label) ? [] : [finding.blocking ? "blocking" : "non-blocking"],
-      finding.type
-    ];
-    if (finding.category !== void 0) decorations.push(finding.category);
-    const owner = finding.type === "decide" ? `
-
-**Decision owner:** ${finding.decision_owner}
-**Decision options:** ${finding.decision_options.map((option) => `\`${option.id}\`: ${option.description}`).join("; ")}` : "";
-    return `**${finding.label} (${decorations.join(", ")}):** ${finding.subject}
-
-${finding.discussion}
-
-<details>
-<summary>Details For LLM</summary>
-
-${finding.details}${owner}
-
-**Resolved when:** ${finding.resolved_when}
-</details>
-
-${this.finding(validated)}`;
-  }
-  fingerprint(finding) {
-    return createHash2("sha256").update(`${finding.path}|${finding.label}|${finding.subject.trim().toLowerCase()}`).digest("hex");
-  }
-  marker(kind, value) {
-    return `<!-- code-review:${kind} ${JSON.stringify(value).replaceAll(">", "\\u003e")} -->`;
-  }
-  readMarkers(body, kind) {
-    const prefix = `<!-- code-review:${kind} `;
-    const matches = [...body.matchAll(new RegExp(`${prefix}([\\s\\S]*?) -->`, "g"))];
-    if (body.split(prefix).length - 1 !== matches.length)
-      throw new InvalidReviewError("unterminated review marker");
-    return matches.map((match) => {
-      try {
-        return JSON.parse(match[1] ?? "");
-      } catch {
-        throw new InvalidReviewError(
-          "review marker contains invalid JSON; recover state before approving"
-        );
-      }
+    review.command("schema").option("--transport", "print the model-facing superset instead of the full schema").action(async (opts) => {
+      const schema = await this.invoke("review-schema", { transport: opts.transport ?? false });
+      process.stdout.write(JSON.stringify(schema, null, 2) + "\n");
     });
-  }
-};
-
-// src/code-review/commands/command.ts
-function createReviewCommand() {
-  const review = new Command("review").description(
-    "shared autonomous review contract, policy and evidence-checked plans"
-  );
-  review.command("schema").option("--transport", "print the model-facing superset instead of the full schema").action((opts) => {
-    const schemas = reviewContract.schemas();
-    process.stdout.write(
-      JSON.stringify(opts.transport ? schemas.transport : schemas.full, null, 2) + "\n"
-    );
-  });
-  review.command("validate").argument("<file>", "structured reviewer result").action((file2) => {
-    process.stdout.write(
-      JSON.stringify(reviewContract.parse(JSON.parse(readFileSync13(file2, "utf8")))) + "\n"
-    );
-  });
-  review.command("render").argument("<plan>", "evidence-checked plan JSON").action((file2) => {
-    const plan = external_exports.looseObject({
-      review: external_exports.unknown(),
-      records: external_exports.array(FindingRecordSchema),
-      outcome: external_exports.string(),
-      problems: external_exports.array(external_exports.string())
-    }).parse(JSON.parse(readFileSync13(file2, "utf8")));
-    const result = reviewContract.parse(plan.review);
-    const codec2 = new JsonReviewCodec();
-    process.stdout.write(
-      JSON.stringify({
-        headSha: result.head_sha,
-        outcome: plan.outcome,
-        problems: plan.problems,
-        findings: plan.records.map((record2) => ({
-          id: record2.finding.id,
-          status: record2.status,
-          path: record2.finding.path,
-          line: record2.finding.line,
-          body: codec2.render(record2)
-        }))
-      }) + "\n"
-    );
-  });
-  review.command("state").argument("<file>", "index with actual persisted artifact IDs").action((file2) => {
-    process.stdout.write(
-      new JsonReviewCodec().state(
-        ReviewStateSchema.parse(JSON.parse(readFileSync13(file2, "utf8")))
-      ) + "\n"
-    );
-  });
-  review.command("context").requiredOption("--ref <sha>", "pinned trusted default-branch commit").option("--path <path>", "repo review-context file", "CODE-REVIEW.md").option("--cwd <directory>", "repository checkout", process.cwd()).action((opts) => {
-    process.stdout.write(
-      JSON.stringify(
-        new FileReviewPolicy().repository({
-          cwd: opts.cwd,
-          trustedRef: opts.ref,
-          contextPath: opts.path
-        })
-      ) + "\n"
-    );
-  });
-  review.command("plan").argument("<number>").requiredOption("--repo <repo>", "owner/name").requiredOption("--file <path>", "structured reviewer result").requiredOption(
-    "--records-file <path>",
-    "trusted prior records from GitHub; [] for a first review"
-  ).option("--owners-file <path>", "trusted role-to-login authority mapping").option("--require-mapping", "reject independent-writer fallback").action(
-    async (number4, opts) => {
-      const prNumber = external_exports.coerce.number().int().positive().parse(number4);
-      const api = new GhReviewGitHubApi();
-      const pr = external_exports.looseObject({
-        head: external_exports.looseObject({ sha: external_exports.string() }),
-        user: external_exports.looseObject({ id: external_exports.number() })
-      }).parse(await api.get(`/repos/${opts.repo}/pulls/${prNumber}`));
-      const owners = opts.ownersFile === void 0 ? {} : external_exports.record(external_exports.string(), external_exports.array(external_exports.string())).parse(JSON.parse(readFileSync13(opts.ownersFile, "utf8")));
-      const planner = new EvidenceReviewPlanner({
-        verifier: new GitHubReviewVerifier({
-          api,
-          repo: opts.repo,
-          prNumber,
-          prAuthorId: pr.user.id,
-          owners,
-          requireMapping: opts.requireMapping ?? false
-        })
-      });
-      const records = external_exports.array(external_exports.unknown()).parse(JSON.parse(readFileSync13(opts.recordsFile, "utf8")));
-      const result = await planner.plan({
-        review: JSON.parse(readFileSync13(opts.file, "utf8")),
-        records,
-        headSha: pr.head.sha
+    review.command("validate").argument("<file>", "structured reviewer result").action(async (file2) => {
+      const result = await this.invoke("review-validate", {
+        review: JSON.parse(readFileSync13(file2, "utf8"))
       });
       process.stdout.write(JSON.stringify(result) + "\n");
-    }
-  );
-  return review;
+    });
+    review.command("render").argument("<plan>", "evidence-checked plan JSON").action(async (file2) => {
+      const plan = external_exports.looseObject({
+        review: external_exports.json(),
+        records: external_exports.array(external_exports.json()),
+        outcome: external_exports.string(),
+        problems: external_exports.array(external_exports.string())
+      }).parse(JSON.parse(readFileSync13(file2, "utf8")));
+      const result = await this.invoke("review-render", {
+        review: plan.review,
+        records: plan.records,
+        outcome: plan.outcome,
+        problems: plan.problems
+      });
+      process.stdout.write(JSON.stringify(result) + "\n");
+    });
+    review.command("state").argument("<file>", "index with actual persisted artifact IDs").action(async (file2) => {
+      const result = await this.invoke("review-state", {
+        state: JSON.parse(readFileSync13(file2, "utf8"))
+      });
+      process.stdout.write(`${external_exports.string().parse(result)}
+`);
+    });
+    review.command("context").requiredOption("--ref <sha>", "pinned trusted default-branch commit").option("--path <path>", "repo review-context file", "CODE-REVIEW.md").option("--cwd <directory>", "trusted repository checkout", this.defaultCwd).action(async (opts) => {
+      const registry2 = this.createTrustedRegistry({ cwd: opts.cwd, trustedRef: opts.ref });
+      const result = await this.invokeWithRegistry(registry2, "review-context", {
+        contextPath: opts.path
+      });
+      process.stdout.write(JSON.stringify(result) + "\n");
+    });
+    review.command("plan").argument("<number>").requiredOption("--repo <repo>", "owner/name").requiredOption("--file <path>", "structured reviewer result").requiredOption(
+      "--records-file <path>",
+      "trusted prior records from GitHub; [] for a first review"
+    ).option("--owners-file <path>", "trusted role-to-login authority mapping").option("--require-mapping", "reject independent-writer fallback").action(
+      async (number4, opts) => {
+        const input2 = {
+          number: external_exports.coerce.number().int().positive().parse(number4),
+          repo: opts.repo,
+          review: JSON.parse(readFileSync13(opts.file, "utf8")),
+          records: JSON.parse(readFileSync13(opts.recordsFile, "utf8"))
+        };
+        const owners = opts.ownersFile === void 0 ? {} : external_exports.record(external_exports.string(), external_exports.array(external_exports.string().min(1))).parse(JSON.parse(readFileSync13(opts.ownersFile, "utf8")));
+        const registry2 = this.createTrustedRegistry({
+          owners,
+          requireMapping: opts.requireMapping ?? false
+        });
+        const result = await this.invokeWithRegistry(registry2, "review-plan", input2);
+        process.stdout.write(JSON.stringify(result) + "\n");
+      }
+    );
+    return review;
+  }
+  async invoke(id, input2) {
+    return this.invokeWithRegistry(this.registry, id, input2);
+  }
+  async invokeWithRegistry(registry2, id, input2) {
+    const result = await registry2.invoke(id, input2);
+    if (result.status === "error")
+      throw new OperationCliError({
+        operationId: id,
+        errorName: result.error.name,
+        message: result.error.message
+      });
+    if (result.status === "partial")
+      throw new OperationCliError({
+        operationId: id,
+        errorName: result.error.name,
+        message: result.error.message
+      });
+    return result.data;
+  }
+};
+function createReviewCommand(props) {
+  return new CommanderReviewCommand(props).create();
 }
 
 // src/shared/commands/board/command.ts
@@ -53254,12 +53515,6 @@ var pendingRoutes = [
   "pr comment",
   "pr list",
   "pr request-review",
-  "review schema",
-  "review validate",
-  "review render",
-  "review state",
-  "review context",
-  "review plan",
   "board post heartbeat",
   "board post item",
   "board post activity",
@@ -53321,7 +53576,13 @@ var cliRouteCoverage = new ManifestCliRouteCoverage({
       ["qa recipe", "qa-recipe"],
       ["config path", "config-path"],
       ["config show", "config-show"],
-      ["check", "check"]
+      ["check", "check"],
+      ["review schema", "review-schema"],
+      ["review validate", "review-validate"],
+      ["review render", "review-render"],
+      ["review state", "review-state"],
+      ["review context", "review-context"],
+      ["review plan", "review-plan"]
     ].map(([path3, operationId]) => ({
       status: "supported",
       route: { path: (path3 ?? "").split(" "), aliases: [] },
@@ -53393,7 +53654,11 @@ function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = () => cr
     getConfigPath
   });
   const operationRegistry = new MapOperationRegistry({
-    operations: [docOperation, ...localOperations.operations()],
+    operations: [
+      docOperation,
+      ...localOperations.operations(),
+      ...new DefaultReviewOperations({ cwd: launchCwd }).operations()
+    ],
     policy: new LaunchOperationAccessPolicy({ allowedEffects: ["read", "process", "network"] })
   });
   new CommanderLocalDiscoveryCli({
@@ -53407,7 +53672,18 @@ function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = () => cr
       registry: operationRegistry
     })
   );
-  program2.addCommand(createReviewCommand());
+  program2.addCommand(
+    createReviewCommand({
+      registry: operationRegistry,
+      defaultCwd: launchCwd,
+      createTrustedRegistry: (launch) => new MapOperationRegistry({
+        operations: services.reviewOperations(launch).operations(),
+        policy: new LaunchOperationAccessPolicy({
+          allowedEffects: ["read", "process", "network"]
+        })
+      })
+    })
+  );
   program2.addCommand(
     createBoardCommand(
       () => services.board(),

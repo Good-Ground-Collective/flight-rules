@@ -1,11 +1,18 @@
 import { z } from "zod";
 import type { ReviewVerifier } from "./review-planner.js";
 import type { ActionableFinding, DecisionAnswer, ReviewEvidence } from "./review.schema.js";
+declare const GhReviewGitHubApiPropsSchema: z.ZodObject<{
+    cwd: z.ZodOptional<z.ZodString>;
+    env: z.ZodOptional<z.ZodCustom<NodeJS.ProcessEnv, NodeJS.ProcessEnv>>;
+}, z.core.$strict>;
 export interface ReviewGitHubApi {
     get(path: string): Promise<unknown>;
     graphql(query: string, variables: Record<string, string | number>): Promise<unknown>;
 }
 export declare class GhReviewGitHubApi implements ReviewGitHubApi {
+    private readonly cwd;
+    private readonly env;
+    constructor(props?: z.input<typeof GhReviewGitHubApiPropsSchema>);
     get(path: string): Promise<unknown>;
     graphql(query: string, variables: Record<string, string | number>): Promise<unknown>;
     private run;

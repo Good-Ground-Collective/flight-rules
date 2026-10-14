@@ -1876,12 +1876,6 @@ var pendingRoutes = [
   "pr comment",
   "pr list",
   "pr request-review",
-  "review schema",
-  "review validate",
-  "review render",
-  "review state",
-  "review context",
-  "review plan",
   "board post heartbeat",
   "board post item",
   "board post activity",
@@ -1943,7 +1937,13 @@ var cliRouteCoverage = new ManifestCliRouteCoverage({
       ["qa recipe", "qa-recipe"],
       ["config path", "config-path"],
       ["config show", "config-show"],
-      ["check", "check"]
+      ["check", "check"],
+      ["review schema", "review-schema"],
+      ["review validate", "review-validate"],
+      ["review render", "review-render"],
+      ["review state", "review-state"],
+      ["review context", "review-context"],
+      ["review plan", "review-plan"]
     ].map(([path, operationId]) => ({
       status: "supported",
       route: { path: (path ?? "").split(" "), aliases: [] },

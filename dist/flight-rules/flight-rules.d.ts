@@ -15,6 +15,7 @@ import { type ToolProbe } from "../tasks/tool-probe/tool-probe.js";
 import { type RepositoryReadiness } from "../tasks/readiness/repository-readiness.js";
 import { type FlightRulesProps } from "./flight-rules.schema.js";
 import { type LocalDiscoveryOperations } from "../operations/local-discovery-operations.js";
+import { type ReviewOperations, type ReviewOperationsLaunchProps } from "../operations/review-operations.js";
 export interface FlightRules {
     installation(): NativeInstallation;
     configPath(): string;
@@ -30,6 +31,7 @@ export interface FlightRules {
     readiness(): RepositoryReadiness;
     docs(): DocResolver;
     localOperations(): LocalDiscoveryOperations;
+    reviewOperations(props?: ReviewOperationsLaunchProps): ReviewOperations;
     /** Ariadne's Agents page reporter; reads only the `ariadne.*` keys from user and local scope, so it works without a valid tracker config. */
     board(): AriadneBoard;
     packets(): AriadnePackets;
@@ -62,6 +64,7 @@ export declare class DefaultFlightRules implements FlightRules {
     readiness(): RepositoryReadiness;
     docs(): DocResolver;
     localOperations(): LocalDiscoveryOperations;
+    reviewOperations(props?: ReviewOperationsLaunchProps): ReviewOperations;
     board(): AriadneBoard;
     packets(): AriadnePackets;
     ariadneTokens(): AriadneTokenStore;
