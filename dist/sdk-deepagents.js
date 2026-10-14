@@ -758,19 +758,19 @@ var CapabilityScopedDeepAgentsToolPolicy = class {
       return [...grants[capability] ?? []];
     });
     const names = /* @__PURE__ */ new Set();
-    for (const tool2 of tools) {
-      if (names.has(tool2.name))
-        throw new InvalidDeepAgentsToolRegistrationError(`Duplicate host tool name: ${tool2.name}`);
-      if (filesystemCapabilities.has(tool2.name)) {
+    for (const tool3 of tools) {
+      if (names.has(tool3.name))
+        throw new InvalidDeepAgentsToolRegistrationError(`Duplicate host tool name: ${tool3.name}`);
+      if (filesystemCapabilities.has(tool3.name)) {
         throw new InvalidDeepAgentsToolRegistrationError(
-          `Host tools cannot replace reserved Deep Agents tool ${tool2.name}.`
+          `Host tools cannot replace reserved Deep Agents tool ${tool3.name}.`
         );
       }
-      names.add(tool2.name);
+      names.add(tool3.name);
     }
     return tools;
   }
-  middlewareFor(model, definition, hostTools, trackExecution, onCapabilityDenied) {
+  middlewareFor(model, definition, hostTools, trackExecution, onCapabilityDenied, additionalToolNames = []) {
     const permissions = new Set(definition.frontmatter.capabilities);
     const filesystemTools = [
       ...permissions.has("read") ? ["read_file", "ls", "glob", "grep"] : [],
@@ -783,7 +783,11 @@ var CapabilityScopedDeepAgentsToolPolicy = class {
       subagents: [],
       generalPurposeAgent: false
     });
-    const allowedToolNames = /* @__PURE__ */ new Set([...hostTools.map((tool2) => tool2.name), ...filesystemTools]);
+    const allowedToolNames = /* @__PURE__ */ new Set([
+      ...hostTools.map((tool3) => tool3.name),
+      ...additionalToolNames,
+      ...filesystemTools
+    ]);
     return [
       filesystem,
       createMiddleware({ name: subagents.name }),
@@ -1183,11 +1187,626 @@ var LangChainDeepAgentsWorkerRuntime = class {
     };
   }
 };
+
+// src/sdk/deepagents/skill-runtime.ts
+import { randomUUID } from "node:crypto";
+import { Command, interrupt, isGraphInterrupt, MemorySaver } from "@langchain/langgraph";
+import {
+  BaseMessage,
+  HumanMessage as HumanMessage2,
+  isAIMessage as isAIMessage2
+} from "@langchain/core/messages";
+import { BaseChatModel as BaseChatModel2 } from "@langchain/core/language_models/chat_models";
+import { AsyncLocalStorageProviderSingleton } from "@langchain/core/singletons";
+import { createDeepAgent as createDeepAgent2 } from "deepagents";
+import { createMiddleware as createMiddleware2, tool as tool2 } from "langchain";
+import { z as z10 } from "zod";
+var SkillRuntimePropsSchema = z10.strictObject({
+  instructions: z10.custom(
+    (value) => typeof value === "object" && value !== null && "loadSkill" in value && typeof value.loadSkill === "function"
+  ),
+  agents: z10.array(AgentDefinitionSchema).min(1),
+  models: z10.strictObject({
+    standard: z10.instanceof(BaseChatModel2),
+    escalated: z10.instanceof(BaseChatModel2),
+    expert: z10.instanceof(BaseChatModel2)
+  }),
+  operations: z10.custom(
+    (value) => typeof value === "object" && value !== null && "invoke" in value && typeof value.invoke === "function" && "list" in value && typeof value.list === "function"
+  ),
+  workers: z10.custom(
+    (value) => typeof value === "object" && value !== null && "dispatch" in value && typeof value.dispatch === "function"
+  ),
+  observe: z10.custom((value) => typeof value === "function"),
+  toolGrants: z10.custom(
+    (value) => typeof value === "function"
+  ),
+  checkpointer: z10.custom(
+    (value) => typeof value === "object" && value !== null && "getTuple" in value && typeof value.getTuple === "function"
+  ).default(() => new MemorySaver()),
+  maxGraphSteps: z10.int().positive().default(128)
+});
+var PartialOperationSchema = z10.strictObject({
+  operationId: z10.string().min(1),
+  status: z10.literal("partial"),
+  data: z10.unknown(),
+  error: z10.strictObject({ name: z10.string().min(1), message: z10.string() })
+});
+var PartialOperationFailurePropsSchema = z10.strictObject({
+  operations: z10.array(PartialOperationSchema).min(1)
+});
+var PartialOperationFailure = class extends Error {
+  name = "PartialOperationFailure";
+  operations;
+  constructor(props) {
+    const parsed = PartialOperationFailurePropsSchema.parse(props);
+    super(parsed.operations.map(({ error }) => `${error.name}: ${error.message}`).join("; "));
+    this.operations = parsed.operations;
+  }
+};
+var InFlightSkillToolExecutionTracker = class {
+  active = /* @__PURE__ */ new Set();
+  async track(execution) {
+    const promise = Promise.resolve().then(execution);
+    this.active.add(promise);
+    try {
+      return await promise;
+    } finally {
+      this.active.delete(promise);
+    }
+  }
+  async waitForIdle() {
+    while (this.active.size > 0) await Promise.allSettled([...this.active]);
+  }
+};
+var InvalidSkillResumeError = class extends Error {
+  name = "InvalidSkillResumeError";
+};
+var DeepAgentsSkillConfigurationError = class extends Error {
+  name = "DeepAgentsSkillConfigurationError";
+};
+var LangChainDeepAgentsSkillRuntime = class {
+  instructions;
+  agents;
+  models;
+  operations;
+  workers;
+  observe;
+  toolGrants;
+  checkpointer;
+  maxGraphSteps;
+  pending = /* @__PURE__ */ new Map();
+  siblingPauses = /* @__PURE__ */ new Map();
+  policy = new CapabilityScopedDeepAgentsToolPolicy();
+  orchestration;
+  constructor(props) {
+    const parsed = SkillRuntimePropsSchema.safeParse(props);
+    if (!parsed.success) throw new DeepAgentsSkillConfigurationError(parsed.error.message);
+    this.instructions = parsed.data.instructions;
+    this.agents = parsed.data.agents.map((agent) => AgentDefinitionSchema.parse(agent));
+    this.models = parsed.data.models;
+    this.operations = parsed.data.operations;
+    this.workers = parsed.data.workers;
+    this.observe = parsed.data.observe;
+    this.toolGrants = parsed.data.toolGrants;
+    this.checkpointer = parsed.data.checkpointer;
+    this.maxGraphSteps = parsed.data.maxGraphSteps;
+    this.orchestration = new RegistryOrchestrationPolicy({ agents: this.agents });
+  }
+  async invoke(skill, context, input, options = {}) {
+    const caller = CallerContextSchema.parse(context);
+    const invocationId = randomUUID();
+    const threadId = randomUUID();
+    let execution;
+    try {
+      const instruction = this.instructions.loadSkill(skill);
+      execution = await this.createGraph(
+        skill,
+        caller,
+        options.allowHumanQuestions === true,
+        threadId
+      );
+      const result = await execution.graph.invoke(
+        {
+          messages: [
+            new HumanMessage2(
+              `${instruction.contents}
+
+## Invocation context
+${JSON.stringify(caller)}
+
+## Invocation input
+${JSON.stringify(input)}`
+            )
+          ]
+        },
+        {
+          configurable: { thread_id: threadId },
+          recursionLimit: this.maxGraphSteps,
+          ...options.signal === void 0 ? {} : { signal: options.signal }
+        }
+      );
+      await execution.tools.waitForIdle();
+      if (execution.failure !== void 0) throw execution.failure;
+      return this.result(
+        execution.graph,
+        result,
+        caller,
+        invocationId,
+        threadId,
+        skill,
+        options.allowHumanQuestions === true
+      );
+    } catch (cause) {
+      await execution?.tools.waitForIdle();
+      const interruption = isGraphInterrupt(cause) ? z10.array(z10.object({ id: z10.string().optional(), value: z10.unknown() })).safeParse(cause.interrupts) : this.questionInterruptionFromError(cause);
+      const question = interruption.success ? z10.object({ questionId: z10.string(), question: z10.string() }).safeParse(interruption.data[0]?.value) : void 0;
+      if (question?.success === true && options.allowHumanQuestions === true) {
+        if (isGraphInterrupt(cause)) {
+          const pauseId = randomUUID();
+          this.pending.set(pauseId, {
+            context: caller,
+            invocationId,
+            pauseId,
+            questionId: question.data.questionId,
+            threadId,
+            skill,
+            allowHumanQuestions: true,
+            state: "paused"
+          });
+          return {
+            status: "paused",
+            context: caller,
+            invocationId,
+            pauseId,
+            questionId: question.data.questionId,
+            question: question.data.question
+          };
+        }
+      }
+      return {
+        status: "failed",
+        context: caller,
+        invocationId,
+        failure: {
+          code: options.signal?.aborted ? "CANCELLED" : execution?.failure === void 0 ? "EXECUTION_FAILED" : "TOOL_FAILED",
+          message: execution?.failure instanceof Error ? execution.failure.message : cause instanceof Error ? cause.message : String(cause),
+          ...execution !== void 0 && execution.partialOperations.length > 0 ? { operations: execution.partialOperations } : {}
+        }
+      };
+    }
+  }
+  async resume(request) {
+    const caller = CallerContextSchema.parse(request.context);
+    const pending = this.pending.get(request.pauseId);
+    if (pending === void 0 || pending.questionId !== request.questionId || JSON.stringify(pending.context) !== JSON.stringify(caller) || pending.state !== "paused") {
+      throw new InvalidSkillResumeError(
+        "The pause, question or caller context is missing, stale or does not match."
+      );
+    }
+    if (request.answer.trim().length === 0)
+      throw new InvalidSkillResumeError("A human answer is required to resume this question.");
+    pending.state = "resuming";
+    let execution;
+    let continuationStarted = false;
+    try {
+      const snapshot = RuntimeSnapshotSchema.parse(await this.observe(caller));
+      if (JSON.stringify(snapshot.context) !== JSON.stringify(caller) || snapshot.ask.state !== "available") {
+        throw new InvalidSkillResumeError(
+          "Fresh question access is unavailable for the original caller context."
+        );
+      }
+      execution = await this.createGraph(
+        pending.skill,
+        caller,
+        pending.allowHumanQuestions,
+        pending.threadId
+      );
+      this.pending.delete(request.pauseId);
+      continuationStarted = true;
+      const result = await execution.graph.invoke(
+        new Command({ resume: { questionId: request.questionId, answer: request.answer } }),
+        {
+          configurable: { thread_id: pending.threadId },
+          recursionLimit: this.maxGraphSteps,
+          ...request.signal === void 0 ? {} : { signal: request.signal }
+        }
+      );
+      await execution.tools.waitForIdle();
+      if (execution.failure !== void 0) throw execution.failure;
+      return this.result(
+        execution.graph,
+        result,
+        caller,
+        pending.invocationId,
+        pending.threadId,
+        pending.skill,
+        pending.allowHumanQuestions
+      );
+    } catch (cause) {
+      await execution?.tools.waitForIdle();
+      if (!continuationStarted && this.pending.get(request.pauseId) === pending) {
+        pending.state = "paused";
+      }
+      return {
+        status: "failed",
+        context: caller,
+        invocationId: pending.invocationId,
+        failure: {
+          code: request.signal?.aborted ? "CANCELLED" : execution?.failure === void 0 ? "EXECUTION_FAILED" : "TOOL_FAILED",
+          message: execution?.failure instanceof Error ? execution.failure.message : cause instanceof Error ? cause.message : String(cause),
+          ...execution !== void 0 && execution.partialOperations.length > 0 ? { operations: execution.partialOperations } : {}
+        }
+      };
+    }
+  }
+  cancel(context, pauseId) {
+    const caller = CallerContextSchema.parse(context);
+    const pending = this.pending.get(pauseId);
+    if (pending === void 0 || pending.state !== "paused" || JSON.stringify(pending.context) !== JSON.stringify(caller)) {
+      throw new InvalidSkillResumeError(
+        "The pause is missing or belongs to another caller context."
+      );
+    }
+    this.pending.delete(pauseId);
+    const sibling = this.siblingPauses.get(pending.threadId);
+    if (sibling !== void 0) {
+      this.siblingPauses.delete(pending.threadId);
+      this.cancel(caller, sibling.pauseId);
+    }
+    return {
+      status: "failed",
+      context: caller,
+      invocationId: pending.invocationId,
+      failure: { code: "CANCELLED", message: "The caller cancelled this paused skill." }
+    };
+  }
+  async createGraph(skill, context, allowHumanQuestions, threadId) {
+    const instruction = this.instructions.loadSkill(skill);
+    const observed = RuntimeSnapshotSchema.parse(await this.observe(context));
+    if (JSON.stringify(observed.context) !== JSON.stringify(context))
+      throw new DeepAgentsSkillConfigurationError(
+        "Runtime evidence belongs to a different caller context."
+      );
+    const grants = this.toolGrants(context);
+    let executionFailure;
+    const partialOperations = [];
+    const recordedPartialFailures = /* @__PURE__ */ new Set();
+    const tools = new InFlightSkillToolExecutionTracker();
+    let propagatingSiblingQuestion = false;
+    const recordExecutionFailure = (cause) => {
+      if (isGraphInterrupt(cause)) return;
+      if (cause instanceof PartialOperationFailure && !recordedPartialFailures.has(cause)) {
+        recordedPartialFailures.add(cause);
+        partialOperations.push(...cause.operations);
+      }
+      executionFailure = cause instanceof Error ? cause : new Error(String(cause));
+    };
+    const rejectDependentWork = () => {
+      if (executionFailure !== void 0) throw executionFailure;
+    };
+    const shared = [
+      tool2(
+        async ({ operationId, input }) => {
+          rejectDependentWork();
+          return tools.track(async () => {
+            try {
+              const descriptor = this.operations.list().find((entry) => entry.id === operationId);
+              if (descriptor === void 0) throw new Error(`Unknown operation: ${operationId}`);
+              const fresh = RuntimeSnapshotSchema.parse(await this.observe(context));
+              if (JSON.stringify(fresh.context) !== JSON.stringify(context)) {
+                throw new DeepAgentsSkillConfigurationError(
+                  "Operation evidence belongs to a different caller context."
+                );
+              }
+              for (const effect of descriptor.effects) {
+                const capability = this.permissionForEffect(effect);
+                if (fresh.permissions[capability]?.state !== "available") {
+                  throw new CapabilityToolDeniedError({
+                    toolName: `operation:${operationId}`,
+                    capability
+                  });
+                }
+              }
+              const result = await this.operations.invoke(operationId, input);
+              if (result.status === "partial") {
+                throw new PartialOperationFailure({
+                  operations: [
+                    {
+                      operationId,
+                      status: "partial",
+                      data: result.data,
+                      error: result.error
+                    }
+                  ]
+                });
+              }
+              if (result.status === "error") {
+                throw new Error(`${result.error.name}: ${result.error.message}`);
+              }
+              return result;
+            } catch (cause) {
+              recordExecutionFailure(cause);
+              throw cause;
+            }
+          });
+        },
+        {
+          name: "flight_rules_operation",
+          description: "Run a launch-authorized shared flight-rules operation.",
+          schema: z10.object({ operationId: z10.string(), input: z10.record(z10.string(), z10.unknown()) })
+        }
+      ),
+      tool2(
+        async ({ agent, dispatchId, input }) => {
+          rejectDependentWork();
+          return tools.track(async () => {
+            try {
+              const request = DispatchRequestSchema.parse({
+                id: dispatchId,
+                agent,
+                context,
+                input
+              });
+              const registration = this.agents.find(
+                (candidate) => candidate.frontmatter.name === request.agent
+              );
+              if (registration === void 0) {
+                const decision2 = this.orchestration.prepare(request, observed);
+                if (decision2.status !== "ready")
+                  throw new Error(`${decision2.failure.code}: ${decision2.failure.message}`);
+              }
+              const fresh = RuntimeSnapshotSchema.parse(await this.observe(context, registration));
+              if (JSON.stringify(fresh.context) !== JSON.stringify(context)) {
+                throw new DeepAgentsSkillConfigurationError(
+                  "Worker evidence belongs to a different caller context."
+                );
+              }
+              const decision = this.orchestration.prepare(request, fresh);
+              if (decision.status !== "ready")
+                throw new Error(`${decision.failure.code}: ${decision.failure.message}`);
+              const outcome = await this.workers.dispatch(request);
+              if (outcome.status !== "completed") {
+                throw new Error(`${outcome.failure.code}: ${outcome.failure.message}`);
+              }
+              return outcome;
+            } catch (cause) {
+              recordExecutionFailure(cause);
+              throw cause;
+            }
+          });
+        },
+        {
+          name: "flight_rules_dispatch",
+          description: "Dispatch one registered named worker under observed host grants.",
+          schema: z10.object({
+            agent: z10.string(),
+            dispatchId: z10.string(),
+            input: z10.record(z10.string(), z10.json())
+          })
+        }
+      ),
+      tool2(
+        async ({ siblingSkill, input }) => {
+          rejectDependentWork();
+          const sibling = this.orchestration.sibling({ context, skill: siblingSkill, input });
+          const pausedSibling = this.siblingPauses.get(threadId);
+          if (pausedSibling !== void 0) {
+            return tools.track(() => this.resumeSibling(threadId, pausedSibling));
+          }
+          return tools.track(async () => {
+            try {
+              const result = await AsyncLocalStorageProviderSingleton.getInstance().run(
+                void 0,
+                () => this.invoke(sibling.skill, sibling.context, sibling.input, {
+                  allowHumanQuestions
+                })
+              );
+              if (result.status === "paused") {
+                this.siblingPauses.set(threadId, result);
+                propagatingSiblingQuestion = true;
+                return await this.resumeSibling(threadId, result);
+              }
+              if (result.status === "failed") {
+                if (result.failure.operations !== void 0) {
+                  throw new PartialOperationFailure({ operations: result.failure.operations });
+                }
+                throw new Error(result.failure.message);
+              }
+              return result;
+            } catch (cause) {
+              if (!propagatingSiblingQuestion && !isGraphInterrupt(cause)) {
+                recordExecutionFailure(cause);
+              }
+              throw cause;
+            }
+          });
+        },
+        {
+          name: "flight_rules_sibling_skill",
+          description: "Invoke another canonical skill with this same caller context.",
+          schema: z10.object({ siblingSkill: z10.string(), input: z10.record(z10.string(), z10.unknown()) })
+        }
+      )
+    ];
+    shared.push(
+      tool2(
+        async ({ question }) => {
+          const questionId = randomUUID();
+          const fresh = RuntimeSnapshotSchema.parse(await this.observe(context));
+          const decision = this.orchestration.ask(
+            { context, question, allowHumanQuestions },
+            fresh
+          );
+          if (decision.status !== "awaiting-answer") {
+            executionFailure = new Error(`${decision.failure.code}: ${decision.failure.message}`);
+            throw executionFailure;
+          }
+          const answer = interrupt({ questionId, question });
+          return answer;
+        },
+        {
+          name: "flight_rules_ask_human",
+          description: "Pause this skill and wait for an actual answer from the human caller.",
+          schema: z10.object({ question: z10.string().min(1) })
+        }
+      )
+    );
+    const model = this.models.standard;
+    const skillDefinition = {
+      frontmatter: {
+        name: "skill-runtime",
+        description: "Execute a canonical workflow skill.",
+        model: "standard",
+        capabilities: AgentFrontmatterSchema.shape.capabilities.parse(
+          ["read", "edit", "shell", "web", "spawn", "ask"].filter(
+            (capability) => observed.permissions[capability]?.state === "available"
+          )
+        )
+      },
+      body: instruction.contents
+    };
+    const suppliedHostTools = this.policy.toolsFor(skillDefinition, grants, observed);
+    const trackToolExecution = async (execution) => tools.track(async () => {
+      try {
+        rejectDependentWork();
+        return await execution();
+      } catch (cause) {
+        recordExecutionFailure(cause);
+        throw cause;
+      }
+    });
+    const subagents = this.policy.middlewareFor(
+      model,
+      skillDefinition,
+      suppliedHostTools,
+      trackToolExecution,
+      (error) => {
+        recordExecutionFailure(error);
+      },
+      shared.map((entry) => entry.name)
+    );
+    const questionBoundary = createMiddleware2({
+      name: "FlightRulesQuestionBoundary",
+      wrapModelCall: async (request, handler) => {
+        const response = await handler(request);
+        const calls = response.tool_calls ?? [];
+        const question = calls.find((call) => call.name === "flight_rules_ask_human");
+        const boundary = question ?? calls.find((call) => call.name === "flight_rules_sibling_skill");
+        if (boundary !== void 0) {
+          response.tool_calls = [boundary];
+        }
+        return response;
+      }
+    });
+    const middleware = [
+      createMiddleware2({ name: "FilesystemMiddleware" }),
+      ...subagents.slice(1),
+      questionBoundary
+    ];
+    return {
+      graph: createDeepAgent2({
+        name: instruction.name,
+        model,
+        tools: [...shared, ...suppliedHostTools],
+        checkpointer: this.checkpointer,
+        middleware
+      }),
+      get failure() {
+        return executionFailure;
+      },
+      partialOperations,
+      tools
+    };
+  }
+  permissionForEffect(effect) {
+    switch (effect) {
+      case "read":
+        return "read";
+      case "write":
+        return "edit";
+      case "process":
+        return "shell";
+      case "network":
+        return "web";
+    }
+  }
+  resumeSibling(threadId, paused) {
+    const answerValue = interrupt({ questionId: paused.questionId, question: paused.question });
+    const answer = z10.object({ questionId: z10.string(), answer: z10.string() }).parse(answerValue);
+    if (answer.questionId !== paused.questionId) {
+      throw new InvalidSkillResumeError("The answer belongs to another sibling question.");
+    }
+    return this.resume({
+      context: paused.context,
+      pauseId: paused.pauseId,
+      questionId: paused.questionId,
+      answer: answer.answer
+    }).then((result) => {
+      if (result.status === "paused") {
+        this.siblingPauses.set(threadId, result);
+        return this.resumeSibling(threadId, result);
+      }
+      this.siblingPauses.delete(threadId);
+      if (result.status === "failed") {
+        if (result.failure.operations !== void 0) {
+          throw new PartialOperationFailure({ operations: result.failure.operations });
+        }
+        throw new Error(result.failure.message);
+      }
+      return result;
+    });
+  }
+  questionInterruptionFromError(cause) {
+    const schema = z10.array(z10.object({ id: z10.string().optional(), value: z10.unknown() }));
+    if (!(cause instanceof Error)) return schema.safeParse(null);
+    try {
+      return schema.safeParse(JSON.parse(cause.message));
+    } catch {
+      return schema.safeParse(null);
+    }
+  }
+  result(graph, result, context, invocationId, threadId, skill, allowHumanQuestions) {
+    const graphResult = z10.record(z10.string(), z10.unknown()).parse(result);
+    const messages = z10.array(z10.instanceof(BaseMessage)).parse(graphResult["messages"]);
+    const interruptions = z10.array(z10.object({ value: z10.unknown() })).safeParse(graphResult["__interrupt__"]);
+    const task = interruptions.success ? interruptions.data[0] : void 0;
+    const question = task === void 0 ? void 0 : z10.object({ questionId: z10.string(), question: z10.string() }).safeParse(task.value);
+    if (question?.success === true) {
+      const pauseId = randomUUID();
+      const value = question.data;
+      this.pending.set(pauseId, {
+        context,
+        invocationId,
+        pauseId,
+        questionId: value.questionId,
+        threadId,
+        skill,
+        allowHumanQuestions,
+        state: "paused"
+      });
+      return {
+        status: "paused",
+        context,
+        invocationId,
+        pauseId,
+        questionId: value.questionId,
+        question: value.question
+      };
+    }
+    const finalMessage = messages.toReversed().find((message) => isAIMessage2(message));
+    return { status: "completed", context, invocationId, report: finalMessage?.content ?? "" };
+  }
+};
 export {
   CapabilityToolDeniedError,
   DeepAgentsConfigurationError,
+  DeepAgentsSkillConfigurationError,
+  LangChainDeepAgentsSkillRuntime as DeepAgentsSkillRuntime,
   CapabilityScopedDeepAgentsToolPolicy as DeepAgentsToolPolicy,
   LangChainDeepAgentsWorkerRuntime as DeepAgentsWorkerRuntime,
   InvalidDeepAgentsToolRegistrationError,
+  InvalidSkillResumeError,
+  LangChainDeepAgentsSkillRuntime,
   flightRulesAbortSignalConfigKey
 };
