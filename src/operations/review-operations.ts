@@ -18,8 +18,22 @@ import {
 import type { OperationDescriptor } from "./operation-registry.js";
 import type { OperationEffect } from "./operation.schema.js";
 
-const ReviewOperationsPropsSchema = z.strictObject({
+export const ReviewOperationsLaunchPropsSchema = z.strictObject({
+  cwd: z.string().min(1).optional(),
+  trustedRef: HeadShaSchema.optional(),
+  owners: z.record(z.string(), z.array(z.string().min(1))).default({}),
+  requireMapping: z.boolean().default(false),
+});
+export type ReviewOperationsLaunchProps = z.input<typeof ReviewOperationsLaunchPropsSchema>;
+
+const ReviewOperationsPropsSchema = ReviewOperationsLaunchPropsSchema.extend({
   cwd: z.string().min(1),
+  env: z
+    .custom<NodeJS.ProcessEnv>(
+      (value): value is NodeJS.ProcessEnv =>
+        typeof value === "object" && value !== null && !Array.isArray(value),
+    )
+    .optional(),
   policy: z
     .custom<ReviewPolicy>(
       (value): value is ReviewPolicy =>
@@ -41,7 +55,6 @@ const reviewOutput = ReviewSchema;
 const stateInput = z.strictObject({ state: JsonValueSchema });
 const stateOutput = z.string();
 const contextInput = z.strictObject({
-  trustedRef: HeadShaSchema,
   contextPath: z.string().min(1).default("CODE-REVIEW.md"),
 });
 const contextOutput = z.object({
@@ -55,8 +68,6 @@ const planInput = z.strictObject({
   repo: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
   review: JsonValueSchema,
   records: z.array(JsonValueSchema),
-  owners: z.record(z.string(), z.array(z.string())).default({}),
-  requireMapping: z.boolean().default(false),
 });
 const renderInput = z.strictObject({
   review: JsonValueSchema,
@@ -90,17 +101,28 @@ export interface ReviewOperations {
   operations(): OperationDescriptor[];
 }
 
+export class MissingTrustedReviewRefError extends Error {
+  override name = "MissingTrustedReviewRefError";
+}
+
 /** Keeps the review lifecycle shared while pinning repository reads to the host's launch checkout. */
 export class DefaultReviewOperations implements ReviewOperations {
   private readonly cwd: string;
   private readonly policy: ReviewPolicy;
   private readonly api: ReviewGitHubApi;
+  private readonly trustedRef: string | undefined;
+  private readonly owners: Record<string, string[]>;
+  private readonly requireMapping: boolean;
 
   constructor(props: z.input<typeof ReviewOperationsPropsSchema>) {
     const parsed = ReviewOperationsPropsSchema.parse(props);
-    this.cwd = parsed.cwd;
-    this.policy = parsed.policy ?? new FileReviewPolicy();
-    this.api = parsed.api ?? new GhReviewGitHubApi();
+    this.cwd = parsed.cwd ?? process.cwd();
+    this.trustedRef = parsed.trustedRef;
+    this.owners = parsed.owners;
+    this.requireMapping = parsed.requireMapping;
+    const env = props.env ?? process.env;
+    this.policy = parsed.policy ?? new FileReviewPolicy({ env });
+    this.api = parsed.api ?? new GhReviewGitHubApi({ cwd: this.cwd, env });
   }
 
   operations(): OperationDescriptor[] {
@@ -168,8 +190,15 @@ export class DefaultReviewOperations implements ReviewOperations {
         ["review", "context"],
         contextInput,
         contextOutput,
-        ({ trustedRef, contextPath }) =>
-          this.policy.repository({ cwd: this.cwd, trustedRef, contextPath }),
+        ({ contextPath }) => {
+          if (this.trustedRef === undefined)
+            throw new MissingTrustedReviewRefError("trusted review ref was not bound at launch");
+          return this.policy.repository({
+            cwd: this.cwd,
+            trustedRef: this.trustedRef,
+            contextPath,
+          });
+        },
       ),
       this.descriptor(
         "review-plan",
@@ -178,7 +207,7 @@ export class DefaultReviewOperations implements ReviewOperations {
         ["review", "plan"],
         planInput,
         planOutput,
-        async ({ number, repo, review, records, owners, requireMapping }) => {
+        async ({ number, repo, review, records }) => {
           const pullRequest = z
             .looseObject({
               head: z.looseObject({ sha: HeadShaSchema }),
@@ -191,8 +220,8 @@ export class DefaultReviewOperations implements ReviewOperations {
               repo,
               prNumber: number,
               prAuthorId: pullRequest.user.id,
-              owners,
-              requireMapping,
+              owners: this.owners,
+              requireMapping: this.requireMapping,
             }),
           });
 

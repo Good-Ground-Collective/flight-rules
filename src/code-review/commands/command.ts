@@ -2,23 +2,39 @@ import { readFileSync } from "node:fs";
 import { Command } from "commander";
 import { z } from "zod";
 import { OperationCliError, type OperationRegistry } from "../../operations/operation-registry.js";
+import type { ReviewOperationsLaunchProps } from "../../operations/review-operations.js";
 
 export interface ReviewCommandProps {
   registry: OperationRegistry;
+  defaultCwd: string;
+  createTrustedRegistry(props: ReviewOperationsLaunchProps): OperationRegistry;
+}
+
+export interface ReviewCommandAdapter {
+  create(): Command;
 }
 
 const ReviewCommandPropsSchema = z.object({
   registry: z.custom<OperationRegistry>((value) =>
     Boolean(value && typeof value === "object" && "invoke" in value),
   ),
+  defaultCwd: z.string().min(1),
+  createTrustedRegistry: z.custom<ReviewCommandProps["createTrustedRegistry"]>(
+    (value) => typeof value === "function",
+  ),
 });
 
 /** Adapts review CLI file arguments and output formatting to shared in-process operations. */
-export class CommanderReviewCommand {
+export class CommanderReviewCommand implements ReviewCommandAdapter {
   private readonly registry: OperationRegistry;
+  private readonly defaultCwd: string;
+  private readonly createTrustedRegistry: ReviewCommandProps["createTrustedRegistry"];
 
   constructor(props: ReviewCommandProps) {
-    this.registry = ReviewCommandPropsSchema.parse(props).registry;
+    const parsed = ReviewCommandPropsSchema.parse(props);
+    this.registry = parsed.registry;
+    this.defaultCwd = parsed.defaultCwd;
+    this.createTrustedRegistry = parsed.createTrustedRegistry;
   }
 
   create(): Command {
@@ -74,9 +90,10 @@ export class CommanderReviewCommand {
       .command("context")
       .requiredOption("--ref <sha>", "pinned trusted default-branch commit")
       .option("--path <path>", "repo review-context file", "CODE-REVIEW.md")
-      .action(async (opts: { ref: string; path: string }) => {
-        const result = await this.invoke("review-context", {
-          trustedRef: opts.ref,
+      .option("--cwd <directory>", "trusted repository checkout", this.defaultCwd)
+      .action(async (opts: { ref: string; path: string; cwd: string }) => {
+        const registry = this.createTrustedRegistry({ cwd: opts.cwd, trustedRef: opts.ref });
+        const result = await this.invokeWithRegistry(registry, "review-context", {
           contextPath: opts.path,
         });
         process.stdout.write(JSON.stringify(result) + "\n");
@@ -108,12 +125,18 @@ export class CommanderReviewCommand {
             repo: opts.repo,
             review: JSON.parse(readFileSync(opts.file, "utf8")),
             records: JSON.parse(readFileSync(opts.recordsFile, "utf8")),
-            ...(opts.ownersFile === undefined
-              ? {}
-              : { owners: JSON.parse(readFileSync(opts.ownersFile, "utf8")) }),
-            requireMapping: opts.requireMapping ?? false,
           };
-          const result = await this.invoke("review-plan", input);
+          const owners =
+            opts.ownersFile === undefined
+              ? {}
+              : z
+                  .record(z.string(), z.array(z.string().min(1)))
+                  .parse(JSON.parse(readFileSync(opts.ownersFile, "utf8")));
+          const registry = this.createTrustedRegistry({
+            owners,
+            requireMapping: opts.requireMapping ?? false,
+          });
+          const result = await this.invokeWithRegistry(registry, "review-plan", input);
           process.stdout.write(JSON.stringify(result) + "\n");
         },
       );
@@ -121,7 +144,15 @@ export class CommanderReviewCommand {
   }
 
   private async invoke(id: string, input: unknown): Promise<unknown> {
-    const result = await this.registry.invoke(id, input);
+    return this.invokeWithRegistry(this.registry, id, input);
+  }
+
+  private async invokeWithRegistry(
+    registry: OperationRegistry,
+    id: string,
+    input: unknown,
+  ): Promise<unknown> {
+    const result = await registry.invoke(id, input);
     if (result.status === "error")
       throw new OperationCliError({
         operationId: id,

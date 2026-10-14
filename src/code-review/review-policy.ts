@@ -3,11 +3,22 @@ import { readFileSync, realpathSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
-import { DocCharterCatalog, type Charter } from "../bundled-docs/charter-catalog/charter-catalog.js";
+import {
+  DocCharterCatalog,
+  type Charter,
+} from "../bundled-docs/charter-catalog/charter-catalog.js";
 import { FileDocResolver } from "../bundled-docs/doc-resolver/doc-resolver.js";
 import { HeadShaSchema, ReviewPathSchema } from "./review.schema.js";
 
-const ReviewPolicyPropsSchema = z.strictObject({ home: z.string().min(1).optional() });
+const ReviewPolicyPropsSchema = z.strictObject({
+  home: z.string().min(1).optional(),
+  env: z
+    .custom<NodeJS.ProcessEnv>(
+      (value): value is NodeJS.ProcessEnv =>
+        typeof value === "object" && value !== null && !Array.isArray(value),
+    )
+    .optional(),
+});
 const LoadPolicyPropsSchema = z.strictObject({ paths: z.array(z.string()).optional() });
 const RepositoryContextPropsSchema = z.strictObject({
   cwd: z.string().min(1),
@@ -42,10 +53,12 @@ export interface ReviewPolicy {
 /** Loads one review method for local skills and Actions, with repo rules read only from a pinned trusted commit. */
 export class FileReviewPolicy implements ReviewPolicy {
   private readonly home: string;
+  private readonly env: NodeJS.ProcessEnv;
 
   constructor(props: z.input<typeof ReviewPolicyPropsSchema> = {}) {
     const parsed = ReviewPolicyPropsSchema.parse(props);
     this.home = parsed.home ?? join(dirname(fileURLToPath(import.meta.url)), "..");
+    this.env = props.env ?? process.env;
   }
 
   load(input: z.input<typeof LoadPolicyPropsSchema> = {}): LoadedReviewPolicy {
@@ -60,7 +73,13 @@ export class FileReviewPolicy implements ReviewPolicy {
 
     const catalog = new DocCharterCatalog({ docs: new FileDocResolver({ docsDir: docs }) });
     const charters = (paths === undefined ? catalog.all() : catalog.select(paths)).map(
-      ({ id, language, appliesTo, tierA, contents }) => ({ id, language, appliesTo, tierA, contents }),
+      ({ id, language, appliesTo, tierA, contents }) => ({
+        id,
+        language,
+        appliesTo,
+        tierA,
+        contents,
+      }),
     );
 
     return {
@@ -91,6 +110,7 @@ export class FileReviewPolicy implements ReviewPolicy {
     for (const path of paths) {
       const tree = execFileSync("git", ["ls-tree", "-z", props.trustedRef, "--", path], {
         cwd: props.cwd,
+        env: this.env,
         encoding: "utf8",
       });
       if (!tree) {
@@ -103,6 +123,7 @@ export class FileReviewPolicy implements ReviewPolicy {
         path,
         contents: execFileSync("git", ["show", `${props.trustedRef}:${path}`], {
           cwd: props.cwd,
+          env: this.env,
           encoding: "utf8",
           maxBuffer: 10_000_000,
         }),

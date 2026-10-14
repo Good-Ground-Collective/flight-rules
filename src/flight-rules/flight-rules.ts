@@ -34,7 +34,12 @@ import {
 } from "../operations/local-discovery-operations.js";
 import { DocCharterCatalog } from "../bundled-docs/charter-catalog/charter-catalog.js";
 import { GitRepositoryPaths } from "../bundled-docs/charter-catalog/repository-paths.js";
-import { DefaultReviewOperations, type ReviewOperations } from "../operations/review-operations.js";
+import {
+  DefaultReviewOperations,
+  ReviewOperationsLaunchPropsSchema,
+  type ReviewOperations,
+  type ReviewOperationsLaunchProps,
+} from "../operations/review-operations.js";
 
 export interface FlightRules {
   installation(): NativeInstallation;
@@ -51,7 +56,7 @@ export interface FlightRules {
   readiness(): RepositoryReadiness;
   docs(): DocResolver;
   localOperations(): LocalDiscoveryOperations;
-  reviewOperations(): ReviewOperations;
+  reviewOperations(props?: ReviewOperationsLaunchProps): ReviewOperations;
   /** Ariadne's Agents page reporter; reads only the `ariadne.*` keys from user and local scope, so it works without a valid tracker config. */
   board(): AriadneBoard;
   packets(): AriadnePackets;
@@ -219,8 +224,13 @@ export class DefaultFlightRules implements FlightRules {
     });
   }
 
-  reviewOperations(): ReviewOperations {
-    return new DefaultReviewOperations({ cwd: this.cwd });
+  reviewOperations(props: ReviewOperationsLaunchProps = {}): ReviewOperations {
+    const launch = ReviewOperationsLaunchPropsSchema.parse(props);
+    return new DefaultReviewOperations({
+      ...launch,
+      cwd: launch.cwd ?? this.cwd,
+      env: this.env,
+    });
   }
 
   board(): AriadneBoard {

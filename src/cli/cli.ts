@@ -47,6 +47,7 @@ export function buildProgram(
     | "readiness"
     | "docs"
     | "configStore"
+    | "reviewOperations"
     | "installation"
     | "evidence"
     | "board"
@@ -129,7 +130,19 @@ export function buildProgram(
       registry: operationRegistry,
     }),
   );
-  program.addCommand(createReviewCommand({ registry: operationRegistry }));
+  program.addCommand(
+    createReviewCommand({
+      registry: operationRegistry,
+      defaultCwd: launchCwd,
+      createTrustedRegistry: (launch) =>
+        new MapOperationRegistry({
+          operations: services.reviewOperations(launch).operations(),
+          policy: new LaunchOperationAccessPolicy({
+            allowedEffects: ["read", "process", "network"],
+          }),
+        }),
+    }),
+  );
   program.addCommand(
     createBoardCommand(
       () => services.board(),
