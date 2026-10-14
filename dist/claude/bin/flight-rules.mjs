@@ -31678,7 +31678,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.86.0";
+var appVersion = false ? "0.0.0-dev" : "1.87.0";
 
 // src/shared/ariadne/review-packet.schema.ts
 var packetLimits = {
@@ -51909,123 +51909,27 @@ A tracker body must stand on its own for an engineer on a fresh clone. Inline th
 };
 var portableContextGuard = new RegexPortableContextGuard();
 
-// src/tasks/review-plan/review-plan.ts
-var maxSimplePrCount = 4;
-var ReviewRouteClassifier = class {
-  classify(blocked, defaultBranch) {
-    const reasons = [];
-    const pullRequests = blocked.flatMap((entry) => entry.pr === null ? [] : [entry.pr]);
-    const waveCount = new Set(blocked.map((entry) => entry.wave)).size;
-    if (waveCount > 1) {
-      reasons.push(`spans more than one wave (${waveCount} waves)`);
+// src/operations/command-operation-client.ts
+var CommandOperationClientPropsSchema = external_exports.object({
+  registry: external_exports.custom(
+    (value) => typeof value === "object" && value !== null && "invoke" in value
+  )
+});
+var RegistryCommandOperationClient = class {
+  registry;
+  constructor(props) {
+    this.registry = CommandOperationClientPropsSchema.parse(props).registry;
+  }
+  async invoke(id, input2, outputSchema) {
+    const result = await this.registry.invoke(id, input2);
+    if (result.status !== "success") {
+      throw new OperationCliError({
+        operationId: id,
+        errorName: result.error.name,
+        message: result.error.message
+      });
     }
-    const stacked = pullRequests.filter((pr) => pr.baseRefName !== defaultBranch);
-    if (stacked.length > 0) {
-      const bases = [...new Set(stacked.map((pr) => pr.baseRefName))].join(", ");
-      reasons.push(`stacked base: a PR targets ${bases} instead of ${defaultBranch}`);
-    }
-    if (pullRequests.length > maxSimplePrCount) {
-      reasons.push(`more than ${maxSimplePrCount} PRs (${pullRequests.length} PRs)`);
-    }
-    return { route: reasons.length > 0 ? "complex" : "simple", reasons };
-  }
-};
-var ReviewPlanService = class {
-  classifier = new ReviewRouteClassifier();
-  /** Tracker statuses are display names on some trackers, so "In Review" and "in-review" must match. */
-  normalizeStatus(status) {
-    return status.trim().toLowerCase().replace(/[\s-]+/g, "-");
-  }
-  isInReview(status, inReviewStatus) {
-    const normalized = this.normalizeStatus(status);
-    return normalized === "in-review" || inReviewStatus !== void 0 && normalized === this.normalizeStatus(inReviewStatus);
-  }
-  /** Ids of open tickets in review, in plan order. */
-  inReviewTicketIds(plan, inReviewStatus) {
-    return plan.waves.flat().filter((t) => this.isInReview(t.status, inReviewStatus)).map((t) => t.id);
-  }
-  build(input2) {
-    const titles = new Map(input2.tickets.map((ticket) => [ticket.id, ticket.title]));
-    const blocked = [];
-    const missingPrReasons = [];
-    input2.plan.waves.forEach((wave, waveIndex) => {
-      for (const planned of wave) {
-        if (!this.isInReview(planned.status, input2.inReviewStatus)) continue;
-        const found = input2.pullRequests.find((pr) => pr.ticket === planned.id);
-        blocked.push({
-          ticketId: planned.id,
-          title: titles.get(planned.id) ?? "",
-          wave: waveIndex,
-          blockedBy: planned.blockedBy,
-          pr: found === void 0 ? null : { number: found.number, url: found.url, headRefName: found.headRefName, baseRefName: found.baseRefName }
-        });
-        if (found === void 0) missingPrReasons.push(`ticket ${planned.id} is in review but has no open PR`);
-      }
-    });
-    const missing = blocked.filter((entry) => entry.pr === null).map((entry) => entry.ticketId);
-    if (missing.length > 0) {
-      return {
-        route: "incomplete",
-        reasons: missingPrReasons,
-        missing,
-        blocked,
-        unblocksOnMerge: this.unblockedOnMerge(input2.plan, blocked)
-      };
-    }
-    const decision = this.classifier.classify(blocked, input2.defaultBranch);
-    return {
-      route: decision.route,
-      reasons: decision.reasons,
-      missing,
-      blocked,
-      unblocksOnMerge: this.unblockedOnMerge(input2.plan, blocked)
-    };
-  }
-  unblockedOnMerge(plan, blocked) {
-    const blockedIds = new Set(blocked.map((entry) => entry.ticketId));
-    const openIds = new Set(plan.waves.flat().map((t) => t.id));
-    return plan.waves.flat().filter((t) => !blockedIds.has(t.id)).filter((t) => {
-      const openBlockers = t.blockedBy.filter((id) => openIds.has(id));
-      return openBlockers.some((id) => blockedIds.has(id)) && openBlockers.every((id) => blockedIds.has(id));
-    }).map((t) => t.id);
-  }
-};
-
-// src/tasks/dependency-planner/dependency-planner.ts
-var DependencyPlannerService = class {
-  plan(tickets) {
-    const byId = new Map(tickets.map((t) => [t.id, t]));
-    const isOpen = (t) => t.status !== "closed";
-    const openTickets = tickets.filter(isOpen);
-    const waveOf = /* @__PURE__ */ new Map();
-    const failed = /* @__PURE__ */ new Set();
-    const visiting = /* @__PURE__ */ new Set();
-    const computeWave = (id) => {
-      if (failed.has(id)) return null;
-      if (waveOf.has(id)) return waveOf.get(id) ?? null;
-      const ticket = byId.get(id);
-      if (ticket === void 0 || !isOpen(ticket)) return -1;
-      if (visiting.has(id)) return null;
-      visiting.add(id);
-      const blockerWaves = ticket.blockedBy.map(computeWave);
-      visiting.delete(id);
-      if (blockerWaves.some((w) => w === null)) {
-        failed.add(id);
-        return null;
-      }
-      const wave = Math.max(-1, ...blockerWaves.filter((w) => w !== null)) + 1;
-      waveOf.set(id, wave);
-      return wave;
-    };
-    openTickets.forEach((t) => computeWave(t.id));
-    const scheduled = openTickets.filter((t) => waveOf.has(t.id));
-    const cycles = openTickets.filter((t) => !waveOf.has(t.id)).map((t) => t.id);
-    const maxWave = scheduled.reduce((max, t) => Math.max(max, waveOf.get(t.id) ?? 0), -1);
-    const waves = Array.from(
-      { length: maxWave + 1 },
-      (_, i) => scheduled.filter((t) => waveOf.get(t.id) === i)
-    );
-    return { waves, cycles };
+    return outputSchema.parse(result.data);
   }
 };
 
@@ -52169,188 +52073,125 @@ var CrossEpicEdgeFinder = class {
   }
 };
 
-// src/tasks/commands/epic/command.ts
-function createEpicCommand(getTracker, getPrHost, getConfig = () => ({})) {
-  const epic = new Command("epic");
-  epic.command("create").exitOverride().requiredOption("--title <title>", "epic title").option("--body <body>", "epic body (or use --body-file)").option("--body-file <path>", "read the epic body from a file").option("--labels <labels>", "comma-separated labels").option("--allow-local-paths", "accept machine-local paths in the body (see docs/layered-body-format.md)").action(async (opts) => {
-    const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
-    portableContextGuard.assertPortable(body, { allowLocalPaths: opts.allowLocalPaths });
-    const result = await getTracker().createEpic({
-      title: opts.title,
-      body,
-      labels: opts.labels !== void 0 ? opts.labels.split(",") : []
-    });
-    process.stdout.write(JSON.stringify(result) + "\n");
-  });
-  epic.command("edit").exitOverride().argument("<id>", "epic id").option("--body <body>", "new epic body (or use --body-file)").option("--body-file <path>", "read the new epic body from a file").option("--title <title>", "new epic title (unchanged if omitted)").option("--labels <labels>", "comma-separated labels replacing existing free-form labels").option("--allow-local-paths", "accept machine-local paths in the body (see docs/layered-body-format.md)").action(async (id, opts) => {
-    const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
-    portableContextGuard.assertPortable(body, { allowLocalPaths: opts.allowLocalPaths });
-    const result = await getTracker().updateEpicDescription(id, {
-      body,
-      ...opts.title !== void 0 ? { title: opts.title } : {},
-      ...opts.labels !== void 0 ? { labels: opts.labels.split(",") } : {}
-    });
-    process.stdout.write(JSON.stringify(result) + "\n");
-  });
-  epic.command("get").exitOverride().argument("<id>", "epic id").action(async (id) => {
-    const result = await getTracker().getEpic(id);
-    process.stdout.write(JSON.stringify(result) + "\n");
-  });
-  epic.command("plan").exitOverride().argument("<id>", "epic id").action(async (id) => {
-    const tracker = getTracker();
-    const epicData = await tracker.getEpic(id);
-    const planner = new DependencyPlannerService();
-    const plan = planner.plan(
-      epicData.childIssues.map((ticket) => ({
-        id: ticket.id,
-        status: ticket.status,
-        blockedBy: ticket.blockedBy
-      }))
+// src/tasks/dependency-planner/dependency-planner.ts
+var DependencyPlannerService = class {
+  plan(tickets) {
+    const byId = new Map(tickets.map((t) => [t.id, t]));
+    const isOpen = (t) => t.status !== "closed";
+    const openTickets = tickets.filter(isOpen);
+    const waveOf = /* @__PURE__ */ new Map();
+    const failed = /* @__PURE__ */ new Set();
+    const visiting = /* @__PURE__ */ new Set();
+    const computeWave = (id) => {
+      if (failed.has(id)) return null;
+      if (waveOf.has(id)) return waveOf.get(id) ?? null;
+      const ticket = byId.get(id);
+      if (ticket === void 0 || !isOpen(ticket)) return -1;
+      if (visiting.has(id)) return null;
+      visiting.add(id);
+      const blockerWaves = ticket.blockedBy.map(computeWave);
+      visiting.delete(id);
+      if (blockerWaves.some((w) => w === null)) {
+        failed.add(id);
+        return null;
+      }
+      const wave = Math.max(-1, ...blockerWaves.filter((w) => w !== null)) + 1;
+      waveOf.set(id, wave);
+      return wave;
+    };
+    openTickets.forEach((t) => computeWave(t.id));
+    const scheduled = openTickets.filter((t) => waveOf.has(t.id));
+    const cycles = openTickets.filter((t) => !waveOf.has(t.id)).map((t) => t.id);
+    const maxWave = scheduled.reduce((max, t) => Math.max(max, waveOf.get(t.id) ?? 0), -1);
+    const waves = Array.from(
+      { length: maxWave + 1 },
+      (_, i) => scheduled.filter((t) => waveOf.get(t.id) === i)
     );
-    const edges = new CrossEpicEdgeFinder(tracker);
-    const crossEpicEdges = await edges.find([epicData]);
-    for (const warning of edges.warnings(crossEpicEdges)) process.stderr.write(warning + "\n");
-    process.stdout.write(JSON.stringify({ ...plan, crossEpicEdges }) + "\n");
-    if (plan.cycles.length > 0) {
-      throw new Error(`dependency cycle detected among tickets: ${plan.cycles.join(", ")}`);
-    }
-  });
-  epic.command("review-plan").exitOverride().argument("<id>", "epic id").action(async (id) => {
-    const tracker = getTracker();
-    const epicData = await tracker.getEpic(id);
-    const plan = new DependencyPlannerService().plan(
-      epicData.childIssues.map((ticket) => ({
-        id: ticket.id,
-        status: ticket.status,
-        blockedBy: ticket.blockedBy
-      }))
-    );
-    const { inReviewStatus } = getConfig();
-    const reviewPlan = new ReviewPlanService();
-    const inReviewIds = reviewPlan.inReviewTicketIds(plan, inReviewStatus);
-    const host = getPrHost();
-    const pullRequests = inReviewIds.length > 0 ? await host.listOpenPullRequestsForTickets(inReviewIds) : [];
-    const defaultBranch = await host.defaultBranch();
-    const result = reviewPlan.build({
-      plan,
-      tickets: epicData.childIssues,
-      pullRequests,
-      defaultBranch,
-      inReviewStatus
-    });
-    const edges = new CrossEpicEdgeFinder(tracker);
-    const crossEpicEdges = await edges.find([epicData]);
-    for (const warning of edges.warnings(crossEpicEdges)) process.stderr.write(warning + "\n");
-    process.stdout.write(
-      JSON.stringify({
-        epic: { id: epicData.id, title: epicData.title },
-        defaultBranch,
-        route: result.route,
-        reasons: result.reasons,
-        missing: result.missing,
-        blocked: result.blocked,
-        unblocksOnMerge: result.unblocksOnMerge,
-        crossEpicEdges
-      }) + "\n"
-    );
-    if (plan.cycles.length > 0) {
-      throw new Error(`dependency cycle detected among tickets: ${plan.cycles.join(", ")}`);
-    }
-  });
-  epic.command("link-initiative").exitOverride().argument("<epicId>", "epic id").requiredOption("--initiative <id>", "initiative (milestone) id").action(async (epicId, opts) => {
-    await getTracker().linkEpicToInitiative(epicId, opts.initiative);
-  });
-  return epic;
-}
+    return { waves, cycles };
+  }
+};
 
-// src/tasks/commands/initiative/command.ts
-function createInitiativeCommand(getTracker, getPrHost, getConfig = () => ({})) {
-  const initiative = new Command("initiative");
-  initiative.command("create").exitOverride().requiredOption("--title <title>", "initiative title").option("--body <body>", "initiative body (or use --body-file)").option("--body-file <path>", "read the initiative body from a file").option("--allow-local-paths", "accept machine-local paths in the body (see docs/layered-body-format.md)").action(async (opts) => {
-    const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
-    portableContextGuard.assertPortable(body, { allowLocalPaths: opts.allowLocalPaths });
-    const result = await getTracker().createInitiative({
-      title: opts.title,
-      body
-    });
-    process.stdout.write(JSON.stringify(result) + "\n");
-  });
-  initiative.command("edit").exitOverride().argument("<id>", "initiative id").option("--body <body>", "new initiative body (or use --body-file)").option("--body-file <path>", "read the new initiative body from a file").option("--title <title>", "new initiative title (unchanged if omitted)").option("--allow-local-paths", "accept machine-local paths in the body (see docs/layered-body-format.md)").action(async (id, opts) => {
-    const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
-    portableContextGuard.assertPortable(body, { allowLocalPaths: opts.allowLocalPaths });
-    const result = await getTracker().updateInitiativeDescription(id, {
-      body,
-      ...opts.title !== void 0 ? { title: opts.title } : {}
-    });
-    process.stdout.write(JSON.stringify(result) + "\n");
-  });
-  initiative.command("get").exitOverride().argument("<id>", "initiative id").action(async (id) => {
-    const result = await getTracker().getInitiative(id);
-    process.stdout.write(JSON.stringify(result) + "\n");
-  });
-  initiative.command("plan").exitOverride().argument("<id>", "initiative id").action(async (id) => {
-    const tracker = getTracker();
-    const initiativeData = await tracker.getInitiative(id);
-    const epics = await Promise.all(initiativeData.epics.map((e) => tracker.getEpic(e.id)));
-    const planner = new DependencyPlannerService();
-    const plan = planner.plan(
-      epics.flatMap(
-        (e) => e.childIssues.map((ticket) => ({
-          id: ticket.id,
-          status: ticket.status,
-          blockedBy: ticket.blockedBy,
-          epicId: e.id
-        }))
-      )
-    );
-    const edges = new CrossEpicEdgeFinder(tracker);
-    const crossEpicEdges = await edges.find(epics);
-    for (const warning of edges.warnings(crossEpicEdges)) process.stderr.write(warning + "\n");
-    process.stdout.write(JSON.stringify({ ...plan, crossEpicEdges }) + "\n");
-    if (plan.cycles.length > 0) {
-      throw new Error(`dependency cycle detected among tickets: ${plan.cycles.join(", ")}`);
+// src/tasks/review-plan/review-plan.ts
+var maxSimplePrCount = 4;
+var ReviewRouteClassifier = class {
+  classify(blocked, defaultBranch) {
+    const reasons = [];
+    const pullRequests = blocked.flatMap((entry) => entry.pr === null ? [] : [entry.pr]);
+    const waveCount = new Set(blocked.map((entry) => entry.wave)).size;
+    if (waveCount > 1) {
+      reasons.push(`spans more than one wave (${waveCount} waves)`);
     }
-  });
-  initiative.command("review-plan").exitOverride().argument("<id>", "initiative id").action(async (id) => {
-    const tracker = getTracker();
-    const initiativeData = await tracker.getInitiative(id);
-    const epics = await Promise.all(initiativeData.epics.map((e) => tracker.getEpic(e.id)));
-    const tickets = epics.flatMap((e) => e.childIssues);
-    const plan = new DependencyPlannerService().plan(
-      tickets.map((ticket) => ({
-        id: ticket.id,
-        status: ticket.status,
-        blockedBy: ticket.blockedBy
-      }))
-    );
-    const { inReviewStatus } = getConfig();
-    const reviewPlan = new ReviewPlanService();
-    const inReviewIds = reviewPlan.inReviewTicketIds(plan, inReviewStatus);
-    const host = getPrHost();
-    const pullRequests = inReviewIds.length > 0 ? await host.listOpenPullRequestsForTickets(inReviewIds) : [];
-    const defaultBranch = await host.defaultBranch();
-    const result = reviewPlan.build({ plan, tickets, pullRequests, defaultBranch, inReviewStatus });
-    const edges = new CrossEpicEdgeFinder(tracker);
-    const crossEpicEdges = await edges.find(epics);
-    for (const warning of edges.warnings(crossEpicEdges)) process.stderr.write(warning + "\n");
-    process.stdout.write(
-      JSON.stringify({
-        initiative: { id: initiativeData.id, title: initiativeData.title },
-        defaultBranch,
-        route: result.route,
-        reasons: result.reasons,
-        missing: result.missing,
-        blocked: result.blocked,
-        unblocksOnMerge: result.unblocksOnMerge,
-        crossEpicEdges
-      }) + "\n"
-    );
-    if (plan.cycles.length > 0) {
-      throw new Error(`dependency cycle detected among tickets: ${plan.cycles.join(", ")}`);
+    const stacked = pullRequests.filter((pr) => pr.baseRefName !== defaultBranch);
+    if (stacked.length > 0) {
+      const bases = [...new Set(stacked.map((pr) => pr.baseRefName))].join(", ");
+      reasons.push(`stacked base: a PR targets ${bases} instead of ${defaultBranch}`);
     }
-  });
-  return initiative;
-}
+    if (pullRequests.length > maxSimplePrCount) {
+      reasons.push(`more than ${maxSimplePrCount} PRs (${pullRequests.length} PRs)`);
+    }
+    return { route: reasons.length > 0 ? "complex" : "simple", reasons };
+  }
+};
+var ReviewPlanService = class {
+  classifier = new ReviewRouteClassifier();
+  /** Tracker statuses are display names on some trackers, so "In Review" and "in-review" must match. */
+  normalizeStatus(status) {
+    return status.trim().toLowerCase().replace(/[\s-]+/g, "-");
+  }
+  isInReview(status, inReviewStatus) {
+    const normalized = this.normalizeStatus(status);
+    return normalized === "in-review" || inReviewStatus !== void 0 && normalized === this.normalizeStatus(inReviewStatus);
+  }
+  /** Ids of open tickets in review, in plan order. */
+  inReviewTicketIds(plan, inReviewStatus) {
+    return plan.waves.flat().filter((t) => this.isInReview(t.status, inReviewStatus)).map((t) => t.id);
+  }
+  build(input2) {
+    const titles = new Map(input2.tickets.map((ticket) => [ticket.id, ticket.title]));
+    const blocked = [];
+    const missingPrReasons = [];
+    input2.plan.waves.forEach((wave, waveIndex) => {
+      for (const planned of wave) {
+        if (!this.isInReview(planned.status, input2.inReviewStatus)) continue;
+        const found = input2.pullRequests.find((pr) => pr.ticket === planned.id);
+        blocked.push({
+          ticketId: planned.id,
+          title: titles.get(planned.id) ?? "",
+          wave: waveIndex,
+          blockedBy: planned.blockedBy,
+          pr: found === void 0 ? null : { number: found.number, url: found.url, headRefName: found.headRefName, baseRefName: found.baseRefName }
+        });
+        if (found === void 0) missingPrReasons.push(`ticket ${planned.id} is in review but has no open PR`);
+      }
+    });
+    const missing = blocked.filter((entry) => entry.pr === null).map((entry) => entry.ticketId);
+    if (missing.length > 0) {
+      return {
+        route: "incomplete",
+        reasons: missingPrReasons,
+        missing,
+        blocked,
+        unblocksOnMerge: this.unblockedOnMerge(input2.plan, blocked)
+      };
+    }
+    const decision = this.classifier.classify(blocked, input2.defaultBranch);
+    return {
+      route: decision.route,
+      reasons: decision.reasons,
+      missing,
+      blocked,
+      unblocksOnMerge: this.unblockedOnMerge(input2.plan, blocked)
+    };
+  }
+  unblockedOnMerge(plan, blocked) {
+    const blockedIds = new Set(blocked.map((entry) => entry.ticketId));
+    const openIds = new Set(plan.waves.flat().map((t) => t.id));
+    return plan.waves.flat().filter((t) => !blockedIds.has(t.id)).filter((t) => {
+      const openBlockers = t.blockedBy.filter((id) => openIds.has(id));
+      return openBlockers.some((id) => blockedIds.has(id)) && openBlockers.every((id) => blockedIds.has(id));
+    }).map((t) => t.id);
+  }
+};
 
 // src/tasks/body-sections/body-sections.ts
 var headingLine2 = /^##\s+(.+?)\s*$/;
@@ -52549,6 +52390,456 @@ var PrecedenceBodyFormatDetector = class {
 };
 var bodyFormatDetector = new PrecedenceBodyFormatDetector();
 
+// src/operations/tracker-read-operations.ts
+var propsSchema = external_exports.object({
+  getTracker: external_exports.custom((value) => typeof value === "function"),
+  getPrHost: external_exports.custom((value) => typeof value === "function").optional(),
+  getConfig: external_exports.custom((value) => typeof value === "function").optional()
+});
+var sectionNames = [
+  "problem-statement",
+  "solution",
+  "acceptance-criteria",
+  "technical-writeup",
+  "guided-walkthrough",
+  "symptom",
+  "environment",
+  "steps-to-reproduce",
+  "expected-vs-actual",
+  "root-cause",
+  "fixed-when",
+  "evidence",
+  "reproduction-notes"
+];
+var sectionNameSet = new Set(sectionNames);
+var sectionName = external_exports.string().refine(
+  (value) => sectionNameSet.has(value),
+  `unknown section \u2014 expected one of: ${sectionNames.join(", ")}`
+);
+var entityInput = external_exports.strictObject({ id: external_exports.string().min(1) });
+var ticketInput = entityInput.extend({
+  section: sectionName.optional()
+});
+var ticketResult = TicketSchema.passthrough();
+var epicResult = EpicSchema.extend({ childIssues: external_exports.array(ticketResult) }).passthrough();
+var initiativeResult = InitiativeSchema.extend({
+  epics: external_exports.array(external_exports.object({ id: external_exports.string(), title: external_exports.string() }).passthrough())
+}).passthrough();
+var tddResult = TechnicalDesignSchema.passthrough();
+var sectionResult = external_exports.object({
+  id: external_exports.string(),
+  section: external_exports.string(),
+  format: external_exports.enum(["layered-body", "bug-report"]),
+  markdown: external_exports.string().nullable(),
+  items: external_exports.array(external_exports.object({ text: external_exports.string(), done: external_exports.boolean() })).optional()
+});
+var edgeResult = external_exports.object({
+  ticket: external_exports.string(),
+  ticketEpic: external_exports.string(),
+  blockedBy: external_exports.string(),
+  blockerEpic: external_exports.string().nullable(),
+  justification: external_exports.string().nullable()
+});
+var planTicket = external_exports.object({
+  id: external_exports.string(),
+  status: external_exports.string(),
+  blockedBy: external_exports.array(external_exports.string()),
+  epicId: external_exports.string().optional()
+});
+var dependencyPlan = external_exports.object({
+  waves: external_exports.array(external_exports.array(planTicket)),
+  cycles: external_exports.array(external_exports.string())
+});
+var TrackerDependencyPlanSchema = dependencyPlan.extend({
+  crossEpicEdges: external_exports.array(edgeResult),
+  warnings: external_exports.array(external_exports.string())
+});
+var TrackerReviewPlanSchema = external_exports.object({
+  epic: external_exports.object({ id: external_exports.string(), title: external_exports.string() }).optional(),
+  initiative: external_exports.object({ id: external_exports.string(), title: external_exports.string() }).optional(),
+  defaultBranch: external_exports.string(),
+  route: external_exports.enum(["simple", "complex", "incomplete"]),
+  reasons: external_exports.array(external_exports.string()),
+  missing: external_exports.array(external_exports.string()),
+  blocked: external_exports.array(
+    external_exports.object({
+      ticketId: external_exports.string(),
+      title: external_exports.string(),
+      wave: external_exports.number(),
+      blockedBy: external_exports.array(external_exports.string()),
+      pr: external_exports.object({
+        number: external_exports.number(),
+        url: external_exports.string(),
+        headRefName: external_exports.string(),
+        baseRefName: external_exports.string()
+      }).nullable()
+    })
+  ),
+  unblocksOnMerge: external_exports.array(external_exports.string()),
+  crossEpicEdges: external_exports.array(edgeResult),
+  warnings: external_exports.array(external_exports.string()),
+  cycles: external_exports.array(external_exports.string())
+});
+var DefaultTrackerReadOperations = class {
+  props;
+  constructor(props) {
+    this.props = propsSchema.parse(props);
+  }
+  operations() {
+    return [
+      this.descriptor(
+        "ticket-get",
+        "Read a ticket and optionally select one body section.",
+        ["read", "network"],
+        ["ticket", "get"],
+        ticketInput,
+        external_exports.union([ticketResult, sectionResult]),
+        (input2) => this.getTicket(input2)
+      ),
+      this.descriptor(
+        "ticket-transitions",
+        "List available status transitions for a ticket.",
+        ["read", "network"],
+        ["ticket", "transitions"],
+        entityInput,
+        external_exports.object({ id: external_exports.string(), transitions: external_exports.array(external_exports.string()) }),
+        async ({ id }) => ({ id, transitions: await this.props.getTracker().listTransitions(id) })
+      ),
+      this.descriptor(
+        "users-get",
+        "List users available for tracker assignment.",
+        ["read", "network"],
+        ["users", "get"],
+        external_exports.strictObject({}),
+        external_exports.array(TrackerUserSchema.passthrough()),
+        () => this.props.getTracker().getUsers()
+      ),
+      this.descriptor(
+        "tdd-get",
+        "Read a technical design by its tracker identifier.",
+        ["read", "network"],
+        ["tdd", "get"],
+        entityInput,
+        tddResult,
+        ({ id }) => this.props.getTracker().getTechnicalDesign(id)
+      ),
+      this.descriptor(
+        "epic-get",
+        "Read an epic and its tracker fields.",
+        ["read", "network"],
+        ["epic", "get"],
+        entityInput,
+        epicResult,
+        ({ id }) => this.props.getTracker().getEpic(id)
+      ),
+      this.descriptor(
+        "initiative-get",
+        "Read an initiative and its linked epics.",
+        ["read", "network"],
+        ["initiative", "get"],
+        entityInput,
+        initiativeResult,
+        ({ id }) => this.props.getTracker().getInitiative(id)
+      ),
+      this.descriptor(
+        "epic-plan",
+        "Plan dependency waves and cross-epic edges for an epic.",
+        ["read", "network", "process"],
+        ["epic", "plan"],
+        entityInput,
+        TrackerDependencyPlanSchema,
+        ({ id }) => this.planEpic(id)
+      ),
+      this.descriptor(
+        "epic-review-plan",
+        "Build the review hand-off for an epic's open pull requests.",
+        ["read", "network", "process"],
+        ["epic", "review-plan"],
+        entityInput,
+        TrackerReviewPlanSchema,
+        ({ id }) => this.reviewEpic(id)
+      ),
+      this.descriptor(
+        "initiative-plan",
+        "Plan dependency waves across every epic in an initiative.",
+        ["read", "network", "process"],
+        ["initiative", "plan"],
+        entityInput,
+        TrackerDependencyPlanSchema,
+        ({ id }) => this.planInitiative(id)
+      ),
+      this.descriptor(
+        "initiative-review-plan",
+        "Build the review hand-off across an initiative's epics.",
+        ["read", "network", "process"],
+        ["initiative", "review-plan"],
+        entityInput,
+        TrackerReviewPlanSchema,
+        ({ id }) => this.reviewInitiative(id)
+      )
+    ];
+  }
+  registry() {
+    return new MapOperationRegistry({
+      operations: this.operations(),
+      policy: new LaunchOperationAccessPolicy({ allowedEffects: ["read", "network", "process"] })
+    });
+  }
+  descriptor(id, description, effects, path3, inputSchema, outputSchema, handler2) {
+    return {
+      id,
+      description,
+      effects,
+      cli: { path: path3, aliases: [] },
+      inputSchema,
+      outputSchema,
+      handler: handler2
+    };
+  }
+  async getTicket(input2) {
+    const ticket = await this.props.getTracker().getTicket(input2.id);
+    if (input2.section === void 0) return ticket;
+    const format = bodyFormatDetector.detect({
+      body: ticket.body,
+      metadata: ticket.metadata,
+      issueType: ticket.issueType
+    });
+    return sectionSelector.select(
+      input2.id,
+      blobSectionSource.read({ body: ticket.body, format }),
+      input2.section
+    );
+  }
+  async planEpic(id) {
+    const tracker = this.props.getTracker();
+    const epic = await tracker.getEpic(id);
+    const plan = new DependencyPlannerService().plan(this.plannerTickets(epic.childIssues));
+    const edges = new CrossEpicEdgeFinder(tracker);
+    const crossEpicEdges = await edges.find([epic]);
+    return { ...plan, crossEpicEdges, warnings: edges.warnings(crossEpicEdges) };
+  }
+  async planInitiative(id) {
+    const tracker = this.props.getTracker();
+    const initiative = await tracker.getInitiative(id);
+    const epics = await Promise.all(initiative.epics.map((epic) => tracker.getEpic(epic.id)));
+    const tickets = epics.flatMap(
+      (epic) => epic.childIssues.map((ticket) => ({ ticket, epicId: epic.id }))
+    );
+    const plan = new DependencyPlannerService().plan(
+      tickets.map(({ ticket, epicId }) => ({
+        id: ticket.id,
+        status: ticket.status,
+        blockedBy: ticket.blockedBy,
+        epicId
+      }))
+    );
+    const edges = new CrossEpicEdgeFinder(tracker);
+    const crossEpicEdges = await edges.find(epics);
+    return { ...plan, crossEpicEdges, warnings: edges.warnings(crossEpicEdges) };
+  }
+  async reviewEpic(id) {
+    const tracker = this.props.getTracker();
+    const epic = await tracker.getEpic(id);
+    return this.reviewPlan({ epic, epics: [epic] });
+  }
+  async reviewInitiative(id) {
+    const tracker = this.props.getTracker();
+    const initiative = await tracker.getInitiative(id);
+    const epics = await Promise.all(initiative.epics.map((epic) => tracker.getEpic(epic.id)));
+    return this.reviewPlan({ initiative, epics });
+  }
+  async reviewPlan(input2) {
+    const tracker = this.props.getTracker();
+    const tickets = input2.epics.flatMap((epic) => epic.childIssues);
+    const plan = new DependencyPlannerService().plan(this.plannerTickets(tickets));
+    const { inReviewStatus } = this.props.getConfig?.() ?? {};
+    const service = new ReviewPlanService();
+    const ids = service.inReviewTicketIds(plan, inReviewStatus);
+    const host = this.props.getPrHost?.();
+    if (host === void 0)
+      throw new PullRequestHostUnavailableError(
+        "pull request host is unavailable for review planning"
+      );
+    const pullRequests = ids.length > 0 ? await host.listOpenPullRequestsForTickets(ids) : [];
+    const defaultBranch = await host.defaultBranch();
+    const result = service.build({ plan, tickets, pullRequests, defaultBranch, inReviewStatus });
+    const edges = new CrossEpicEdgeFinder(tracker);
+    const crossEpicEdges = await edges.find(input2.epics);
+    return {
+      ...input2.epic === void 0 ? {} : { epic: { id: input2.epic.id, title: input2.epic.title } },
+      ...input2.initiative === void 0 ? {} : { initiative: input2.initiative },
+      defaultBranch,
+      ...result,
+      crossEpicEdges,
+      warnings: edges.warnings(crossEpicEdges),
+      cycles: plan.cycles
+    };
+  }
+  plannerTickets(tickets) {
+    return tickets.map((ticket) => ({
+      id: ticket.id,
+      status: ticket.status,
+      blockedBy: ticket.blockedBy
+    }));
+  }
+};
+var PullRequestHostUnavailableError = class extends Error {
+  name = "PullRequestHostUnavailableError";
+};
+
+// src/tasks/commands/epic/command.ts
+function createEpicCommand(getTracker, getPrHost, getConfig = () => ({}), registry2) {
+  const epic = new Command("epic");
+  const operations = new RegistryCommandOperationClient({
+    registry: registry2 ?? new DefaultTrackerReadOperations({ getTracker, getPrHost, getConfig }).registry()
+  });
+  epic.command("create").exitOverride().requiredOption("--title <title>", "epic title").option("--body <body>", "epic body (or use --body-file)").option("--body-file <path>", "read the epic body from a file").option("--labels <labels>", "comma-separated labels").option(
+    "--allow-local-paths",
+    "accept machine-local paths in the body (see docs/layered-body-format.md)"
+  ).action(async (opts) => {
+    const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
+    portableContextGuard.assertPortable(body, { allowLocalPaths: opts.allowLocalPaths });
+    const result = await getTracker().createEpic({
+      title: opts.title,
+      body,
+      labels: opts.labels !== void 0 ? opts.labels.split(",") : []
+    });
+    process.stdout.write(JSON.stringify(result) + "\n");
+  });
+  epic.command("edit").exitOverride().argument("<id>", "epic id").option("--body <body>", "new epic body (or use --body-file)").option("--body-file <path>", "read the new epic body from a file").option("--title <title>", "new epic title (unchanged if omitted)").option("--labels <labels>", "comma-separated labels replacing existing free-form labels").option(
+    "--allow-local-paths",
+    "accept machine-local paths in the body (see docs/layered-body-format.md)"
+  ).action(async (id, opts) => {
+    const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
+    portableContextGuard.assertPortable(body, { allowLocalPaths: opts.allowLocalPaths });
+    const result = await getTracker().updateEpicDescription(id, {
+      body,
+      ...opts.title !== void 0 ? { title: opts.title } : {},
+      ...opts.labels !== void 0 ? { labels: opts.labels.split(",") } : {}
+    });
+    process.stdout.write(JSON.stringify(result) + "\n");
+  });
+  epic.command("get").exitOverride().argument("<id>", "epic id").action(async (id) => {
+    const result = await operations.invoke("epic-get", { id }, external_exports.unknown());
+    process.stdout.write(JSON.stringify(result) + "\n");
+  });
+  epic.command("plan").exitOverride().argument("<id>", "epic id").action(async (id) => {
+    const result = await operations.invoke("epic-plan", { id }, TrackerDependencyPlanSchema);
+    for (const warning of result.warnings) process.stderr.write(warning + "\n");
+    process.stdout.write(
+      JSON.stringify({
+        waves: result.waves,
+        cycles: result.cycles,
+        crossEpicEdges: result.crossEpicEdges
+      }) + "\n"
+    );
+    if (result.cycles.length > 0) {
+      throw new Error(`dependency cycle detected among tickets: ${result.cycles.join(", ")}`);
+    }
+  });
+  epic.command("review-plan").exitOverride().argument("<id>", "epic id").action(async (id) => {
+    const result = await operations.invoke("epic-review-plan", { id }, TrackerReviewPlanSchema);
+    for (const warning of result.warnings) process.stderr.write(warning + "\n");
+    process.stdout.write(
+      JSON.stringify({
+        epic: result.epic,
+        defaultBranch: result.defaultBranch,
+        route: result.route,
+        reasons: result.reasons,
+        missing: result.missing,
+        blocked: result.blocked,
+        unblocksOnMerge: result.unblocksOnMerge,
+        crossEpicEdges: result.crossEpicEdges
+      }) + "\n"
+    );
+    if (result.cycles.length > 0) {
+      throw new Error(`dependency cycle detected among tickets: ${result.cycles.join(", ")}`);
+    }
+  });
+  epic.command("link-initiative").exitOverride().argument("<epicId>", "epic id").requiredOption("--initiative <id>", "initiative (milestone) id").action(async (epicId, opts) => {
+    await getTracker().linkEpicToInitiative(epicId, opts.initiative);
+  });
+  return epic;
+}
+
+// src/tasks/commands/initiative/command.ts
+function createInitiativeCommand(getTracker, getPrHost, getConfig = () => ({}), registry2) {
+  const initiative = new Command("initiative");
+  const operations = new RegistryCommandOperationClient({
+    registry: registry2 ?? new DefaultTrackerReadOperations({ getTracker, getPrHost, getConfig }).registry()
+  });
+  initiative.command("create").exitOverride().requiredOption("--title <title>", "initiative title").option("--body <body>", "initiative body (or use --body-file)").option("--body-file <path>", "read the initiative body from a file").option(
+    "--allow-local-paths",
+    "accept machine-local paths in the body (see docs/layered-body-format.md)"
+  ).action(async (opts) => {
+    const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
+    portableContextGuard.assertPortable(body, { allowLocalPaths: opts.allowLocalPaths });
+    const result = await getTracker().createInitiative({
+      title: opts.title,
+      body
+    });
+    process.stdout.write(JSON.stringify(result) + "\n");
+  });
+  initiative.command("edit").exitOverride().argument("<id>", "initiative id").option("--body <body>", "new initiative body (or use --body-file)").option("--body-file <path>", "read the new initiative body from a file").option("--title <title>", "new initiative title (unchanged if omitted)").option(
+    "--allow-local-paths",
+    "accept machine-local paths in the body (see docs/layered-body-format.md)"
+  ).action(async (id, opts) => {
+    const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
+    portableContextGuard.assertPortable(body, { allowLocalPaths: opts.allowLocalPaths });
+    const result = await getTracker().updateInitiativeDescription(id, {
+      body,
+      ...opts.title !== void 0 ? { title: opts.title } : {}
+    });
+    process.stdout.write(JSON.stringify(result) + "\n");
+  });
+  initiative.command("get").exitOverride().argument("<id>", "initiative id").action(async (id) => {
+    const result = await operations.invoke("initiative-get", { id }, external_exports.unknown());
+    process.stdout.write(JSON.stringify(result) + "\n");
+  });
+  initiative.command("plan").exitOverride().argument("<id>", "initiative id").action(async (id) => {
+    const result = await operations.invoke(
+      "initiative-plan",
+      { id },
+      TrackerDependencyPlanSchema
+    );
+    for (const warning of result.warnings) process.stderr.write(warning + "\n");
+    process.stdout.write(
+      JSON.stringify({
+        waves: result.waves,
+        cycles: result.cycles,
+        crossEpicEdges: result.crossEpicEdges
+      }) + "\n"
+    );
+    if (result.cycles.length > 0) {
+      throw new Error(`dependency cycle detected among tickets: ${result.cycles.join(", ")}`);
+    }
+  });
+  initiative.command("review-plan").exitOverride().argument("<id>", "initiative id").action(async (id) => {
+    const result = await operations.invoke(
+      "initiative-review-plan",
+      { id },
+      TrackerReviewPlanSchema
+    );
+    for (const warning of result.warnings) process.stderr.write(warning + "\n");
+    process.stdout.write(
+      JSON.stringify({
+        initiative: result.initiative,
+        defaultBranch: result.defaultBranch,
+        route: result.route,
+        reasons: result.reasons,
+        missing: result.missing,
+        blocked: result.blocked,
+        unblocksOnMerge: result.unblocksOnMerge,
+        crossEpicEdges: result.crossEpicEdges
+      }) + "\n"
+    );
+    if (result.cycles.length > 0) {
+      throw new Error(`dependency cycle detected among tickets: ${result.cycles.join(", ")}`);
+    }
+  });
+  return initiative;
+}
+
 // src/tasks/evidence/evidence.ts
 import { basename as basename3 } from "node:path/posix";
 var mediaReference = /(!?)\[([^\]]*)\]\(\s*<?([^\s()<>]+)>?(?:\s+"[^"]*")?\s*\)/g;
@@ -52674,9 +52965,15 @@ var TrackerEvidenceService = class {
 };
 
 // src/tasks/commands/ticket/command.ts
-function createTicketCommand(getTracker) {
+function createTicketCommand(getTracker, registry2) {
   const ticket = new Command("ticket");
-  ticket.command("create").exitOverride().requiredOption("--title <title>", "ticket title").option("--body <body>", "ticket body (or use --body-file)").option("--body-file <path>", "read the ticket body from a file").option("--epic-id <id>", "parent epic id; omit to create a standalone ticket").option("--labels <labels>", "comma-separated labels").option("--assignee <user>", "assignee login").option("--allow-local-paths", "accept machine-local paths in the body (see docs/layered-body-format.md)").action(async (opts) => {
+  const operations = new RegistryCommandOperationClient({
+    registry: registry2 ?? new DefaultTrackerReadOperations({ getTracker }).registry()
+  });
+  ticket.command("create").exitOverride().requiredOption("--title <title>", "ticket title").option("--body <body>", "ticket body (or use --body-file)").option("--body-file <path>", "read the ticket body from a file").option("--epic-id <id>", "parent epic id; omit to create a standalone ticket").option("--labels <labels>", "comma-separated labels").option("--assignee <user>", "assignee login").option(
+    "--allow-local-paths",
+    "accept machine-local paths in the body (see docs/layered-body-format.md)"
+  ).action(async (opts) => {
     const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
     portableContextGuard.assertPortable(body, { allowLocalPaths: opts.allowLocalPaths });
     const input2 = {
@@ -52689,10 +52986,17 @@ function createTicketCommand(getTracker) {
     const result = await getTracker().createTicket(input2);
     process.stdout.write(JSON.stringify(result) + "\n");
   });
-  ticket.command("edit").exitOverride().argument("<id>", "ticket id").option("--body <body>", "new ticket body (or use --body-file)").option("--body-file <path>", "read the new ticket body from a file").option("--title <title>", "new ticket title (unchanged if omitted)").option("--labels <labels>", "comma-separated labels replacing existing free-form labels").option("--attach <spec>", "file to attach, as <path>#<caption> (repeatable)", collect, []).option("--allow-local-paths", "accept machine-local paths in the body (see docs/layered-body-format.md)").action(async (id, opts) => {
+  ticket.command("edit").exitOverride().argument("<id>", "ticket id").option("--body <body>", "new ticket body (or use --body-file)").option("--body-file <path>", "read the new ticket body from a file").option("--title <title>", "new ticket title (unchanged if omitted)").option("--labels <labels>", "comma-separated labels replacing existing free-form labels").option("--attach <spec>", "file to attach, as <path>#<caption> (repeatable)", collect, []).option(
+    "--allow-local-paths",
+    "accept machine-local paths in the body (see docs/layered-body-format.md)"
+  ).action(async (id, opts) => {
     const tracker = getTracker();
     const raw = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
-    const body = opts.attach.length === 0 ? raw : (await new TrackerEvidenceService({ tracker }).attach({ ticketId: id, body: raw, specs: opts.attach })).body;
+    const body = opts.attach.length === 0 ? raw : (await new TrackerEvidenceService({ tracker }).attach({
+      ticketId: id,
+      body: raw,
+      specs: opts.attach
+    })).body;
     portableContextGuard.assertPortable(body, { allowLocalPaths: opts.allowLocalPaths });
     const result = await tracker.updateTicketDescription(id, {
       body,
@@ -52702,18 +53006,12 @@ function createTicketCommand(getTracker) {
     process.stdout.write(JSON.stringify(result) + "\n");
   });
   ticket.command("get").exitOverride().argument("<id>", "ticket id").option("--section <name>", "extract a single body section (e.g. acceptance-criteria)").action(async (id, opts) => {
-    const result = await getTracker().getTicket(id);
-    if (opts.section === void 0) {
-      process.stdout.write(JSON.stringify(result) + "\n");
-      return;
-    }
-    const format = bodyFormatDetector.detect({
-      body: result.body,
-      metadata: result.metadata,
-      issueType: result.issueType
-    });
-    const sections = blobSectionSource.read({ body: result.body, format });
-    process.stdout.write(JSON.stringify(sectionSelector.select(id, sections, opts.section)) + "\n");
+    const result = await operations.invoke(
+      "ticket-get",
+      { id, ...opts.section === void 0 ? {} : { section: opts.section } },
+      external_exports.unknown()
+    );
+    process.stdout.write(JSON.stringify(result) + "\n");
   });
   ticket.command("block").exitOverride().argument("<id>", "ticket id to block").requiredOption("--by <blockerId>", "id of the ticket that must close first").option(
     "--cross-epic-reason <why>",
@@ -52735,13 +53033,17 @@ function createTicketCommand(getTracker) {
     process.stdout.write(JSON.stringify({ id, status: opts.to }) + "\n");
   });
   ticket.command("transitions").exitOverride().argument("<id>", "ticket id").action(async (id) => {
-    const transitions = await getTracker().listTransitions(id);
-    process.stdout.write(JSON.stringify({ id, transitions }) + "\n");
+    const result = await operations.invoke("ticket-transitions", { id }, external_exports.unknown());
+    process.stdout.write(JSON.stringify(result) + "\n");
   });
   ticket.command("comment").exitOverride().argument("<id>", "ticket id").option("--body <body>", "comment body (or use --body-file)").option("--body-file <path>", "read the comment body from a file").option("--attach <spec>", "file to attach, as <path>#<caption> (repeatable)", collect, []).action(async (id, opts) => {
     const tracker = getTracker();
     const raw = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
-    const body = opts.attach.length === 0 ? raw : (await new TrackerEvidenceService({ tracker }).attach({ ticketId: id, body: raw, specs: opts.attach })).body;
+    const body = opts.attach.length === 0 ? raw : (await new TrackerEvidenceService({ tracker }).attach({
+      ticketId: id,
+      body: raw,
+      specs: opts.attach
+    })).body;
     const comment = await tracker.addComment(id, body);
     process.stdout.write(JSON.stringify(comment) + "\n");
   });
@@ -52758,9 +53060,15 @@ function createTicketCommand(getTracker) {
 }
 
 // src/tasks/commands/tdd/command.ts
-function createTddCommand(getTracker) {
+function createTddCommand(getTracker, registry2) {
   const tdd = new Command("tdd");
-  tdd.command("create").exitOverride().requiredOption("--title <title>", "tdd title").option("--body <body>", "tdd body (or use --body-file)").option("--body-file <path>", "read the tdd body from a file").requiredOption("--epic-id <id>", "parent epic id").option("--allow-local-paths", "accept machine-local paths in the body (see docs/layered-body-format.md)").action(async (opts) => {
+  const operations = new RegistryCommandOperationClient({
+    registry: registry2 ?? new DefaultTrackerReadOperations({ getTracker }).registry()
+  });
+  tdd.command("create").exitOverride().requiredOption("--title <title>", "tdd title").option("--body <body>", "tdd body (or use --body-file)").option("--body-file <path>", "read the tdd body from a file").requiredOption("--epic-id <id>", "parent epic id").option(
+    "--allow-local-paths",
+    "accept machine-local paths in the body (see docs/layered-body-format.md)"
+  ).action(async (opts) => {
     const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
     portableContextGuard.assertPortable(body, { allowLocalPaths: opts.allowLocalPaths });
     const result = await getTracker().createTechnicalDesign({
@@ -52771,17 +53079,20 @@ function createTddCommand(getTracker) {
     process.stdout.write(JSON.stringify(result) + "\n");
   });
   tdd.command("get").exitOverride().argument("<id>", "tdd id").action(async (id) => {
-    const result = await getTracker().getTechnicalDesign(id);
+    const result = await operations.invoke("tdd-get", { id }, external_exports.unknown());
     process.stdout.write(JSON.stringify(result) + "\n");
   });
   return tdd;
 }
 
 // src/tasks/commands/users/command.ts
-function createUsersCommand(getTracker) {
+function createUsersCommand(getTracker, registry2) {
   const users = new Command("users");
+  const operations = new RegistryCommandOperationClient({
+    registry: registry2 ?? new DefaultTrackerReadOperations({ getTracker }).registry()
+  });
   users.command("get").exitOverride().action(async () => {
-    const result = await getTracker().getUsers();
+    const result = await operations.invoke("users-get", {}, external_exports.unknown());
     process.stdout.write(JSON.stringify(result) + "\n");
   });
   return users;
@@ -53491,32 +53802,6 @@ function createHookCommand(getHandler = () => new PreBashHook(), readStdin = () 
 
 // src/git/commands/commit/command.ts
 import { readFileSync as readFileSync19 } from "node:fs";
-
-// src/operations/command-operation-client.ts
-var CommandOperationClientPropsSchema = external_exports.object({
-  registry: external_exports.custom(
-    (value) => typeof value === "object" && value !== null && "invoke" in value
-  )
-});
-var RegistryCommandOperationClient = class {
-  registry;
-  constructor(props) {
-    this.registry = CommandOperationClientPropsSchema.parse(props).registry;
-  }
-  async invoke(id, input2, outputSchema) {
-    const result = await this.registry.invoke(id, input2);
-    if (result.status !== "success") {
-      throw new OperationCliError({
-        operationId: id,
-        errorName: result.error.name,
-        message: result.error.message
-      });
-    }
-    return outputSchema.parse(result.data);
-  }
-};
-
-// src/git/commands/commit/command.ts
 function collect2(value, previous3) {
   return [...previous3, value];
 }
@@ -53813,22 +54098,12 @@ var ManifestCliRouteCoverage = class _ManifestCliRouteCoverage {
   }
 };
 var pendingRoutes = [
-  "ticket get",
-  "ticket transitions",
-  "users get",
-  "tdd get",
   "tdd create",
-  "epic get",
   "epic create",
   "epic edit",
-  "epic plan",
-  "epic review-plan",
   "epic link-initiative",
-  "initiative get",
   "initiative create",
   "initiative edit",
-  "initiative plan",
-  "initiative review-plan",
   "ticket create",
   "ticket edit",
   "ticket block",
@@ -53892,6 +54167,16 @@ var cliRouteCoverage = new ManifestCliRouteCoverage({
   entries: [
     { status: "supported", route: { path: ["doc"], aliases: [] }, operationId: "doc" },
     ...[
+      ["ticket get", "ticket-get"],
+      ["ticket transitions", "ticket-transitions"],
+      ["users get", "users-get"],
+      ["tdd get", "tdd-get"],
+      ["epic get", "epic-get"],
+      ["epic plan", "epic-plan"],
+      ["epic review-plan", "epic-review-plan"],
+      ["initiative get", "initiative-get"],
+      ["initiative plan", "initiative-plan"],
+      ["initiative review-plan", "initiative-review-plan"],
       ["charter", "charter"],
       ["competencies", "competencies"],
       ["rfc dir", "rfc-dir"],
@@ -53948,12 +54233,7 @@ function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = () => cr
   const tracker = () => getTracker(overrideTracker);
   const config2 = () => getConfig(overrideTracker);
   const prHost = () => getPrHost(overrideTracker);
-  program2.addCommand(createEpicCommand(tracker, prHost, config2));
-  program2.addCommand(createInitiativeCommand(tracker, prHost, config2));
-  program2.addCommand(createTicketCommand(tracker));
-  program2.addCommand(createTddCommand(tracker));
   program2.addCommand(createPrCommand(prHost));
-  program2.addCommand(createUsersCommand(tracker));
   program2.addCommand(createAgentsCommand(() => services.installation()));
   const boardHooks = () => new BoardHookKit({
     sessions: services.boardSessions(),
@@ -53993,12 +54273,22 @@ function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = () => cr
         scopes: [...configScopes],
         roots: [parse7(launchCwd).root]
       })).operations(),
-      ...new DefaultReviewOperations({ cwd: launchCwd }).operations()
+      ...new DefaultReviewOperations({ cwd: launchCwd }).operations(),
+      ...new DefaultTrackerReadOperations({
+        getTracker: tracker,
+        getPrHost: prHost,
+        getConfig: config2
+      }).operations()
     ],
     policy: new LaunchOperationAccessPolicy({
       allowedEffects: ["read", "write", "process", "network"]
     })
   });
+  program2.addCommand(createEpicCommand(tracker, prHost, config2, operationRegistry));
+  program2.addCommand(createInitiativeCommand(tracker, prHost, config2, operationRegistry));
+  program2.addCommand(createTicketCommand(tracker, operationRegistry));
+  program2.addCommand(createTddCommand(tracker, operationRegistry));
+  program2.addCommand(createUsersCommand(tracker, operationRegistry));
   program2.addCommand(createGitCommand(operationRegistry));
   program2.addCommand(createCommitMessageCommand(operationRegistry));
   program2.addCommand(createBranchNameCommand(operationRegistry));
