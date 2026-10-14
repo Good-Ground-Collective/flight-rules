@@ -50,6 +50,7 @@ describe("public library surface", () => {
         "DefaultFlightRules",
         "DefaultGitConfigOperations",
         "DefaultTrackerEntityOperations",
+        "DefaultTicketLifecycleOperations",
         "FileNativeInstallation",
         "NativeInstallationError",
         "NativeHostSchema",
