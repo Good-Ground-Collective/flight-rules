@@ -217,14 +217,15 @@ export class JiraTaskTracker implements TaskTracker {
     const blocksLinkType = await this.resolveBlocksLinkType();
     const links = await this.issueLinks(ticketId);
     const alreadyBlocked = links.some(
-      (link) => link.type.name === blocksLinkType && link.outwardIssue?.key === blockedById,
+      (link) => link.type.name === blocksLinkType && link.inwardIssue?.key === blockedById,
     );
     if (alreadyBlocked) return;
 
+    // On POST, Jira applies the outward description ("blocks") to inwardIssue, so the blocker goes inward.
     await this.client.request("POST", "/issueLink", {
       type: { name: blocksLinkType },
-      inwardIssue: { key: ticketId },
-      outwardIssue: { key: blockedById },
+      inwardIssue: { key: blockedById },
+      outwardIssue: { key: ticketId },
     });
   }
 
@@ -233,7 +234,7 @@ export class JiraTaskTracker implements TaskTracker {
     const links = await this.issueLinks(ticketId);
     const link = links.find(
       (candidate) =>
-        candidate.type.name === blocksLinkType && candidate.outwardIssue?.key === blockedById,
+        candidate.type.name === blocksLinkType && candidate.inwardIssue?.key === blockedById,
     );
     if (link?.id === undefined) return;
 
@@ -557,9 +558,9 @@ export class JiraTaskTracker implements TaskTracker {
     const blocking: string[] = [];
     links.forEach((link) => {
       if (link.type.name !== blocksLinkType) return;
-      // Jira reports the partner in the partner's own slot, so outward is what blocks this issue and inward is what it blocks.
-      if (link.outwardIssue !== undefined) blockedBy.push(link.outwardIssue.key);
-      if (link.inwardIssue !== undefined) blocking.push(link.inwardIssue.key);
+      // An issue's own link list names the partner by this issue's side: outwardIssue is what this issue blocks, inwardIssue is what blocks it.
+      if (link.inwardIssue !== undefined) blockedBy.push(link.inwardIssue.key);
+      if (link.outwardIssue !== undefined) blocking.push(link.outwardIssue.key);
     });
     return { blockedBy, blocking };
   }

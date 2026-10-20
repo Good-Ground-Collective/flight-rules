@@ -85,7 +85,7 @@ describe("tracker read operations with backend read fixtures", () => {
               {
                 id: "link-1",
                 type: { name: "Blocks" },
-                outwardIssue: { key: "PROJ-12" },
+                inwardIssue: { key: "PROJ-12" },
               },
             ],
           },

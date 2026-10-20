@@ -53,7 +53,7 @@ describe('JiraTaskTracker.blockTicket', () => {
     request.mockReset()
   })
 
-  it('creates a Blocks link with the blocker outward and the blocked ticket inward', async () => {
+  it('creates a Blocks link with the blocker inward and the blocked ticket outward', async () => {
     request.mockImplementation((method: string, path: string) => {
       if (method === 'GET' && path === '/issueLinkType') return Promise.resolve(linkTypes())
       if (method === 'GET' && path === '/issue/PROJ-2') return Promise.resolve(issueLinks('PROJ-2', []))
@@ -65,8 +65,8 @@ describe('JiraTaskTracker.blockTicket', () => {
 
     expect(postLinkBody()).toEqual({
       type: { name: 'Blocks' },
-      inwardIssue: { key: 'PROJ-2' },
-      outwardIssue: { key: 'PROJ-9' },
+      inwardIssue: { key: 'PROJ-9' },
+      outwardIssue: { key: 'PROJ-2' },
     })
   })
 
@@ -83,7 +83,7 @@ describe('JiraTaskTracker.blockTicket', () => {
     request.mockImplementation((method: string, path: string) => {
       if (method === 'GET' && path === '/issueLinkType') return Promise.resolve(linkTypes())
       if (method === 'GET' && path === '/issue/PROJ-2')
-        return Promise.resolve(issueLinks('PROJ-2', [{ type: { name: 'Blocks' }, outwardIssue: { key: 'PROJ-9' } }]))
+        return Promise.resolve(issueLinks('PROJ-2', [{ type: { name: 'Blocks' }, inwardIssue: { key: 'PROJ-9' } }]))
       throw new Error(`unexpected ${method} ${path}`)
     })
 
@@ -114,7 +114,7 @@ describe('JiraTaskTracker.unblockTicket', () => {
       if (method === 'GET' && path === '/issue/PROJ-2')
         return Promise.resolve(
           issueLinks('PROJ-2', [
-            { id: '55', type: { name: 'Blocks' }, outwardIssue: { key: 'PROJ-9' } },
+            { id: '55', type: { name: 'Blocks' }, inwardIssue: { key: 'PROJ-9' } },
             { id: '56', type: { name: 'Relates' }, outwardIssue: { key: 'PROJ-8' } },
           ]),
         )
