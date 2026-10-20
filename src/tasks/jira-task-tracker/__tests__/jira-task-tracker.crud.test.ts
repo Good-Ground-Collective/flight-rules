@@ -450,7 +450,7 @@ describe("JiraTaskTracker.getEpic", () => {
   it("populates childIssues with the planner trio {id, status, blockedBy} via a parent JQL search", async () => {
     const child = issue("PROJ-3", {
       status: "In Progress",
-      issuelinks: [{ type: { name: "Blocks" }, outwardIssue: { key: "PROJ-9" } }],
+      issuelinks: [{ type: { name: "Blocks" }, inwardIssue: { key: "PROJ-9" } }],
     });
     request.mockImplementation(
       (method: string, path: string, _body?: unknown, params?: Record<string, unknown>) => {
@@ -527,8 +527,8 @@ describe("JiraTaskTracker.getTicket", () => {
             assignee: "acct-7",
             description: descriptionWith("the body", { tddId: 5 }),
             issuelinks: [
-              { type: { name: "Blocks" }, outwardIssue: { key: "PROJ-8" } },
-              { type: { name: "Blocks" }, inwardIssue: { key: "PROJ-9" } },
+              { type: { name: "Blocks" }, inwardIssue: { key: "PROJ-8" } },
+              { type: { name: "Blocks" }, outwardIssue: { key: "PROJ-9" } },
               { type: { name: "Relates" }, outwardIssue: { key: "PROJ-10" } },
             ],
           }),
