@@ -31684,7 +31684,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.94.0";
+var appVersion = false ? "0.0.0-dev" : "1.94.1";
 
 // src/shared/ariadne/review-packet.schema.ts
 var packetLimits = {
@@ -47861,20 +47861,20 @@ var JiraTaskTracker = class {
     const blocksLinkType = await this.resolveBlocksLinkType();
     const links = await this.issueLinks(ticketId);
     const alreadyBlocked = links.some(
-      (link) => link.type.name === blocksLinkType && link.outwardIssue?.key === blockedById
+      (link) => link.type.name === blocksLinkType && link.inwardIssue?.key === blockedById
     );
     if (alreadyBlocked) return;
     await this.client.request("POST", "/issueLink", {
       type: { name: blocksLinkType },
-      inwardIssue: { key: ticketId },
-      outwardIssue: { key: blockedById }
+      inwardIssue: { key: blockedById },
+      outwardIssue: { key: ticketId }
     });
   }
   async unblockTicket(ticketId, blockedById) {
     const blocksLinkType = await this.resolveBlocksLinkType();
     const links = await this.issueLinks(ticketId);
     const link = links.find(
-      (candidate) => candidate.type.name === blocksLinkType && candidate.outwardIssue?.key === blockedById
+      (candidate) => candidate.type.name === blocksLinkType && candidate.inwardIssue?.key === blockedById
     );
     if (link?.id === void 0) return;
     await this.client.request("DELETE", `/issueLink/${link.id}`);
@@ -48148,8 +48148,8 @@ var JiraTaskTracker = class {
     const blocking = [];
     links.forEach((link) => {
       if (link.type.name !== blocksLinkType) return;
-      if (link.outwardIssue !== void 0) blockedBy.push(link.outwardIssue.key);
-      if (link.inwardIssue !== void 0) blocking.push(link.inwardIssue.key);
+      if (link.inwardIssue !== void 0) blockedBy.push(link.inwardIssue.key);
+      if (link.outwardIssue !== void 0) blocking.push(link.outwardIssue.key);
     });
     return { blockedBy, blocking };
   }
