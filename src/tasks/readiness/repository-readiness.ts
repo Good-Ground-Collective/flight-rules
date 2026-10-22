@@ -60,7 +60,7 @@ export class NodeRepositoryReadiness implements RepositoryReadiness {
             code: "INVALID_CONTEXT",
             detail: "Workflow or runtime evidence does not match the readiness schema",
             remedy:
-              "Supply a valid WorkflowEvidence document for the selected workflow; do not fill unknown capabilities with available.",
+              "Select a supported workflow. If supplying optional programmatic evidence, it must match WorkflowEvidenceSchema.",
           },
         ],
         ok: false,

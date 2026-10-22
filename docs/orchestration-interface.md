@@ -2,15 +2,23 @@
 
 An orchestrating skill owns the task, working directory, worker dispatch, human questions and git/tracker mutations. A worker owns its assigned role and returns a structured report. The same contract applies to native parents and programmatic consumers; concrete tools, model bindings and permission enforcement belong to the host adapter.
 
-The package root exports Zod schemas, `RegistryOrchestrationPolicy`, `ValidatedReportHandoff` and `VerifiedImplementationLoop`. These are deterministic in-process services. They do not invoke a model, shell out to the CLI, grant access, schedule workers or ask a human. Native skill integration and scheduling consume this policy; an executable SDK adapter implements the same semantics.
+The package root exports Zod schemas, `RegistryOrchestrationPolicy`, `ValidatedReportHandoff` and `VerifiedImplementationLoop`. These are deterministic in-process services. They do not invoke a model, shell out to the CLI, grant access, schedule workers or ask a human. Programmatic adapters may use these services to implement their own scheduling. Native skills use the running harness directly; they do not need to instantiate these services or reconstruct its permission and capacity state.
 
-## Caller context and runtime evidence
+## Native skill execution
+
+Use the named agent tools exposed by the running harness. Carry task identity and context into the brief, associate each result with its original request, and validate the role report before consuming it. Preserve the implementation retry rules and verifier independence below.
+
+The harness enforces permissions, concurrency and nesting. Honor restrictions it exposes and handle actual dispatch failures. A missing numeric limit or permission snapshot is not itself a failure. When capacity is not exposed, run separate briefs sequentially. Native callers do not create `RuntimeSnapshot` or `WorkflowEvidence` JSON files and do not call `policy.prepare` as a prerequisite. See [native bindings](./native-orchestration.md).
+
+The snapshot, policy and queue APIs below describe programmatic adapters that own scheduling. Their existing explicit evidence checks remain available to those consumers.
+
+## Caller context and optional SDK runtime evidence
 
 `RunContext` carries `runId`, `taskId`, `cwd`, `repositoryRoot`, `baseRef` and the originating `skill`. `CallerContext` adds the implementation `attempt`, starting at one. Use a unique run ID per execution. `repositoryRoot` identifies the active checkout, including a linked worktree; `cwd` must be an absolute path lexically inside it. `baseRef` is the caller's fixed comparison base (prefer a resolved commit). These fields identify a run; path validation does not resolve symlinks or establish filesystem access.
 
 Carry the exact context through dispatch and outcome. Do not reset the attempt on sibling-skill invocation, substitute the main checkout, change the base, or reuse a report from another task. Host-native identifiers may be recorded separately by the adapter; they do not replace the shared dispatch identity.
 
-Before dispatch, the adapter supplies a `RuntimeSnapshot` scoped to the exact context and selected agent:
+When using `RegistryOrchestrationPolicy`, a programmatic adapter supplies a `RuntimeSnapshot` scoped to the exact context and selected agent:
 
 | Field | Meaning |
 | --- | --- |
@@ -27,7 +35,7 @@ Snapshots are trusted adapter observations, not signed attestations. The library
 
 `maxConcurrent` counts the host's worker pool, and `activeWorkers` includes workers outside this batch. `currentDepth` is the caller's nesting depth (root is zero); a child needs `currentDepth + 1 <= maxDepth`. Unknown bounds are `null`; zero disables capacity. A documented conservative adapter bound may be used with its provenance, but never invent a host default or change global settings to make the work fit. Retry attempt, concurrent workers and nesting depth are separate quantities.
 
-## Dispatch and structured outcomes
+## SDK dispatch and structured outcomes
 
 `dispatch(request)` means:
 
@@ -54,7 +62,7 @@ if (decision.status === 'ready') {
 
 Explicit registration `sandbox` or `dispatch` restrictions currently return `UNSUPPORTED_AGENT_SETTINGS`: this policy cannot attest to an enforcing binding for them. Do not drop restrictions to make dispatch succeed. Current canonical workers do not declare them or require worker-owned `spawn`/`ask`.
 
-## Bounded dispatchMany
+## SDK bounded dispatchMany
 
 `dispatchMany(requests, { maxConcurrent })` retains every separate brief and original order while running at most the smaller of the caller's positive bound and available host capacity. It is a scheduling contract, not an invitation to issue all tool calls at once.
 
@@ -70,7 +78,7 @@ After the native worker finishes **and releases its occupied host slot**, call `
 
 ## Sibling skills and human questions
 
-`policy.sibling({ context, skill, input })` validates a sibling-skill invocation. `skill` selects the target; `context.skill` continues to identify the originating caller. Run the sibling's instructions in the same caller context. This does not consume worker nesting depth or grant new capabilities. Workers dispatched by that sibling still use the caller's observed limits. Do not launch an extra agent merely to invoke a skill.
+`policy.sibling({ context, skill, input })` validates a sibling-skill invocation. `skill` selects the target; `context.skill` continues to identify the originating caller. Run the sibling's instructions in the same caller context. This does not consume worker nesting depth or grant new capabilities. Workers dispatched by that sibling remain subject to the host's limits. Do not launch an extra agent merely to invoke a skill.
 
 `policy.ask({ context, question, allowHumanQuestions }, snapshot)` requires explicit invocation opt-in and available caller question support. Its successful decision is `awaiting-answer`, never a fabricated answer. The adapter asks through the actual host mechanism and waits for a real reply before dependent work. A timeout, default option, elapsed time or capability observation is not an answer or approval. Return cancellation/failure when the host cannot wait; do not resume dependent work.
 
@@ -78,7 +86,7 @@ Unattended invocations set `allowHumanQuestions: false`. They receive `QUESTIONS
 
 ## Implementation and independent verification
 
-`VerifiedImplementationLoop.next(run)` derives the next action from the original context, ordered acceptance criteria, full `implementationInput` brief and paired implementation/verification receipts in `history`. Call `verify(run, implementationReceipt)` after each implementation to obtain the verifier request. Persist both original requests and outcomes unchanged; feed the new pair back to `next`. Every returned dispatch still needs `policy.prepare` before execution.
+`VerifiedImplementationLoop.next(run)` derives the next action from the original context, ordered acceptance criteria, full `implementationInput` brief and paired implementation/verification receipts in `history`. Call `verify(run, implementationReceipt)` after each implementation to obtain the verifier request. Persist both original requests and outcomes unchanged; feed the new pair back to `next`. Programmatic adapters using the policy pass each returned dispatch through `policy.prepare`; native callers use the harness’s dispatch tools.
 
 | Verified history | Next action |
 | --- | --- |
@@ -120,4 +128,4 @@ Every policy failure names a cause and remedy. The adapter may add host-specific
 | `ATTEMPTS_EXHAUSTED` | Return remaining FAIL items for a caller decision |
 | `EXECUTION_FAILED`, `CANCELLED` | Preserve the host failure/cancellation; reconcile execution before any deliberate new dispatch |
 
-Read-only environment probes supply evidence before the workflow's first mutation. Dispatch-time checks supplement that preflight; they do not authorize the parent's git/tracker actions. Native installation, effective sandbox enforcement and full live workflow behavior need separate installed-host execution proof.
+Read-only environment probes run before the workflow’s first mutation. They report configuration and access observations, not authorization for git/tracker actions. Native harness enforcement remains authoritative when operations execute.
