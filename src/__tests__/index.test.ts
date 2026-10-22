@@ -19,6 +19,7 @@ describe("public library surface", () => {
         "ValidatedReportHandoff",
         "ImplementationReportSchema",
         "VerificationReportSchema",
+        "ReviewTriageReportSchema",
         "CriterionResultSchema",
         "HandoffRecordSchema",
         "ImplementationRunSchema",

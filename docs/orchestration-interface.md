@@ -96,6 +96,16 @@ The verifier always uses `code-verifier`. Its input contains only the original c
 
 These receipts bind decisions to supplied history; they do not cryptographically prove execution or prevent a caller from inventing a new run. The adapter must retain authentic receipts and enforce stopped-run decisions. Schema validity alone is not completion evidence.
 
+## Private review remediation in execute-work
+
+After the initial verified PR is opened, `execute-work` invokes autonomous review in action mode and retains its output privately. No review poster runs for this result. The caller validates the full review and current head before dispatching `code-verifier` with `mode: triage`, original criteria, reviewed head and complete findings with stable IDs/source locations. Validate the receipt with `ReviewTriageReportSchema`, then check that the head matches and every supplied ID appears exactly once with no extra IDs. The codec validates shape; the caller owns this snapshot/coverage check.
+
+Triage returns `fix` with a verification criterion, `ignore` with evidence, or `needs_input` with a question also in `openQuestions`. Any question stops remediation under the normal invocation question policy. Triage is read-only, does not count as a verifier FAIL, and cannot close another reviewer's findings. Before remediation starts, caller-supplied answers go to a fresh triage dispatch at the same head with the same complete finding set; retain both receipts and validate the new result instead of overriding the old disposition. A changed head needs a fresh review; answering a question does not reset any spent implementation attempts.
+
+For accepted fixes, the caller creates one linked follow-up run with a new run ID and empty history. Its immutable criteria are the original ordered ticket criteria followed by `[review:<id>] <criterion>` for every accepted fix in triage order. The implementation brief carries the full ticket and accepted findings, source references, resolution conditions and triage evidence. `VerifiedImplementationLoop` then runs unchanged: criteria/path-only independent verification, standard attempts 1/2, escalated attempt 3 after two FAILs, and all criteria PASS before publication. Its `verifierFailures` remain derived solely from paired receipts, not from triage. The original completed run stays immutable; no fourth attempt or further automatic remediation run is allowed.
+
+Native parents follow the same protocol. Remediation verification receives the original and accepted review criteria, never the implementation claims or triage verdicts. Keep the original acceptance criteria distinct in the caller's mapping; do not edit the ticket's contract. Only verified changes are pushed to the existing PR. Replies to external reviewers may cite those changes and verification evidence, but private findings, summaries, state markers and outcomes are never posted. Unresolved work returns to the caller with the PR unchanged by unverified edits.
+
 ## Failure handling
 
 Every policy failure names a cause and remedy. The adapter may add host-specific instructions using verified configuration, but cannot convert a failure into permission.

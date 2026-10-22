@@ -24,11 +24,12 @@ The skill gives you:
 
 - **The ticket's layered body** — Problem Statement, Solution, Acceptance Criteria, and (usually) a Guided Walkthrough naming the files, patterns, and test approach.
 - **Supporting context when relevant** — excerpts from the parent RFC or a linked TDD, and the exact acceptance criteria you must satisfy.
+- **On review remediation** — the original ticket plus verifier-accepted review findings, each mapped to a `[review:<id>]` criterion, source comment and resolution condition. Address every accepted fix while preserving the original acceptance criteria. Ignored findings are not tasks. Explain each fix under `filesChanged[].why` with its review ID; the orchestrator owns replies to external reviewers. Never publish a self-review, verdict or comment.
 - **On iterations 2 and 3** — the verifier's itemized failures from the previous attempt: which criteria failed and the evidence. Treat that as the definition of what still needs fixing.
 
 ## How to work
 
-1. Read the ticket and the charter. Settle what "done" means from the Acceptance Criteria — those are the contract.
+1. Read the ticket and the charter. Settle what "done" means from the Acceptance Criteria — those and any supplied accepted review criteria are the fixed contract for this pass.
 2. Follow the Guided Walkthrough when present, but **trust the real code over the walkthrough** when they disagree; the walkthrough was written before you saw the tree.
 3. Match the surrounding idiom — file placement, naming, test framework and style. Read a neighboring module before inventing structure.
 4. Write and update tests alongside the code. Run them through the shell and get them green before you hand back.

@@ -7,7 +7,7 @@ description: "Iterative, unattended PR review for remediation agents. Uses the s
 
 Review one PR as it stands now, carrying earlier findings, replies and commits
 forward. Every pass should tell its author how to get the PR ready. Read,
-judge and comment; never edit code, commit, push, merge or submit an approval.
+judge and return findings (publish only in local mode); never edit code, commit, push, merge or submit an approval.
 A separate remediation agent makes changes and replies with evidence. The
 next reviewer pass verifies them and closes the contract findings.
 
@@ -15,6 +15,13 @@ There are two adapter modes. **Local mode** produces a validated plan and
 posts COMMENT reviews plus the shared summary/state. **Action mode** applies
 the same method and returns the structured review object only. The action's
 poster owns GitHub writes. Never run both posters on one result.
+
+When `execute-work` or its harness requests a private review, use action mode
+and return the structured result to that caller. Do not run posting stages,
+submit inline comments, write a summary/state marker, or publish an outcome.
+The caller validates the result and sends it to verifier triage and bounded
+implementation/verification. This does not change a standalone review bot's
+configured publishing mode.
 
 ## 1. Read the shared method and contract
 
@@ -179,8 +186,11 @@ pass; a later invocation picks up the author's replies and new commits.
 - Never answer a human policy decision as an agent, weaken its resolution
   criteria without authorization, or treat any unrelated human reply as sign-off.
 - Never treat thread UI state or a missing record as proof a blocker disappeared.
-- Unread or oversized diffs, unavailable evidence, unsupported versions,
-  corrupt markers or posting failures are INCOMPLETE with a specific repair step.
+- Unread or oversized diffs, unavailable evidence needed to complete the review,
+  unsupported versions, corrupt markers or posting failures are INCOMPLETE with
+  a specific repair step. A completed review may still contain a `clarify` or
+  `decide` finding requesting evidence or a human decision; retain that finding
+  explicitly rather than treating its unresolved question as a failed review.
 - Missing PR identification is a stop with the missing input named; action
   mode never prompts interactively.
 - Review retries are separate from execute-work's implementation retry cap.

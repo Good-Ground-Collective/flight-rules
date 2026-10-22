@@ -14,6 +14,8 @@ export {
 } from "./report-codec.js";
 export type { WorkerReportParser } from "./report-codec.js";
 export type { ReportMode, ValidatedWorkerReport } from "./report-codec.js";
+export { ReviewTriageReportSchema } from "../orchestration/review-triage.schema.js";
+export type { ReviewTriageReport } from "../orchestration/review-triage.schema.js";
 export {
   ImplementationReportSchema,
   VerificationReportSchema,

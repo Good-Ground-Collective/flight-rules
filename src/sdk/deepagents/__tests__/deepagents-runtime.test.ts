@@ -156,6 +156,7 @@ const implementationReport =
   "```yaml\nsummary: Done\nfilesChanged: []\ntestsRun: []\napproach: Scripted report\n```";
 const verificationReport =
   "```yaml\nsummary: Verified\ncriteria:\n  - criterion: Contract works\n    verdict: PASS\n    evidence: The actual graph returned this report\nverified: true\n```";
+const triageReport = `\`\`\`yaml\nsummary: No actionable findings\nheadSha: "${"a".repeat(40)}"\nfindings: []\n\`\`\``;
 const qaVerificationReport =
   "```yaml\nsummary: Verified\nitems: []\nevidence:\n  dir: /tmp/evidence\n  items: []\nverified: true\n```";
 const researchReport =
@@ -170,6 +171,7 @@ describe("Deep Agents worker runtime", () => {
     ["code-implementation", "implement", "standard", implementationReport],
     ["code-implementation-escalated", "implement", "escalated", implementationReport],
     ["code-verifier", "verify", "standard", verificationReport],
+    ["code-verifier", "triage", "standard", triageReport],
     ["research-agent", "internal", "escalated", researchReport],
     ["qa-engineer", "reproduce", "escalated", reproduceReport],
     ["qa-engineer-verify", "verify", "standard", qaVerificationReport],

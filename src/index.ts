@@ -257,6 +257,8 @@ export type {
   ImplementationRun,
 } from "./orchestration/implementation-loop.schema.js";
 export { VerifiedImplementationLoop } from "./orchestration/implementation-loop.js";
+export { ReviewTriageReportSchema } from "./orchestration/review-triage.schema.js";
+export type { ReviewTriageReport } from "./orchestration/review-triage.schema.js";
 export type {
   ImplementationLoop,
   ImplementationDecision,

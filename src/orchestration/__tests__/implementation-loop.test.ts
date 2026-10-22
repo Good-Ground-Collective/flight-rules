@@ -80,6 +80,41 @@ function addRound(
 }
 
 describe("verified implementation loop", () => {
+  it("retries accepted review fixes even when original acceptance criteria pass", () => {
+    const input = run();
+    input.context.runId = "run-1-review";
+    const reviewCriterion = "[review:private-1] Reject blank input through the public parser";
+    input.criteria.push(reviewCriterion);
+    input.implementationInput.acceptedFindings = [{
+      id: "private-1",
+      criterion: reviewCriterion,
+      evidence: "The public parser accepts whitespace.",
+    }];
+    for (const attempt of [1, 2]) {
+      const result = report(input, "PASS");
+      result.criteria[result.criteria.length - 1] = {
+        criterion: reviewCriterion,
+        verdict: "FAIL",
+        evidence: `Whitespace still accepted on attempt ${attempt}`,
+      };
+      result.verified = false;
+      addRound(input, result);
+      const request = nextImplementation(input);
+      expect(request.input.verifierFailures).toEqual([result.criteria.at(-1)]);
+      expect(request.agent).toBe(attempt === 2 ? "code-implementation-escalated" : "code-implementation");
+    }
+    const impl = receipt(nextImplementation(input), implementationReport());
+    const verification = loop.verify(input, impl);
+    if (verification.status !== "verify") throw new Error("expected verifier dispatch");
+    expect(verification.request.input).toEqual({
+      mode: "verify",
+      criteria: input.criteria,
+      filesChanged: [{ path: "src/input.ts" }],
+    });
+    input.history.push({ implementation: impl, verification: receipt(verification.request, report(input, "PASS")) });
+    expect(loop.next(input)).toMatchObject({ status: "verified" });
+  });
+
   it("uses standard twice, then the named escalated variant; preserves exact failed criteria", () => {
     const input = run();
     for (const attempt of [1, 2, 3]) {
