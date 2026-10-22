@@ -5,6 +5,7 @@ import {
   VerificationReportSchema,
 } from "../orchestration/implementation-loop.schema.js";
 import { OrchestrationTextSchema } from "../orchestration/orchestration.schema.js";
+import { ReviewTriageReportSchema } from "../orchestration/review-triage.schema.js";
 
 const reportText = OrchestrationTextSchema;
 const JsonReportValueSchema = z.json();
@@ -124,6 +125,7 @@ export const ReportModeSchema = z.union([
     mode: z.literal("implement"),
   }),
   z.strictObject({ agent: z.literal("code-verifier"), mode: z.literal("verify") }),
+  z.strictObject({ agent: z.literal("code-verifier"), mode: z.literal("triage") }),
   z.strictObject({
     agent: z.literal("research-agent"),
     mode: z.enum(["internal", "external", "mixed"]),
@@ -139,6 +141,7 @@ export type ReportMode = z.infer<typeof ReportModeSchema>;
 export type ValidatedWorkerReport =
   | z.infer<typeof ImplementationReportSchema>
   | z.infer<typeof VerificationReportSchema>
+  | z.infer<typeof ReviewTriageReportSchema>
   | z.infer<typeof ResearchReportSchema>
   | z.infer<typeof QaReproduceSchema>
   | z.infer<typeof QaVerifySchema>
@@ -211,7 +214,8 @@ export class WorkerReportCodec implements WorkerReportParser {
   private schemaFor(mode: ReportMode): z.ZodType<ValidatedWorkerReport> {
     if (mode.agent === "code-implementation" || mode.agent === "code-implementation-escalated")
       return ImplementationReportSchema;
-    if (mode.agent === "code-verifier") return VerificationReportSchema;
+    if (mode.agent === "code-verifier")
+      return mode.mode === "triage" ? ReviewTriageReportSchema : VerificationReportSchema;
     if (mode.agent === "research-agent")
       return ResearchReportSchema.refine(
         (report) =>

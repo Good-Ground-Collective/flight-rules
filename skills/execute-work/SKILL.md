@@ -1,6 +1,6 @@
 ---
 name: execute-work
-description: "Drives a single ticket from to-do to PR-in-review: reads it through the flight-rules CLI, branches deterministically, runs the code-implementation and code-verifier agents in a bounded loop, then commits, pushes, opens a PR and moves the ticket. Never merges and never lets an unverified change reach a PR. Use when an engineer or agent picks up a ticket to implement it."
+description: "Drives a single ticket from to-do to PR-in-review: reads it through the flight-rules CLI, branches deterministically, runs the code-implementation and code-verifier agents in a bounded loop, then opens a PR and privately reviews it with verifier-triaged remediation. Never merges and never lets an unverified change reach a PR. Use when an engineer or agent picks up a ticket to implement it."
 ---
 
 # Execute Work
@@ -9,7 +9,7 @@ This is the skill that builds the thing. You are handed a **ticket id**; you han
 
 **The hard rule: this skill never merges, and never lets an unverified change reach a PR.** Those are one rule, not two. The verifier is the gate, and a human is the merge button. If you catch yourself opening a PR on the strength of the implementer's own say-so, stop — you have removed the only independent check in the pipeline.
 
-**Terminal state:** the PR is open and carries an autonomous charter review, the ticket sits in the tracker's in-review status, and the user is holding a run summary they can grade.
+**Terminal state:** the PR is open, the ticket sits in the tracker's in-review status, and the caller has the private review, triage decisions and verification evidence. No self-review is published on the PR. An incomplete review or unresolved remediation is reported explicitly to the caller.
 
 ## Orchestration context
 
@@ -68,7 +68,7 @@ First settle which format the ticket is in. Read `issueType` from the returned J
 
 - **Problem Statement** — the why. Context for the implementer, not a contract.
 - **Solution** — the intended shape. This grounds the PR body's "Why Was It Changed" section in step 7.
-- **Acceptance Criteria** — the contract. This is what the verifier checks and the only definition of done.
+- **Acceptance Criteria** — the contract. This is the original contract the verifier checks; step 8 adds accepted review fixes without changing it.
 - **Guided Walkthrough** — files, patterns, and test approach, when the ticket has one.
 
 **Bug report** — extract:
@@ -78,7 +78,7 @@ First settle which format the ticket is in. Read `issueType` from the returned J
 - **Steps To Reproduce** — what the reproduction did; the implementer re-runs it to see the bug.
 - **Expected vs Actual** — the gap, stated plainly.
 - **Root Cause** — where the reproduction points; trust the code over it on conflict.
-- **Fixed When** — the contract. This is what the verifier checks and the only definition of done.
+- **Fixed When** — the contract. This is the original contract the verifier checks; step 8 adds accepted review fixes without changing it.
 - **Reproduction Notes** — the collapsed agent-facing block: the API calls that carry the symptom, the selectors, the data setup. It plays the Guided Walkthrough's role for the implementer.
 
 Also note the ticket's title (for the branch slug), its labels, and its `metadata` — `metadata.epicId` is how you find the parent epic in step 5.
@@ -447,51 +447,64 @@ flight-rules ticket status <id> --to "<inReviewStatus>"
 flight-rules ticket comment <id> --body-file <path> --attach <path>#<caption> --attach <path>#<caption>
 ```
 
-One `--attach` per manifest item, the same `<path>#<caption>` pairs you passed to `pr create`, referenced in the body as `![<caption>](<path>)` with that same path. The command uploads each file to the ticket and rewrites the matching reference in the body so it renders inline; a file the body does not reference is appended at the end. Pass no `--attach` when the capture step recorded `No visual evidence: <reason>`; the PR URL goes in the body either way. This comes _after_ the transition for the same reason step 8's review does: it is commentary on a state that already exists.
+One `--attach` per manifest item, the same `<path>#<caption>` pairs you passed to `pr create`, referenced in the body as `![<caption>](<path>)` with that same path. The command uploads each file to the ticket and rewrites the matching reference in the body so it renders inline; a file the body does not reference is appended at the end. Pass no `--attach` when the capture step recorded `No visual evidence: <reason>`; the PR URL goes in the body either way. This comes _after_ the transition because it describes a state that already exists.
 
-Report that the run now waits on a person:
+Continue to the private review in step 8. Do not merge or approve your own PR.
+
+### 8. Private review, verifier triage and remediation
+
+**Every `execute-work` invocation uses a private review**, including invocations by a harness or `execute-wave`. Invoke `autonomous-code-review` as a sibling skill with **action mode (return structured output only)**. Do not invoke its posting stages or hand its output to a poster. Never publish self-review findings, inline comments, summary/state markers, or decisions such as APPROVED or HOLD on the PR. The independent review bot retains its own publishing behavior.
+
+Pass the PR URL, current head SHA, the verifier's `charterConcerns` verbatim, and outstanding questions. Validate the returned object with `flight-rules review validate <review-json-file>` and require its `head_sha` to match the current PR head and the clean local checkout. A failed, partial or stale review is incomplete, never an empty successful review. Distinguish incomplete review execution from a complete review that identifies an unresolved `clarify` or `decide` finding: the latter proceeds to triage with its evidence gap explicit. Preserve the result in the caller's private run artifacts, outside the committed tree.
+
+**a. Triage before editing.** Dispatch a fresh `code-verifier` with `mode: triage`, the original ordered ticket criteria, head SHA, complete review findings, and any existing feedback from other reviewers (including replies and source URLs). Preserve existing finding IDs; assign private IDs to new findings without IDs using the reviewed SHA and their array index. Keep a private map from each ID to its full finding and source. New private IDs are not GitHub review records.
+
+The verifier reads the code and returns `ReviewTriageReportSchema`: one `fix`, `ignore`, or `needs_input` disposition per supplied finding, with evidence. A `fix` includes a concrete verification criterion; `ignore` requires a reason grounded in code, applicable rules or existing evidence. Unanswered policy decisions and unavailable evidence require `needs_input`; the verifier cannot waive a mandatory requirement or another reviewer's blocking finding. This triage evaluates findings, not the implementer's rationale, and does not count as an implementation attempt or a verifier rejection.
+
+Validate the dispatch receipt and triage schema. Require the same head SHA and exactly the supplied finding IDs, each once, with no omissions or additions. Stop for any `needs_input` or `openQuestions` and return the questions under the invocation's question policy. Do not let a malformed report, missing finding or changed head silently remove work. An `ignore` disposition is private triage, not authority to resolve a public review thread or overwrite a bot's records.
+
+If the caller supplies the requested evidence or decision before remediation starts, preserve the original review and triage receipts, recheck the PR/local head, and dispatch a fresh triage worker with the same findings plus that evidence. Validate the new receipt and complete ID coverage again; never hand-edit a `needs_input` into `fix` or `ignore`. A changed head requires a fresh private review first. This does not consume an implementation attempt or reset an existing remediation budget.
+
+**b. Run one bounded remediation pass.** If triage accepts fixes, start one separate `VerifiedImplementationLoop` run with a new run ID linked to the original run and review snapshot. Preserve the ticket, checkout and base. This follow-up pass is authorized by this workflow; it does not reopen or reset the initial implementation history. Its fixed `criteria` list is:
+
+1. Every original acceptance criterion (or Fixed When item), verbatim and in its original order.
+2. One criterion per accepted finding, in triage order, formatted `[review:<id>] <criterion>`.
+
+Keep the mapping to the original comments, their resolution conditions and triage evidence in the implementation brief. Pass accepted fixes and the full original ticket to the implementer. Record ignored findings separately; do not turn them into implementation tasks. The verifier receives only the complete ordered criteria and union of changed paths, with a fresh context every time. Each review criterion must contain the relevant behavior, source location and sufficient verification condition so it stands on its own without the implementer's claims.
+
+Use the same implementation/verifier alternation, report schemas, independent evidence requirements and failure handling as step 6. When refreshing the ticket contract, compare only its original criteria to the original ticket snapshot; keep the accepted review criteria fixed and appended for dispatch. A successful follow-up returns to step 8c, not the PR-creation path in step 7. Attempts 1 and 2 use `code-implementation`; attempt 3 uses `code-implementation-escalated` only after two verifier FAILs. The verifier checks **all original criteria and every accepted review criterion on every attempt**. All must PASS before committing or pushing. Preserve each FAIL verbatim on retry, including failed review criteria. UNVERIFIABLE, open questions, malformed output and unavailable workers stop the pass. Maximum three remediation attempts; never start another automatic pass to evade the cap. If triage accepts no fixes, skip implementation and retain the original verification plus triage evidence.
+
+**c. Publish verified changes and respond to others.** After successful remediation, commit the union of paths changed in this pass and push to the existing PR using step 7's commit/push procedure. Do not create another PR or repeat the ticket transition. Reconcile the current PR head before pushing; unexpected commits require a caller decision, not a stale verification claim. Refresh affected visual evidence and PR body details when behavior changed. Preserve the original and remediation receipts and report both attempt counts separately.
+
+When other reviewers have left feedback, reply in their existing threads with the verified fix and commit/test evidence, or an evidence-backed explanation for a disagreement. The implementation report supplies the fix details; the verifier's evidence supports the response. Never claim an unverified fix is complete. Do not publish replies to private findings, a full self-review, a decision summary, or edits to another reviewer's state markers. Leave public finding closure to its reviewer; triage alone cannot resolve it. Replies to existing external feedback are the only review comments this step authorizes.
+
+If review, triage or remediation stops, retain the existing PR and ticket status and report the incomplete work privately. Leave unverified local edits uncommitted and unpushed. Do not restart the initial loop, invent a successful outcome, or post a self-review explaining the stop.
+
+After successful completion, report the wait on a person to Ariadne, not as a PR comment:
 
 ```bash
 flight-rules board post heartbeat --ticket <id> --step pr --state hold --branch <branch> --skill flight-rules:execute-work --detail "PR #<number> is waiting for review"
 ```
 
-Then **stop.** Do not merge. Do not approve your own PR.
-
-### 8. Review the PR
-
-Invoke the **`autonomous-code-review`** skill against the PR you just opened. It is unattended and it never edits code — it posts a `COMMENT` review enumerating every objective charter violation on the diff, and records a shared `outcome` of `APPROVED`, `CHANGES_NEEDED`, `ESCALATE` or `INCOMPLETE`.
-
-Hand it three things:
-
-- **The PR number or URL** from `pr create`.
-- **The verifier's `charterConcerns`**, verbatim. This is the step where they stop being a line in a run summary and start being review comments on the diff. The reviewer confirms each one against the PR before raising it, so passing a concern is not asserting it.
-- **Any `UNVERIFIABLE` criteria or `openQuestions`** still outstanding. The reviewer turns each into a concrete `clarify` or `decide` finding; their presence alone does not force human escalation.
-
-Run this **after** the in-review transition, not before. The review is commentary on a PR that already exists and is already on the board; sequencing it earlier only widens the window where the ticket's status lies about reality.
-
-**The review outcome does not reopen this implementation loop.** `CHANGES_NEEDED` names follow-up remediation, `ESCALATE` names a human decision, `INCOMPLETE` needs review repair/retry, and `APPROVED` is a recommendation conditional on green CI; it does not approve anything — this skill's terminal state is unchanged either way. The outcome is a routing hint for whoever picks the PR up, and you pass it through to the report.
-
-If the review fails to post, report that and carry on to step 9. A failed review is a missing signal, not a failed run: the PR is open, verified, and on the board, and re-running the review costs nothing. Do not retry the loop, and do not roll back the ticket status.
-
 ### 9. Report
 
 Give the user, in this order:
 
-- **Iterations used** — 1, 2, or 3. Say it plainly; it is the honest signal of how hard this was.
-- **Per-criterion verdicts** — every criterion with its verdict and the verifier's evidence, including any `UNVERIFIABLE`.
+- **Iterations used** — initial implementation attempts (1–3) and remediation attempts (0–3), separately. Triage is not an implementation attempt.
+- **Per-criterion verdicts** — every original criterion and accepted review criterion with its verdict and evidence, including any `UNVERIFIABLE`. Distinguish the published head from unverified local edits.
 - **The PR URL**, and the branch name.
 - **Evidence** — each manifest item's caption and path, the PR's OTS Materials, and the ticket comment that carries them; or the `No visual evidence: <reason>` line.
-- **The review outcome** — the shared outcome, its reasons, and the finding counts by `fix`, `clarify` and `decide`. Name required fixes, evidence requests and human decisions.
-- **Every `charterConcerns` entry** the verifier raised, verbatim. These didn't block the PR — so don't quietly drop them, even where the review picked them up.
+- **Private review and triage** — review completeness, every finding's disposition and evidence, accepted fixes and their verification, ignored findings and reasons, and unresolved questions or decisions. State that no self-review was posted. Include links to replies to other reviewers when present.
+- **Every `charterConcerns` entry** the verifier raised, verbatim, including how triage handled it when applicable.
 - **Any `openQuestions`** from either agent, still unanswered.
 
 ## Guardrails
 
-- **Maximum 3 loop iterations, hard.** No restarting the count, no fourth attempt under another name.
+- **Maximum 3 initial implementation attempts and 3 remediation attempts.** Step 8 permits one separate remediation pass after the initial run passed. Neither pass can restart its count or gain a fourth attempt; new findings at the cap go to the caller.
 - **Dispatch `code-implementation-escalated` only on iteration 3, and the verifier never escalates.** Iterations 1 and 2 dispatch `code-implementation`. A ticket that "looks hard" is not a reason to escalate early — two recorded FAILs is the only one.
 - **Never merge.** This skill opens a PR and stops. Merging is a human decision.
 - **Never let an unverified change reach a PR.** `verified: true` is the only key that unlocks step 7.
-- **Review remediation is a separate, verified pass.** The review outcome does not restart this hard-capped implementation loop or authorize approval. Acting on a review finding here would put an unverified edit on the branch after the verifier signed off.
+- **Review remediation is private and verified.** Follow step 8: triage first, then one bounded follow-up pass. Reverify the original contract and accepted fixes before publishing changes. No self-review comments, summaries, state markers or approval/hold decisions on the PR.
 - **Never tick contract checkboxes.** The `items[].done` flags are read-only to this skill; the verifier's itemized verdict is the record of what passed. A ticked box in a tracker is a claim nobody checked.
 - **All git and tracker mutations go through `flight-rules`.** Never hand-rolled `git commit`/`checkout`/`push`, never host-generated commits, never native tracker APIs (`gh issue edit`, the Jira REST API) for state changes. Read-only inspection with plain `git` or `gh` is fine. The plugin's commit guard hook blocks a raw `git commit` in any repo with flight-rules config. When it fires, switch to `flight-rules git commit`; do not reach for the `FLIGHT_RULES_RAW_GIT=1` bypass during a run. The one exception to running git through `flight-rules` is plain-git mode, above, which still takes its message and branch name from the CLI.
 - **`openQuestions` and `UNVERIFIABLE` always reach the user, unanswered.** The agents ask when they are genuinely unsure. Answering on their behalf converts a flagged unknown into a silent guess — which is the exact failure the loop exists to prevent.
@@ -512,12 +525,12 @@ flight-rules board post heartbeat --ticket <id> --step <current step> --state ab
 - **`ticket status` reports the transition is unreachable** → the CLI's error carries an `available:` list. Show it to the user, ask which status they meant, then **store the corrected value** with `flight-rules config set inReviewStatus "<status>"` (or `inProgressStatus`) so the next run doesn't repeat the mistake. Don't retry blind.
 - **Verifier returns `UNVERIFIABLE`** → do not treat it as PASS and do not treat it as FAIL, and **do not iterate**. Stop before spending another iteration, surface the criterion and the verifier's question to the user, and ask how to proceed. An untestable criterion is usually a ticket bug, not a code bug — another implementation pass cannot fix it. This takes precedence over any FAIL in the same result.
 - **Either agent returns `openQuestions`** → surface them unanswered, alongside whatever else that iteration produced.
-- **Third consecutive FAIL** → stop. Present the itemized evidence from the final verification, state that three iterations were used, and **leave the branch intact** with the work in place so a human can pick it up. Do not commit, do not push, do not open a PR, and do not move the ticket to in-review. Leave it in the in-progress status — that is now true.
+- **Third consecutive FAIL in either pass** → stop. Present the itemized evidence from the final verification, state that three iterations were used, and **leave the branch intact** with the work in place so a human can pick it up. Do not commit, do not push, do not open a PR, and do not move the ticket to in-review. For initial implementation, leave it in-progress. If remediation failed after the PR opened, keep that PR and the in-review status, and report the unpushed work to the caller.
 - **`git push` rejected** → stop and report. There is no force flag, and inventing one with raw git is not the fix.
 - **`pr create` fails on `repo`** — either `repo (owner/repo) is required in config to create pull requests` or `Invalid repo format …`. This is a config error, not a work error, and by the time you see it **the commit has landed and the branch is pushed**. So: fix `repo` with `flight-rules config set repo "<owner/repo>"` (confirm the value with the user first) and re-run **only** the `pr create` command, then carry on to the in-review transition. Do **not** redo the implement/verify loop, do not re-commit, and do **not** fall back to raw `gh pr create` — that bypasses the PR template, so the body would lose the authored What/Why sections, the OTS Materials block and the ticket link, which is the whole point of routing through the CLI. Re-run `pr create` with the same authored fields the tech-writer produced and the same `--attach` set — don't re-summon the agent and don't hand-write a body. If the user can't supply a valid `owner/repo`, stop and report the branch name and commit sha so the PR can be opened by hand.
 - **`pr create` exits non-zero but printed a PR URL** → a partial attachment upload. The PR exists, with the files that did upload. Do **not** run `pr create` again — that opens a duplicate. Record the URL, note which attachments failed for the step 9 report, and carry on to the in-review transition. The missing images can be attached to the PR later by hand.
 - **`ticket comment` fails** → report it in step 9 and finish the run. The PR is open, the work is verified, and the ticket has moved; the comment is the only thing missing, and it can be posted by hand from the manifest. Do not roll the ticket status back and do not retry the loop.
-- **`autonomous-code-review` fails to post** → report it in step 9 and finish the run. By this point the PR is open, the work is verified and the ticket has moved, so the review is the only thing missing and it can be re-run against the PR at any time. Do not retry the implement/verify loop, do not roll the ticket status back, and do not withhold the run summary.
+- **Private review or triage fails** → report the incomplete stage in step 9. Keep the existing PR and ticket status; do not substitute an empty review, skip a finding, publish a self-review, or reset either attempt budget.
 
 ## What Good Looks Like
 
@@ -530,8 +543,8 @@ A reviewer can grade a run against this list:
 - The ticket carries a comment linking the PR and, for a visible change, the same evidence the PR shows; it was posted after the in-review transition.
 - The PR body matches `docs/pr-body-format.md`: tech-writer-authored What/Why sections, the ticket linked, and — when present — an OTS Materials block whose images and video render from GitHub-hosted assets, not relative paths, or which states `No visual evidence: <reason>`.
 - The ticket's status trail reads to-do → in-progress → in-review, with the in-review transition happening _after_ the PR exists.
-- No contract item — acceptance criterion or Fixed When item — shipped without a PASS verdict backed by evidence, and no checkbox was ticked.
+- No contract item — acceptance criterion or Fixed When item — shipped without a PASS verdict backed by evidence, and no checkbox was ticked. Every accepted review criterion also passed before remediation was pushed.
 - The run summary states the iteration count, and every `charterConcerns` and `openQuestions` entry reached the user.
 - Iterations 1 and 2 dispatched `code-implementation`; `code-implementation-escalated` appeared only if a third iteration was reached, and the verifier remained `code-verifier`.
-- The PR carries a submitted `COMMENT` review from `autonomous-code-review`, posted after the in-review transition, and the run summary states its outcome.
+- The autonomous review stayed private. The verifier triaged every finding with evidence; all accepted fixes and original criteria passed before remediation was pushed. Only replies to other reviewers' existing feedback were posted, with no author self-review or verdict summary.
 - The PR is open and unmerged, waiting on a human.
