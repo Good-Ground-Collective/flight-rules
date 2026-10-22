@@ -13,16 +13,16 @@ This is the skill that turns a landed bug into a document a human can act on. Yo
 
 ## Orchestration context
 
-Read `flight-rules doc orchestration-interface` and `flight-rules doc native-orchestration`. Preserve or initialize the ticket's caller context (run/task IDs, active checkout, working directory, fixed base and attempt 1). Use `dispatch` with the named `qa-engineer` registration and retain the original request beside its role report. Missing capability, unavailable dispatch or exhausted depth is a named stop before any ticket label/write. If a later report has a mismatched identity or invalid shape, follow Error handling to clear the in-progress label and stop. Invoke sibling skills in the same caller context, without an extra worker level.
+Read `flight-rules doc orchestration-interface` and `flight-rules doc native-orchestration`. Preserve or initialize the ticket's caller context (run/task IDs, active checkout, working directory, fixed base and attempt 1). Use `dispatch` with the named `qa-engineer` registration and retain the original request beside its role report. Confirm the named worker is exposed before the first ticket mutation. The harness enforces permissions and depth; report actual dispatch failures with their cause. If a later report has a mismatched identity or invalid shape, follow Error handling to clear the in-progress label and stop. Invoke sibling skills in the same caller context, without an extra worker level.
 
 This invocation is unattended: `allowHumanQuestions` is always false. Return missing inputs as `needs`/`openQuestions` and a named failure; never invoke `ask`, publish a question or infer an answer. A failed execution or malformed report cannot stand in for reproduction evidence.
 
 ## Preconditions
 
-- Read `flight-rules doc workflow-preflight` and require `flight-rules check --workflow reproduce-bug --runtime-file <host-runtime-json>` to report `"ok": true` before setting any label or creating evidence. Use current caller/worker observations. Missing or unknown capability is a named failure/`needs:` result; never prompt or widen permissions. A general environment check alone is insufficient.
+- Before the first repository or tracker mutation, run `flight-rules check --workflow reproduce-bug` and require `"ok": true` for the workflow’s environment checks. Return failed checks as named `needs:` results without prompting. Use the native harness for permissions and worker dispatch; no runtime evidence file is required.
 
 - You are handed a **ticket id**.
-- Run everything from the **repo root** of the app under test; the CLI resolves config relative to CWD, and the agent drives that app.
+- The session may start outside the repository, such as in `~/Developer`. Run each repository-specific command from the target **repo root**, using the tool’s working-directory option or `cd <repo> && <command>`. This includes the parent’s preflight, tracker, Git and PR commands; changing only a worker’s directory is insufficient. Initialize task context for that repository and give workers the same target path. No session restart is needed.
 - **Config comes from the CLI.** It merges the user's and project's Claude Code settings with the flight-rules config file; `flight-rules config show` prints the result and where each value came from. Never hand-edit a config file; write with `flight-rules config set`.
 - The tracker is **Jira**. The label lifecycle and the reporter mention are Jira shapes.
 - The workflow check includes the capture tool probes and required QA instructions. Fix failed required checks before labelling the ticket; optional tool results do not become new requirements.

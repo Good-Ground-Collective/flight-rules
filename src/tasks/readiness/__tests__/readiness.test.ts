@@ -14,6 +14,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { FileAgentRegistry } from "../../../agents/agent-registry/agent-registry.js";
+import { buildProgram } from "../../../cli/cli.js";
+import { WorkflowSchema } from "../readiness.schema.js";
 import { createFlightRules } from "../../../flight-rules/flight-rules.js";
 import { QaInstructionsFinder } from "../../qa-instructions/qa-instructions.js";
 import type { TaskTracker } from "../../task-tracker/task-tracker.js";
@@ -85,13 +87,96 @@ function evidence(cwd: string): WorkflowEvidence {
   };
 }
 function inputs() {
+  const tracker: TaskTracker = {
+    createEpic: vi.fn<TaskTracker["createEpic"]>(),
+    getEpic: vi.fn<TaskTracker["getEpic"]>(),
+    createTicket: vi.fn<TaskTracker["createTicket"]>(),
+    getTicket: vi.fn<TaskTracker["getTicket"]>(),
+    linkTicketToEpic: vi.fn<TaskTracker["linkTicketToEpic"]>(),
+    getTicketEpicId: vi.fn<TaskTracker["getTicketEpicId"]>(),
+    blockTicket: vi.fn<TaskTracker["blockTicket"]>(),
+    unblockTicket: vi.fn<TaskTracker["unblockTicket"]>(),
+    transitionTicket: vi.fn<TaskTracker["transitionTicket"]>(),
+    listTransitions: vi.fn<TaskTracker["listTransitions"]>(),
+    addLabel: vi.fn<TaskTracker["addLabel"]>(),
+    removeLabel: vi.fn<TaskTracker["removeLabel"]>(),
+    updateEpicMetadata: vi.fn<TaskTracker["updateEpicMetadata"]>(),
+    updateTicketMetadata: vi.fn<TaskTracker["updateTicketMetadata"]>(),
+    updateTddMetadata: vi.fn<TaskTracker["updateTddMetadata"]>(),
+    updateEpicDescription: vi.fn<TaskTracker["updateEpicDescription"]>(),
+    updateTicketDescription: vi.fn<TaskTracker["updateTicketDescription"]>(),
+    updateInitiativeDescription: vi.fn<TaskTracker["updateInitiativeDescription"]>(),
+    createInitiative: vi.fn<TaskTracker["createInitiative"]>(),
+    getInitiative: vi.fn<TaskTracker["getInitiative"]>(),
+    linkEpicToInitiative: vi.fn<TaskTracker["linkEpicToInitiative"]>(),
+    createTechnicalDesign: vi.fn<TaskTracker["createTechnicalDesign"]>(),
+    getTechnicalDesign: vi.fn<TaskTracker["getTechnicalDesign"]>(),
+    addComment: vi.fn<TaskTracker["addComment"]>(),
+    addAttachment: vi.fn<TaskTracker["addAttachment"]>(),
+    getUsers: vi.fn<TaskTracker["getUsers"]>(),
+    ping: vi.fn<TaskTracker["ping"]>().mockResolvedValue(undefined),
+  };
   return {
     config: () => ({ ...config, defaultLabels: [], competencies: [] }),
     configPath: () => "/nonexistent/config.md",
-    tracker: () => ({ ping: vi.fn().mockResolvedValue(undefined) }) as unknown as TaskTracker,
+    tracker: () => tracker,
     probe: { probe: vi.fn().mockResolvedValue([]) },
     finder: new QaInstructionsFinder(),
   };
+}
+function checkout(): string {
+  const cwd = directory();
+  execFileSync("git", ["init", "-q", "-b", "main", cwd]);
+  execFileSync(
+    "git",
+    [
+      "-c",
+      "user.name=Fixture",
+      "-c",
+      "user.email=fixture@example.invalid",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "--allow-empty",
+      "-qm",
+      "fixture",
+    ],
+    { cwd },
+  );
+  const remote = directory();
+  execFileSync("git", ["init", "--bare", "-q", remote]);
+  execFileSync("git", ["remote", "add", "origin", remote], { cwd });
+  return cwd;
+}
+function checkCommand(
+  kind: string,
+  cwd: string,
+  request = inputs(),
+  env = { GITHUB_TOKEN: "token" },
+) {
+  const checker = new NodeRepositoryReadiness({ cwd, env: { ...process.env, ...env } });
+  if (kind === "standalone")
+    return createCheckCommand(
+      request.config,
+      request.tracker,
+      request.configPath,
+      () => request.probe,
+      () => request.finder,
+      () => checker,
+    );
+  const core = createFlightRules({ cwd, env });
+  vi.spyOn(core, "readiness").mockReturnValue(checker);
+  vi.spyOn(core, "probe").mockReturnValue(request.probe);
+  const program = buildProgram(
+    request.tracker,
+    request.config,
+    () => core.prHost(),
+    request.configPath,
+    core,
+  );
+  const command = program.commands.find((item) => item.name() === "check");
+  if (command === undefined) throw new Error("Missing check command");
+  return command;
 }
 afterEach(() => {
   vi.restoreAllMocks();
@@ -146,62 +231,69 @@ describe("workflow readiness", () => {
     const report = await new NodeRepositoryReadiness({
       cwd,
       env: { GITHUB_TOKEN: "token" },
-    }).inspect({ ...request, options: { workflow: "verify-ticket", evidence: evidence(cwd) } });
+    }).inspect({ ...request, options: { workflow: "verify-ticket" } });
     expect(report.ok).toBe(false);
     expect(report.checks.find((check) => check.name === "qa-instructions")).toMatchObject({
       code: "PERMISSION_DENIED",
       required: true,
     });
   });
-  it("runs the CLI workflow gate with scoped evidence and preserves the JSON report", async () => {
-    const cwd = directory();
-    const file = join(cwd, "runtime.json");
-    writeFileSync(file, JSON.stringify(evidence(cwd)));
-    const request = inputs();
-    const output = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-    await createCheckCommand(
-      request.config,
-      request.tracker,
-      request.configPath,
-      () => request.probe,
-      () => request.finder,
-      () => new NodeRepositoryReadiness({ cwd, env: { GITHUB_TOKEN: "token" } }),
-    ).parseAsync(["--workflow", "break-down-work", "--runtime-file", file], { from: "user" });
-    const report = JSON.parse(String(output.mock.calls[0]?.[0]));
-    expect(report).toMatchObject({ ok: true, scope: "workflow", workflow: "break-down-work" });
-    expect(report.checks).toContainEqual(
-      expect.objectContaining({ name: "dispatch:research-agent", ok: true }),
-    );
-  });
+  describe.each(["standalone", "operation-backed"])("%s CLI", (kind) => {
+    it.each(WorkflowSchema.options)("checks %s without a runtime file", async (workflow) => {
+      const cwd = checkout();
+      writeFileSync(join(cwd, "QA.md"), "Exercise the fixture application.");
+      const files = readdirSync(cwd, { recursive: true }).sort();
+      const output = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+      await checkCommand(kind, cwd).parseAsync(["--workflow", workflow], { from: "user" });
+      const report = JSON.parse(String(output.mock.calls[0]?.[0]));
+      expect(report).toMatchObject({ ok: true, scope: "workflow", workflow });
+      expect(report.checks).not.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ name: expect.stringMatching(/^(host:|dispatch:)/) }),
+        ]),
+      );
+      expect(readdirSync(cwd, { recursive: true }).sort()).toEqual(files);
+    });
 
-  it.each(["malformed", "missing", "invalid-schema"] as const)(
-    "reports %s runtime input without echoing file contents",
-    async (kind) => {
-      const file = join(directory(), "runtime.json");
-      if (kind !== "missing")
-        writeFileSync(
-          file,
-          kind === "malformed" ? "{secret-value" : JSON.stringify({ secret: "secret-value" }),
-        );
+    it("rejects the removed runtime-file option before probing", async () => {
       const request = inputs();
+      vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+      await expect(
+        checkCommand(kind, directory(), request).parseAsync(
+          ["--workflow", "break-down-work", "--runtime-file", "runtime.json"],
+          { from: "user" },
+        ),
+      ).rejects.toMatchObject({ code: "commander.unknownOption" });
+      expect(request.probe.probe).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      { status: 401, code: "AUTHENTICATION" },
+      { status: 403, code: "PERMISSION_DENIED" },
+      { status: 503, code: "NETWORK" },
+    ])("reports real $code failures without host evidence", async ({ status, code }) => {
+      const request = inputs();
+      vi.spyOn(request.tracker(), "ping").mockRejectedValue(
+        Object.assign(new Error("secret-token rejected"), { status }),
+      );
       const output = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
       await expect(
-        createCheckCommand(
-          request.config,
-          request.tracker,
-          request.configPath,
-          () => request.probe,
-        ).parseAsync(["--workflow", "break-down-work", "--runtime-file", file], { from: "user" }),
+        checkCommand(kind, directory(), request, { GITHUB_TOKEN: "secret-token" }).parseAsync(
+          ["--workflow", "break-down-work"],
+          { from: "user" },
+        ),
       ).rejects.toThrow("check failed");
       const serialized = String(output.mock.calls[0]?.[0]);
       expect(JSON.parse(serialized)).toMatchObject({
         ok: false,
-        checks: [{ name: "runtime", code: "INVALID_CONTEXT" }],
+        checks: expect.arrayContaining([
+          expect.objectContaining({ name: "reachable", ok: false, code }),
+        ]),
       });
-      expect(serialized).not.toContain("secret-value");
-      expect(request.probe.probe).not.toHaveBeenCalled();
-    },
-  );
+      expect(serialized).not.toContain("secret-token");
+    });
+  });
+
   it("keeps the environment checks/ok contract without claiming workflow readiness", async () => {
     const checker = new NodeRepositoryReadiness({
       cwd: directory(),
@@ -222,17 +314,44 @@ describe("workflow readiness", () => {
     ]);
     expect(report.checks.find((check) => check.name === "qa-instructions")?.required).toBe(false);
   });
-  it("requires explicit host capabilities even when ordinary environment checks succeed", async () => {
+  it("runs workflow environment checks without claiming host capabilities", async () => {
     const checker = new NodeRepositoryReadiness({
       cwd: directory(),
       env: { GITHUB_TOKEN: "token" },
     });
     const report = await checker.inspect({ ...inputs(), options: { workflow: "break-down-work" } });
-    expect(report).toMatchObject({ ok: false, scope: "workflow", workflow: "break-down-work" });
-    expect(report.checks).toContainEqual(
-      expect.objectContaining({ name: "host:tracker.write", code: "CAPABILITY_UNKNOWN" }),
-    );
+    expect(report).toMatchObject({ ok: true, scope: "workflow", workflow: "break-down-work" });
+    expect(report.checks.map((check) => check.name)).toEqual([
+      "config",
+      "credentials",
+      "reachable",
+      "qa-instructions",
+    ]);
   });
+  it.each(["available", "unknown", "denied"] as const)(
+    "preserves optional SDK evidence with %s tracker access",
+    async (state) => {
+      const cwd = directory();
+      const observed = evidence(cwd);
+      if (state !== "available")
+        observed.callerCapabilities["tracker.write"] = {
+          state,
+          evidence: "Explicit adapter observation",
+          remedy: "Resolve tracker access through the host",
+        };
+      const report = await new NodeRepositoryReadiness({
+        cwd,
+        env: { GITHUB_TOKEN: "token" },
+      }).inspect({
+        ...inputs(),
+        options: { workflow: "break-down-work", evidence: observed },
+      });
+      expect(report.ok).toBe(state === "available");
+      expect(report.checks).toContainEqual(
+        expect.objectContaining({ name: "host:tracker.write", ok: state === "available" }),
+      );
+    },
+  );
   it("uses injected cwd/environment and notices subsequent credential changes", async () => {
     const cwd = directory();
     writeFileSync(join(cwd, "QA.md"), "Local QA instructions");
@@ -253,13 +372,10 @@ describe("workflow readiness", () => {
       timeoutMs: 10,
     });
     const request = inputs();
-    request.tracker = () =>
-      ({
-        ping: (options: { signal: AbortSignal }) => {
-          signal = options.signal;
-          return new Promise(() => {});
-        },
-      }) as unknown as TaskTracker;
+    vi.spyOn(request.tracker(), "ping").mockImplementation((options) => {
+      signal = options?.signal;
+      return new Promise(() => {});
+    });
     const report = await checker.inspect(request);
     expect(report.checks.find((check) => check.name === "reachable")).toMatchObject({
       ok: false,
@@ -273,11 +389,9 @@ describe("workflow readiness", () => {
       env: { GITHUB_TOKEN: "secret-token" },
     });
     const request = inputs();
-    request.tracker = () =>
-      ({
-        ping: () =>
-          Promise.reject(Object.assign(new Error("secret-token rejected"), { status: 401 })),
-      }) as unknown as TaskTracker;
+    vi.spyOn(request.tracker(), "ping").mockRejectedValue(
+      Object.assign(new Error("secret-token rejected"), { status: 401 }),
+    );
     const report = await checker.inspect(request);
     expect(report.checks.find((check) => check.name === "reachable")).toMatchObject({
       code: "AUTHENTICATION",
@@ -290,7 +404,7 @@ describe("workflow readiness", () => {
     const request = inputs();
     const report = await checker.inspect({
       ...request,
-      options: { workflow: "verify-ticket", evidence: evidence(cwd) },
+      options: { workflow: "verify-ticket" },
     });
     expect(report.ok).toBe(false);
     expect(report.checks.find((check) => check.name === "qa-instructions")?.required).toBe(true);
@@ -323,8 +437,28 @@ describe("workflow readiness", () => {
 });
 
 describe("read-only workflow probes", () => {
+  it("checks a linked worktree without supplied repository context", async () => {
+    const main = checkout();
+    const cwd = join(directory(), "linked");
+    execFileSync("git", ["worktree", "add", "-q", "-b", "linked", cwd], { cwd: main });
+    const checks = await new NodeWorkflowPreflight({ cwd, env: process.env }).inspect(
+      "execute-wave",
+    );
+    expect(checks.every((check) => check.ok)).toBe(true);
+    expect(checks).toContainEqual(expect.objectContaining({ name: "local:git-write", ok: true }));
+  });
+  it("still fails a missing Git remote without host evidence", async () => {
+    const cwd = checkout();
+    execFileSync("git", ["remote", "remove", "origin"], { cwd });
+    const checks = await new NodeWorkflowPreflight({ cwd, env: process.env }).inspect(
+      "execute-work",
+    );
+    expect(checks).toContainEqual(
+      expect.objectContaining({ name: "git:remote-read", ok: false, required: true }),
+    );
+  });
   it.each(["permissions", "spawn", "limits"] as const)(
-    "stops when worker %s are unverified",
+    "preserves opt-in SDK checks when worker %s are unverified",
     async (kind) => {
       const cwd = directory();
       const observed = evidence(cwd);
@@ -354,12 +488,11 @@ describe("read-only workflow probes", () => {
     },
   );
 
-  it("does not confuse a denied local directory with successful host evidence", async () => {
+  it("reports a denied local directory without host evidence", async () => {
     const cwd = directory();
     chmodSync(cwd, 0o555);
     const checks = await new NodeWorkflowPreflight({ cwd, env: process.env }).inspect(
       "execute-work",
-      evidence(cwd),
     );
     expect(checks.find((check) => check.name === "local:workspace-write")).toMatchObject({
       ok: false,
@@ -392,7 +525,6 @@ describe("read-only workflow probes", () => {
     const files = readdirSync(cwd, { recursive: true }).sort();
     const checks = await new NodeWorkflowPreflight({ cwd, env: process.env }).inspect(
       "execute-work",
-      evidence(cwd),
     );
     expect(checks.every((check) => check.ok)).toBe(true);
     expect(checks.find((check) => check.name === "git:remote-read")?.detail).toContain(
