@@ -80,6 +80,8 @@ export type { ReportHandoff, ReportHandoffResult } from "./orchestration/report-
 export { ImplementationReportSchema, VerificationReportSchema, CriterionResultSchema, HandoffRecordSchema, ImplementationRunSchema, } from "./orchestration/implementation-loop.schema.js";
 export type { ImplementationReport, VerificationReport, CriterionResult, HandoffRecord, ImplementationRun, } from "./orchestration/implementation-loop.schema.js";
 export { VerifiedImplementationLoop } from "./orchestration/implementation-loop.js";
+export { ReviewTriageReportSchema } from "./orchestration/review-triage.schema.js";
+export type { ReviewTriageReport } from "./orchestration/review-triage.schema.js";
 export type { ImplementationLoop, ImplementationDecision, VerificationDecision, StoppedImplementation, } from "./orchestration/implementation-loop.js";
 export { BoundedDispatchQueue, InvalidDispatchQueueStateError, } from "./orchestration/dispatch-queue.js";
 export type { DispatchQueue, DispatchAdmission } from "./orchestration/dispatch-queue.js";

@@ -3,7 +3,7 @@
   "agents": [
     {
       "name": "code-implementation",
-      "sha256": "ed11ecf00fa64f488e5dc74d41338a6894be60b7b3044d9d78f6e006f4a9866f",
+      "sha256": "2bd5c2cbfedba9058e72d5a25763ee738f842720aef75eae521b3690cec0a404",
       "registration": {
         "name": "code-implementation",
         "description": "Implements a single ticket's acceptance criteria against the coding charter. Dispatched by the execute-work skill with the ticket's layered body, any RFC/TDD context, and — on a retry — the verifier's itemized failures. Writes and edits code and tests; it never commits, branches, or opens PRs (the orchestrating skill owns git). Use when a ticket needs to be built.",
@@ -20,7 +20,7 @@
     },
     {
       "name": "code-implementation-escalated",
-      "sha256": "4cae526b0dce9c9f1d40d0853f9049cb15ca98a051281b06a64312d5953bb5a9",
+      "sha256": "26e1e364fb1b20ac0c18a14671fbac7d81c2fe0680b362b5c6ae5f87d0408f25",
       "registration": {
         "name": "code-implementation-escalated",
         "description": "Implements the final attempt for a ticket after two recorded verifier rejections. Shares the code-implementation instructions, acceptance criteria and structured report; use only on attempt three of execute-work.",
@@ -37,10 +37,10 @@
     },
     {
       "name": "code-verifier",
-      "sha256": "19f0f206e45a2692211e16d017c7ab603047b21a2575e2db898185c8bd938e08",
+      "sha256": "ea4813c0c12ca80fa0bc20fdb66376d460c580671c1ea41e8c498ef2c09af029",
       "registration": {
         "name": "code-verifier",
-        "description": "Verifies a completed implementation against a ticket's acceptance criteria, itemized, one verdict per criterion with evidence. Dispatched by the execute-work skill after code-implementation runs. Read-only — it inspects code and runs tests but never edits anything. Use to independently confirm a ticket is actually done.",
+        "description": "Verifies acceptance criteria and accepted review fixes, or triages review findings before remediation. Dispatched by the execute-work skill after code-implementation runs. Read-only — it inspects code and runs tests but never edits anything. Use to independently confirm a ticket is actually done.",
         "capabilities": [
           "read",
           "shell"

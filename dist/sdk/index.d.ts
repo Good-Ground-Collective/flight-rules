@@ -3,6 +3,8 @@ export type { InstructionCatalog, CanonicalInstruction } from "./instruction-cat
 export { WorkerReportCodec, workerReportCodec, InvalidWorkerReportError, ReportModeSchema, } from "./report-codec.js";
 export type { WorkerReportParser } from "./report-codec.js";
 export type { ReportMode, ValidatedWorkerReport } from "./report-codec.js";
+export { ReviewTriageReportSchema } from "../orchestration/review-triage.schema.js";
+export type { ReviewTriageReport } from "../orchestration/review-triage.schema.js";
 export { ImplementationReportSchema, VerificationReportSchema, } from "../orchestration/implementation-loop.schema.js";
 export { VerifiedImplementationLoop } from "../orchestration/implementation-loop.js";
 export type { ImplementationLoop } from "../orchestration/implementation-loop.js";

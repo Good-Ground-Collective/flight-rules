@@ -1288,7 +1288,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.94.2";
+var appVersion = false ? "0.0.0-dev" : "1.94.3";
 
 // src/shared/ariadne/review-packet.schema.ts
 import { z as z14 } from "zod";
@@ -10508,17 +10508,53 @@ var VerifiedImplementationLoop = class {
   }
 };
 
-// src/orchestration/dispatch-queue.ts
+// src/orchestration/review-triage.schema.ts
 import { z as z57 } from "zod";
-var DispatchQueuePropsSchema = z57.strictObject({
-  agents: z57.array(AgentDefinitionSchema).min(1),
-  requests: z57.array(DispatchRequestSchema).refine(
+var FindingDispositionSchema = z57.discriminatedUnion("disposition", [
+  z57.strictObject({
+    id: OrchestrationTextSchema,
+    disposition: z57.literal("fix"),
+    evidence: OrchestrationTextSchema,
+    criterion: OrchestrationTextSchema
+  }),
+  z57.strictObject({
+    id: OrchestrationTextSchema,
+    disposition: z57.literal("ignore"),
+    evidence: OrchestrationTextSchema
+  }),
+  z57.strictObject({
+    id: OrchestrationTextSchema,
+    disposition: z57.literal("needs_input"),
+    evidence: OrchestrationTextSchema,
+    question: OrchestrationTextSchema
+  })
+]);
+var ReviewTriageReportSchema = z57.strictObject({
+  summary: OrchestrationTextSchema,
+  headSha: z57.string().regex(/^[a-f0-9]{40}$/),
+  findings: z57.array(FindingDispositionSchema).refine(
+    (findings) => new Set(findings.map((finding) => finding.id)).size === findings.length,
+    "Each finding must have exactly one disposition"
+  ),
+  openQuestions: z57.array(OrchestrationTextSchema).optional()
+}).refine(
+  (report) => report.findings.every(
+    (finding) => finding.disposition !== "needs_input" || report.openQuestions?.includes(finding.question)
+  ),
+  "Every needs_input question must also appear in openQuestions"
+);
+
+// src/orchestration/dispatch-queue.ts
+import { z as z58 } from "zod";
+var DispatchQueuePropsSchema = z58.strictObject({
+  agents: z58.array(AgentDefinitionSchema).min(1),
+  requests: z58.array(DispatchRequestSchema).refine(
     (requests) => new Set(requests.map((request) => request.id)).size === requests.length,
     "dispatch IDs must be unique"
   ),
-  maxConcurrent: z57.int().positive()
+  maxConcurrent: z58.int().positive()
 });
-var ObservedDispatchIdsSchema = z57.array(z57.string().min(1)).refine((ids) => new Set(ids).size === ids.length, "observed dispatch IDs must be unique");
+var ObservedDispatchIdsSchema = z58.array(z58.string().min(1)).refine((ids) => new Set(ids).size === ids.length, "observed dispatch IDs must be unique");
 var InvalidDispatchQueueStateError = class extends Error {
   name = "InvalidDispatchQueueStateError";
 };
@@ -10703,6 +10739,7 @@ export {
   QuestionRequestSchema,
   ReadinessOptionsSchema,
   RegistryOrchestrationPolicy,
+  ReviewTriageReportSchema,
   RunContextSchema,
   RuntimeSnapshotSchema,
   SemanticTypeSchema,

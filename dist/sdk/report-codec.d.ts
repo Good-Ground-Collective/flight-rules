@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { ImplementationReportSchema, VerificationReportSchema } from "../orchestration/implementation-loop.schema.js";
+import { ReviewTriageReportSchema } from "../orchestration/review-triage.schema.js";
 declare const ResearchReportSchema: z.ZodObject<{
     summary: z.ZodString;
     confidence: z.ZodEnum<{
@@ -157,6 +158,9 @@ export declare const ReportModeSchema: z.ZodUnion<readonly [z.ZodObject<{
     agent: z.ZodLiteral<"code-verifier">;
     mode: z.ZodLiteral<"verify">;
 }, z.core.$strict>, z.ZodObject<{
+    agent: z.ZodLiteral<"code-verifier">;
+    mode: z.ZodLiteral<"triage">;
+}, z.core.$strict>, z.ZodObject<{
     agent: z.ZodLiteral<"research-agent">;
     mode: z.ZodEnum<{
         external: "external";
@@ -183,7 +187,7 @@ export declare const ReportModeSchema: z.ZodUnion<readonly [z.ZodObject<{
     mode: z.ZodLiteral<"author">;
 }, z.core.$strict>]>;
 export type ReportMode = z.infer<typeof ReportModeSchema>;
-export type ValidatedWorkerReport = z.infer<typeof ImplementationReportSchema> | z.infer<typeof VerificationReportSchema> | z.infer<typeof ResearchReportSchema> | z.infer<typeof QaReproduceSchema> | z.infer<typeof QaVerifySchema> | z.infer<typeof WriterFeedbackSchema> | z.infer<typeof WriterRewriteSchema> | z.infer<typeof WriterAuthorSchema>;
+export type ValidatedWorkerReport = z.infer<typeof ImplementationReportSchema> | z.infer<typeof VerificationReportSchema> | z.infer<typeof ReviewTriageReportSchema> | z.infer<typeof ResearchReportSchema> | z.infer<typeof QaReproduceSchema> | z.infer<typeof QaVerifySchema> | z.infer<typeof WriterFeedbackSchema> | z.infer<typeof WriterRewriteSchema> | z.infer<typeof WriterAuthorSchema>;
 export declare class InvalidWorkerReportError extends Error {
     name: string;
 }

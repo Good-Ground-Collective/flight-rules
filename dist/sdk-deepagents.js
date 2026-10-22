@@ -4,7 +4,7 @@ import { BaseCallbackHandler } from "@langchain/core/callbacks/base";
 import { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { HumanMessage, isAIMessage } from "@langchain/core/messages";
 import { tool } from "langchain";
-import { z as z9 } from "zod";
+import { z as z10 } from "zod";
 
 // src/agents/agent-emitter/agent-emitter.schema.ts
 import { z as z2 } from "zod";
@@ -481,7 +481,7 @@ var BoundedDispatchQueue = class {
 };
 
 // src/sdk/report-codec.ts
-import { z as z7 } from "zod";
+import { z as z8 } from "zod";
 import { parse as parseYaml } from "yaml";
 
 // src/orchestration/implementation-loop.schema.ts
@@ -528,132 +528,169 @@ var ImplementationRunSchema = z6.strictObject({
   ).max(3)
 });
 
+// src/orchestration/review-triage.schema.ts
+import { z as z7 } from "zod";
+var FindingDispositionSchema = z7.discriminatedUnion("disposition", [
+  z7.strictObject({
+    id: OrchestrationTextSchema,
+    disposition: z7.literal("fix"),
+    evidence: OrchestrationTextSchema,
+    criterion: OrchestrationTextSchema
+  }),
+  z7.strictObject({
+    id: OrchestrationTextSchema,
+    disposition: z7.literal("ignore"),
+    evidence: OrchestrationTextSchema
+  }),
+  z7.strictObject({
+    id: OrchestrationTextSchema,
+    disposition: z7.literal("needs_input"),
+    evidence: OrchestrationTextSchema,
+    question: OrchestrationTextSchema
+  })
+]);
+var ReviewTriageReportSchema = z7.strictObject({
+  summary: OrchestrationTextSchema,
+  headSha: z7.string().regex(/^[a-f0-9]{40}$/),
+  findings: z7.array(FindingDispositionSchema).refine(
+    (findings) => new Set(findings.map((finding) => finding.id)).size === findings.length,
+    "Each finding must have exactly one disposition"
+  ),
+  openQuestions: z7.array(OrchestrationTextSchema).optional()
+}).refine(
+  (report) => report.findings.every(
+    (finding) => finding.disposition !== "needs_input" || report.openQuestions?.includes(finding.question)
+  ),
+  "Every needs_input question must also appear in openQuestions"
+);
+
 // src/sdk/report-codec.ts
 var reportText = OrchestrationTextSchema;
-var JsonReportValueSchema = z7.json();
-var InternalResearchSchema = z7.strictObject({
-  files: z7.array(z7.strictObject({ path: reportText, why: reportText })),
-  patterns: z7.array(reportText),
-  integrationPoints: z7.array(reportText),
-  risks: z7.array(reportText)
+var JsonReportValueSchema = z8.json();
+var InternalResearchSchema = z8.strictObject({
+  files: z8.array(z8.strictObject({ path: reportText, why: reportText })),
+  patterns: z8.array(reportText),
+  integrationPoints: z8.array(reportText),
+  risks: z8.array(reportText)
 });
-var ExternalResearchSchema = z7.strictObject({
+var ExternalResearchSchema = z8.strictObject({
   answer: reportText,
-  sources: z7.array(z7.strictObject({ url: z7.url(), title: reportText })),
+  sources: z8.array(z8.strictObject({ url: z8.url(), title: reportText })),
   exampleUsage: reportText.nullable(),
-  caveats: z7.array(reportText)
+  caveats: z8.array(reportText)
 });
-var ResearchReportSchema = z7.strictObject({
+var ResearchReportSchema = z8.strictObject({
   summary: reportText,
-  confidence: z7.enum(["low", "med", "high"]),
+  confidence: z8.enum(["low", "med", "high"]),
   internal: InternalResearchSchema.optional(),
   external: ExternalResearchSchema.optional()
 });
-var EvidenceSchema = z7.strictObject({
+var EvidenceSchema = z8.strictObject({
   dir: reportText,
-  items: z7.array(
-    z7.strictObject({
+  items: z8.array(
+    z8.strictObject({
       path: reportText,
-      kind: z7.enum(["image", "video", "text"]),
-      phase: z7.enum(["before", "after"]),
+      kind: z8.enum(["image", "video", "text"]),
+      phase: z8.enum(["before", "after"]),
       caption: reportText
     })
   )
 });
-var QaReproduceSchema = z7.discriminatedUnion("reproduced", [
-  z7.strictObject({
+var QaReproduceSchema = z8.discriminatedUnion("reproduced", [
+  z8.strictObject({
     summary: reportText,
-    reproduced: z7.literal(true),
-    needs: z7.array(reportText).optional(),
-    steps: z7.array(reportText),
-    after: z7.array(reportText),
+    reproduced: z8.literal(true),
+    needs: z8.array(reportText).optional(),
+    steps: z8.array(reportText),
+    after: z8.array(reportText),
     rootCause: reportText,
     trapForQA: reportText,
-    fixedWhen: z7.array(reportText),
+    fixedWhen: z8.array(reportText),
     evidence: EvidenceSchema,
-    openQuestions: z7.array(reportText).optional()
+    openQuestions: z8.array(reportText).optional()
   }),
-  z7.strictObject({
+  z8.strictObject({
     summary: reportText,
-    reproduced: z7.literal(false),
+    reproduced: z8.literal(false),
     reason: reportText,
-    needs: z7.array(reportText).optional(),
+    needs: z8.array(reportText).optional(),
     evidence: EvidenceSchema,
-    openQuestions: z7.array(reportText).optional()
+    openQuestions: z8.array(reportText).optional()
   })
 ]);
-var QaVerifySchema = z7.strictObject({
+var QaVerifySchema = z8.strictObject({
   summary: reportText,
-  items: z7.array(
-    z7.strictObject({
+  items: z8.array(
+    z8.strictObject({
       item: reportText,
-      verdict: z7.enum(["PASS", "FAIL", "UNVERIFIABLE"]),
+      verdict: z8.enum(["PASS", "FAIL", "UNVERIFIABLE"]),
       evidence: reportText
     })
   ),
   evidence: EvidenceSchema,
-  verified: z7.boolean(),
-  needs: z7.array(reportText).optional(),
-  openQuestions: z7.array(reportText).optional()
+  verified: z8.boolean(),
+  needs: z8.array(reportText).optional(),
+  openQuestions: z8.array(reportText).optional()
 }).refine(
   (report) => report.verified === report.items.every((item) => item.verdict === "PASS"),
   "verified must agree with every item verdict"
 );
-var WriterFindingSchema = z7.strictObject({
+var WriterFindingSchema = z8.strictObject({
   excerpt: reportText,
   location: reportText,
   mandate: reportText,
   problem: reportText,
   suggestion: reportText
 });
-var WriterFeedbackSchema = z7.strictObject({
+var WriterFeedbackSchema = z8.strictObject({
   summary: reportText,
-  verdict: z7.enum(["CLEAN", "MINOR", "HEAVY"]),
-  findings: z7.array(WriterFindingSchema),
-  strengths: z7.array(reportText),
-  openQuestions: z7.array(reportText).optional()
+  verdict: z8.enum(["CLEAN", "MINOR", "HEAVY"]),
+  findings: z8.array(WriterFindingSchema),
+  strengths: z8.array(reportText),
+  openQuestions: z8.array(reportText).optional()
 });
-var WriterChangeSchema = z7.strictObject({
+var WriterChangeSchema = z8.strictObject({
   before: reportText,
   after: reportText,
   mandate: reportText,
   why: reportText
 });
-var WriterRewriteSchema = z7.strictObject({
+var WriterRewriteSchema = z8.strictObject({
   summary: reportText,
-  verdict: z7.enum(["CLEAN", "MINOR", "HEAVY"]),
-  changes: z7.array(WriterChangeSchema).optional(),
+  verdict: z8.enum(["CLEAN", "MINOR", "HEAVY"]),
+  changes: z8.array(WriterChangeSchema).optional(),
   rewritten: reportText.optional(),
-  preserved: z7.array(reportText),
-  openQuestions: z7.array(reportText).optional()
+  preserved: z8.array(reportText),
+  openQuestions: z8.array(reportText).optional()
 }).refine(
   (report) => report.changes === void 0 !== (report.rewritten === void 0),
   "rewrite reports must contain either file changes or inline rewritten text"
 );
-var WriterAuthorSchema = z7.strictObject({
+var WriterAuthorSchema = z8.strictObject({
   summary: reportText,
-  whatWasChanged: z7.array(reportText.max(256)).min(1).max(5),
+  whatWasChanged: z8.array(reportText.max(256)).min(1).max(5),
   whyWasItChanged: reportText,
   otsMaterials: reportText,
-  openQuestions: z7.array(reportText).optional()
+  openQuestions: z8.array(reportText).optional()
 });
-var ReportModeSchema = z7.union([
-  z7.strictObject({ agent: z7.literal("code-implementation"), mode: z7.literal("implement") }),
-  z7.strictObject({
-    agent: z7.literal("code-implementation-escalated"),
-    mode: z7.literal("implement")
+var ReportModeSchema = z8.union([
+  z8.strictObject({ agent: z8.literal("code-implementation"), mode: z8.literal("implement") }),
+  z8.strictObject({
+    agent: z8.literal("code-implementation-escalated"),
+    mode: z8.literal("implement")
   }),
-  z7.strictObject({ agent: z7.literal("code-verifier"), mode: z7.literal("verify") }),
-  z7.strictObject({
-    agent: z7.literal("research-agent"),
-    mode: z7.enum(["internal", "external", "mixed"])
+  z8.strictObject({ agent: z8.literal("code-verifier"), mode: z8.literal("verify") }),
+  z8.strictObject({ agent: z8.literal("code-verifier"), mode: z8.literal("triage") }),
+  z8.strictObject({
+    agent: z8.literal("research-agent"),
+    mode: z8.enum(["internal", "external", "mixed"])
   }),
-  z7.strictObject({ agent: z7.literal("qa-engineer"), mode: z7.literal("reproduce") }),
-  z7.strictObject({ agent: z7.literal("qa-engineer"), mode: z7.literal("verify") }),
-  z7.strictObject({ agent: z7.literal("qa-engineer-verify"), mode: z7.literal("verify") }),
-  z7.strictObject({ agent: z7.literal("tech-writer"), mode: z7.literal("feedback") }),
-  z7.strictObject({ agent: z7.literal("tech-writer"), mode: z7.literal("rewrite") }),
-  z7.strictObject({ agent: z7.literal("tech-writer"), mode: z7.literal("author") })
+  z8.strictObject({ agent: z8.literal("qa-engineer"), mode: z8.literal("reproduce") }),
+  z8.strictObject({ agent: z8.literal("qa-engineer"), mode: z8.literal("verify") }),
+  z8.strictObject({ agent: z8.literal("qa-engineer-verify"), mode: z8.literal("verify") }),
+  z8.strictObject({ agent: z8.literal("tech-writer"), mode: z8.literal("feedback") }),
+  z8.strictObject({ agent: z8.literal("tech-writer"), mode: z8.literal("rewrite") }),
+  z8.strictObject({ agent: z8.literal("tech-writer"), mode: z8.literal("author") })
 ]);
 var InvalidWorkerReportError = class extends Error {
   name = "InvalidWorkerReportError";
@@ -671,7 +708,7 @@ var WorkerReportCodec = class {
     return report.data;
   }
   pipelineFor(mode) {
-    return z7.string().transform((input, context) => {
+    return z8.string().transform((input, context) => {
       const blocks = [...input.matchAll(/```yaml\s*\r?\n([\s\S]*?)\r?\n```/gi)];
       const block = blocks.at(0);
       const before = block === void 0 ? "" : input.slice(0, block.index);
@@ -681,7 +718,7 @@ var WorkerReportCodec = class {
           code: "custom",
           message: "Return one final fenced YAML report; only research reports may have prose before it"
         });
-        return z7.NEVER;
+        return z8.NEVER;
       }
       return block[1] ?? "";
     }).transform((yaml, context) => {
@@ -692,14 +729,15 @@ var WorkerReportCodec = class {
           code: "custom",
           message: `Malformed YAML report: ${cause instanceof Error ? cause.message : String(cause)}`
         });
-        return z7.NEVER;
+        return z8.NEVER;
       }
-    }).pipe(JsonReportValueSchema).pipe(z7.preprocess((report) => report, this.schemaFor(mode)));
+    }).pipe(JsonReportValueSchema).pipe(z8.preprocess((report) => report, this.schemaFor(mode)));
   }
   schemaFor(mode) {
     if (mode.agent === "code-implementation" || mode.agent === "code-implementation-escalated")
       return ImplementationReportSchema;
-    if (mode.agent === "code-verifier") return VerificationReportSchema;
+    if (mode.agent === "code-verifier")
+      return mode.mode === "triage" ? ReviewTriageReportSchema : VerificationReportSchema;
     if (mode.agent === "research-agent")
       return ResearchReportSchema.refine(
         (report) => (mode.mode === "external" || report.internal !== void 0) && (mode.mode === "internal" || report.external !== void 0),
@@ -717,10 +755,10 @@ var workerReportCodec = new WorkerReportCodec();
 // src/sdk/deepagents/tool-policy.ts
 import { createFilesystemMiddleware, createSubAgentMiddleware, StateBackend } from "deepagents";
 import { createMiddleware } from "langchain";
-import { z as z8 } from "zod";
-var WorkerCapabilitySchema = z8.enum(["read", "edit", "shell", "web", "spawn", "ask"]);
-var CapabilityToolDeniedPropsSchema = z8.strictObject({
-  toolName: z8.string().min(1),
+import { z as z9 } from "zod";
+var WorkerCapabilitySchema = z9.enum(["read", "edit", "shell", "web", "spawn", "ask"]);
+var CapabilityToolDeniedPropsSchema = z9.strictObject({
+  toolName: z9.string().min(1),
   capability: WorkerCapabilitySchema.optional()
 });
 var flightRulesAbortSignalConfigKey = "flightRulesAbortSignal";
@@ -860,26 +898,26 @@ var InFlightModelTracker = class extends BaseCallbackHandler {
     }
   }
 };
-var ModelInstancesSchema = z9.strictObject({
-  standard: z9.instanceof(BaseChatModel),
-  escalated: z9.instanceof(BaseChatModel),
-  expert: z9.instanceof(BaseChatModel)
+var ModelInstancesSchema = z10.strictObject({
+  standard: z10.instanceof(BaseChatModel),
+  escalated: z10.instanceof(BaseChatModel),
+  expert: z10.instanceof(BaseChatModel)
 });
-var DeepAgentsRuntimePropsSchema = z9.strictObject({
-  agents: z9.array(AgentDefinitionSchema).min(1),
+var DeepAgentsRuntimePropsSchema = z10.strictObject({
+  agents: z10.array(AgentDefinitionSchema).min(1),
   models: ModelInstancesSchema,
-  toolGrants: z9.record(
-    z9.string(),
-    z9.array(
-      z9.custom(
+  toolGrants: z10.record(
+    z10.string(),
+    z10.array(
+      z10.custom(
         (value) => typeof value === "object" && value !== null && "name" in value && typeof value.name === "string" && "invoke" in value && typeof value.invoke === "function"
       )
     )
   ),
-  observe: z9.custom(
+  observe: z10.custom(
     (value) => typeof value === "function"
   ),
-  maxGraphSteps: z9.int().positive().default(64)
+  maxGraphSteps: z10.int().positive().default(64)
 });
 var DeepAgentsConfigurationError = class extends Error {
   name = "DeepAgentsConfigurationError";
@@ -917,7 +955,7 @@ var LangChainDeepAgentsWorkerRuntime = class {
     return outcome;
   }
   async dispatchMany(requests, options) {
-    const validatedRequests = z9.array(DispatchRequestSchema).parse(requests);
+    const validatedRequests = z10.array(DispatchRequestSchema).parse(requests);
     const queue = new BoundedDispatchQueue({
       agents: this.agents,
       requests: validatedRequests,
@@ -971,7 +1009,7 @@ var LangChainDeepAgentsWorkerRuntime = class {
             const handoff = queue.settle(
               admission.request.id,
               outcome,
-              z9.record(z9.string(), z9.json())
+              z10.record(z10.string(), z10.json())
             );
             if (handoff.status === "accepted") {
               settledOutcomes.set(admission.request.id, outcome);
@@ -988,7 +1026,7 @@ var LangChainDeepAgentsWorkerRuntime = class {
             const handoff = queue.settle(
               admission.request.id,
               outcome,
-              z9.record(z9.string(), z9.json())
+              z10.record(z10.string(), z10.json())
             );
             if (handoff.status === "accepted") {
               settledOutcomes.set(admission.request.id, outcome);
@@ -1200,40 +1238,40 @@ import { BaseChatModel as BaseChatModel2 } from "@langchain/core/language_models
 import { AsyncLocalStorageProviderSingleton } from "@langchain/core/singletons";
 import { createDeepAgent as createDeepAgent2 } from "deepagents";
 import { createMiddleware as createMiddleware2, tool as tool2 } from "langchain";
-import { z as z10 } from "zod";
-var SkillRuntimePropsSchema = z10.strictObject({
-  instructions: z10.custom(
+import { z as z11 } from "zod";
+var SkillRuntimePropsSchema = z11.strictObject({
+  instructions: z11.custom(
     (value) => typeof value === "object" && value !== null && "loadSkill" in value && typeof value.loadSkill === "function"
   ),
-  agents: z10.array(AgentDefinitionSchema).min(1),
-  models: z10.strictObject({
-    standard: z10.instanceof(BaseChatModel2),
-    escalated: z10.instanceof(BaseChatModel2),
-    expert: z10.instanceof(BaseChatModel2)
+  agents: z11.array(AgentDefinitionSchema).min(1),
+  models: z11.strictObject({
+    standard: z11.instanceof(BaseChatModel2),
+    escalated: z11.instanceof(BaseChatModel2),
+    expert: z11.instanceof(BaseChatModel2)
   }),
-  operations: z10.custom(
+  operations: z11.custom(
     (value) => typeof value === "object" && value !== null && "invoke" in value && typeof value.invoke === "function" && "list" in value && typeof value.list === "function"
   ),
-  workers: z10.custom(
+  workers: z11.custom(
     (value) => typeof value === "object" && value !== null && "dispatch" in value && typeof value.dispatch === "function"
   ),
-  observe: z10.custom((value) => typeof value === "function"),
-  toolGrants: z10.custom(
+  observe: z11.custom((value) => typeof value === "function"),
+  toolGrants: z11.custom(
     (value) => typeof value === "function"
   ),
-  checkpointer: z10.custom(
+  checkpointer: z11.custom(
     (value) => typeof value === "object" && value !== null && "getTuple" in value && typeof value.getTuple === "function"
   ).default(() => new MemorySaver()),
-  maxGraphSteps: z10.int().positive().default(128)
+  maxGraphSteps: z11.int().positive().default(128)
 });
-var PartialOperationSchema = z10.strictObject({
-  operationId: z10.string().min(1),
-  status: z10.literal("partial"),
-  data: z10.unknown(),
-  error: z10.strictObject({ name: z10.string().min(1), message: z10.string() })
+var PartialOperationSchema = z11.strictObject({
+  operationId: z11.string().min(1),
+  status: z11.literal("partial"),
+  data: z11.unknown(),
+  error: z11.strictObject({ name: z11.string().min(1), message: z11.string() })
 });
-var PartialOperationFailurePropsSchema = z10.strictObject({
-  operations: z10.array(PartialOperationSchema).min(1)
+var PartialOperationFailurePropsSchema = z11.strictObject({
+  operations: z11.array(PartialOperationSchema).min(1)
 });
 var PartialOperationFailure = class extends Error {
   name = "PartialOperationFailure";
@@ -1339,8 +1377,8 @@ ${JSON.stringify(input)}`
       );
     } catch (cause) {
       await execution?.tools.waitForIdle();
-      const interruption = isGraphInterrupt(cause) ? z10.array(z10.object({ id: z10.string().optional(), value: z10.unknown() })).safeParse(cause.interrupts) : this.questionInterruptionFromError(cause);
-      const question = interruption.success ? z10.object({ questionId: z10.string(), question: z10.string() }).safeParse(interruption.data[0]?.value) : void 0;
+      const interruption = isGraphInterrupt(cause) ? z11.array(z11.object({ id: z11.string().optional(), value: z11.unknown() })).safeParse(cause.interrupts) : this.questionInterruptionFromError(cause);
+      const question = interruption.success ? z11.object({ questionId: z11.string(), question: z11.string() }).safeParse(interruption.data[0]?.value) : void 0;
       if (question?.success === true && options.allowHumanQuestions === true) {
         if (isGraphInterrupt(cause)) {
           const pauseId = randomUUID();
@@ -1534,7 +1572,7 @@ ${JSON.stringify(input)}`
         {
           name: "flight_rules_operation",
           description: "Run a launch-authorized shared flight-rules operation.",
-          schema: z10.object({ operationId: z10.string(), input: z10.record(z10.string(), z10.unknown()) })
+          schema: z11.object({ operationId: z11.string(), input: z11.record(z11.string(), z11.unknown()) })
         }
       ),
       tool2(
@@ -1579,10 +1617,10 @@ ${JSON.stringify(input)}`
         {
           name: "flight_rules_dispatch",
           description: "Dispatch one registered named worker under observed host grants.",
-          schema: z10.object({
-            agent: z10.string(),
-            dispatchId: z10.string(),
-            input: z10.record(z10.string(), z10.json())
+          schema: z11.object({
+            agent: z11.string(),
+            dispatchId: z11.string(),
+            input: z11.record(z11.string(), z11.json())
           })
         }
       ),
@@ -1625,7 +1663,7 @@ ${JSON.stringify(input)}`
         {
           name: "flight_rules_sibling_skill",
           description: "Invoke another canonical skill with this same caller context.",
-          schema: z10.object({ siblingSkill: z10.string(), input: z10.record(z10.string(), z10.unknown()) })
+          schema: z11.object({ siblingSkill: z11.string(), input: z11.record(z11.string(), z11.unknown()) })
         }
       )
     ];
@@ -1648,7 +1686,7 @@ ${JSON.stringify(input)}`
         {
           name: "flight_rules_ask_human",
           description: "Pause this skill and wait for an actual answer from the human caller.",
-          schema: z10.object({ question: z10.string().min(1) })
+          schema: z11.object({ question: z11.string().min(1) })
         }
       )
     );
@@ -1733,7 +1771,7 @@ ${JSON.stringify(input)}`
   }
   resumeSibling(threadId, paused) {
     const answerValue = interrupt({ questionId: paused.questionId, question: paused.question });
-    const answer = z10.object({ questionId: z10.string(), answer: z10.string() }).parse(answerValue);
+    const answer = z11.object({ questionId: z11.string(), answer: z11.string() }).parse(answerValue);
     if (answer.questionId !== paused.questionId) {
       throw new InvalidSkillResumeError("The answer belongs to another sibling question.");
     }
@@ -1758,7 +1796,7 @@ ${JSON.stringify(input)}`
     });
   }
   questionInterruptionFromError(cause) {
-    const schema = z10.array(z10.object({ id: z10.string().optional(), value: z10.unknown() }));
+    const schema = z11.array(z11.object({ id: z11.string().optional(), value: z11.unknown() }));
     if (!(cause instanceof Error)) return schema.safeParse(null);
     try {
       return schema.safeParse(JSON.parse(cause.message));
@@ -1767,11 +1805,11 @@ ${JSON.stringify(input)}`
     }
   }
   result(graph, result, context, invocationId, threadId, skill, allowHumanQuestions) {
-    const graphResult = z10.record(z10.string(), z10.unknown()).parse(result);
-    const messages = z10.array(z10.instanceof(BaseMessage)).parse(graphResult["messages"]);
-    const interruptions = z10.array(z10.object({ value: z10.unknown() })).safeParse(graphResult["__interrupt__"]);
+    const graphResult = z11.record(z11.string(), z11.unknown()).parse(result);
+    const messages = z11.array(z11.instanceof(BaseMessage)).parse(graphResult["messages"]);
+    const interruptions = z11.array(z11.object({ value: z11.unknown() })).safeParse(graphResult["__interrupt__"]);
     const task = interruptions.success ? interruptions.data[0] : void 0;
-    const question = task === void 0 ? void 0 : z10.object({ questionId: z10.string(), question: z10.string() }).safeParse(task.value);
+    const question = task === void 0 ? void 0 : z11.object({ questionId: z11.string(), question: z11.string() }).safeParse(task.value);
     if (question?.success === true) {
       const pauseId = randomUUID();
       const value = question.data;
