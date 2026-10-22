@@ -33,7 +33,7 @@ Human questions require invocation-level `allowHumanQuestions: true` and availab
 ## Preconditions
 
 - You are handed an **epic id** or an **initiative id**.
-- Run everything from the **repo root**.
+- The session may start outside the repository, such as in `~/Developer`. Run each repository-specific command from the target **repo root**, using the tool’s working-directory option or `cd <repo> && <command>`. This includes the parent’s preflight, tracker, Git and PR commands; changing only a worker’s directory is insufficient. Initialize task context for that repository and give workers the same target path. No session restart is needed.
 - The **working tree is clean**. Checked once, here, before any mutation.
 - Before the first repository or tracker mutation, run `flight-rules check --workflow execute-wave` and require `"ok": true` for the workflow’s environment checks. Resolve failed required checks before continuing. Use the native harness for permissions and worker dispatch; no runtime evidence file is required.
 - Config carries a **`repo`** field (`owner/repo`). `execute-work` needs it to open each PR, and discovering it missing on ticket four means three PRs and a broken run. Settle it now.

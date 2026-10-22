@@ -2,6 +2,12 @@
 
 Native skills use the running harness for permissions, worker scheduling and dispatch. Read [orchestration-interface](./orchestration-interface.md) for task identity, role reports and retry rules. Its runtime snapshot and policy APIs serve programmatic adapters; native parents do not need a permission manifest or a second scheduler.
 
+## Session directory and task directory
+
+The session may start in a parent directory such as `~/Developer` and work in repositories beneath it. For each task, use the selected repository or worktree as `repositoryRoot` and a working directory inside it as `cwd`; these identify the task, not the session’s launch directory.
+
+Run repository-specific commands in that target directory using the tool’s working-directory option or `cd <repo> && <command>`. Set the directory for each call instead of assuming a prior shell call persists it. The parent’s preflight, tracker, Git and PR commands need the target directory too; changing only a worker’s directory does not redirect the parent’s commands. Include the target path in worker briefs and use it when dispatching. No session restart is needed.
+
 ## Binding the shared operations
 
 | Operation | Claude Code parent | Codex parent |

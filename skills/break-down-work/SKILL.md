@@ -86,7 +86,7 @@ When you ask, be specific: state what's unclear, show what you found, and offer 
 
 ## Preconditions
 
-- Run everything from the **repo root** so `flight-rules` resolves the project's configured tracker.
+- The session may start outside the repository, such as in `~/Developer`. Run each repository-specific command from the target **repo root**, using the tool’s working-directory option or `cd <repo> && <command>`. This includes the parent’s preflight, tracker, Git and PR commands; changing only a worker’s directory is insufficient. Initialize task context for that repository and give workers the same target path. No session restart is needed.
 - Before the first repository or tracker mutation, run `flight-rules check --workflow break-down-work` and require `"ok": true` for the workflow’s environment checks. Resolve failed required checks before continuing. Use the native harness for permissions and worker dispatch; no runtime evidence file is required. This skill is **tracker-agnostic** — it talks to the configured tracker only through `flight-rules`.
 
 ## Process

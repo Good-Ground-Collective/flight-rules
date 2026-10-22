@@ -11,6 +11,16 @@ No runtime evidence file is required. The native harness owns permissions and wo
 
 The first command reports `scope: "environment"`. Selecting `execute-work`, `execute-wave`, `break-down-work`, `reproduce-bug` or `verify-ticket` adds the relevant environment requirements and reports `scope: "workflow"` and the selected workflow. Both preserve the public `checks`/`ok` shape. Each check retains `name`, `ok`, `detail` and optional `required`; failures can also carry `code` and `remedy`. A check with `required: false` never makes the overall result fail.
 
+## Select the target repository
+
+The session can start in `~/Developer` or another parent directory. Run the check in the repository selected for the task:
+
+```bash
+cd ~/Developer/my-repo && flight-rules check --workflow execute-work
+```
+
+The tool’s working-directory option is equivalent. The check uses the command’s working directory, not the session’s launch directory. Target the same repository for subsequent tracker, Git and PR commands and worker dispatches. A parent check run in `~/Developer` cannot infer which child repository a later worker will use. Set the directory on each command; no session restart or runtime file is needed.
+
 ## What the check establishes
 
 | Observation | Scope and limit |

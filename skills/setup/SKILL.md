@@ -13,6 +13,8 @@ Read `flight-rules doc native-installation` for the current host's installation 
 
 Check that the installed skills and named worker registrations are discoverable by the running host. Follow the adapter's registration step when needed, preserving existing definitions; a file-presence check alone does not establish native discovery or dispatch permissions. If the CLI is unavailable, read the bundled `docs/native-installation.md` beside this skill's plugin installation and follow its PATH instructions.
 
+The session may start outside the repository, such as in `~/Developer`. Run configuration and workflow checks in the target repository using the tool’s working-directory option or `cd <repo> && <command>`. Apply this to each command; do not assume a previous shell call changed later calls’ working directory. No session restart is needed.
+
 ## Where config lives
 
 The CLI merges four scopes, lowest precedence first. `flight-rules config show` reports the selected `host` and the exact `layers` paths; use those paths rather than constructing them.

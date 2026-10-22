@@ -22,7 +22,7 @@ This invocation is unattended: `allowHumanQuestions` is always false. Return mis
 - Before the first repository or tracker mutation, run `flight-rules check --workflow reproduce-bug` and require `"ok": true` for the workflow’s environment checks. Return failed checks as named `needs:` results without prompting. Use the native harness for permissions and worker dispatch; no runtime evidence file is required.
 
 - You are handed a **ticket id**.
-- Run everything from the **repo root** of the app under test; the CLI resolves config relative to CWD, and the agent drives that app.
+- The session may start outside the repository, such as in `~/Developer`. Run each repository-specific command from the target **repo root**, using the tool’s working-directory option or `cd <repo> && <command>`. This includes the parent’s preflight, tracker, Git and PR commands; changing only a worker’s directory is insufficient. Initialize task context for that repository and give workers the same target path. No session restart is needed.
 - **Config comes from the CLI.** It merges the user's and project's Claude Code settings with the flight-rules config file; `flight-rules config show` prints the result and where each value came from. Never hand-edit a config file; write with `flight-rules config set`.
 - The tracker is **Jira**. The label lifecycle and the reporter mention are Jira shapes.
 - The workflow check includes the capture tool probes and required QA instructions. Fix failed required checks before labelling the ticket; optional tool results do not become new requirements.

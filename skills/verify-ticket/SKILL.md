@@ -20,7 +20,7 @@ This invocation is unattended: `allowHumanQuestions` is always false. Return `ne
 ## Preconditions
 
 - You are handed a **ticket id**.
-- Run everything from the **repo root of the app under test** — the `flight-rules` CLI resolves config relative to CWD, and the tester drives that app.
+- The session may start outside the repository, such as in `~/Developer`. Run each repository-specific command from the target **repo root**, using the tool’s working-directory option or `cd <repo> && <command>`. This includes the parent’s preflight, tracker, Git and PR commands; changing only a worker’s directory is insufficient. Initialize task context for that repository and give workers the same target path. No session restart is needed.
 - **Config comes from the CLI.** It merges the user's and project's Claude Code settings with the flight-rules config file; `flight-rules config show` prints the result and where each value came from. Never hand-edit a config file; write with `flight-rules config set`.
 - Before the first repository or tracker mutation, run `flight-rules check --workflow verify-ticket` and require `"ok": true` for the workflow’s environment checks. Return failed checks as named `needs:` results without prompting. Use the native harness for permissions and worker dispatch; no runtime evidence file is required.
 - The **tracker is Jira**. The failure mention and the native attachments are Jira shapes.
