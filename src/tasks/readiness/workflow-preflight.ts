@@ -23,7 +23,7 @@ export interface WorkflowPreflight {
   inspect(workflow: Workflow, evidence?: WorkflowEvidence): Promise<ReadinessCheck[]>;
 }
 
-/** Read-only observations supplement explicit host evidence; no probe attempts the workflow's mutations. */
+/** Checks the environment; programmatic callers may opt into additional host evidence checks. */
 export class NodeWorkflowPreflight implements WorkflowPreflight {
   private readonly cwd: string;
   private readonly env: Record<string, string | undefined>;
@@ -44,14 +44,30 @@ export class NodeWorkflowPreflight implements WorkflowPreflight {
     const parsed = evidence === undefined ? undefined : WorkflowEvidenceSchema.parse(evidence);
     const diagnostics = new RedactedProbeDiagnostics({ env: this.env });
     const codeWorkflow = selected === "execute-work" || selected === "execute-wave";
+    const checks = parsed === undefined ? [] : this.hostChecks(selected, parsed, diagnostics);
+
+    if (codeWorkflow) {
+      checks.push(await this.checkoutContext(parsed, diagnostics));
+      checks.push(await this.remoteRead(diagnostics));
+      checks.push(await this.localWrite("local:workspace-write", this.cwd, diagnostics));
+      checks.push(await this.gitWrite(diagnostics));
+    }
+    return checks;
+  }
+
+  private hostChecks(
+    selected: Workflow,
+    parsed: WorkflowEvidence,
+    diagnostics: RedactedProbeDiagnostics,
+  ): ReadinessCheck[] {
+    const codeWorkflow = selected === "execute-work" || selected === "execute-wave";
     const requiredAgents = codeWorkflow
       ? ["code-implementation", "code-implementation-escalated", "code-verifier", "tech-writer"]
       : selected === "break-down-work"
         ? ["research-agent"]
         : [selected === "reproduce-bug" ? "qa-engineer" : "qa-engineer-verify"];
     const checks: ReadinessCheck[] = [];
-    const contextMatches =
-      parsed !== undefined && resolve(parsed.context.cwd) === resolve(this.cwd);
+    const contextMatches = resolve(parsed.context.cwd) === resolve(this.cwd);
     checks.push({
       name: "host:context",
       ok: contextMatches,
@@ -72,7 +88,7 @@ export class NodeWorkflowPreflight implements WorkflowPreflight {
       ...(["reproduce-bug", "verify-ticket"].includes(selected) ? ["evidence.write"] : []),
     ];
     for (const capability of required) {
-      const observed = contextMatches ? parsed?.callerCapabilities[capability] : undefined;
+      const observed = contextMatches ? parsed.callerCapabilities[capability] : undefined;
       checks.push({
         name: `host:${capability}`,
         ok: observed?.state === "available",
@@ -96,7 +112,7 @@ export class NodeWorkflowPreflight implements WorkflowPreflight {
       });
     }
 
-    const policy = parsed?.workers.length
+    const policy = parsed.workers.length
       ? new RegistryOrchestrationPolicy({
           agents: parsed.workers.map((worker) => ({
             frontmatter: worker.registration,
@@ -106,9 +122,9 @@ export class NodeWorkflowPreflight implements WorkflowPreflight {
       : undefined;
     for (const agent of requiredAgents) {
       const worker = contextMatches
-        ? parsed?.workers.find((item) => item.registration.name === agent)
+        ? parsed.workers.find((item) => item.registration.name === agent)
         : undefined;
-      if (worker === undefined || parsed === undefined || policy === undefined) {
+      if (worker === undefined || policy === undefined) {
         checks.push({
           name: `dispatch:${agent}`,
           ok: false,
@@ -145,12 +161,6 @@ export class NodeWorkflowPreflight implements WorkflowPreflight {
       );
     }
 
-    if (codeWorkflow) {
-      checks.push(await this.checkoutContext(parsed, diagnostics));
-      checks.push(await this.remoteRead(diagnostics));
-      checks.push(await this.localWrite("local:workspace-write", this.cwd, diagnostics));
-      checks.push(await this.gitWrite(diagnostics));
-    }
     return checks;
   }
 
@@ -185,19 +195,12 @@ export class NodeWorkflowPreflight implements WorkflowPreflight {
     evidence: WorkflowEvidence | undefined,
     diagnostics: RedactedProbeDiagnostics,
   ): Promise<ReadinessCheck> {
-    if (evidence === undefined)
-      return {
-        name: "git:context",
-        ok: false,
-        required: true,
-        code: "CONTEXT_MISMATCH",
-        detail: "No repository/base context supplied",
-        remedy:
-          "Identify the active checkout and fixed comparison base before starting the workflow.",
-      };
     try {
       const root = await this.command(["rev-parse", "--show-toplevel"]);
-      if ((await realpath(root)) !== (await realpath(evidence.context.repositoryRoot))) {
+      if (
+        evidence !== undefined &&
+        (await realpath(root)) !== (await realpath(evidence.context.repositoryRoot))
+      ) {
         return {
           name: "git:context",
           ok: false,
@@ -211,14 +214,17 @@ export class NodeWorkflowPreflight implements WorkflowPreflight {
         "rev-parse",
         "--verify",
         "--end-of-options",
-        `${evidence.context.baseRef}^{commit}`,
+        `${evidence?.context.baseRef ?? "HEAD"}^{commit}`,
       ]);
       return {
         name: "git:context",
         ok: true,
         required: true,
         code: "AVAILABLE",
-        detail: "Active checkout matches and the fixed base resolves to a commit",
+        detail:
+          evidence === undefined
+            ? "Active checkout found and HEAD resolves to a commit"
+            : "Active checkout matches and the fixed base resolves to a commit",
       };
     } catch (error) {
       return diagnostics.failure("git:context", error, true);
@@ -238,7 +244,7 @@ export class NodeWorkflowPreflight implements WorkflowPreflight {
         required: true,
         code: "AVAILABLE",
         detail:
-          "Filesystem access check permits directory writes; no file was created and host authorization is checked separately",
+          "Filesystem access check permits directory writes; no file was created; the harness enforces access when operations run",
       };
     } catch (error) {
       return diagnostics.failure(name, error, true);

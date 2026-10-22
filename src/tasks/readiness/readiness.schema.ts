@@ -13,6 +13,7 @@ export const WorkflowSchema = z.enum([
   "reproduce-bug",
   "verify-ticket",
 ]);
+/** Optional programmatic host diagnostics; native skills do not need a runtime manifest. */
 export const WorkflowEvidenceSchema = z.strictObject({
   context: CallerContextSchema,
   callerCapabilities: z.record(z.string(), CapabilityEvidenceSchema),
@@ -29,6 +30,7 @@ export const WorkflowEvidenceSchema = z.strictObject({
 export const ReadinessOptionsSchema = z
   .strictObject({
     workflow: WorkflowSchema.optional(),
+    /** Supplying evidence opts into host checks in addition to environment probes. */
     evidence: WorkflowEvidenceSchema.optional(),
   })
   .refine(

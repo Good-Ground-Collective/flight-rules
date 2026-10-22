@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { text } from "node:stream/consumers";
 import { Option } from "commander";
 import type { Command } from "commander";
@@ -8,22 +7,6 @@ import { ReadinessFailedError } from "../tasks/commands/check/command.js";
 import { ReadinessOptionsSchema, WorkflowSchema } from "../tasks/readiness/readiness.schema.js";
 import { OperationCliError, type OperationRegistry } from "./operation-registry.js";
 
-const RuntimeFailureReportSchema = z.object({
-  tracker: z.null(),
-  repo: z.null(),
-  checks: z.array(
-    z.object({
-      name: z.string(),
-      ok: z.boolean(),
-      required: z.boolean(),
-      code: z.string(),
-      detail: z.string(),
-      remedy: z.string(),
-    }),
-  ),
-  ok: z.literal(false),
-  scope: z.literal("workflow"),
-});
 const CharterResultSchema = z.object({
   charters: z.array(
     z.object({ path: z.string(), contents: z.string(), language: z.string().nullable() }),
@@ -265,51 +248,14 @@ export class CommanderLocalDiscoveryCli implements LocalDiscoveryCommandAdapter 
           "check readiness for this workflow before its first mutation",
         ).choices(WorkflowSchema.options),
       )
-      .option(
-        "--runtime-file <path>",
-        "JSON containing current caller/worker capability observations; requires --workflow",
-      )
       .exitOverride()
-      .action(async (options: { workflow?: string; runtimeFile?: string }) => {
-        let evidence: unknown;
-        try {
-          evidence =
-            options.runtimeFile === undefined
-              ? undefined
-              : JSON.parse(readFileSync(options.runtimeFile, "utf8"));
-        } catch {
-          this.writeRuntimeFailure(
-            "Cannot read a JSON runtime evidence file",
-            "Supply a readable evidence file; see flight-rules doc workflow-preflight.",
-          );
-          throw new ReadinessFailedError("flight-rules check failed — see report above");
-        }
-        const parsed = ReadinessOptionsSchema.safeParse({ workflow: options.workflow, evidence });
-        if (!parsed.success) {
-          this.writeRuntimeFailure(
-            "Invalid workflow runtime evidence",
-            "Supply evidence matching WorkflowEvidenceSchema with a --workflow selection.",
-          );
-          throw new ReadinessFailedError("flight-rules check failed — see report above");
-        }
-        const report = await this.invoke("check", parsed.data, ReadinessResultSchema);
+      .action(async (options: { workflow?: string }) => {
+        const input = ReadinessOptionsSchema.parse({ workflow: options.workflow });
+        const report = await this.invoke("check", input, ReadinessResultSchema);
         process.stdout.write(`${JSON.stringify(report)}\n`);
         if (!report.ok)
           throw new ReadinessFailedError("flight-rules check failed — see report above");
       });
-  }
-
-  private writeRuntimeFailure(detail: string, remedy: string): void {
-    const report = RuntimeFailureReportSchema.parse({
-      tracker: null,
-      repo: null,
-      checks: [
-        { name: "runtime", ok: false, required: true, code: "INVALID_CONTEXT", detail, remedy },
-      ],
-      ok: false,
-      scope: "workflow",
-    });
-    process.stdout.write(`${JSON.stringify(report)}\n`);
   }
 
   private async invoke<T>(id: string, input: unknown, outputSchema: z.ZodType<T>): Promise<T> {

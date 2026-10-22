@@ -38,6 +38,8 @@ const registry = new MapOperationRegistry({
 const report = await registry.invoke("check", { workflow: "verify-ticket" });
 ```
 
-Readiness evidence is a typed `WorkflowEvidence` object in programmatic calls. The CLI keeps `--runtime-file` as a transport convenience and validates its contents before invoking the same operation. Failed readiness checks remain in the successful structured report with `ok: false`, allowing a host to explain each unmet requirement.
+Readiness runs environment probes without a runtime manifest. Programmatic callers may still pass a typed `WorkflowEvidence` object in `evidence` to opt into the existing caller/worker diagnostics; supplied evidence is validated and denied, unknown or mismatched observations still fail those checks. The exported schemas, types and service signatures remain available. Omitting evidence does not assert host permission or dispatch availability.
+
+The CLI no longer accepts `--runtime-file`; use `flight-rules check --workflow <name>`. SDK callers that need explicit host diagnostics pass evidence in memory. Failed readiness checks remain in the successful structured report with `ok: false`, allowing a host to explain each unmet requirement.
 
 `WorkerReportCodec` accepts one final fenced YAML block, parses it as JSON-compatible data, and checks the requested registration mode. Research reports may include short prose before the block; every report rejects trailing content and additional report blocks. Inline writer rewrites return `rewritten`, while file rewrites return `changes`. The available modes are implementation, verification, research (`internal`, `external`, or `mixed`), QA (`reproduce` or `verify`), and writer (`feedback`, `rewrite`, or `author`). A valid report is content from a worker; the host adds dispatch ID, agent identity, and caller context when it creates the terminal outcome.

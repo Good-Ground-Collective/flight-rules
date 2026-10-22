@@ -13,7 +13,7 @@ This is the skill that confirms the thing. You are handed a **ticket id**; you h
 
 ## Orchestration context
 
-Read `flight-rules doc orchestration-interface` and `flight-rules doc native-orchestration`. Preserve or initialize the ticket's caller context (run/task IDs, active checkout, working directory, fixed base and attempt 1). Use `dispatch` with `qa-engineer-verify`; validate its role report against the original request identity and context. Missing dispatch/capability evidence or insufficient depth is a named stop before the first ticket mutation. Invoke sibling skills in the same caller context, without an extra worker level.
+Read `flight-rules doc orchestration-interface` and `flight-rules doc native-orchestration`. Preserve or initialize the ticket's caller context (run/task IDs, active checkout, working directory, fixed base and attempt 1). Use `dispatch` with `qa-engineer-verify`; validate its role report against the original request identity and context. Confirm the named worker is exposed before the first ticket mutation. The harness enforces permissions and depth; report actual dispatch failures with their cause. Invoke sibling skills in the same caller context, without an extra worker level.
 
 This invocation is unattended: `allowHumanQuestions` is always false. Return `needs`/`openQuestions` with the named failure, without invoking `ask`, publishing a question or inferring an answer. A failed or malformed worker outcome is not a product FAIL verdict. Preserve the existing per-item QA verdict and label rules below.
 
@@ -22,7 +22,7 @@ This invocation is unattended: `allowHumanQuestions` is always false. Return `ne
 - You are handed a **ticket id**.
 - Run everything from the **repo root of the app under test** — the `flight-rules` CLI resolves config relative to CWD, and the tester drives that app.
 - **Config comes from the CLI.** It merges the user's and project's Claude Code settings with the flight-rules config file; `flight-rules config show` prints the result and where each value came from. Never hand-edit a config file; write with `flight-rules config set`.
-- Read `flight-rules doc workflow-preflight` and require `flight-rules check --workflow verify-ticket --runtime-file <host-runtime-json>` to report `"ok": true` with current caller/worker observations before any label or evidence write. Missing or unknown access is a named failure/`needs:` result, never a prompt or permission change. A general environment check alone is insufficient.
+- Before the first repository or tracker mutation, run `flight-rules check --workflow verify-ticket` and require `"ok": true` for the workflow’s environment checks. Return failed checks as named `needs:` results without prompting. Use the native harness for permissions and worker dispatch; no runtime evidence file is required.
 - The **tracker is Jira**. The failure mention and the native attachments are Jira shapes.
 - **QA instructions exist.** Read them, passing `--from` the directory of the code the ticket changed when the ticket names it:
 
