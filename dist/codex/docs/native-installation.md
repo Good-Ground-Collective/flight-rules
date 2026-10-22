@@ -1,6 +1,6 @@
 # Native installation and configuration
 
-The native packages contain the same shared skills and resolved worker prompts. Host installation and settings are separate from workflow permission evidence. E6's SDK/MCP adapters are not required to use these native packages.
+The native packages contain the same shared skills and resolved worker prompts. The native harness owns permissions and scheduling. E6's SDK/MCP adapters are not required to use these native packages.
 
 ## Select the configuration host
 
@@ -29,7 +29,7 @@ Put that plugin's `bin` directory on PATH or invoke its `bin/flight-rules` by ab
 
 Add the marketplace with `codex plugin marketplace add Good-Ground-Collective/flight-rules`. On the inspected CLI, install with `codex plugin add flight-rules@flight-rules --json`; use `/plugins` or the desktop plugin directory where that is the available installation surface. See the [official plugin installation guidance](https://learn.chatgpt.com/docs/plugins) and [marketplace authoring guidance](https://developers.openai.com/plugins/build/plugins). Inspect the native install result for the actual cache path and put its `bin` directory on PATH.
 
-The generated `flight-rules-install.json` includes each resolved neutral `registration` and the native file checksum. Once native discovery is confirmed, use that metadata in E4 readiness evidence; observe permissions and limits separately.
+The generated `flight-rules-install.json` includes each resolved neutral `registration` and the native file checksum for installation integrity. It is package metadata, not a workflow permission manifest.
 
 The plugin loads skills; the emitted standalone custom-agent files require a registration step. From the installed Codex plugin's CLI, run:
 
@@ -42,9 +42,13 @@ Run in the repository root. Project registrations go to `.codex/agents`; `--scop
 
 Installation copies missing definitions and accepts identical files. It checks every expected definition before writing, refuses differing existing files and symlinks inside the installation paths, and leaves unrelated definitions/settings intact. To upgrade a differing definition, compare it with the new package, back up the old file, and explicitly remove it before reinstalling. There is no overwrite or permission-widening flag. Reload a trusted native session after installation; project trust and managed configuration remain host decisions.
 
-`agents status` returns `evidence: "files-only"`. Confirm actual native discovery in the fresh host, then supply observed registration and permission evidence to `flight-rules check --workflow ... --runtime-file ...` as described in [workflow-preflight](./workflow-preflight.md). A successful copy cannot establish model availability, dispatch access, occupancy, or network permission.
+`agents status` returns `evidence: "files-only"`. Confirm actual native discovery in the fresh host, then run `flight-rules check --workflow <name>` for the environment probes described in [workflow-preflight](./workflow-preflight.md). A successful copy does not guarantee dispatch availability; handle actual host failures when invoking the named worker. No runtime evidence file is needed.
 
 For project registrations, trust must apply to the actual workflow checkout. Trusting another scratch repository or the marketplace directory is insufficient. In the E5 live proof, valid role files remained unselectable until the operator trusted that specific test checkout; the spawn tool then exposed its `agent_type` selector. Inspect the live tool schema: a generic `task_name` label is not proof that a named registration can be selected. Do not automatically trust arbitrary repositories to make the check pass.
+
+### Codex sandbox troubleshooting
+
+When session policy or an operation failure identifies a Codex sandbox restriction, read [Codex sandbox diagnostics](./codex-sandbox.md), also available through `flight-rules doc codex-sandbox`. This guidance applies only to Codex; it is not a shared workflow prerequisite.
 
 ## Evidence boundaries
 

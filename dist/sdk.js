@@ -1356,6 +1356,7 @@ var WorkflowEvidenceSchema = z14.strictObject({
 });
 var ReadinessOptionsSchema = z14.strictObject({
   workflow: WorkflowSchema.optional(),
+  /** Supplying evidence opts into host checks in addition to environment probes. */
   evidence: WorkflowEvidenceSchema.optional()
 }).refine(
   (value) => value.evidence === void 0 || value.workflow !== void 0,
@@ -1629,7 +1630,6 @@ var BlankQaRecipeError = class extends Error {
 };
 
 // src/operations/local-discovery-cli.ts
-import { readFileSync as readFileSync6 } from "node:fs";
 import { text } from "node:stream/consumers";
 import { Option as Option2 } from "commander";
 import { z as z25 } from "zod";
@@ -1748,22 +1748,6 @@ var ReadinessFailedError = class extends Error {
 };
 
 // src/operations/local-discovery-cli.ts
-var RuntimeFailureReportSchema = z25.object({
-  tracker: z25.null(),
-  repo: z25.null(),
-  checks: z25.array(
-    z25.object({
-      name: z25.string(),
-      ok: z25.boolean(),
-      required: z25.boolean(),
-      code: z25.string(),
-      detail: z25.string(),
-      remedy: z25.string()
-    })
-  ),
-  ok: z25.literal(false),
-  scope: z25.literal("workflow")
-});
 var CharterResultSchema = z25.object({
   charters: z25.array(
     z25.object({ path: z25.string(), contents: z25.string(), language: z25.string().nullable() })
@@ -1938,47 +1922,14 @@ var CommanderLocalDiscoveryCli = class {
         "--workflow <name>",
         "check readiness for this workflow before its first mutation"
       ).choices(WorkflowSchema.options)
-    ).option(
-      "--runtime-file <path>",
-      "JSON containing current caller/worker capability observations; requires --workflow"
     ).exitOverride().action(async (options) => {
-      let evidence;
-      try {
-        evidence = options.runtimeFile === void 0 ? void 0 : JSON.parse(readFileSync6(options.runtimeFile, "utf8"));
-      } catch {
-        this.writeRuntimeFailure(
-          "Cannot read a JSON runtime evidence file",
-          "Supply a readable evidence file; see flight-rules doc workflow-preflight."
-        );
-        throw new ReadinessFailedError("flight-rules check failed \u2014 see report above");
-      }
-      const parsed = ReadinessOptionsSchema.safeParse({ workflow: options.workflow, evidence });
-      if (!parsed.success) {
-        this.writeRuntimeFailure(
-          "Invalid workflow runtime evidence",
-          "Supply evidence matching WorkflowEvidenceSchema with a --workflow selection."
-        );
-        throw new ReadinessFailedError("flight-rules check failed \u2014 see report above");
-      }
-      const report = await this.invoke("check", parsed.data, ReadinessResultSchema);
+      const input = ReadinessOptionsSchema.parse({ workflow: options.workflow });
+      const report = await this.invoke("check", input, ReadinessResultSchema);
       process.stdout.write(`${JSON.stringify(report)}
 `);
       if (!report.ok)
         throw new ReadinessFailedError("flight-rules check failed \u2014 see report above");
     });
-  }
-  writeRuntimeFailure(detail, remedy) {
-    const report = RuntimeFailureReportSchema.parse({
-      tracker: null,
-      repo: null,
-      checks: [
-        { name: "runtime", ok: false, required: true, code: "INVALID_CONTEXT", detail, remedy }
-      ],
-      ok: false,
-      scope: "workflow"
-    });
-    process.stdout.write(`${JSON.stringify(report)}
-`);
   }
   async invoke(id, input, outputSchema) {
     const result = await this.registry.invoke(id, input);
@@ -4580,7 +4531,7 @@ var BranchNamer = class {
 var branchNamer = new BranchNamer();
 
 // src/git/commit-message-builder/commit-message-builder.ts
-import { readFileSync as readFileSync7 } from "node:fs";
+import { readFileSync as readFileSync6 } from "node:fs";
 import { dirname as dirname5, join as join6 } from "node:path";
 
 // src/shared/attribution-stripper/attribution-stripper.ts
@@ -4669,7 +4620,7 @@ var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
   static readPluginVersion(binPath) {
     try {
       const pkgPath = join6(dirname5(binPath), "..", "package.json");
-      const parsed = JSON.parse(readFileSync7(pkgPath, "utf-8"));
+      const parsed = JSON.parse(readFileSync6(pkgPath, "utf-8"));
       if (typeof parsed === "object" && parsed !== null && "version" in parsed && typeof parsed.version === "string") {
         return parsed.version;
       }
@@ -4930,7 +4881,7 @@ import { z as z46 } from "zod";
 
 // src/code-review/review-policy.ts
 import { execFileSync } from "node:child_process";
-import { readFileSync as readFileSync8, realpathSync as realpathSync8 } from "node:fs";
+import { readFileSync as readFileSync7, realpathSync as realpathSync8 } from "node:fs";
 import { dirname as dirname7, join as join8, relative as relative7 } from "node:path";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
 import { z as z41 } from "zod";
@@ -5238,7 +5189,7 @@ var FileReviewPolicy = class {
       const path = realpathSync8(join8(docs, `${id}.md`));
       if (relative7(docs, path).startsWith(".."))
         throw new ReviewPolicyError("review policy path leaves the installed docs directory");
-      return readFileSync8(path, "utf8");
+      return readFileSync7(path, "utf8");
     };
     const catalog = new DocCharterCatalog({ docs: new FileDocResolver({ docsDir: docs }) });
     const charters = (paths === void 0 ? catalog.all() : catalog.select(paths)).map(

@@ -8,13 +8,14 @@ declare const WorkflowPreflightPropsSchema: z.ZodObject<{
 export interface WorkflowPreflight {
     inspect(workflow: Workflow, evidence?: WorkflowEvidence): Promise<ReadinessCheck[]>;
 }
-/** Read-only observations supplement explicit host evidence; no probe attempts the workflow's mutations. */
+/** Checks the environment; programmatic callers may opt into additional host evidence checks. */
 export declare class NodeWorkflowPreflight implements WorkflowPreflight {
     private readonly cwd;
     private readonly env;
     private readonly timeoutMs;
     constructor(props: z.input<typeof WorkflowPreflightPropsSchema>);
     inspect(workflow: Workflow, evidence?: WorkflowEvidence): Promise<ReadinessCheck[]>;
+    private hostChecks;
     private command;
     private remoteRead;
     private checkoutContext;

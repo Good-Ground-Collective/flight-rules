@@ -6,6 +6,7 @@ export declare const WorkflowSchema: z.ZodEnum<{
     "reproduce-bug": "reproduce-bug";
     "verify-ticket": "verify-ticket";
 }>;
+/** Optional programmatic host diagnostics; native skills do not need a runtime manifest. */
 export declare const WorkflowEvidenceSchema: z.ZodObject<{
     context: z.ZodObject<{
         runId: z.ZodString;

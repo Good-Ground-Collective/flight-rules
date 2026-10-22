@@ -19,7 +19,6 @@ export declare class CommanderLocalDiscoveryCli implements LocalDiscoveryCommand
     private addQa;
     private addConfig;
     private addCheck;
-    private writeRuntimeFailure;
     private invoke;
 }
 export declare class CharterSelectionError extends Error {

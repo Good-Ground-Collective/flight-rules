@@ -86,8 +86,8 @@ When you ask, be specific: state what's unclear, show what you found, and offer 
 
 ## Preconditions
 
-- Run everything from the **repo root** so `flight-rules` resolves the project's configured tracker.
-- Read `flight-rules doc workflow-preflight` and require `flight-rules check --workflow break-down-work --runtime-file <host-runtime-json>` to report `"ok": true` with current caller/research-worker evidence before dispatch or tracker mutation. A general environment check is insufficient; missing or unknown access returns the named remedy. This skill is **tracker-agnostic** — it never talks to GitHub/Jira directly, only through `flight-rules`, which resolves the configured system.
+- The session may start outside the repository, such as in `~/Developer`. Run each repository-specific command from the target **repo root**, using the tool’s working-directory option or `cd <repo> && <command>`. This includes the parent’s preflight, tracker, Git and PR commands; changing only a worker’s directory is insufficient. Initialize task context for that repository and give workers the same target path. No session restart is needed.
+- Before the first repository or tracker mutation, run `flight-rules check --workflow break-down-work` and require `"ok": true` for the workflow’s environment checks. Resolve failed required checks before continuing. Use the native harness for permissions and worker dispatch; no runtime evidence file is required. This skill is **tracker-agnostic** — it talks to the configured tracker only through `flight-rules`.
 
 ## Process
 
@@ -118,9 +118,9 @@ Add one or two **cross-cutting briefs** for shared concerns the sketch implies (
 
 ### 4. Fan out the research — in bounded batches
 
-Use `dispatchMany` for the separate briefs addressed to `research-agent`. Admit at most the smaller of the explicit batch bound and the host's observed available slots. Refresh current usage before each launch and reserve its slot immediately, including launches the host has not yet counted. Wait for every worker in a batch and reconcile/release its occupied host capacity before launching the next batch. The shared `BoundedDispatchQueue` implements this admission and report-ordering policy for programmatic consumers; native parents follow the same decisions through their host tools.
+Use the native agent tools for each separate research brief. Respect any explicit batch bound and the limits exposed by the harness. When numeric capacity is not exposed, dispatch briefs sequentially and wait for each completion; do not require a permission or capacity snapshot. Release completed workers when the host requires it before launching another batch. Programmatic schedulers can use `BoundedDispatchQueue` as described in the shared interface.
 
-One available slot means one brief at a time, preserving every separate input. Zero capacity with no running batch returns `CAPACITY_EXHAUSTED`; unknown bounds return `LIMITS_UNKNOWN`; insufficient nesting returns `DEPTH_EXCEEDED`. Return the named remedy, never change global/project caps, assume unlimited workers, merge briefs or do research inline to conceal unavailable dispatch. Missing required capabilities also stop before dispatch.
+Report actual permission, capacity or depth failures with their cause. Wait for an existing worker when its completion can free capacity. Keep every brief separate; do not change host limits, merge briefs or replace unavailable delegation with inline research.
 
 **Dispatch `research-agent` at its declared escalated tier**, deliberately. Research is the one stage in this pipeline with no gate downstream: an implementation is checked criterion-by-criterion by `code-verifier` before it can reach a PR, but a findings report goes straight into the Guided Walkthrough and from there into every ticket derived from it. An error here is amplified, not caught. It is also the cheapest stage — a handful of single-shot, read-only dispatches sitting in front of a per-ticket, multi-turn, up-to-three-attempt execution loop. Do not route by `depth` or `mode` to save money; the saving is a rounding error and the rule is one more thing to get wrong. If a human explicitly requests a cheaper survey, select a named standard-tier registration supplied by the adapter; if none exists, report that limitation rather than overriding the model at dispatch.
 

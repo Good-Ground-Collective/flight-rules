@@ -13,6 +13,8 @@ Read `flight-rules doc native-installation` for the current host's installation 
 
 Check that the installed skills and named worker registrations are discoverable by the running host. Follow the adapter's registration step when needed, preserving existing definitions; a file-presence check alone does not establish native discovery or dispatch permissions. If the CLI is unavailable, read the bundled `docs/native-installation.md` beside this skill's plugin installation and follow its PATH instructions.
 
+The session may start outside the repository, such as in `~/Developer`. Run configuration and workflow checks in the target repository using the tool’s working-directory option or `cd <repo> && <command>`. Apply this to each command; do not assume a previous shell call changed later calls’ working directory. No session restart is needed.
+
 ## Where config lives
 
 The CLI merges four scopes, lowest precedence first. `flight-rules config show` reports the selected `host` and the exact `layers` paths; use those paths rather than constructing them.
@@ -242,9 +244,9 @@ flight-rules check
 
 ## Workflow readiness after configuration
 
-A successful ordinary `flight-rules check` establishes environment checks, not permission to run every workflow. Before reporting a selected workflow ready, read `flight-rules doc workflow-preflight` and `flight-rules doc native-orchestration`. Identify the actual installed host/version, effective caller and worker access, named registrations, current worker usage and depth. Record observations without credentials in the documented runtime evidence format, then run `flight-rules check --workflow <workflow-name> --runtime-file <host-runtime-json>` from the active checkout.
+Run `flight-rules check --workflow <workflow-name>` from the active checkout when checking a selected workflow. It checks configuration, tools, connectivity and the workflow’s repository or QA prerequisites. No runtime evidence file is required. Confirm the named workers are exposed by the native harness; permissions and scheduling remain the harness’s responsibility.
 
-Show every failed required check with its code and remedy. Distinguish authentication, connectivity, known permission denial and unknown access; connection refusal alone does not identify a sandbox. A remote read and GitHub push entitlement do not prove a future push will succeed. Do not change sandbox settings, grant access, raise worker caps or disable approvals automatically. Apply only a requested scoped setup correction through the installed host's supported options, refresh observations and rerun the check. When the current workflow is unattended, return the missing capability rather than starting a permission prompt. Native project placement remains separate from this readiness check.
+Show failed required checks with their code and remedy. Authentication, connectivity and permission errors are distinct; a connection refusal alone does not identify a sandbox. Remote reads and account push entitlement cannot guarantee a later push. For a Codex sandbox restriction, use the Codex troubleshooting guidance in `flight-rules doc native-installation`. In unattended workflows, return the failure without prompting.
 
 ## Step 7: Scaffold the QA instructions
 

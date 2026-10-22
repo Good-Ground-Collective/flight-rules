@@ -31684,7 +31684,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.94.1";
+var appVersion = false ? "0.0.0-dev" : "1.94.2";
 
 // src/shared/ariadne/review-packet.schema.ts
 var packetLimits = {
@@ -48826,6 +48826,7 @@ var WorkflowEvidenceSchema = external_exports.strictObject({
 });
 var ReadinessOptionsSchema = external_exports.strictObject({
   workflow: WorkflowSchema.optional(),
+  /** Supplying evidence opts into host checks in addition to environment probes. */
   evidence: WorkflowEvidenceSchema.optional()
 }).refine(
   (value) => value.evidence === void 0 || value.workflow !== void 0,
@@ -48856,9 +48857,20 @@ var NodeWorkflowPreflight = class {
     const parsed = evidence === void 0 ? void 0 : WorkflowEvidenceSchema.parse(evidence);
     const diagnostics = new RedactedProbeDiagnostics({ env: this.env });
     const codeWorkflow = selected === "execute-work" || selected === "execute-wave";
+    const checks = parsed === void 0 ? [] : this.hostChecks(selected, parsed, diagnostics);
+    if (codeWorkflow) {
+      checks.push(await this.checkoutContext(parsed, diagnostics));
+      checks.push(await this.remoteRead(diagnostics));
+      checks.push(await this.localWrite("local:workspace-write", this.cwd, diagnostics));
+      checks.push(await this.gitWrite(diagnostics));
+    }
+    return checks;
+  }
+  hostChecks(selected, parsed, diagnostics) {
+    const codeWorkflow = selected === "execute-work" || selected === "execute-wave";
     const requiredAgents = codeWorkflow ? ["code-implementation", "code-implementation-escalated", "code-verifier", "tech-writer"] : selected === "break-down-work" ? ["research-agent"] : [selected === "reproduce-bug" ? "qa-engineer" : "qa-engineer-verify"];
     const checks = [];
-    const contextMatches = parsed !== void 0 && resolve4(parsed.context.cwd) === resolve4(this.cwd);
+    const contextMatches = resolve4(parsed.context.cwd) === resolve4(this.cwd);
     checks.push({
       name: "host:context",
       ok: contextMatches,
@@ -48875,7 +48887,7 @@ var NodeWorkflowPreflight = class {
       ...["reproduce-bug", "verify-ticket"].includes(selected) ? ["evidence.write"] : []
     ];
     for (const capability of required2) {
-      const observed = contextMatches ? parsed?.callerCapabilities[capability] : void 0;
+      const observed = contextMatches ? parsed.callerCapabilities[capability] : void 0;
       checks.push({
         name: `host:${capability}`,
         ok: observed?.state === "available",
@@ -48889,15 +48901,15 @@ var NodeWorkflowPreflight = class {
         )
       });
     }
-    const policy = parsed?.workers.length ? new RegistryOrchestrationPolicy({
+    const policy = parsed.workers.length ? new RegistryOrchestrationPolicy({
       agents: parsed.workers.map((worker) => ({
         frontmatter: worker.registration,
         body: "Preflight registration requirements; this check does not dispatch."
       }))
     }) : void 0;
     for (const agent of requiredAgents) {
-      const worker = contextMatches ? parsed?.workers.find((item) => item.registration.name === agent) : void 0;
-      if (worker === void 0 || parsed === void 0 || policy === void 0) {
+      const worker = contextMatches ? parsed.workers.find((item) => item.registration.name === agent) : void 0;
+      if (worker === void 0 || policy === void 0) {
         checks.push({
           name: `dispatch:${agent}`,
           ok: false,
@@ -48929,12 +48941,6 @@ var NodeWorkflowPreflight = class {
         }
       );
     }
-    if (codeWorkflow) {
-      checks.push(await this.checkoutContext(parsed, diagnostics));
-      checks.push(await this.remoteRead(diagnostics));
-      checks.push(await this.localWrite("local:workspace-write", this.cwd, diagnostics));
-      checks.push(await this.gitWrite(diagnostics));
-    }
     return checks;
   }
   async command(args) {
@@ -48963,18 +48969,9 @@ var NodeWorkflowPreflight = class {
     }
   }
   async checkoutContext(evidence, diagnostics) {
-    if (evidence === void 0)
-      return {
-        name: "git:context",
-        ok: false,
-        required: true,
-        code: "CONTEXT_MISMATCH",
-        detail: "No repository/base context supplied",
-        remedy: "Identify the active checkout and fixed comparison base before starting the workflow."
-      };
     try {
       const root = await this.command(["rev-parse", "--show-toplevel"]);
-      if (await realpath(root) !== await realpath(evidence.context.repositoryRoot)) {
+      if (evidence !== void 0 && await realpath(root) !== await realpath(evidence.context.repositoryRoot)) {
         return {
           name: "git:context",
           ok: false,
@@ -48988,14 +48985,14 @@ var NodeWorkflowPreflight = class {
         "rev-parse",
         "--verify",
         "--end-of-options",
-        `${evidence.context.baseRef}^{commit}`
+        `${evidence?.context.baseRef ?? "HEAD"}^{commit}`
       ]);
       return {
         name: "git:context",
         ok: true,
         required: true,
         code: "AVAILABLE",
-        detail: "Active checkout matches and the fixed base resolves to a commit"
+        detail: evidence === void 0 ? "Active checkout found and HEAD resolves to a commit" : "Active checkout matches and the fixed base resolves to a commit"
       };
     } catch (error62) {
       return diagnostics.failure("git:context", error62, true);
@@ -49009,7 +49006,7 @@ var NodeWorkflowPreflight = class {
         ok: true,
         required: true,
         code: "AVAILABLE",
-        detail: "Filesystem access check permits directory writes; no file was created and host authorization is checked separately"
+        detail: "Filesystem access check permits directory writes; no file was created; the harness enforces access when operations run"
       };
     } catch (error62) {
       return diagnostics.failure(name, error62, true);
@@ -49075,7 +49072,7 @@ var NodeRepositoryReadiness = class {
             required: true,
             code: "INVALID_CONTEXT",
             detail: "Workflow or runtime evidence does not match the readiness schema",
-            remedy: "Supply a valid WorkflowEvidence document for the selected workflow; do not fill unknown capabilities with available."
+            remedy: "Select a supported workflow. If supplying optional programmatic evidence, it must match WorkflowEvidenceSchema."
           }
         ],
         ok: false,
@@ -53245,7 +53242,6 @@ function createDocCommand(props) {
 }
 
 // src/operations/local-discovery-cli.ts
-import { readFileSync as readFileSync13 } from "node:fs";
 import { text as text4 } from "node:stream/consumers";
 
 // src/tasks/commands/check/command.ts
@@ -53254,22 +53250,6 @@ var ReadinessFailedError = class extends Error {
 };
 
 // src/operations/local-discovery-cli.ts
-var RuntimeFailureReportSchema = external_exports.object({
-  tracker: external_exports.null(),
-  repo: external_exports.null(),
-  checks: external_exports.array(
-    external_exports.object({
-      name: external_exports.string(),
-      ok: external_exports.boolean(),
-      required: external_exports.boolean(),
-      code: external_exports.string(),
-      detail: external_exports.string(),
-      remedy: external_exports.string()
-    })
-  ),
-  ok: external_exports.literal(false),
-  scope: external_exports.literal("workflow")
-});
 var CharterResultSchema = external_exports.object({
   charters: external_exports.array(
     external_exports.object({ path: external_exports.string(), contents: external_exports.string(), language: external_exports.string().nullable() })
@@ -53444,47 +53424,14 @@ var CommanderLocalDiscoveryCli = class {
         "--workflow <name>",
         "check readiness for this workflow before its first mutation"
       ).choices(WorkflowSchema.options)
-    ).option(
-      "--runtime-file <path>",
-      "JSON containing current caller/worker capability observations; requires --workflow"
     ).exitOverride().action(async (options) => {
-      let evidence;
-      try {
-        evidence = options.runtimeFile === void 0 ? void 0 : JSON.parse(readFileSync13(options.runtimeFile, "utf8"));
-      } catch {
-        this.writeRuntimeFailure(
-          "Cannot read a JSON runtime evidence file",
-          "Supply a readable evidence file; see flight-rules doc workflow-preflight."
-        );
-        throw new ReadinessFailedError("flight-rules check failed \u2014 see report above");
-      }
-      const parsed = ReadinessOptionsSchema.safeParse({ workflow: options.workflow, evidence });
-      if (!parsed.success) {
-        this.writeRuntimeFailure(
-          "Invalid workflow runtime evidence",
-          "Supply evidence matching WorkflowEvidenceSchema with a --workflow selection."
-        );
-        throw new ReadinessFailedError("flight-rules check failed \u2014 see report above");
-      }
-      const report = await this.invoke("check", parsed.data, ReadinessResultSchema);
+      const input2 = ReadinessOptionsSchema.parse({ workflow: options.workflow });
+      const report = await this.invoke("check", input2, ReadinessResultSchema);
       process.stdout.write(`${JSON.stringify(report)}
 `);
       if (!report.ok)
         throw new ReadinessFailedError("flight-rules check failed \u2014 see report above");
     });
-  }
-  writeRuntimeFailure(detail, remedy) {
-    const report = RuntimeFailureReportSchema.parse({
-      tracker: null,
-      repo: null,
-      checks: [
-        { name: "runtime", ok: false, required: true, code: "INVALID_CONTEXT", detail, remedy }
-      ],
-      ok: false,
-      scope: "workflow"
-    });
-    process.stdout.write(`${JSON.stringify(report)}
-`);
   }
   async invoke(id, input2, outputSchema) {
     const result = await this.registry.invoke(id, input2);
@@ -53502,7 +53449,7 @@ var CharterSelectionError = class extends Error {
 };
 
 // src/code-review/commands/command.ts
-import { readFileSync as readFileSync14 } from "node:fs";
+import { readFileSync as readFileSync13 } from "node:fs";
 var ReviewCommandPropsSchema = external_exports.object({
   registry: external_exports.custom(
     (value) => Boolean(value && typeof value === "object" && "invoke" in value)
@@ -53532,7 +53479,7 @@ var CommanderReviewCommand = class {
     });
     review.command("validate").argument("<file>", "structured reviewer result").action(async (file2) => {
       const result = await this.invoke("review-validate", {
-        review: JSON.parse(readFileSync14(file2, "utf8"))
+        review: JSON.parse(readFileSync13(file2, "utf8"))
       });
       process.stdout.write(JSON.stringify(result) + "\n");
     });
@@ -53542,7 +53489,7 @@ var CommanderReviewCommand = class {
         records: external_exports.array(external_exports.json()),
         outcome: external_exports.string(),
         problems: external_exports.array(external_exports.string())
-      }).parse(JSON.parse(readFileSync14(file2, "utf8")));
+      }).parse(JSON.parse(readFileSync13(file2, "utf8")));
       const result = await this.invoke("review-render", {
         review: plan.review,
         records: plan.records,
@@ -53553,7 +53500,7 @@ var CommanderReviewCommand = class {
     });
     review.command("state").argument("<file>", "index with actual persisted artifact IDs").action(async (file2) => {
       const result = await this.invoke("review-state", {
-        state: JSON.parse(readFileSync14(file2, "utf8"))
+        state: JSON.parse(readFileSync13(file2, "utf8"))
       });
       process.stdout.write(`${external_exports.string().parse(result)}
 `);
@@ -53573,10 +53520,10 @@ var CommanderReviewCommand = class {
         const input2 = {
           number: external_exports.coerce.number().int().positive().parse(number4),
           repo: opts.repo,
-          review: JSON.parse(readFileSync14(opts.file, "utf8")),
-          records: JSON.parse(readFileSync14(opts.recordsFile, "utf8"))
+          review: JSON.parse(readFileSync13(opts.file, "utf8")),
+          records: JSON.parse(readFileSync13(opts.recordsFile, "utf8"))
         };
-        const owners = opts.ownersFile === void 0 ? {} : external_exports.record(external_exports.string(), external_exports.array(external_exports.string().min(1))).parse(JSON.parse(readFileSync14(opts.ownersFile, "utf8")));
+        const owners = opts.ownersFile === void 0 ? {} : external_exports.record(external_exports.string(), external_exports.array(external_exports.string().min(1))).parse(JSON.parse(readFileSync13(opts.ownersFile, "utf8")));
         const registry2 = this.createTrustedRegistry({
           owners,
           requireMapping: opts.requireMapping ?? false
@@ -53904,7 +53851,7 @@ function createBoardCommand(getBoard, getTokens = () => new AriadneTokenStore(),
 }
 
 // src/shared/commands/packet/command.ts
-import { readFileSync as readFileSync15, writeFileSync as writeFileSync7 } from "node:fs";
+import { readFileSync as readFileSync14, writeFileSync as writeFileSync7 } from "node:fs";
 
 // src/shared/decimal-integer.ts
 var DecimalIntegerParser = class {
@@ -53962,7 +53909,7 @@ var PacketFile = class {
   read() {
     let text7;
     try {
-      text7 = readFileSync15(this.path, "utf8");
+      text7 = readFileSync14(this.path, "utf8");
     } catch (err) {
       throw new Error(
         `cannot read ${this.path}: ${err instanceof Error ? err.message : String(err)}`,
@@ -54085,9 +54032,9 @@ var PacketCommandFactory = class {
 var createPacketCommand = (getPackets, registry2) => new PacketCommandFactory().create(getPackets, registry2);
 
 // src/tasks/commands/resolve-body.ts
-import { readFileSync as readFileSync16 } from "node:fs";
+import { readFileSync as readFileSync15 } from "node:fs";
 function resolveBody(opts) {
-  if (opts.bodyFile !== void 0) return readFileSync16(opts.bodyFile, "utf8");
+  if (opts.bodyFile !== void 0) return readFileSync15(opts.bodyFile, "utf8");
   if (opts.body !== void 0) return opts.body;
   throw new Error("one of --body or --body-file is required");
 }
@@ -54772,7 +54719,7 @@ import { execFileSync as execFileSync4 } from "node:child_process";
 
 // src/hooks/board-heartbeat/agent-ticket-resolver.ts
 import { createHash as createHash3 } from "node:crypto";
-import { closeSync, existsSync as existsSync14, openSync, readFileSync as readFileSync17, readSync } from "node:fs";
+import { closeSync, existsSync as existsSync14, openSync, readFileSync as readFileSync16, readSync } from "node:fs";
 import { basename as basename5, dirname as dirname14, join as join15 } from "node:path";
 var SubagentMetaSchema = external_exports.looseObject({
   agentType: external_exports.string().optional(),
@@ -54865,7 +54812,7 @@ var AgentTicketResolver = class {
   readMeta(path3) {
     if (!existsSync14(path3)) return void 0;
     try {
-      const parsed = SubagentMetaSchema.safeParse(JSON.parse(readFileSync17(path3, "utf-8")));
+      const parsed = SubagentMetaSchema.safeParse(JSON.parse(readFileSync16(path3, "utf-8")));
       return parsed.success ? parsed.data : void 0;
     } catch {
       return void 0;
@@ -54949,7 +54896,7 @@ var GitBranchReader = class {
 };
 
 // src/hooks/commit-guard/commit-guard.ts
-import { readFileSync as readFileSync18 } from "node:fs";
+import { readFileSync as readFileSync17 } from "node:fs";
 import { isAbsolute as isAbsolute6, resolve as resolve11 } from "node:path";
 var PreToolUseInputSchema = external_exports.looseObject({
   tool_name: external_exports.string().optional(),
@@ -55042,7 +54989,7 @@ var CommitGuard = class {
     const unquoted = file2.replace(/^["']|["']$/g, "");
     if (unquoted === "-" || !isAbsolute6(unquoted) && cwd === void 0) return false;
     try {
-      const contents = readFileSync18(isAbsolute6(unquoted) ? unquoted : resolve11(cwd ?? "", unquoted), "utf8");
+      const contents = readFileSync17(isAbsolute6(unquoted) ? unquoted : resolve11(cwd ?? "", unquoted), "utf8");
       return /^Flight-Rules-Version: /m.test(contents);
     } catch {
       return false;
@@ -55163,7 +55110,7 @@ function createHookCommand(getHandler = () => new PreBashHook(), readStdin = () 
 }
 
 // src/git/commands/commit/command.ts
-import { readFileSync as readFileSync19 } from "node:fs";
+import { readFileSync as readFileSync18 } from "node:fs";
 function collect2(value, previous3) {
   return [...previous3, value];
 }
@@ -55182,7 +55129,7 @@ function createGitCommand(registry2) {
         type: opts.type,
         scope: opts.scope,
         description: opts.description,
-        body: opts.bodyFile !== void 0 ? readFileSync19(opts.bodyFile, "utf8") : opts.body,
+        body: opts.bodyFile !== void 0 ? readFileSync18(opts.bodyFile, "utf8") : opts.body,
         footers: opts.footer,
         model: opts.model,
         files: opts.file
@@ -55220,7 +55167,7 @@ function createGitCommand(registry2) {
 }
 
 // src/git/commands/message/command.ts
-import { mkdtempSync, readFileSync as readFileSync20, writeFileSync as writeFileSync8 } from "node:fs";
+import { mkdtempSync, readFileSync as readFileSync19, writeFileSync as writeFileSync8 } from "node:fs";
 import { tmpdir as tmpdir2 } from "node:os";
 import { join as join16 } from "node:path";
 function createCommitMessageCommand(registry2) {
@@ -55242,7 +55189,7 @@ function createCommitMessageCommand(registry2) {
         type: opts.type,
         scope: opts.scope,
         description: opts.description,
-        body: opts.bodyFile !== void 0 ? readFileSync20(opts.bodyFile, "utf8") : opts.body,
+        body: opts.bodyFile !== void 0 ? readFileSync19(opts.bodyFile, "utf8") : opts.body,
         footers: opts.footer,
         model: opts.model
       },
@@ -55638,7 +55585,7 @@ var cliRouteCoverage = new ManifestCliRouteCoverage({
 });
 
 // src/mcp/command.ts
-import { readFileSync as readFileSync24 } from "node:fs";
+import { readFileSync as readFileSync23 } from "node:fs";
 
 // node_modules/@modelcontextprotocol/server/dist/chunk-Br0eD_fh.mjs
 var __create2 = Object.create;
@@ -70407,7 +70354,7 @@ function toError(value) {
 }
 
 // src/mcp/mcp-server.ts
-import { existsSync as existsSync16, readFileSync as readFileSync23, realpathSync as realpathSync10, statSync as statSync9 } from "node:fs";
+import { existsSync as existsSync16, readFileSync as readFileSync22, realpathSync as realpathSync10, statSync as statSync9 } from "node:fs";
 import { dirname as dirname16, isAbsolute as isAbsolute9, relative as relative8, resolve as resolve14, sep as sep6 } from "node:path";
 
 // node_modules/@modelcontextprotocol/server/dist/index.mjs
@@ -70560,12 +70507,12 @@ var DefaultPrOperations = class {
 };
 
 // src/sdk/instruction-catalog-core.ts
-import { existsSync as existsSync15, readFileSync as readFileSync22, readdirSync as readdirSync6, realpathSync as realpathSync9, statSync as statSync8 } from "node:fs";
+import { existsSync as existsSync15, readFileSync as readFileSync21, readdirSync as readdirSync6, realpathSync as realpathSync9, statSync as statSync8 } from "node:fs";
 import { basename as basename7, dirname as dirname15, isAbsolute as isAbsolute8, join as join18, relative as relative7, resolve as resolve13, sep as sep5 } from "node:path";
 import { fileURLToPath as fileURLToPath4 } from "node:url";
 
 // src/agents/agent-registry/agent-registry.ts
-import { readFileSync as readFileSync21, readdirSync as readdirSync5 } from "node:fs";
+import { readFileSync as readFileSync20, readdirSync as readdirSync5 } from "node:fs";
 import { basename as basename6, join as join17 } from "node:path";
 
 // src/agents/agent-frontmatter/agent-frontmatter.ts
@@ -70604,7 +70551,7 @@ var InvalidAgentDefinitionError = class extends Error {
 var FileAgentRegistry = class {
   load(directory) {
     const agents = readdirSync5(directory, { withFileTypes: true }).filter((entry) => entry.isFile() && entry.name.endsWith(".md")).sort((a, b) => a.name.localeCompare(b.name)).map((entry) => {
-      const markdown = readFileSync21(join17(directory, entry.name), "utf8");
+      const markdown = readFileSync20(join17(directory, entry.name), "utf8");
       const frontmatter = AgentRegistrationSchema.parse(agentFrontmatterParser.parse(markdown));
       const body = markdown.replace(/^---\r?\n[\s\S]*?^---(?:\r?\n|$)/m, "");
       if (frontmatter.name !== basename6(entry.name, ".md") || body.trim() === "") {
@@ -70614,7 +70561,7 @@ var FileAgentRegistry = class {
     });
     const canonical = new Map(agents.map((agent) => [agent.frontmatter.name, agent]));
     const names = new Set(canonical.keys());
-    const variants = AgentVariantsSchema.parse(JSON.parse(readFileSync21(join17(directory, "variants.json"), "utf8")));
+    const variants = AgentVariantsSchema.parse(JSON.parse(readFileSync20(join17(directory, "variants.json"), "utf8")));
     for (const variant of variants) {
       const base = canonical.get(variant.extends);
       if (base === void 0 || names.has(variant.name)) {
@@ -70680,7 +70627,7 @@ var FileInstructionCatalog = class {
     return {
       name: parsed.data,
       path: this.safePath(path3, this.skillDir),
-      contents: readFileSync22(this.safePath(path3, this.skillDir), "utf8")
+      contents: readFileSync21(this.safePath(path3, this.skillDir), "utf8")
     };
   }
   listAgents() {
@@ -70765,7 +70712,7 @@ var LaunchBoundQaFileSystem = class {
   }
   readFile(path3) {
     this.requireInsideLaunch(path3);
-    return readFileSync23(path3, "utf8");
+    return readFileSync22(path3, "utf8");
   }
   isInsideLaunch(path3) {
     const absolute = resolve14(path3);
@@ -71023,7 +70970,7 @@ function createMcpCommand() {
   ).action(async (options) => {
     const parsed = CommandOptionsSchema.parse(options);
     const owners = parsed.reviewOwnersFile === void 0 ? {} : ReviewOperationsLaunchPropsSchema.shape.owners.parse(
-      JSON.parse(readFileSync24(parsed.reviewOwnersFile, "utf8"))
+      JSON.parse(readFileSync23(parsed.reviewOwnersFile, "utf8"))
     );
     await new StdioFlightRulesMcpTransport({
       cwd: process.cwd(),

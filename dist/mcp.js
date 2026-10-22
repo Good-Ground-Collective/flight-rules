@@ -738,6 +738,7 @@ var WorkflowEvidenceSchema = z10.strictObject({
 });
 var ReadinessOptionsSchema = z10.strictObject({
   workflow: WorkflowSchema.optional(),
+  /** Supplying evidence opts into host checks in addition to environment probes. */
   evidence: WorkflowEvidenceSchema.optional()
 }).refine(
   (value) => value.evidence === void 0 || value.workflow !== void 0,
@@ -8943,9 +8944,20 @@ var NodeWorkflowPreflight = class {
     const parsed = evidence === void 0 ? void 0 : WorkflowEvidenceSchema.parse(evidence);
     const diagnostics = new RedactedProbeDiagnostics({ env: this.env });
     const codeWorkflow = selected === "execute-work" || selected === "execute-wave";
+    const checks = parsed === void 0 ? [] : this.hostChecks(selected, parsed, diagnostics);
+    if (codeWorkflow) {
+      checks.push(await this.checkoutContext(parsed, diagnostics));
+      checks.push(await this.remoteRead(diagnostics));
+      checks.push(await this.localWrite("local:workspace-write", this.cwd, diagnostics));
+      checks.push(await this.gitWrite(diagnostics));
+    }
+    return checks;
+  }
+  hostChecks(selected, parsed, diagnostics) {
+    const codeWorkflow = selected === "execute-work" || selected === "execute-wave";
     const requiredAgents = codeWorkflow ? ["code-implementation", "code-implementation-escalated", "code-verifier", "tech-writer"] : selected === "break-down-work" ? ["research-agent"] : [selected === "reproduce-bug" ? "qa-engineer" : "qa-engineer-verify"];
     const checks = [];
-    const contextMatches = parsed !== void 0 && resolve9(parsed.context.cwd) === resolve9(this.cwd);
+    const contextMatches = resolve9(parsed.context.cwd) === resolve9(this.cwd);
     checks.push({
       name: "host:context",
       ok: contextMatches,
@@ -8962,7 +8974,7 @@ var NodeWorkflowPreflight = class {
       ...["reproduce-bug", "verify-ticket"].includes(selected) ? ["evidence.write"] : []
     ];
     for (const capability of required) {
-      const observed = contextMatches ? parsed?.callerCapabilities[capability] : void 0;
+      const observed = contextMatches ? parsed.callerCapabilities[capability] : void 0;
       checks.push({
         name: `host:${capability}`,
         ok: observed?.state === "available",
@@ -8976,15 +8988,15 @@ var NodeWorkflowPreflight = class {
         )
       });
     }
-    const policy = parsed?.workers.length ? new RegistryOrchestrationPolicy({
+    const policy = parsed.workers.length ? new RegistryOrchestrationPolicy({
       agents: parsed.workers.map((worker) => ({
         frontmatter: worker.registration,
         body: "Preflight registration requirements; this check does not dispatch."
       }))
     }) : void 0;
     for (const agent of requiredAgents) {
-      const worker = contextMatches ? parsed?.workers.find((item) => item.registration.name === agent) : void 0;
-      if (worker === void 0 || parsed === void 0 || policy === void 0) {
+      const worker = contextMatches ? parsed.workers.find((item) => item.registration.name === agent) : void 0;
+      if (worker === void 0 || policy === void 0) {
         checks.push({
           name: `dispatch:${agent}`,
           ok: false,
@@ -9016,12 +9028,6 @@ var NodeWorkflowPreflight = class {
         }
       );
     }
-    if (codeWorkflow) {
-      checks.push(await this.checkoutContext(parsed, diagnostics));
-      checks.push(await this.remoteRead(diagnostics));
-      checks.push(await this.localWrite("local:workspace-write", this.cwd, diagnostics));
-      checks.push(await this.gitWrite(diagnostics));
-    }
     return checks;
   }
   async command(args) {
@@ -9050,18 +9056,9 @@ var NodeWorkflowPreflight = class {
     }
   }
   async checkoutContext(evidence, diagnostics) {
-    if (evidence === void 0)
-      return {
-        name: "git:context",
-        ok: false,
-        required: true,
-        code: "CONTEXT_MISMATCH",
-        detail: "No repository/base context supplied",
-        remedy: "Identify the active checkout and fixed comparison base before starting the workflow."
-      };
     try {
       const root = await this.command(["rev-parse", "--show-toplevel"]);
-      if (await realpath(root) !== await realpath(evidence.context.repositoryRoot)) {
+      if (evidence !== void 0 && await realpath(root) !== await realpath(evidence.context.repositoryRoot)) {
         return {
           name: "git:context",
           ok: false,
@@ -9075,14 +9072,14 @@ var NodeWorkflowPreflight = class {
         "rev-parse",
         "--verify",
         "--end-of-options",
-        `${evidence.context.baseRef}^{commit}`
+        `${evidence?.context.baseRef ?? "HEAD"}^{commit}`
       ]);
       return {
         name: "git:context",
         ok: true,
         required: true,
         code: "AVAILABLE",
-        detail: "Active checkout matches and the fixed base resolves to a commit"
+        detail: evidence === void 0 ? "Active checkout found and HEAD resolves to a commit" : "Active checkout matches and the fixed base resolves to a commit"
       };
     } catch (error) {
       return diagnostics.failure("git:context", error, true);
@@ -9096,7 +9093,7 @@ var NodeWorkflowPreflight = class {
         ok: true,
         required: true,
         code: "AVAILABLE",
-        detail: "Filesystem access check permits directory writes; no file was created and host authorization is checked separately"
+        detail: "Filesystem access check permits directory writes; no file was created; the harness enforces access when operations run"
       };
     } catch (error) {
       return diagnostics.failure(name, error, true);
@@ -9162,7 +9159,7 @@ var NodeRepositoryReadiness = class {
             required: true,
             code: "INVALID_CONTEXT",
             detail: "Workflow or runtime evidence does not match the readiness schema",
-            remedy: "Supply a valid WorkflowEvidence document for the selected workflow; do not fill unknown capabilities with available."
+            remedy: "Select a supported workflow. If supplying optional programmatic evidence, it must match WorkflowEvidenceSchema."
           }
         ],
         ok: false,
