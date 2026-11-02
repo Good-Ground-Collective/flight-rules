@@ -122,6 +122,7 @@ const makeHost = (): PullRequestHost => ({
   ]),
   defaultBranch: vi.fn().mockResolvedValue("main"),
   requestReviewers: vi.fn(),
+  listReviewThreads: vi.fn(),
 });
 
 const makeProgram = (

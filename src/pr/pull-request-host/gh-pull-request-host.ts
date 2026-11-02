@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { z } from 'zod'
+import { JsonReviewCodec, type ReviewCodec } from '../../code-review/review-codec.js'
 import {
   DefaultPullRequestBuilder,
   PullRequestTemplateSchema,
@@ -12,11 +13,15 @@ import {
 } from '../../git/pr-template/pr-template.js'
 import type {
   CreatedPullRequest,
+  ListReviewThreadsOptions,
   OpenPullRequest,
   PullRequestAttachOptions,
   PullRequestComment,
   PullRequestHost,
+  PullRequestThreads,
   ReviewerRequestResult,
+  ReviewThread,
+  ReviewThreadComment,
 } from './pull-request-host.js'
 
 type ExecFileFn = (file: string, args: readonly string[]) => Promise<{ stdout: string; stderr: string }>
@@ -45,6 +50,70 @@ const GhPullRequestListSchema = z.array(
   }),
 )
 
+const reviewThreadsQuery = `query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      number url title body headRefName headRefOid baseRefName
+      author { login }
+      reviewThreads(first: 100, after: $endCursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id isResolved isOutdated path line originalLine
+          comments(first: 100) {
+            totalCount
+            nodes { id url body createdAt author { type: __typename login } }
+          }
+        }
+      }
+    }
+  }
+}`
+
+const GhReviewThreadsPageSchema = z.object({
+  data: z.object({
+    repository: z.object({
+      pullRequest: z.object({
+        number: z.number(),
+        url: z.string(),
+        title: z.string(),
+        body: z.string(),
+        headRefName: z.string(),
+        headRefOid: z.string(),
+        baseRefName: z.string(),
+        author: z.object({ login: z.string() }).nullable(),
+        reviewThreads: z.object({
+          pageInfo: z.object({ hasNextPage: z.boolean(), endCursor: z.string().nullable() }),
+          nodes: z.array(
+            z.object({
+              id: z.string(),
+              isResolved: z.boolean(),
+              isOutdated: z.boolean(),
+              path: z.string(),
+              line: z.number().nullable(),
+              originalLine: z.number().nullable(),
+              comments: z.object({
+                totalCount: z.number(),
+                nodes: z.array(
+                  z.object({
+                    id: z.string(),
+                    url: z.string(),
+                    body: z.string(),
+                    createdAt: z.string(),
+                    author: z.object({ type: z.string(), login: z.string() }).nullable(),
+                  }),
+                ),
+              }),
+            }),
+          ),
+        }),
+      }),
+    }),
+  }),
+})
+
+type GhReviewThreadsPage = z.infer<typeof GhReviewThreadsPageSchema>
+type GhReviewThreadNode = GhReviewThreadsPage['data']['repository']['pullRequest']['reviewThreads']['nodes'][number]
+
 const pullUrl = /\/pull\/(\d+)\b/
 
 /** gh printed no recognizable pull request URL on stdout, so the create/comment result cannot be reported back to the caller. */
@@ -65,12 +134,14 @@ export class GhOutputParseError extends Error {
 export class GhPullRequestHost implements PullRequestHost {
   private readonly repo: string
   private readonly builder: PullRequestBuilder
+  private readonly codec: ReviewCodec
   private readonly execFile: ExecFileFn
 
   constructor(props: GhPullRequestHostProps) {
     const parsed = GhPullRequestHostPropsSchema.parse(props)
     this.repo = parsed.repo
     this.builder = props.builder ?? new DefaultPullRequestBuilder()
+    this.codec = new JsonReviewCodec()
 
     const promisified = promisify(execFile)
     const cwd = parsed.cwd ?? process.cwd()
@@ -168,6 +239,85 @@ export class GhPullRequestHost implements PullRequestHost {
     }
 
     return result
+  }
+
+  async listReviewThreads(number: number, options: ListReviewThreadsOptions): Promise<PullRequestThreads> {
+    const [owner = '', name = ''] = this.repo.split('/')
+    let first: GhReviewThreadsPage['data']['repository']['pullRequest'] | undefined
+    const nodes: GhReviewThreadNode[] = []
+    let cursor: string | undefined
+
+    for (;;) {
+      const { stdout } = await this.execFile('gh', [
+        'api',
+        'graphql',
+        '-f',
+        `query=${reviewThreadsQuery}`,
+        '-f',
+        `owner=${owner}`,
+        '-f',
+        `name=${name}`,
+        '-F',
+        `number=${number}`,
+        ...(cursor === undefined ? [] : ['-f', `endCursor=${cursor}`]),
+      ])
+      const { reviewThreads, ...header } = GhReviewThreadsPageSchema.parse(JSON.parse(stdout)).data.repository.pullRequest
+      first ??= { ...header, reviewThreads }
+      nodes.push(...reviewThreads.nodes)
+
+      if (!reviewThreads.pageInfo.hasNextPage || reviewThreads.pageInfo.endCursor === null) break
+      cursor = reviewThreads.pageInfo.endCursor
+    }
+
+    const trusted = new Set(options.trustedAuthors)
+    return {
+      pullRequest: {
+        number: first.number,
+        url: first.url,
+        title: first.title,
+        body: first.body,
+        headRefName: first.headRefName,
+        headRefOid: first.headRefOid,
+        baseRefName: first.baseRefName,
+        authorLogin: first.author?.login ?? 'ghost',
+      },
+      threads: nodes.map((node) => this.toReviewThread(node, trusted)),
+    }
+  }
+
+  private toReviewThread(node: GhReviewThreadNode, trusted: ReadonlySet<string>): ReviewThread {
+    const comments: ReviewThreadComment[] = node.comments.nodes.map((comment) => ({
+      id: comment.id,
+      url: comment.url,
+      authorLogin: (comment.author?.login ?? 'ghost').replace(/\[bot\]$/, ''),
+      authorType: comment.author?.type === 'Bot' ? 'Bot' : 'User',
+      body: comment.body,
+      createdAt: comment.createdAt,
+    }))
+    const root = comments[0]
+    let finding: ReviewThread['finding'] = null
+    let markerError: string | null = null
+
+    if (root !== undefined && trusted.has(root.authorType === 'Bot' ? `${root.authorLogin}[bot]` : root.authorLogin)) {
+      try {
+        finding = this.codec.parseFinding(root.body)
+      } catch (err) {
+        markerError = err instanceof Error ? err.message : String(err)
+      }
+    }
+
+    return {
+      id: node.id,
+      path: node.path,
+      line: node.line,
+      originalLine: node.originalLine,
+      isResolved: node.isResolved,
+      isOutdated: node.isOutdated,
+      commentsTruncated: node.comments.totalCount > node.comments.nodes.length,
+      comments,
+      finding,
+      markerError,
+    }
   }
 
   private describeFailure(err: unknown): string {

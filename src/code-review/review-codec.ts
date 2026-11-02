@@ -16,6 +16,8 @@ export interface ReviewCodec {
     authorId: number;
     trustedAuthorIds: number[];
   }): ReviewState | undefined;
+  /** Returns the single finding marker in `body`, or null when it has none; throws InvalidReviewError on a malformed or repeated marker. */
+  parseFinding(body: string): FindingRecord | null;
   render(record: FindingRecord): string;
   fingerprint(finding: StoredFinding): string;
 }
@@ -55,6 +57,12 @@ export class JsonReviewCodec implements ReviewCodec {
     if (states.length > 1)
       throw new InvalidReviewError("multiple review state markers in one summary");
     return states.length === 0 ? undefined : reviewContract.state(states[0]);
+  }
+
+  parseFinding(body: string): FindingRecord | null {
+    const markers = this.readMarkers(body, "finding");
+    if (markers.length > 1) throw new InvalidReviewError("multiple finding markers in one comment");
+    return markers.length === 0 ? null : reviewContract.record(markers[0]);
   }
 
   render(record: FindingRecord): string {

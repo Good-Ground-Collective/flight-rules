@@ -99,6 +99,14 @@ export class CommanderPrCommand implements PrCommandAdapter {
         await this.invokeAndPrint("pr-list", { ticket: opts.ticket }, command);
       });
 
+    pr.command("threads")
+      .exitOverride()
+      .argument("<number>", "pull request number", (value: string) => decimalIntegers.positive(value))
+      .option("--trusted-author <login>", "author whose root comments may carry finding markers; `name[bot]` trusts only that Bot, a bare `name` only that User (repeatable)", collect, [])
+      .action(async (number: number, opts: { trustedAuthor: string[] }, command: Command) => {
+        await this.invokeAndPrint("pr-threads", { number, trustedAuthors: opts.trustedAuthor }, command);
+      });
+
     pr.command("request-review")
       .exitOverride()
       .argument("<number>", "pull request number", (value: string) => decimalIntegers.positive(value))
