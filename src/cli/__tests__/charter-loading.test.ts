@@ -28,11 +28,14 @@ describe("coding charters load through flight-rules charter", () => {
       "agents/code-implementation.md",
       "agents/code-verifier.md",
       "skills/execute-work/SKILL.md",
+      "skills/remediate-review/SKILL.md",
       "skills/guided-code-review/SKILL.md",
       "skills/autonomous-code-review/SKILL.md",
     ];
     for (const consumer of consumers) {
-      expect(readFileSync(join(root, consumer), "utf8"), consumer).toMatch(/flight-rules charter\b/);
+      expect(readFileSync(join(root, consumer), "utf8"), consumer).toMatch(
+        /flight-rules charter\b/,
+      );
     }
   });
 });
