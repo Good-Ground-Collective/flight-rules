@@ -107,6 +107,16 @@ export class CommanderPrCommand implements PrCommandAdapter {
         await this.invokeAndPrint("pr-threads", { number, trustedAuthors: opts.trustedAuthor }, command);
       });
 
+    pr.command("thread-reply")
+      .exitOverride()
+      .argument("<thread-id>", "review thread GraphQL node id, as returned by `pr threads`")
+      .option("--body <body>", "reply body (or use --body-file)")
+      .option("--body-file <path>", "read the reply body from a file")
+      .action(async (threadId: string, opts: { body?: string; bodyFile?: string }, command: Command) => {
+        const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
+        await this.invokeAndPrint("pr-thread-reply", { threadId, body }, command);
+      });
+
     pr.command("request-review")
       .exitOverride()
       .argument("<number>", "pull request number", (value: string) => decimalIntegers.positive(value))

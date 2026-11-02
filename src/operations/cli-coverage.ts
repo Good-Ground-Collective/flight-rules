@@ -293,6 +293,7 @@ export const cliRouteCoverage: CliRouteCoverage = new ManifestCliRouteCoverage({
       ["pr comment", "pr-comment"],
       ["pr list", "pr-list"],
       ["pr threads", "pr-threads"],
+      ["pr thread-reply", "pr-thread-reply"],
       ["pr request-review", "pr-request-review"],
       ["board post heartbeat", "board-post-heartbeat"],
       ["board post item", "board-post-item"],

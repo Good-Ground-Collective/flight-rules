@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { readFile } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { CommanderError } from 'commander'
 import type {
@@ -25,6 +26,7 @@ const makeMockHost = (
   defaultBranch: vi.fn().mockResolvedValue('main'),
   requestReviewers: vi.fn().mockResolvedValue({ number: 7, requested: [], failed: [] }),
   listReviewThreads: vi.fn(),
+  replyToReviewThread: vi.fn(),
 })
 
 const testCwd = dirname(fileURLToPath(import.meta.url))
@@ -58,6 +60,8 @@ const processFixture = (stdout: string, failedReviewer?: string) => {
       if (path === undefined) throw new Error('Missing body file path')
       bodies.push(await readFile(path))
     }
+    const replyBody = args.find((arg) => arg.startsWith('body=@'))
+    if (replyBody !== undefined) bodies.push(await readFile(replyBody.slice('body=@'.length)))
     if (failedReviewer !== undefined && args.at(-1) === failedReviewer) {
       throw Object.assign(new Error('Reviewer request failed'), { stderr: 'not a collaborator\nmore details' })
     }
@@ -170,6 +174,24 @@ describe.each(['commander', 'shared'] as const)('PR process parity through %s', 
     expect(calls[0]?.[1].slice(0, 2)).toEqual(['api', 'graphql'])
     expect(calls[0]?.[1].slice(4)).toEqual(['-f', 'owner=o', '-f', 'name=r', '-F', 'number=7'])
     expect(bodies).toEqual([])
+  })
+
+  it('preserves the thread-reply argv and sends the --body through a temp file', async () => {
+    const reply = JSON.stringify({
+      data: { addPullRequestReviewThreadReply: { comment: { id: 'PRRC_1', url: 'https://github.com/o/r/pull/7#discussion_r1' } } },
+    })
+    const { host, calls, bodies } = processFixture(reply)
+    const body = 'café\r\n  `literal` $text  \n'
+    await invokeTransport(transport, host, ['thread-reply', 'PRRT_abc', '--body', body],
+      'pr-thread-reply', { threadId: 'PRRT_abc', body })
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.[1].slice(0, 2)).toEqual(['api', 'graphql'])
+    expect(calls[0]?.[1].slice(4)).toEqual(['-f', 'id=PRRT_abc', '-F', expect.stringMatching(/^body=@.*[/\\]body\.md$/)])
+    expect(bodies).toEqual([Buffer.from(body, 'utf8')])
+    if (transport === 'commander') {
+      expect(process.stdout.write).toHaveBeenCalledWith(JSON.stringify({ id: 'PRRC_1', url: 'https://github.com/o/r/pull/7#discussion_r1' }) + '\n')
+    }
   })
 
   it('preserves every reviewer argv and partial outcome without retrying a failed write', async () => {
@@ -287,6 +309,42 @@ describe('pr comment command', () => {
     const host = makeMockHost()
     await expect(run(host, ['comment', '42'])).rejects.toThrow()
     expect(vi.mocked(host.commentOnPullRequest)).not.toHaveBeenCalled()
+  })
+})
+
+describe('pr thread-reply command', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('replies with --body and prints the new comment as JSON', async () => {
+    const host = makeMockHost()
+    vi.mocked(host.replyToReviewThread).mockResolvedValue({ id: 'PRRC_1', url: 'https://github.com/o/r/pull/7#discussion_r1' })
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(host, ['thread-reply', 'PRRT_abc', '--body', 'fixed in abc123'])
+    expect(vi.mocked(host.replyToReviewThread)).toHaveBeenCalledWith('PRRT_abc', 'fixed in abc123')
+    expect(output).toHaveBeenCalledWith('{"id":"PRRC_1","url":"https://github.com/o/r/pull/7#discussion_r1"}\n')
+    output.mockRestore()
+  })
+
+  it('reads the reply from --body-file', async () => {
+    const host = makeMockHost()
+    vi.mocked(host.replyToReviewThread).mockResolvedValue({ id: 'PRRC_1', url: 'u' })
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    const dir = await mkdtemp(join(tmpdir(), 'flight-rules-reply-'))
+    try {
+      const file = join(dir, 'reply.md')
+      await writeFile(file, 'from file\n', 'utf8')
+      await run(host, ['thread-reply', 'PRRT_abc', '--body-file', file])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+      output.mockRestore()
+    }
+    expect(vi.mocked(host.replyToReviewThread)).toHaveBeenCalledWith('PRRT_abc', 'from file\n')
+  })
+
+  it('rejects when neither --body nor --body-file is given', async () => {
+    const host = makeMockHost()
+    await expect(run(host, ['thread-reply', 'PRRT_abc'])).rejects.toThrow()
+    expect(vi.mocked(host.replyToReviewThread)).not.toHaveBeenCalled()
   })
 })
 

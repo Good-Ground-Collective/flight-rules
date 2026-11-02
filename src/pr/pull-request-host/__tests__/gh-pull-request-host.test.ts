@@ -525,3 +525,39 @@ describe('GhPullRequestHost.listReviewThreads', () => {
     expect(threads[1]?.markerError).toBeNull()
   })
 })
+
+describe('GhPullRequestHost.replyToReviewThread', () => {
+  const mutationResult = JSON.stringify({
+    data: { addPullRequestReviewThreadReply: { comment: { id: 'PRRC_1', url: 'https://github.com/o/r/pull/9#discussion_r1' } } },
+  })
+
+  it('posts the body from a temp file via -F and returns the new comment id and url', async () => {
+    const body = 'café\r\n  `literal` $text  \n'
+    const calls: (readonly string[])[] = []
+    const bodies: Buffer[] = []
+    const execFileFn = vi.fn(async (_file: string, args: readonly string[]) => {
+      calls.push(args)
+      const bodyArg = args.find((arg) => arg.startsWith('body=@'))
+      if (bodyArg !== undefined) bodies.push(await readFile(bodyArg.slice('body=@'.length)))
+      return { stdout: mutationResult, stderr: '' }
+    })
+    const host = new GhPullRequestHost({ repo: 'o/r', execFileFn })
+
+    const result = await host.replyToReviewThread('PRRT_abc', body)
+
+    expect(result).toEqual({ id: 'PRRC_1', url: 'https://github.com/o/r/pull/9#discussion_r1' })
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.slice(0, 3)).toEqual(['api', 'graphql', '-f'])
+    expect(calls[0]?.[3]).toMatch(/^query=mutation\(\$id: ID!, \$body: String!\)/)
+    expect(calls[0]?.[3]).toContain('addPullRequestReviewThreadReply(input: {pullRequestReviewThreadId: $id, body: $body})')
+    expect(calls[0]?.[3]).not.toMatch(/resolveReviewThread|unresolveReviewThread/)
+    expect(calls[0]?.slice(4)).toEqual(['-f', 'id=PRRT_abc', '-F', expect.stringMatching(/^body=@.*[/\\]body\.md$/)])
+    expect(bodies).toEqual([Buffer.from(body, 'utf8')])
+  })
+
+  it('rejects an unexpected response shape', async () => {
+    const execFileFn = vi.fn(async () => ({ stdout: '{"data":{}}', stderr: '' }))
+    const host = new GhPullRequestHost({ repo: 'o/r', execFileFn })
+    await expect(host.replyToReviewThread('PRRT_abc', 'x')).rejects.toThrow()
+  })
+})
