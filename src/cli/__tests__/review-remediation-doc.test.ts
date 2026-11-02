@@ -4,11 +4,16 @@ import { describe, it, expect } from "vitest";
 
 const root = join(import.meta.dirname, "..", "..", "..");
 const executeWork = readFileSync(join(root, "skills", "execute-work", "SKILL.md"), "utf8");
+const remediateReview = readFileSync(join(root, "skills", "remediate-review", "SKILL.md"), "utf8");
 const doc = readFileSync(join(root, "docs", "review-remediation.md"), "utf8");
 
 describe("review remediation doc", () => {
   it("is loaded by execute-work", () => {
     expect(executeWork).toContain("flight-rules doc review-remediation");
+  });
+
+  it("is loaded by remediate-review", () => {
+    expect(remediateReview).toContain("flight-rules doc review-remediation");
   });
 
   it.each([

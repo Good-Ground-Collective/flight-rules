@@ -6,8 +6,8 @@ How to turn review findings into verified fixes and replies: triage first, one b
 
 Two points are decided by the calling skill, not by this doc:
 
-- **Which findings are in scope.** `execute-work`: its private review's findings plus other reviewers' existing threads on the PR.
-- **Whether a summary comment is allowed.** `execute-work`: none. Replies in existing external threads are the only review comments it authorizes.
+- **Which findings are in scope.** `execute-work`: its private review's findings plus other reviewers' existing threads on the PR. `remediate-review`: the PR's unresolved, non-outdated, untruncated public threads, with no private review.
+- **Whether a summary comment is allowed.** `execute-work`: none. Replies in existing external threads are the only review comments it authorizes. `remediate-review`: exactly one summary comment is allowed.
 
 Everything below applies to whichever findings the caller puts in scope.
 
