@@ -24,6 +24,7 @@ const makeMockHost = (
   listOpenPullRequestsForTickets: vi.fn().mockResolvedValue([]),
   defaultBranch: vi.fn().mockResolvedValue('main'),
   requestReviewers: vi.fn().mockResolvedValue({ number: 7, requested: [], failed: [] }),
+  listReviewThreads: vi.fn(),
 })
 
 const testCwd = dirname(fileURLToPath(import.meta.url))
@@ -150,6 +151,24 @@ describe.each(['commander', 'shared'] as const)('PR process parity through %s', 
       'pr', 'list', '--repo', 'o/r', '--state', 'open', '--limit', '200',
       '--json', 'number,url,headRefName,baseRefName,title',
     ]]])
+    expect(bodies).toEqual([])
+  })
+
+  it('collects repeated --trusted-author into the threads query and reads without a body file', async () => {
+    const { host, calls, bodies } = processFixture(JSON.stringify({
+      data: { repository: { pullRequest: {
+        number: 7, url: 'https://github.com/o/r/pull/7', title: 't', body: 'b', headRefName: 'h',
+        headRefOid: 'abc', baseRefName: 'main', author: { login: 'dev' },
+        reviewThreads: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+      } } },
+    }))
+    await invokeTransport(transport, host, [
+      'threads', '7', '--trusted-author', 'alice', '--trusted-author', 'bob',
+    ], 'pr-threads', { number: 7, trustedAuthors: ['alice', 'bob'] })
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.[1].slice(0, 2)).toEqual(['api', 'graphql'])
+    expect(calls[0]?.[1].slice(4)).toEqual(['-f', 'owner=o', '-f', 'name=r', '-F', 'number=7'])
     expect(bodies).toEqual([])
   })
 

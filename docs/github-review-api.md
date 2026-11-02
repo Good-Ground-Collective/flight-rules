@@ -155,6 +155,12 @@ stating that the diff exceeded the guard and was not reviewed, carrying an
 
 ## 7. Read the other reviewers
 
+Prefer `flight-rules pr threads <number> [--trusted-author <login>]` for the
+review threads: it returns resolved/outdated flags and finding markers parsed
+only from root comments by trusted authors (`name[bot]` trusts a Bot, a bare
+`name` a User). The raw query below stays for what the command does not cover:
+the viewer, labels, reviews and conversation comments.
+
 Used by `guided-code-review` in self-review mode. One GraphQL call fetches the
 signed-in user, the PR's author and head, its labels, its reviews, its review
 threads and its conversation comments. Replace `<n>` with the PR number;

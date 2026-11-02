@@ -3,6 +3,7 @@ import { isAbsolute, relative, resolve } from "node:path";
 import { z } from "zod";
 import { PullRequestTemplateSchema } from "../git/pr-template/pr-template.js";
 import { SemanticTypeSchema } from "../git/semantic-types.js";
+import { FindingRecordSchema } from "../code-review/review.schema.js";
 import type { PullRequestHost } from "../pr/pull-request-host/pull-request-host.js";
 import type { OperationDescriptor } from "./operation-registry.js";
 import type { OperationEffect } from "./operation.schema.js";
@@ -35,6 +36,43 @@ const listInput = z.strictObject({ ticket: z.array(z.string().min(1)).min(1) });
 const reviewInput = z.strictObject({
   number: z.number().int().positive(),
   reviewer: z.array(z.string().min(1)).min(1),
+});
+const threadsInput = z.strictObject({
+  number: z.number().int().positive(),
+  trustedAuthors: z.array(z.string().min(1)).default([]),
+});
+const threadCommentSchema = z.strictObject({
+  id: z.string(),
+  url: z.string(),
+  authorLogin: z.string(),
+  authorType: z.enum(["User", "Bot"]),
+  body: z.string(),
+  createdAt: z.string(),
+});
+const reviewThreadSchema = z.strictObject({
+  id: z.string(),
+  path: z.string(),
+  line: z.number().nullable(),
+  originalLine: z.number().nullable(),
+  isResolved: z.boolean(),
+  isOutdated: z.boolean(),
+  commentsTruncated: z.boolean(),
+  comments: z.array(threadCommentSchema),
+  finding: FindingRecordSchema.nullable(),
+  markerError: z.string().nullable(),
+});
+const pullRequestThreadsSchema = z.strictObject({
+  pullRequest: z.strictObject({
+    number: z.number(),
+    url: z.string(),
+    title: z.string(),
+    body: z.string(),
+    headRefName: z.string(),
+    headRefOid: z.string(),
+    baseRefName: z.string(),
+    authorLogin: z.string(),
+  }),
+  threads: z.array(reviewThreadSchema),
 });
 const createdSchema = z.object({ number: z.number().int().positive(), url: z.string().url() });
 const commentResultSchema = z.object({ url: z.string() });
@@ -104,6 +142,7 @@ export class DefaultPrOperations implements PrOperations {
         return this.getHost().commentOnPullRequest(input.number, input.body, { attach: input.attach });
       }),
       this.descriptor("pr-list", "List open pull requests matched to ticket identifiers.", ["read", "network", "process"], ["pr", "list"], listInput, z.array(openPullRequestSchema), (input) => this.getHost().listOpenPullRequestsForTickets(input.ticket)),
+      this.descriptor("pr-threads", "List a pull request's review threads with trusted finding markers.", ["read", "network", "process"], ["pr", "threads"], threadsInput, pullRequestThreadsSchema, (input) => this.getHost().listReviewThreads(input.number, { trustedAuthors: input.trustedAuthors })),
       this.descriptor("pr-request-review", "Request reviewers for a pull request and preserve each outcome.", effects, ["pr", "request-review"], reviewInput, reviewerResultSchema, async (input) => {
         const result = await this.getHost().requestReviewers(input.number, input.reviewer);
         if (result.failed.length > 0) {

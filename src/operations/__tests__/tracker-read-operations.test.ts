@@ -106,6 +106,7 @@ const makeHost = (
   listOpenPullRequestsForTickets: vi.fn().mockResolvedValue(open),
   defaultBranch: vi.fn().mockResolvedValue("main"),
   requestReviewers: vi.fn(),
+  listReviewThreads: vi.fn(),
 });
 
 const makeRegistry = (tracker: TaskTracker, host = makeHost()) =>

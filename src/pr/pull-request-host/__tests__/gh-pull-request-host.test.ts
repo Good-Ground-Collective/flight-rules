@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { PullRequestTemplate } from '../../../git/pr-template/pr-template.js'
+import { FindingRecordSchema } from '../../../code-review/review.schema.js'
+import { JsonReviewCodec } from '../../../code-review/review-codec.js'
 import { GhPullRequestHost } from '../gh-pull-request-host.js'
 
 type ExecFileFn = (file: string, args: readonly string[]) => Promise<{ stdout: string; stderr: string }>
@@ -334,5 +336,192 @@ describe('GhPullRequestHost.defaultBranch', () => {
     const host = new GhPullRequestHost({ repo: 'o/r', execFileFn })
     expect(await host.defaultBranch()).toBe('main')
     expect(execFileFn).toHaveBeenCalledWith('gh', expect.arrayContaining(['repo', 'view', 'o/r', 'defaultBranchRef']))
+  })
+})
+
+const findingRecord = FindingRecordSchema.parse({
+  v: 1,
+  schema_revision: 1,
+  finding: {
+    id: 'f-0000000001',
+    path: 'src/a.ts',
+    line: 3,
+    label: 'issue',
+    type: 'fix',
+    blocking: true,
+    severity: 'major',
+    subject: 'Scope the query',
+    discussion: 'Records can cross tenants.',
+    details: 'Filter on tenantId.',
+    resolved_when: 'The query is scoped.',
+  },
+  status: 'open',
+  evidence: [],
+})
+const marker = new JsonReviewCodec().finding(findingRecord)
+
+const commentNode = (id: string, login: string | null, body: string, typename = 'User') => ({
+  id,
+  url: `https://github.com/o/r/pull/9#discussion_${id}`,
+  body,
+  createdAt: '2026-01-01T00:00:00Z',
+  author: login === null ? null : { type: typename, login },
+})
+
+const threadNode = (id: string, comments: ReturnType<typeof commentNode>[], extra: Record<string, unknown> = {}, totalCount = comments.length) => ({
+  id,
+  isResolved: false,
+  isOutdated: false,
+  path: 'src/a.ts',
+  line: 3,
+  originalLine: 3,
+  comments: { totalCount, nodes: comments },
+  ...extra,
+})
+
+const page = (nodes: unknown[], endCursor: string | null) =>
+  JSON.stringify({
+    data: {
+      repository: {
+        pullRequest: {
+          number: 9,
+          url: 'https://github.com/o/r/pull/9',
+          title: 'feat: x',
+          body: 'PR body',
+          headRefName: 'feat/x',
+          headRefOid: 'abc123',
+          baseRefName: 'main',
+          author: { login: 'dev' },
+          reviewThreads: { pageInfo: { hasNextPage: endCursor !== null, endCursor }, nodes },
+        },
+      },
+    },
+  })
+
+describe('GhPullRequestHost.listReviewThreads', () => {
+  const hostFor = (pages: string[]) => {
+    const calls: (readonly string[])[] = []
+    const execFileFn = vi.fn(async (_file: string, args: readonly string[]) => {
+      calls.push(args)
+      return { stdout: pages[calls.length - 1] ?? '', stderr: '' }
+    })
+    return { host: new GhPullRequestHost({ repo: 'o/r', execFileFn }), calls }
+  }
+
+  it('merges two pages, sends the cursor only on the second, and returns the first page header', async () => {
+    const { host, calls } = hostFor([
+      page([threadNode('T1', [commentNode('C1', 'alice', 'one')])], 'CUR1'),
+      page([threadNode('T2', [commentNode('C2', 'bob', 'two')], { isResolved: true })], null),
+    ])
+    const result = await host.listReviewThreads(9, { trustedAuthors: [] })
+
+    expect(calls).toHaveLength(2)
+    expect(calls[0]?.slice(0, 3)).toEqual(['api', 'graphql', '-f'])
+    expect(calls[0]?.slice(4)).toEqual(['-f', 'owner=o', '-f', 'name=r', '-F', 'number=9'])
+    expect(calls[0]?.[3]).toMatch(/^query=query\(/)
+    expect(calls[1]?.slice(4)).toEqual(['-f', 'owner=o', '-f', 'name=r', '-F', 'number=9', '-f', 'endCursor=CUR1'])
+    expect(result.pullRequest).toEqual({
+      number: 9,
+      url: 'https://github.com/o/r/pull/9',
+      title: 'feat: x',
+      body: 'PR body',
+      headRefName: 'feat/x',
+      headRefOid: 'abc123',
+      baseRefName: 'main',
+      authorLogin: 'dev',
+    })
+    expect(result.threads.map((t) => [t.id, t.isResolved])).toEqual([['T1', false], ['T2', true]])
+  })
+
+  it('keeps a null line on an outdated thread, strips [bot], and flags truncated comments', async () => {
+    const { host } = hostFor([
+      page(
+        [
+          threadNode(
+            'T1',
+            [commentNode('C1', 'coderabbit[bot]', 'hi', 'Bot'), commentNode('C2', 'alice', 'reply')],
+            { line: null, isOutdated: true, originalLine: 7 },
+            150,
+          ),
+          threadNode('T2', [commentNode('C3', null, 'orphan')]),
+        ],
+        null,
+      ),
+    ])
+    const { threads } = await host.listReviewThreads(9, { trustedAuthors: [] })
+
+    expect(threads[0]).toMatchObject({ line: null, originalLine: 7, isOutdated: true, commentsTruncated: true })
+    expect(threads[0]?.comments[0]).toMatchObject({ authorLogin: 'coderabbit', authorType: 'Bot' })
+    expect(threads[0]?.comments[1]).toMatchObject({ authorLogin: 'alice', authorType: 'User' })
+    expect(threads[1]).toMatchObject({ commentsTruncated: false })
+    expect(threads[1]?.comments[0]).toMatchObject({ authorLogin: 'ghost', authorType: 'User' })
+  })
+
+  it('parses a marker only from a trusted root comment', async () => {
+    const body = `Please fix.\n${marker}`
+    const { host } = hostFor([
+      page(
+        [
+          threadNode('trusted', [commentNode('C1', 'reviewer[bot]', body, 'Bot')]),
+          threadNode('untrusted', [commentNode('C2', 'mallory', body)]),
+          threadNode('reply', [commentNode('C3', 'alice', 'plain'), commentNode('C4', 'reviewer[bot]', body, 'Bot')]),
+        ],
+        null,
+      ),
+    ])
+    const { threads } = await host.listReviewThreads(9, { trustedAuthors: ['reviewer[bot]'] })
+
+    expect(threads.map((t) => [t.id, t.finding === null ? null : t.finding.finding.id, t.markerError])).toEqual([
+      ['trusted', 'f-0000000001', null],
+      ['untrusted', null, null],
+      ['reply', null, null],
+    ])
+  })
+
+  it('trusts a [bot] entry only for a Bot author, and a bare entry only for a User', async () => {
+    const { host } = hostFor([
+      page(
+        [
+          threadNode('bot', [commentNode('C1', 'coderabbit', marker, 'Bot')]),
+          threadNode('user', [commentNode('C2', 'coderabbit', marker)]),
+        ],
+        null,
+      ),
+    ])
+    const { threads } = await host.listReviewThreads(9, { trustedAuthors: ['coderabbit[bot]'] })
+    expect(threads.map((t) => [t.id, t.finding === null ? null : t.finding.finding.id, t.markerError])).toEqual([
+      ['bot', 'f-0000000001', null],
+      ['user', null, null],
+    ])
+  })
+
+  it('does not trust a Bot through a bare login entry', async () => {
+    const { host } = hostFor([page([threadNode('T1', [commentNode('C1', 'alice', marker, 'Bot')])], null)])
+    const { threads } = await host.listReviewThreads(9, { trustedAuthors: ['alice'] })
+    expect(threads[0]).toMatchObject({ finding: null, markerError: null })
+  })
+
+  it('parses nothing when no author is trusted', async () => {
+    const { host } = hostFor([page([threadNode('T1', [commentNode('C1', 'reviewer', marker)])], null)])
+    const { threads } = await host.listReviewThreads(9, { trustedAuthors: [] })
+    expect(threads[0]).toMatchObject({ finding: null, markerError: null })
+  })
+
+  it('reports a malformed marker on its own thread without failing the call', async () => {
+    const { host } = hostFor([
+      page(
+        [
+          threadNode('bad', [commentNode('C1', 'reviewer', '<!-- code-review:finding {not json} -->')]),
+          threadNode('good', [commentNode('C2', 'reviewer', marker)]),
+        ],
+        null,
+      ),
+    ])
+    const { threads } = await host.listReviewThreads(9, { trustedAuthors: ['reviewer'] })
+
+    expect(threads[0]?.finding).toBeNull()
+    expect(threads[0]?.markerError).toContain('invalid JSON')
+    expect(threads[1]?.finding?.finding.id).toBe('f-0000000001')
+    expect(threads[1]?.markerError).toBeNull()
   })
 })

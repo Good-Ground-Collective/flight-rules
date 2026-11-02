@@ -88,7 +88,7 @@ describe("MCP stdio subprocess", () => {
     try {
       const { tools } = await client.listTools();
       const toolNames = tools.map((tool) => tool.name);
-      expect(toolNames).toHaveLength(60);
+      expect(toolNames).toHaveLength(61);
       expect(toolNames).toContain("branch-name");
       expect(toolNames).toEqual(
         expect.arrayContaining([
