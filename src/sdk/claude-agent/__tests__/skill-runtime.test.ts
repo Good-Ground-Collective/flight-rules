@@ -502,6 +502,10 @@ describe("Claude Agent skill runtime", () => {
       expect(result.status).toBe("completed");
       expect(operationCalls).not.toHaveBeenCalled();
       expect(scripted.denials).toHaveLength(2);
+      for (const denial of scripted.denials) {
+        expect(denial.reason).toContain("only tool call in its turn");
+        expect(denial.reason).not.toContain("Nothing in this turn ran");
+      }
     });
 
     it("fails the parent with a named error when a sibling skill pauses, and does not keep the sibling pause", async () => {

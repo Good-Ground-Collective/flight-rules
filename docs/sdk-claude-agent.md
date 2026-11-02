@@ -100,7 +100,7 @@ const result = await skills.invoke("remediate-review", callerContext, input, {
 
 ### Tools the model sees
 
-Two in-process MCP servers are built for each run, both loaded up front. Nothing shells out to the Claude CLI to serve them.
+The `flight-rules` MCP server is always built. The `flight-rules-host` server is built only when the caller grants host tools. Both are in-process and loaded up front, and nothing shells out to the Claude CLI to serve them.
 
 - `flight-rules` serves `flight_rules_operation`, `flight_rules_dispatch`, `flight_rules_sibling_skill` and, only when the caller passed `allowHumanQuestions: true` and the host observed `ask` available, `flight_rules_ask_human`. With human questions disabled the tool does not exist and nothing ever supplies a default answer.
 - `flight-rules-host` serves the caller's host tools exactly as the worker runtime does.
@@ -119,7 +119,7 @@ When the model calls `flight_rules_ask_human`, a `PreToolUse` hook re-checks the
 
 ### One question or sibling call per turn
 
-Deferral only works when the model makes a single tool call in the turn. The ask and sibling-skill tools therefore fail closed: if either appears in a turn together with any other tool call, every call in that turn is denied, nothing in the turn runs, and the denial tells the model to call it alone. Dependent writes and worker dispatches never run beside a sibling that might still ask.
+Deferral only works when the model makes a single tool call in the turn. The ask and sibling-skill tools therefore fail closed: if either appears in a turn together with any other tool call, the ask or sibling call itself is denied, other calls in the same turn may already have executed, and the denial tells the model to call it alone. Dependent writes and worker dispatches never run beside a sibling that might still ask.
 
 ### Failures and partial operations
 

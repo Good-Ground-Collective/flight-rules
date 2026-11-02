@@ -351,7 +351,7 @@ export class LangChainDeepAgentsSkillRuntime implements DeepAgentsSkillRuntimeCo
             async (sibling) => {
               const pausedSibling = this.pauses.siblingOf(threadId);
               if (pausedSibling !== undefined) {
-                return this.resumeSibling(handlers, threadId, pausedSibling);
+                return this.resumeSibling(threadId, pausedSibling);
               }
               const result = await AsyncLocalStorageProviderSingleton.getInstance().run(
                 undefined,
@@ -363,7 +363,7 @@ export class LangChainDeepAgentsSkillRuntime implements DeepAgentsSkillRuntimeCo
               if (result.status === "paused") {
                 this.pauses.carrySibling(threadId, result);
                 propagatingSiblingQuestion = true;
-                return await this.resumeSibling(handlers, threadId, result);
+                return await this.resumeSibling(threadId, result);
               }
               return result;
             },
@@ -438,7 +438,6 @@ export class LangChainDeepAgentsSkillRuntime implements DeepAgentsSkillRuntimeCo
   }
 
   private resumeSibling(
-    handlers: SharedSkillToolHandlers,
     threadId: string,
     paused: PausedSkillResult,
   ): Promise<DeepAgentsSkillResult> {
@@ -458,10 +457,9 @@ export class LangChainDeepAgentsSkillRuntime implements DeepAgentsSkillRuntimeCo
     }).then((result) => {
       if (result.status === "paused") {
         this.pauses.carrySibling(threadId, result);
-        return this.resumeSibling(handlers, threadId, result);
+        return this.resumeSibling(threadId, result);
       }
       this.pauses.releaseSibling(threadId);
-      if (result.status === "failed") throw handlers.siblingFailure(result);
       return result;
     });
   }

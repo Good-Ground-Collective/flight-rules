@@ -154,7 +154,7 @@ export class QuestionBoundary {
 
   private refuse(toolName: string): HookJSONOutput {
     return this.deny(
-      `${toolName} must be the only tool call in its turn. Nothing in this turn ran; call it alone.`,
+      `${toolName} must be the only tool call in its turn. Other calls in this turn may already have run; call it alone.`,
     );
   }
 
