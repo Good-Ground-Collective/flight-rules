@@ -1,3 +1,4 @@
+import type { FindingRecord } from '../../code-review/review.schema.js'
 import type { PullRequestTemplate } from '../../git/pr-template/pr-template.js'
 
 export interface CreatedPullRequest {
@@ -16,6 +17,54 @@ export interface OpenPullRequest {
   headRefName: string
   baseRefName: string
   title: string
+}
+
+export interface ReviewThreadComment {
+  id: string
+  url: string
+  /** Login with any `[bot]` suffix removed. */
+  authorLogin: string
+  authorType: 'User' | 'Bot'
+  body: string
+  createdAt: string
+}
+
+export interface ReviewThread {
+  /** GraphQL node id. */
+  id: string
+  path: string
+  line: number | null
+  originalLine: number | null
+  isResolved: boolean
+  isOutdated: boolean
+  /** True when the thread has more comments than were fetched. */
+  commentsTruncated: boolean
+  comments: ReviewThreadComment[]
+  /** Parsed from the root comment only, and only when its author is a trusted author. */
+  finding: FindingRecord | null
+  /** Set when the root comment of a trusted author carries a malformed finding marker. */
+  markerError: string | null
+}
+
+export interface PullRequestThreadsHeader {
+  number: number
+  url: string
+  title: string
+  body: string
+  headRefName: string
+  headRefOid: string
+  baseRefName: string
+  authorLogin: string
+}
+
+export interface PullRequestThreads {
+  pullRequest: PullRequestThreadsHeader
+  threads: ReviewThread[]
+}
+
+export interface ListReviewThreadsOptions {
+  /** Logins whose root comments may carry finding markers; with none, no marker is parsed. */
+  trustedAuthors: readonly string[]
 }
 
 /** Per-login outcome of asking for reviewers on an existing pull request. */
@@ -45,4 +94,6 @@ export interface PullRequestHost {
   defaultBranch(): Promise<string>
   /** Attempts every login and reports each outcome rather than stopping at the first failure. */
   requestReviewers(number: number, logins: readonly string[]): Promise<ReviewerRequestResult>
+  /** Every review thread, resolved and outdated included, since neither state proves a finding closed. */
+  listReviewThreads(number: number, options: ListReviewThreadsOptions): Promise<PullRequestThreads>
 }

@@ -29,6 +29,7 @@ const hostFixture = (): PullRequestHost => ({
   ]),
   defaultBranch: vi.fn().mockResolvedValue("main"),
   requestReviewers: vi.fn().mockResolvedValue({ number: 12, requested: ["alice"], failed: [{ login: "bob", error: "not found" }] }),
+  listReviewThreads: vi.fn(),
 });
 
 const registryFor = (cwd: string, host: PullRequestHost, allowedEffects: Array<"read" | "write" | "network" | "process"> = ["read", "write", "network", "process"]) =>
@@ -38,7 +39,7 @@ const registryFor = (cwd: string, host: PullRequestHost, allowedEffects: Array<"
   });
 
 describe("shared PR operations", () => {
-  it("exposes all four routes and uses the existing host for create, comment, and list", async () => {
+  it("exposes all five routes and uses the existing host for create, comment, and list", async () => {
     const cwd = await makeRoot();
     const host = hostFixture();
     const registry = registryFor(cwd, host);
@@ -46,6 +47,7 @@ describe("shared PR operations", () => {
       ["pr-create", ["pr", "create"]],
       ["pr-comment", ["pr", "comment"]],
       ["pr-list", ["pr", "list"]],
+      ["pr-threads", ["pr", "threads"]],
       ["pr-request-review", ["pr", "request-review"]],
     ]);
     const create = await registry.invoke("pr-create", {
@@ -76,6 +78,8 @@ describe("shared PR operations", () => {
       ["pr-comment", { number: 0, body: "x" }],
       ["pr-request-review", { number: 2, reviewer: [] }],
       ["pr-request-review", { number: -1, reviewer: ["alice"] }],
+      ["pr-threads", { number: 0 }],
+      ["pr-threads", { number: 1, trustedAuthors: [""] }],
       ["pr-list", { ticket: [""] }],
       ["pr-list", { ticket: [] }],
       ["pr-create", { type: "invalid", scope: "x", description: "x", why: "x", what: ["x"], base: "main", head: "topic" }],
@@ -86,6 +90,25 @@ describe("shared PR operations", () => {
     expect(host.commentOnPullRequest).not.toHaveBeenCalled();
     expect(host.listOpenPullRequestsForTickets).not.toHaveBeenCalled();
     expect(host.requestReviewers).not.toHaveBeenCalled();
+    expect(host.listReviewThreads).not.toHaveBeenCalled();
+  });
+
+  it("passes trusted authors to the host and validates the threads result", async () => {
+    const host = hostFixture();
+    const result = {
+      pullRequest: { number: 12, url: "u", title: "t", body: "b", headRefName: "h", headRefOid: "o", baseRefName: "main", authorLogin: "dev" },
+      threads: [{
+        id: "T1", path: "a.ts", line: null, originalLine: 4, isResolved: false, isOutdated: true,
+        commentsTruncated: false, finding: null, markerError: "bad marker",
+        comments: [{ id: "C1", url: "u", authorLogin: "bot", authorType: "Bot" as const, body: "x", createdAt: "2026-01-01T00:00:00Z" }],
+      }],
+    };
+    vi.mocked(host.listReviewThreads).mockResolvedValue(result);
+    const registry = registryFor(await makeRoot(), host, ["read", "network", "process"]);
+    expect(await registry.invoke("pr-threads", { number: 12, trustedAuthors: ["bot"] })).toEqual({ status: "success", data: result });
+    expect(host.listReviewThreads).toHaveBeenCalledWith(12, { trustedAuthors: ["bot"] });
+    await registry.invoke("pr-threads", { number: 12 });
+    expect(host.listReviewThreads).toHaveBeenLastCalledWith(12, { trustedAuthors: [] });
   });
 
   it("denies mutations before host calls and rejects missing or symlinked-out attachments", async () => {

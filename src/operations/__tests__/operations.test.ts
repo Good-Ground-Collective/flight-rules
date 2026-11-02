@@ -226,8 +226,8 @@ describe("shared operations", () => {
       policy: new LaunchOperationAccessPolicy({ allowedEffects: ["read", "process", "network"] }),
     });
     const routes = cliRouteCoverage.check(program, registry);
-    expect(routes).toHaveLength(69);
-    expect(cliRouteCoverage.list().filter((item) => item.status === "supported")).toHaveLength(60);
+    expect(routes).toHaveLength(70);
+    expect(cliRouteCoverage.list().filter((item) => item.status === "supported")).toHaveLength(61);
     expect(
       cliRouteCoverage.list().filter((item) => item.status === "pending-migration"),
     ).toHaveLength(0);
@@ -304,6 +304,7 @@ describe("shared operations", () => {
       "pr-create",
       "pr-comment",
       "pr-list",
+      "pr-threads",
       "pr-request-review",
       "board-post-heartbeat",
       "board-post-item",
