@@ -1,8 +1,4 @@
-import {
-  query as claudeAgentQuery,
-  type Options,
-  type SDKResultMessage,
-} from "@anthropic-ai/claude-agent-sdk";
+import { query as claudeAgentQuery, type SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import {
   AgentDefinitionSchema,
@@ -25,6 +21,7 @@ import {
   type DispatchOptions,
   type WorkerRuntimeContract,
 } from "../worker-runtime-core.js";
+import { guardedQueryOptions } from "./guarded-query-options.js";
 import { claudeModelTiers, type ModelTierCatalog } from "./model-tiers.js";
 import {
   CapabilityScopedClaudeToolPolicy,
@@ -169,32 +166,26 @@ export class ClaudeAgentWorkerRuntime implements ClaudeAgentWorkerRuntimeContrac
         controller.abort(error);
       },
     });
-    const options: Options = {
+    const options = guardedQueryOptions.build({
       cwd: request.context.cwd,
       model,
       systemPrompt: definition.body,
-      tools: builtInTools,
+      builtInTools,
       disallowedTools: this.toolPolicy.disallowedTools(),
-      ...(hostTools.length === 0
-        ? {}
-        : {
-            mcpServers: {
+      mcpServers:
+        hostTools.length === 0
+          ? {}
+          : {
               [flightRulesHostServerName]: this.toolPolicy.serverFor(hostTools, {
                 signal: controller.signal,
                 tracker,
               }),
             },
-          }),
-      strictMcpConfig: true,
-      settingSources: [],
-      plugins: [],
-      permissionMode: "default",
-      hooks: { PreToolUse: [{ hooks: [(input) => guard.preToolUse(input)] }] },
-      canUseTool: (toolName, input) => guard.canUseTool(toolName, input),
+      guard,
       maxTurns: this.maxTurns,
-      abortController: controller,
+      controller,
       persistSession: false,
-    };
+    });
 
     let result: SDKResultMessage | undefined;
     let queryFailure: { cause: unknown } | undefined;

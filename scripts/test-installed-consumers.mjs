@@ -217,9 +217,9 @@ if (!appVersion || !createFlightRules({ cwd: process.cwd(), env: {} }) || !revie
     adapterSource,
     `
 import { LangChainDeepAgentsSkillRuntime, DeepAgentsWorkerRuntime } from "@good-ground-collective/flight-rules/sdk/deepagents";
-import { ClaudeAgentWorkerRuntime } from "@good-ground-collective/flight-rules/sdk/claude-agent";
+import { ClaudeAgentWorkerRuntime, ClaudeAgentSkillRuntime } from "@good-ground-collective/flight-rules/sdk/claude-agent";
 import { FileReviewPolicy, EvidenceReviewPlanner, JsonReviewCodec } from "@good-ground-collective/flight-rules/review";
-void [LangChainDeepAgentsSkillRuntime, DeepAgentsWorkerRuntime, ClaudeAgentWorkerRuntime, FileReviewPolicy, EvidenceReviewPlanner, JsonReviewCodec];
+void [LangChainDeepAgentsSkillRuntime, DeepAgentsWorkerRuntime, ClaudeAgentWorkerRuntime, ClaudeAgentSkillRuntime, FileReviewPolicy, EvidenceReviewPlanner, JsonReviewCodec];
 `,
   );
   run(
@@ -252,8 +252,8 @@ void [LangChainDeepAgentsSkillRuntime, DeepAgentsWorkerRuntime, ClaudeAgentWorke
       "-e",
       `
     import assert from 'node:assert/strict';
-    import { instructionCatalog } from '@good-ground-collective/flight-rules/sdk';
-    import { ClaudeAgentWorkerRuntime } from '@good-ground-collective/flight-rules/sdk/claude-agent';
+    import { instructionCatalog, MapOperationRegistry, LaunchOperationAccessPolicy } from '@good-ground-collective/flight-rules/sdk';
+    import { ClaudeAgentWorkerRuntime, ClaudeAgentSkillRuntime } from '@good-ground-collective/flight-rules/sdk/claude-agent';
     const available = { state: 'available', evidence: 'Installed consumer observation.' };
     const seen = [];
     const fence = String.fromCharCode(96).repeat(3);
@@ -265,23 +265,46 @@ void [LangChainDeepAgentsSkillRuntime, DeepAgentsWorkerRuntime, ClaudeAgentWorke
       })();
     };
     const context = { runId: 'installed', taskId: 'claude-agent', cwd: process.cwd(), repositoryRoot: process.cwd(), baseRef: 'main', skill: 'execute-work', attempt: 1 };
+    const snapshot = (caller, agent) => ({
+      context: caller, agent, host: { name: 'installed', version: '1' },
+      observedAt: new Date().toISOString(), spawn: available, ask: available,
+      permissions: { read: available, edit: available, shell: available, web: available, spawn: available, ask: available },
+      limits: { maxConcurrent: 1, activeWorkers: 0, currentDepth: 0, maxDepth: 1, source: 'Installed consumer bound' },
+    });
+    const agents = instructionCatalog.listAgents().map((name) => instructionCatalog.loadAgent(name));
     const workers = new ClaudeAgentWorkerRuntime({
-      agents: instructionCatalog.listAgents().map((name) => instructionCatalog.loadAgent(name)),
+      agents,
       toolGrants: {},
       query,
-      observe: async (request) => ({
-        context: request.context, agent: request.agent, host: { name: 'installed', version: '1' },
-        observedAt: new Date().toISOString(), spawn: available, ask: available,
-        permissions: { read: available, edit: available, shell: available, web: available, spawn: available, ask: available },
-        limits: { maxConcurrent: 1, activeWorkers: 0, currentDepth: 0, maxDepth: 1, source: 'Installed consumer bound' },
-      }),
+      observe: async (request) => snapshot(request.context, request.agent),
     });
     const outcome = await workers.dispatch({ id: 'installed-1', agent: 'tech-writer', context, input: { mode: 'author', focus: 'proof' } });
     assert.equal(outcome.status, 'completed', JSON.stringify(outcome));
     assert.equal(seen.length, 1);
     assert.equal(seen[0].model, 'opus');
     assert.deepEqual(seen[0].settingSources, []);
-    console.log(JSON.stringify({ status: outcome.status, model: seen[0].model, tools: seen[0].tools }));
+    const skillOptions = [];
+    const skills = new ClaudeAgentSkillRuntime({
+      instructions: instructionCatalog,
+      agents,
+      operations: new MapOperationRegistry({ operations: [], policy: new LaunchOperationAccessPolicy({ allowedOperationIds: [] }) }),
+      workers,
+      toolGrants: () => ({}),
+      observe: async (caller, registration) => snapshot(caller, registration?.frontmatter.name ?? null),
+      query: (params) => {
+        skillOptions.push(params.options);
+        return (async function* () {
+          yield { type: 'result', subtype: 'success', is_error: false, result: 'skill done', session_id: 'installed-session' };
+        })();
+      },
+    });
+    const skill = await skills.invoke('guided-code-review', context, {});
+    assert.equal(skill.status, 'completed', JSON.stringify(skill));
+    assert.equal(skill.report, 'skill done');
+    assert.deepEqual(skillOptions[0].settingSources, []);
+    assert.equal(skillOptions[0].strictMcpConfig, true);
+    assert.equal(skillOptions[0].mcpServers['flight-rules'].type, 'sdk');
+    console.log(JSON.stringify({ status: outcome.status, model: seen[0].model, tools: seen[0].tools, skill: skill.status }));
   `,
     ],
     full,

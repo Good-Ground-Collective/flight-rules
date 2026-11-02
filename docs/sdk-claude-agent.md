@@ -1,6 +1,6 @@
 # Claude Agent SDK worker binding
 
-`@good-ground-collective/flight-rules/sdk/claude-agent` runs the neutral worker registrations (code-implementation, code-verifier, research-agent and the rest) through the Claude Agent SDK. It is an optional peer entry: applications that only use the root library, review entry, neutral SDK, MCP server or CLI never load `@anthropic-ai/claude-agent-sdk`, and this entry loads no LangChain package.
+`@good-ground-collective/flight-rules/sdk/claude-agent` runs the neutral worker registrations (code-implementation, code-verifier, research-agent and the rest) and canonical skills such as `remediate-review` through the Claude Agent SDK. It is an optional peer entry: applications that only use the root library, review entry, neutral SDK, MCP server or CLI never load `@anthropic-ai/claude-agent-sdk`, and this entry loads no LangChain package.
 
 The package is published to GitHub Packages. Configure the `@good-ground-collective` scope registry and a read token first; [the shared package guide](code-review-package.md#consumer-entry-points) documents that prerequisite. Then install the optional runtime at the version exercised by the consumer proof:
 
@@ -71,3 +71,60 @@ Host tools are served through an in-process MCP server named `flight-rules-host`
 ## Real filesystem, not a sandbox
 
 Unlike the Deep Agents binding's in-memory filesystem, the Claude built-in tools act on the real checkout. That is intended: a worker that edits a pull request branch edits real files. The path guard confines the built-in file tools to the repository root, but it cannot sandbox a shell command or inspect what a host tool does with its arguments. Bash is granted only to registrations with the `shell` capability. Isolating that shell (container, VM, restricted user, network policy) is the host's responsibility, and host tools must enforce their own access rules.
+
+## Run a canonical skill
+
+`ClaudeAgentSkillRuntime` runs one canonical `SKILL.md` body as a single `query()` conversation. It mirrors the Deep Agents skill runtime: the same `invoke`, `resume` and `cancel` methods, the same `completed`, `paused` and `failed` results, and the same partial-operation records on failure. The behavior both bindings share (pause bookkeeping, the operation, dispatch, sibling and ask handlers, failure mapping) lives in a neutral module; only the model loop differs.
+
+```ts
+import { ClaudeAgentSkillRuntime } from "@good-ground-collective/flight-rules/sdk/claude-agent";
+
+const skills = new ClaudeAgentSkillRuntime({
+  instructions: instructionCatalog,
+  agents: instructionCatalog.listAgents().map((name) => instructionCatalog.loadAgent(name)),
+  operations,
+  workers,
+  observe: (context, registration) => host.observe(context, registration),
+  toolGrants: (context) => host.toolGrants(context),
+});
+
+const result = await skills.invoke("remediate-review", callerContext, input, {
+  allowHumanQuestions: false,
+  signal,
+});
+```
+
+- `operations` is the launch-bound operation registry. `workers` is any object with the worker runtime's `dispatch`, usually a `ClaudeAgentWorkerRuntime`. `observe` is called with the caller context, and with the selected registration before a worker dispatch.
+- `models` and `maxTurns` behave as they do for the worker runtime. The skill runs on the `standard` tier; construction throws `ClaudeAgentSkillConfigurationError` when it has no model. `query` replaces the SDK function for tests.
+- A completed skill's `report` is the final `result` text of the SDK's success message.
+
+### Tools the model sees
+
+Two in-process MCP servers are built for each run, both loaded up front. Nothing shells out to the Claude CLI to serve them.
+
+- `flight-rules` serves `flight_rules_operation`, `flight_rules_dispatch`, `flight_rules_sibling_skill` and, only when the caller passed `allowHumanQuestions: true` and the host observed `ask` available, `flight_rules_ask_human`. With human questions disabled the tool does not exist and nothing ever supplies a default answer.
+- `flight-rules-host` serves the caller's host tools exactly as the worker runtime does.
+
+Every operation call re-observes the host and requires `permissionForEffect` evidence for each of the operation's effects (`read`, `write` as edit, `process` as shell, `network` as web) before the handler runs. Worker dispatch goes through the supplied worker runtime after the orchestration evidence check, with the observed registration identity validated against the requested one.
+
+The run uses the same isolation as a worker dispatch: `settingSources: []`, `plugins: []`, `strictMcpConfig: true`, the catch-all `PreToolUse` guard and the `canUseTool` backstop. The only difference is `persistSession: true`, because a paused skill resumes from its saved session. Sessions use the SDK's default storage; a host that needs the session to survive its own process owns that durability.
+
+### Pause and resume
+
+When the model calls `flight_rules_ask_human`, a `PreToolUse` hook re-checks the host's question policy and returns `permissionDecision: "defer"`. The SDK stops with `terminal_reason: "tool_deferred"` and a `deferred_tool_use`, and the runtime returns `status: "paused"` with a `pauseId`, `questionId` and the question text. The pause record keeps the session id, the tool-use id and the question id.
+
+`resume({ context, pauseId, questionId, answer })` validates the pause (it must be `paused`, match the question and the original caller context, and carry a non-blank answer), reserves it so a concurrent resume is rejected, observes again to confirm `ask` is still available, and re-queries with `resume: <session id>`. When the hook fires again for the same tool-use id it allows the call with the human's answer, and the tool returns that answer to the same call. A failure before the continuation starts releases the reservation so the pause can be retried; `cancel(context, pauseId)` ends a paused skill explicitly. The model cannot answer for the human: an `answer` it supplies is denied, and a question tool call the SDK did not pause fails the run with `QUESTION_NOT_PAUSED`.
+
+`query()` takes a prompt on every call. A resume passes an empty prompt stream so no new user message is added. This has been checked against the installed SDK typings but not against a live provider; verify it before relying on pause and resume in production.
+
+### One question or sibling call per turn
+
+Deferral only works when the model makes a single tool call in the turn. The ask and sibling-skill tools therefore fail closed: if either appears in a turn together with any other tool call, every call in that turn is denied, nothing in the turn runs, and the denial tells the model to call it alone. Dependent writes and worker dispatches never run beside a sibling that might still ask.
+
+### Failures and partial operations
+
+After the first tool failure, later tool calls are denied and the run ends with `TOOL_FAILED` and that failure's message, even if the model reports success. A shared operation that returns `partial` fails the skill and its `operations` records (operation id, validated partial data and error) are carried on the failure, including those from a sibling skill. An abort ends the run with `CANCELLED` once every in-flight handler has settled. An error result, `error_max_turns` or a thrown query is `EXECUTION_FAILED`.
+
+### Limitation: a sibling cannot pause its parent
+
+Nested pause propagation is not supported. If a sibling skill pauses for a human answer, the runtime cancels the sibling's pause and fails the parent with `NESTED_PAUSE_UNSUPPORTED` (`NestedSkillPauseError`). The Deep Agents binding can carry a sibling's question through its checkpoint; the Claude Agent SDK has no equivalent way to surface a nested session's deferral in the parent's session. Run skills that delegate to siblings with `allowHumanQuestions: false`, or ask the question from the parent skill.
