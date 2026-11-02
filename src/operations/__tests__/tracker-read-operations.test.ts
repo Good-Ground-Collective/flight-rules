@@ -107,6 +107,7 @@ const makeHost = (
   defaultBranch: vi.fn().mockResolvedValue("main"),
   requestReviewers: vi.fn(),
   listReviewThreads: vi.fn(),
+  replyToReviewThread: vi.fn(),
 });
 
 const makeRegistry = (tracker: TaskTracker, host = makeHost()) =>

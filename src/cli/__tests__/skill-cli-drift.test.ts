@@ -17,9 +17,14 @@ const program = buildProgram(
 
 const skillsDir = join(import.meta.dirname, '..', '..', '..', 'skills')
 
-const skillFiles = readdirSync(skillsDir, { withFileTypes: true })
-  .filter((entry) => entry.isDirectory())
-  .map((entry) => join(skillsDir, entry.name, 'SKILL.md'))
+const docsDir = join(import.meta.dirname, '..', '..', '..', 'docs')
+
+const skillFiles = [
+  ...readdirSync(skillsDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => join(skillsDir, entry.name, 'SKILL.md')),
+  join(docsDir, 'review-remediation.md'),
+]
 
 /**
  * Lines beginning `flight-rules` inside fenced code blocks, prose excluded.
@@ -120,7 +125,7 @@ const resolve = (invocation: string): string => {
   return 'ok'
 }
 
-describe('skills reference a real CLI surface', () => {
+describe('skills and the review-remediation doc reference a real CLI surface', () => {
   it('finds skills to check', () => {
     expect(skillFiles.length).toBeGreaterThan(0)
   })

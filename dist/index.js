@@ -231,25 +231,415 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join as join2 } from "node:path";
 import { promisify as promisify2 } from "node:util";
+import { z as z8 } from "zod";
+
+// src/code-review/review-codec.ts
+import { createHash } from "node:crypto";
+import { z as z6 } from "zod";
+
+// src/code-review/review-contract.ts
 import { z as z5 } from "zod";
 
-// src/git/pr-template/pr-template.ts
+// src/code-review/review.schema.ts
 import { z as z4 } from "zod";
+var reviewContractVersion = 1;
+var reviewSchemaRevision = 1;
+var ReviewOutcomeSchema = z4.enum(["APPROVED", "CHANGES_NEEDED", "ESCALATE", "INCOMPLETE"]);
+var FindingIdSchema = z4.string().regex(/^f-[a-f0-9]{10}$/);
+var HeadShaSchema = z4.string().regex(/^[a-f0-9]{40}$/);
+var ReviewPathSchema = z4.string().max(400).regex(/^(?!\/)(?!.*\\)(?!.*(?:^|\/)\.{1,2}(?:\/|$))[^\p{Cc}]*$/u);
+var TextSchema = z4.string().min(1).max(16e3);
+var LineTextSchema = z4.string().min(1).max(400).regex(/^[^\r\n]+$/);
+var PositiveIdSchema = z4.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+var HttpsUrlSchema = z4.url().regex(/^https:\/\//);
+var CategorySchema = z4.enum([
+  "security",
+  "correctness",
+  "data",
+  "deployment",
+  "design",
+  "testing",
+  "performance",
+  "readability",
+  "docs"
+]);
+var ActionLabelSchema = z4.enum([
+  "issue",
+  "todo",
+  "suggestion",
+  "question",
+  "chore",
+  "nitpick",
+  "typo",
+  "polish"
+]);
+var InformationLabelSchema = z4.enum(["praise", "note", "thought"]);
+var SeveritySchema = z4.enum(["critical", "major", "minor", "trivial"]);
+var DecisionOptionsSchema = z4.array(
+  z4.strictObject({ id: z4.string().regex(/^[a-z][a-z0-9-]{0,79}$/), description: TextSchema })
+).min(2);
+var findingFields = {
+  path: ReviewPathSchema,
+  line: z4.number().int().nonnegative(),
+  start_line: z4.number().int().positive().optional(),
+  category: CategorySchema.optional(),
+  subject: LineTextSchema,
+  discussion: TextSchema,
+  related_finding_id: FindingIdSchema.optional()
+};
+var actionFields = {
+  ...findingFields,
+  label: ActionLabelSchema,
+  type: z4.enum(["fix", "clarify"]),
+  blocking: z4.boolean(),
+  severity: SeveritySchema,
+  details: TextSchema,
+  resolved_when: TextSchema
+};
+var decisionFields = {
+  ...actionFields,
+  type: z4.literal("decide"),
+  decision_owner: LineTextSchema,
+  decision_options: DecisionOptionsSchema
+};
+var informationFields = {
+  ...findingFields,
+  label: InformationLabelSchema,
+  blocking: z4.literal(false),
+  details: TextSchema.optional()
+};
+var NewFindingSchema = z4.union([
+  z4.strictObject(actionFields),
+  z4.strictObject(decisionFields),
+  z4.strictObject(informationFields)
+]);
+var ActionableFindingSchema = z4.union([
+  z4.strictObject({ ...actionFields, id: FindingIdSchema }),
+  z4.strictObject({ ...decisionFields, id: FindingIdSchema })
+]);
+var StoredFindingSchema = z4.union([
+  ...ActionableFindingSchema.options,
+  z4.strictObject({ ...informationFields, id: FindingIdSchema })
+]);
+var ReviewEvidenceSchema = z4.discriminatedUnion("kind", [
+  z4.strictObject({
+    kind: z4.literal("github_comment"),
+    comment_id: PositiveIdSchema,
+    url: HttpsUrlSchema
+  }),
+  z4.strictObject({
+    kind: z4.literal("code"),
+    commit_sha: HeadShaSchema,
+    path: ReviewPathSchema.min(1),
+    line: z4.number().int().positive()
+  }),
+  z4.strictObject({ kind: z4.literal("commit"), sha: HeadShaSchema }),
+  z4.strictObject({
+    kind: z4.literal("check_run"),
+    check_run_id: PositiveIdSchema,
+    commit_sha: HeadShaSchema
+  }),
+  z4.strictObject({ kind: z4.literal("document"), url: HttpsUrlSchema }),
+  z4.strictObject({
+    kind: z4.literal("verification"),
+    commit_sha: HeadShaSchema,
+    command: TextSchema,
+    result: z4.literal("passed"),
+    report_url: HttpsUrlSchema
+  }),
+  z4.strictObject({
+    kind: z4.literal("thread_resolution"),
+    thread_id: z4.string().min(1),
+    author_id: PositiveIdSchema
+  })
+]);
+var DecisionAnswerSchema = z4.strictObject({
+  comment_id: PositiveIdSchema,
+  author_id: PositiveIdSchema,
+  option_id: z4.string().min(1)
+});
+var transitionFields = {
+  id: FindingIdSchema,
+  reason: TextSchema,
+  reply: TextSchema.optional(),
+  decision: DecisionAnswerSchema.optional()
+};
+var PriorFindingSchema = z4.union([
+  z4.strictObject({
+    ...transitionFields,
+    status: z4.literal("resolved"),
+    evidence: z4.array(ReviewEvidenceSchema).min(1)
+  }),
+  z4.strictObject({
+    ...transitionFields,
+    status: z4.literal("withdrawn"),
+    evidence: z4.array(ReviewEvidenceSchema).min(1),
+    withdrawal_basis: z4.enum(["incorrect", "no_longer_applicable", "dismissed"])
+  }),
+  z4.strictObject({
+    ...transitionFields,
+    status: z4.literal("still_open"),
+    evidence: z4.array(ReviewEvidenceSchema).optional(),
+    updated_finding: ActionableFindingSchema.optional()
+  })
+]);
+var reviewFields = {
+  contract_version: z4.literal(reviewContractVersion),
+  schema_revision: z4.literal(reviewSchemaRevision),
+  head_sha: HeadShaSchema,
+  review_complete: z4.boolean(),
+  incomplete_reason: z4.string().max(16e3).optional(),
+  summary: TextSchema,
+  outcome: ReviewOutcomeSchema,
+  outcome_reason: TextSchema,
+  remaining_risk: TextSchema,
+  extensions: z4.record(z4.string(), z4.json()).optional()
+};
+var ReviewSchema = z4.strictObject({
+  ...reviewFields,
+  findings: z4.array(NewFindingSchema),
+  prior_findings: z4.array(PriorFindingSchema)
+});
+var FindingRecordSchema = z4.strictObject({
+  v: z4.literal(reviewContractVersion),
+  schema_revision: z4.literal(reviewSchemaRevision),
+  finding: ActionableFindingSchema,
+  status: z4.enum(["open", "resolved", "withdrawn"]),
+  evidence: z4.array(ReviewEvidenceSchema),
+  decision: DecisionAnswerSchema.optional()
+});
+var ReviewStateSchema = z4.strictObject({
+  v: z4.literal(reviewContractVersion),
+  schema_revision: z4.literal(reviewSchemaRevision),
+  sha: HeadShaSchema,
+  outcome: ReviewOutcomeSchema,
+  records: z4.array(
+    z4.union([
+      z4.strictObject({
+        id: FindingIdSchema,
+        status: z4.enum(["open", "resolved", "withdrawn"]),
+        location: z4.union([
+          z4.strictObject({ kind: z4.literal("review_comment"), comment_id: PositiveIdSchema }),
+          z4.strictObject({ kind: z4.literal("review_body"), review_id: PositiveIdSchema })
+        ])
+      }),
+      z4.strictObject({
+        id: FindingIdSchema,
+        status: z4.literal("informational"),
+        fingerprint: z4.string().min(1),
+        finding: z4.strictObject({ ...informationFields, id: FindingIdSchema }).optional()
+      })
+    ])
+  )
+});
+var TransportReviewSchema = z4.strictObject({
+  ...reviewFields,
+  findings: z4.array(
+    z4.strictObject({
+      ...actionFields,
+      type: z4.enum(["fix", "clarify", "decide"]).optional(),
+      label: z4.enum([...ActionLabelSchema.options, ...InformationLabelSchema.options]),
+      severity: SeveritySchema.optional(),
+      details: TextSchema.optional(),
+      resolved_when: TextSchema.optional(),
+      decision_owner: LineTextSchema.optional(),
+      decision_options: DecisionOptionsSchema.optional()
+    })
+  ),
+  prior_findings: z4.array(
+    z4.strictObject({
+      ...transitionFields,
+      status: z4.enum(["resolved", "still_open", "withdrawn"]),
+      evidence: z4.array(ReviewEvidenceSchema).optional(),
+      withdrawal_basis: z4.enum(["incorrect", "no_longer_applicable", "dismissed"]).optional(),
+      updated_finding: StoredFindingSchema.optional()
+    })
+  )
+});
+
+// src/code-review/review-contract.ts
+var InvalidReviewError = class extends Error {
+  name = "InvalidReviewError";
+};
+var ZodReviewContract = class {
+  parse(value) {
+    const result = ReviewSchema.parse(value);
+    const ids = result.prior_findings.map((finding) => finding.id);
+    if (new Set(ids).size !== ids.length)
+      throw new InvalidReviewError("duplicate prior finding IDs");
+    if (!result.review_complete && !result.incomplete_reason?.trim()) {
+      throw new InvalidReviewError("an incomplete review must explain what could not be reviewed");
+    }
+    const findings = result.findings.map((finding) => this.normalize(finding));
+    const priorFindings = result.prior_findings.map((transition) => {
+      if (transition.status !== "still_open") return transition;
+      if ((transition.decision !== void 0 || transition.updated_finding !== void 0) && !transition.evidence?.length) {
+        throw new InvalidReviewError(`transition ${transition.id} requires evidence`);
+      }
+      if (transition.updated_finding === void 0) return transition;
+      if (transition.id !== transition.updated_finding.id)
+        throw new InvalidReviewError("a replacement must preserve the finding ID");
+      return {
+        ...transition,
+        updated_finding: this.normalizeActionable(transition.updated_finding)
+      };
+    });
+    for (const transition of priorFindings) {
+      if (transition.decision !== void 0 && !transition.evidence?.some(
+        (evidence) => evidence.kind === "github_comment" && evidence.comment_id === transition.decision?.comment_id
+      )) {
+        throw new InvalidReviewError(
+          `decision ${transition.id} must reference its human comment in evidence`
+        );
+      }
+    }
+    return { ...result, findings, prior_findings: priorFindings };
+  }
+  record(value) {
+    const result = FindingRecordSchema.parse(value);
+    if (result.status !== "open" && result.evidence.length === 0)
+      throw new InvalidReviewError("closed records require evidence");
+    return { ...result, finding: this.normalizeActionable(result.finding) };
+  }
+  state(value) {
+    const result = ReviewStateSchema.parse(value);
+    const ids = result.records.map((record) => record.id);
+    if (new Set(ids).size !== ids.length)
+      throw new InvalidReviewError("duplicate finding IDs in state");
+    for (const record of result.records) {
+      if (record.status === "informational" && record.finding !== void 0 && record.id !== record.finding.id) {
+        throw new InvalidReviewError("informational index ID does not match its finding");
+      }
+    }
+    return result;
+  }
+  schemas() {
+    return {
+      full: z5.toJSONSchema(ReviewSchema, { target: "draft-07" }),
+      transport: z5.toJSONSchema(TransportReviewSchema, { target: "draft-07" })
+    };
+  }
+  normalize(finding) {
+    this.checkRange(finding);
+    if (!("type" in finding)) return finding;
+    if (finding.type === "decide") this.checkOptions(finding);
+    const blocking = finding.blocking || finding.severity === "critical" || finding.severity === "major";
+    const label = blocking && ["nitpick", "typo", "polish"].includes(finding.label) ? "issue" : finding.label;
+    return { ...finding, blocking, label };
+  }
+  normalizeActionable(finding) {
+    return ActionableFindingSchema.parse({ ...this.normalize(finding), id: finding.id });
+  }
+  checkRange(finding) {
+    if (finding.start_line !== void 0 && (finding.line === 0 || finding.start_line > finding.line)) {
+      throw new InvalidReviewError("start_line must not exceed a positive line anchor");
+    }
+  }
+  checkOptions(finding) {
+    const ids = finding.decision_options.map((option) => option.id);
+    if (new Set(ids).size !== ids.length)
+      throw new InvalidReviewError("decision option IDs must be unique");
+  }
+};
+var reviewContract = new ZodReviewContract();
+
+// src/code-review/review-codec.ts
+var MarkerInputSchema = z6.strictObject({
+  body: z6.string(),
+  authorId: z6.number().int().positive(),
+  trustedAuthorIds: z6.array(z6.number().int().positive())
+});
+var JsonReviewCodec = class {
+  finding(record) {
+    return this.marker("finding", reviewContract.record(record));
+  }
+  state(state) {
+    return this.marker("state", reviewContract.state(state));
+  }
+  readFindings(input) {
+    const parsed = MarkerInputSchema.parse(input);
+    if (!parsed.trustedAuthorIds.includes(parsed.authorId)) return [];
+    return this.readMarkers(parsed.body, "finding").map((value) => reviewContract.record(value));
+  }
+  readState(input) {
+    const parsed = MarkerInputSchema.parse(input);
+    if (!parsed.trustedAuthorIds.includes(parsed.authorId)) return void 0;
+    const states = this.readMarkers(parsed.body, "state");
+    if (states.length > 1)
+      throw new InvalidReviewError("multiple review state markers in one summary");
+    return states.length === 0 ? void 0 : reviewContract.state(states[0]);
+  }
+  parseFinding(body) {
+    const markers = this.readMarkers(body, "finding");
+    if (markers.length > 1) throw new InvalidReviewError("multiple finding markers in one comment");
+    return markers.length === 0 ? null : reviewContract.record(markers[0]);
+  }
+  render(record) {
+    const validated = reviewContract.record(record);
+    const finding = validated.finding;
+    const decorations = [
+      ...["nitpick", "typo", "polish"].includes(finding.label) ? [] : [finding.blocking ? "blocking" : "non-blocking"],
+      finding.type
+    ];
+    if (finding.category !== void 0) decorations.push(finding.category);
+    const owner = finding.type === "decide" ? `
+
+**Decision owner:** ${finding.decision_owner}
+**Decision options:** ${finding.decision_options.map((option) => `\`${option.id}\`: ${option.description}`).join("; ")}` : "";
+    return `**${finding.label} (${decorations.join(", ")}):** ${finding.subject}
+
+${finding.discussion}
+
+<details>
+<summary>Details For LLM</summary>
+
+${finding.details}${owner}
+
+**Resolved when:** ${finding.resolved_when}
+</details>
+
+${this.finding(validated)}`;
+  }
+  fingerprint(finding) {
+    return createHash("sha256").update(`${finding.path}|${finding.label}|${finding.subject.trim().toLowerCase()}`).digest("hex");
+  }
+  marker(kind, value) {
+    return `<!-- code-review:${kind} ${JSON.stringify(value).replaceAll(">", "\\u003e")} -->`;
+  }
+  readMarkers(body, kind) {
+    const prefix = `<!-- code-review:${kind} `;
+    const matches = [...body.matchAll(new RegExp(`${prefix}([\\s\\S]*?) -->`, "g"))];
+    if (body.split(prefix).length - 1 !== matches.length)
+      throw new InvalidReviewError("unterminated review marker");
+    return matches.map((match) => {
+      try {
+        return JSON.parse(match[1] ?? "");
+      } catch {
+        throw new InvalidReviewError(
+          "review marker contains invalid JSON; recover state before approving"
+        );
+      }
+    });
+  }
+};
+
+// src/git/pr-template/pr-template.ts
+import { z as z7 } from "zod";
 var maxChangeLineLength = 256;
 var maxChangeLines = 5;
-var PullRequestTemplateSchema = z4.object({
-  type: z4.enum(semanticTypes),
-  scope: z4.string().min(1),
-  description: z4.string().min(1),
-  whatWasChanged: z4.array(z4.string().min(1).max(maxChangeLineLength)).min(1).max(maxChangeLines),
-  whyWasItChanged: z4.string().min(1),
-  otsMaterials: z4.string().min(1).optional(),
-  ticketId: z4.string().min(1).optional(),
-  ticketUrl: z4.url().optional(),
-  baseBranch: z4.string().min(1),
-  headBranch: z4.string().min(1),
-  reviewers: z4.array(z4.string()).default([]),
-  labels: z4.array(z4.string()).default([])
+var PullRequestTemplateSchema = z7.object({
+  type: z7.enum(semanticTypes),
+  scope: z7.string().min(1),
+  description: z7.string().min(1),
+  whatWasChanged: z7.array(z7.string().min(1).max(maxChangeLineLength)).min(1).max(maxChangeLines),
+  whyWasItChanged: z7.string().min(1),
+  otsMaterials: z7.string().min(1).optional(),
+  ticketId: z7.string().min(1).optional(),
+  ticketUrl: z7.url().optional(),
+  baseBranch: z7.string().min(1),
+  headBranch: z7.string().min(1),
+  reviewers: z7.array(z7.string()).default([]),
+  labels: z7.array(z7.string()).default([])
 });
 var DefaultPullRequestBuilder = class {
   build(input) {
@@ -297,22 +687,93 @@ var DefaultPullRequestBuilder = class {
 var pullRequestBuilder = new DefaultPullRequestBuilder();
 
 // src/pr/pull-request-host/gh-pull-request-host.ts
-var GhPullRequestHostPropsSchema = z5.object({
-  repo: z5.string().regex(/^[^/\s]+\/[^/\s]+$/, 'expected "owner/repo"'),
-  cwd: z5.string().min(1).optional(),
-  env: z5.custom(
+var GhPullRequestHostPropsSchema = z8.object({
+  repo: z8.string().regex(/^[^/\s]+\/[^/\s]+$/, 'expected "owner/repo"'),
+  cwd: z8.string().min(1).optional(),
+  env: z8.custom(
     (value) => typeof value === "object" && value !== null && !Array.isArray(value)
   ).optional()
 });
-var GhPullRequestListSchema = z5.array(
-  z5.object({
-    number: z5.number(),
-    url: z5.string(),
-    headRefName: z5.string(),
-    baseRefName: z5.string(),
-    title: z5.string()
+var GhPullRequestListSchema = z8.array(
+  z8.object({
+    number: z8.number(),
+    url: z8.string(),
+    headRefName: z8.string(),
+    baseRefName: z8.string(),
+    title: z8.string()
   })
 );
+var reviewThreadsQuery = `query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      number url title body headRefName headRefOid baseRefName
+      author { login }
+      reviewThreads(first: 100, after: $endCursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id isResolved isOutdated path line originalLine
+          comments(first: 100) {
+            totalCount
+            nodes { id url body createdAt author { type: __typename login } }
+          }
+        }
+      }
+    }
+  }
+}`;
+var replyToReviewThreadMutation = `mutation($id: ID!, $body: String!) {
+  addPullRequestReviewThreadReply(input: {pullRequestReviewThreadId: $id, body: $body}) {
+    comment { id url }
+  }
+}`;
+var GhReplyToReviewThreadSchema = z8.object({
+  data: z8.object({
+    addPullRequestReviewThreadReply: z8.object({
+      comment: z8.object({ id: z8.string(), url: z8.string() })
+    })
+  })
+});
+var GhReviewThreadsPageSchema = z8.object({
+  data: z8.object({
+    repository: z8.object({
+      pullRequest: z8.object({
+        number: z8.number(),
+        url: z8.string(),
+        title: z8.string(),
+        body: z8.string(),
+        headRefName: z8.string(),
+        headRefOid: z8.string(),
+        baseRefName: z8.string(),
+        author: z8.object({ login: z8.string() }).nullable(),
+        reviewThreads: z8.object({
+          pageInfo: z8.object({ hasNextPage: z8.boolean(), endCursor: z8.string().nullable() }),
+          nodes: z8.array(
+            z8.object({
+              id: z8.string(),
+              isResolved: z8.boolean(),
+              isOutdated: z8.boolean(),
+              path: z8.string(),
+              line: z8.number().nullable(),
+              originalLine: z8.number().nullable(),
+              comments: z8.object({
+                totalCount: z8.number(),
+                nodes: z8.array(
+                  z8.object({
+                    id: z8.string(),
+                    url: z8.string(),
+                    body: z8.string(),
+                    createdAt: z8.string(),
+                    author: z8.object({ type: z8.string(), login: z8.string() }).nullable()
+                  })
+                )
+              })
+            })
+          )
+        })
+      })
+    })
+  })
+});
 var pullUrl = /\/pull\/(\d+)\b/;
 var GhOutputParseError = class extends Error {
   name = "GhOutputParseError";
@@ -323,11 +784,13 @@ var GhOutputParseError = class extends Error {
 var GhPullRequestHost = class {
   repo;
   builder;
+  codec;
   execFile;
   constructor(props) {
     const parsed = GhPullRequestHostPropsSchema.parse(props);
     this.repo = parsed.repo;
     this.builder = props.builder ?? new DefaultPullRequestBuilder();
+    this.codec = new JsonReviewCodec();
     const promisified = promisify2(execFile2);
     const cwd = parsed.cwd ?? process.cwd();
     const env = { ...props.env ?? process.env };
@@ -411,6 +874,94 @@ var GhPullRequestHost = class {
     }
     return result;
   }
+  async listReviewThreads(number, options) {
+    const [owner = "", name = ""] = this.repo.split("/");
+    let first;
+    const nodes = [];
+    let cursor;
+    for (; ; ) {
+      const { stdout } = await this.execFile("gh", [
+        "api",
+        "graphql",
+        "-f",
+        `query=${reviewThreadsQuery}`,
+        "-f",
+        `owner=${owner}`,
+        "-f",
+        `name=${name}`,
+        "-F",
+        `number=${number}`,
+        ...cursor === void 0 ? [] : ["-f", `endCursor=${cursor}`]
+      ]);
+      const { reviewThreads, ...header } = GhReviewThreadsPageSchema.parse(JSON.parse(stdout)).data.repository.pullRequest;
+      first ??= { ...header, reviewThreads };
+      nodes.push(...reviewThreads.nodes);
+      if (!reviewThreads.pageInfo.hasNextPage || reviewThreads.pageInfo.endCursor === null) break;
+      cursor = reviewThreads.pageInfo.endCursor;
+    }
+    const trusted = new Set(options.trustedAuthors);
+    return {
+      pullRequest: {
+        number: first.number,
+        url: first.url,
+        title: first.title,
+        body: first.body,
+        headRefName: first.headRefName,
+        headRefOid: first.headRefOid,
+        baseRefName: first.baseRefName,
+        authorLogin: first.author?.login ?? "ghost"
+      },
+      threads: nodes.map((node) => this.toReviewThread(node, trusted))
+    };
+  }
+  async replyToReviewThread(threadId, body) {
+    const { stdout } = await this.withBodyFile(
+      body,
+      (bodyFile) => this.execFile("gh", [
+        "api",
+        "graphql",
+        "-f",
+        `query=${replyToReviewThreadMutation}`,
+        "-f",
+        `id=${threadId}`,
+        "-F",
+        `body=@${bodyFile}`
+      ])
+    );
+    return GhReplyToReviewThreadSchema.parse(JSON.parse(stdout)).data.addPullRequestReviewThreadReply.comment;
+  }
+  toReviewThread(node, trusted) {
+    const comments = node.comments.nodes.map((comment) => ({
+      id: comment.id,
+      url: comment.url,
+      authorLogin: (comment.author?.login ?? "ghost").replace(/\[bot\]$/, ""),
+      authorType: comment.author?.type === "Bot" ? "Bot" : "User",
+      body: comment.body,
+      createdAt: comment.createdAt
+    }));
+    const root = comments[0];
+    let finding = null;
+    let markerError = null;
+    if (root !== void 0 && trusted.has(root.authorType === "Bot" ? `${root.authorLogin}[bot]` : root.authorLogin)) {
+      try {
+        finding = this.codec.parseFinding(root.body);
+      } catch (err) {
+        markerError = err instanceof Error ? err.message : String(err);
+      }
+    }
+    return {
+      id: node.id,
+      path: node.path,
+      line: node.line,
+      originalLine: node.originalLine,
+      isResolved: node.isResolved,
+      isOutdated: node.isOutdated,
+      commentsTruncated: node.comments.totalCount > node.comments.nodes.length,
+      comments,
+      finding,
+      markerError
+    };
+  }
   describeFailure(err) {
     const stderr = this.readStringProperty(err, "stderr")?.trim();
     const text = stderr !== void 0 && stderr.length > 0 ? stderr : err instanceof Error ? err.message : String(err);
@@ -482,17 +1033,17 @@ import { dirname as dirname6 } from "node:path";
 // src/shared/config.ts
 import { existsSync as existsSync2, readFileSync as readFileSync2, statSync as statSync2 } from "node:fs";
 import { dirname as dirname2, isAbsolute, join as join3, resolve as resolve2 } from "node:path";
-import { z as z8 } from "zod";
+import { z as z11 } from "zod";
 
 // src/tasks/jira-task-tracker/jira-host.ts
-import { z as z6 } from "zod";
-var JiraHostSchema = z6.string().transform((host) => host.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, ""));
+import { z as z9 } from "zod";
+var JiraHostSchema = z9.string().transform((host) => host.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, ""));
 
 // src/shared/ariadne/ariadne.schema.ts
-import { z as z7 } from "zod";
+import { z as z10 } from "zod";
 var defaultAriadneUrl = "https://ariadne-api-xohlbba2ea-uc.a.run.app";
 var loopbackHosts = /* @__PURE__ */ new Set(["localhost", "127.0.0.1"]);
-var AriadneUrlSchema = z7.url().refine((value) => {
+var AriadneUrlSchema = z10.url().refine((value) => {
   if (!URL.canParse(value)) return false;
   const url = new URL(value);
   return url.protocol === "https:" || url.protocol === "http:" && loopbackHosts.has(url.hostname);
@@ -528,77 +1079,77 @@ var AgentTextNormalizer = class {
   }
 };
 var normalizer = new AgentTextNormalizer();
-var oneLineSchema = (max) => z7.string().transform((value) => normalizer.oneLine(value, max)).pipe(z7.string().min(1, "must not be blank"));
-var multiLineSchema = (max) => z7.string().transform((value) => normalizer.multiLine(value, max)).pipe(z7.string().min(1, "must not be blank"));
-var optionalSchema = (schema) => z7.preprocess((value) => value === "" || value === null ? void 0 : value, schema.optional());
-var AgentSessionIdSchema = z7.string().regex(/^[A-Za-z0-9_-]{1,80}$/, "must be 1\u201380 letters, digits, underscores or hyphens");
+var oneLineSchema = (max) => z10.string().transform((value) => normalizer.oneLine(value, max)).pipe(z10.string().min(1, "must not be blank"));
+var multiLineSchema = (max) => z10.string().transform((value) => normalizer.multiLine(value, max)).pipe(z10.string().min(1, "must not be blank"));
+var optionalSchema = (schema) => z10.preprocess((value) => value === "" || value === null ? void 0 : value, schema.optional());
+var AgentSessionIdSchema = z10.string().regex(/^[A-Za-z0-9_-]{1,80}$/, "must be 1\u201380 letters, digits, underscores or hyphens");
 var AgentRecordIdSchema = AgentSessionIdSchema;
-var TicketKeySchema = z7.string().transform((value) => value.trim().toUpperCase()).pipe(z7.string().regex(/^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,8}$/, "must be a Jira issue key: project key, hyphen, number"));
-var RepoSchema = z7.string().regex(/^(?:[A-Za-z0-9][A-Za-z0-9-]{0,38}\/)?[A-Za-z0-9_.-]{1,100}$/, "must be owner/name or name").refine((value) => !value.includes(".."), "must not contain ..");
-var BranchSchema = z7.string().regex(/^[A-Za-z0-9_+@][A-Za-z0-9._/+@-]{0,254}$/, "must be a branch name as git prints it").refine((value) => !value.includes(".."), "must not contain ..");
-var SkillSchema = z7.string().regex(/^[A-Za-z0-9:._-]{1,80}$/, "must be up to 80 of A-Z a-z 0-9 : . _ -");
-var HeartbeatInputSchema = z7.strictObject({
+var TicketKeySchema = z10.string().transform((value) => value.trim().toUpperCase()).pipe(z10.string().regex(/^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,8}$/, "must be a Jira issue key: project key, hyphen, number"));
+var RepoSchema = z10.string().regex(/^(?:[A-Za-z0-9][A-Za-z0-9-]{0,38}\/)?[A-Za-z0-9_.-]{1,100}$/, "must be owner/name or name").refine((value) => !value.includes(".."), "must not contain ..");
+var BranchSchema = z10.string().regex(/^[A-Za-z0-9_+@][A-Za-z0-9._/+@-]{0,254}$/, "must be a branch name as git prints it").refine((value) => !value.includes(".."), "must not contain ..");
+var SkillSchema = z10.string().regex(/^[A-Za-z0-9:._-]{1,80}$/, "must be up to 80 of A-Z a-z 0-9 : . _ -");
+var HeartbeatInputSchema = z10.strictObject({
   session: AgentSessionIdSchema,
   step: oneLineSchema(agentLimits.step),
-  state: z7.enum(agentStates),
+  state: z10.enum(agentStates),
   ticket: optionalSchema(TicketKeySchema),
   repo: optionalSchema(RepoSchema),
   branch: optionalSchema(BranchSchema),
   skill: optionalSchema(SkillSchema),
   detail: optionalSchema(oneLineSchema(agentLimits.heartbeatDetail))
 });
-var ItemInputSchema = z7.strictObject({
+var ItemInputSchema = z10.strictObject({
   session: AgentSessionIdSchema,
-  kind: z7.enum(agentItemKinds),
+  kind: z10.enum(agentItemKinds),
   title: oneLineSchema(agentLimits.title),
   ticket: optionalSchema(TicketKeySchema),
   detail: optionalSchema(multiLineSchema(agentLimits.itemDetail)),
-  options: z7.array(oneLineSchema(agentLimits.option)).max(agentLimits.options, `up to ${agentLimits.options} options`).refine((labels) => new Set(labels).size === labels.length, "options must be distinct").optional(),
+  options: z10.array(oneLineSchema(agentLimits.option)).max(agentLimits.options, `up to ${agentLimits.options} options`).refine((labels) => new Set(labels).size === labels.length, "options must be distinct").optional(),
   id: optionalSchema(AgentRecordIdSchema)
 });
-var ActivityInputSchema = z7.strictObject({
+var ActivityInputSchema = z10.strictObject({
   session: AgentSessionIdSchema,
   text: oneLineSchema(agentLimits.text),
-  level: optionalSchema(z7.enum(agentActivityLevels)),
+  level: optionalSchema(z10.enum(agentActivityLevels)),
   ticket: optionalSchema(TicketKeySchema),
   id: optionalSchema(AgentRecordIdSchema)
 });
-var AgentSessionSchema = z7.looseObject({
-  id: z7.string(),
-  ownerId: z7.string(),
-  ticket: z7.string().nullable(),
-  step: z7.string(),
-  state: z7.string(),
-  lastHeartbeat: z7.string(),
-  running: z7.boolean()
+var AgentSessionSchema = z10.looseObject({
+  id: z10.string(),
+  ownerId: z10.string(),
+  ticket: z10.string().nullable(),
+  step: z10.string(),
+  state: z10.string(),
+  lastHeartbeat: z10.string(),
+  running: z10.boolean()
 });
-var AgentItemSchema = z7.looseObject({
-  id: z7.string(),
-  session: z7.string(),
-  kind: z7.string(),
-  ticket: z7.string().nullable(),
-  title: z7.string(),
-  detail: z7.string().nullable(),
-  options: z7.array(z7.string()),
-  status: z7.string(),
-  chosenOption: z7.string().nullable(),
-  createdAt: z7.string(),
-  resolvedAt: z7.string().nullable(),
-  resolvedBy: z7.string().nullable()
+var AgentItemSchema = z10.looseObject({
+  id: z10.string(),
+  session: z10.string(),
+  kind: z10.string(),
+  ticket: z10.string().nullable(),
+  title: z10.string(),
+  detail: z10.string().nullable(),
+  options: z10.array(z10.string()),
+  status: z10.string(),
+  chosenOption: z10.string().nullable(),
+  createdAt: z10.string(),
+  resolvedAt: z10.string().nullable(),
+  resolvedBy: z10.string().nullable()
 });
-var AgentActivitySchema = z7.looseObject({
-  id: z7.string(),
-  at: z7.string(),
-  session: z7.string(),
-  ticket: z7.string().nullable(),
-  level: z7.string(),
-  text: z7.string()
+var AgentActivitySchema = z10.looseObject({
+  id: z10.string(),
+  at: z10.string(),
+  session: z10.string(),
+  ticket: z10.string().nullable(),
+  level: z10.string(),
+  text: z10.string()
 });
-var HeartbeatResponseSchema = z7.looseObject({ session: AgentSessionSchema });
-var ItemResponseSchema = z7.looseObject({ item: AgentItemSchema, created: z7.boolean() });
-var ActivityResponseSchema = z7.looseObject({ activity: AgentActivitySchema, created: z7.boolean() });
-var ItemListResponseSchema = z7.looseObject({ items: z7.array(AgentItemSchema) });
-var AgentErrorBodySchema = z7.looseObject({ error: z7.string(), message: z7.string().optional() });
+var HeartbeatResponseSchema = z10.looseObject({ session: AgentSessionSchema });
+var ItemResponseSchema = z10.looseObject({ item: AgentItemSchema, created: z10.boolean() });
+var ActivityResponseSchema = z10.looseObject({ activity: AgentActivitySchema, created: z10.boolean() });
+var ItemListResponseSchema = z10.looseObject({ items: z10.array(AgentItemSchema) });
+var AgentErrorBodySchema = z10.looseObject({ error: z10.string(), message: z10.string().optional() });
 
 // src/shared/config.ts
 var seedCompetencies = [
@@ -615,33 +1166,33 @@ var seedCompetencies = [
   "async-coordination",
   "auth-check"
 ];
-var ConfigSchema = z8.object({
-  tracker: z8.enum(["github", "jira"]),
-  repo: z8.string().optional().describe("GitHub owner/repo; required when tracker is github"),
+var ConfigSchema = z11.object({
+  tracker: z11.enum(["github", "jira"]),
+  repo: z11.string().optional().describe("GitHub owner/repo; required when tracker is github"),
   jiraHost: JiraHostSchema.optional().describe(
     "Atlassian Cloud host, e.g. acme.atlassian.net"
   ),
-  jiraEmail: z8.string().optional().describe("Atlassian account email for Basic auth"),
-  jiraProject: z8.string().optional().describe("Jira project key holding epics and tickets"),
-  jpdProject: z8.string().optional().describe("Jira Product Discovery project key holding initiatives"),
-  confluenceSpaceKey: z8.string().optional().describe("Confluence space key holding technical design docs"),
-  inProgressStatus: z8.string().optional().describe(
+  jiraEmail: z11.string().optional().describe("Atlassian account email for Basic auth"),
+  jiraProject: z11.string().optional().describe("Jira project key holding epics and tickets"),
+  jpdProject: z11.string().optional().describe("Jira Product Discovery project key holding initiatives"),
+  confluenceSpaceKey: z11.string().optional().describe("Confluence space key holding technical design docs"),
+  inProgressStatus: z11.string().optional().describe(
     "Tracker status meaning work has started; discovered and stored on first run"
   ),
-  inReviewStatus: z8.string().optional().describe(
+  inReviewStatus: z11.string().optional().describe(
     "Tracker status meaning a PR is open; discovered and stored on first run"
   ),
-  defaultLabels: z8.array(z8.string()).default([]),
-  rfcStorage: z8.enum(["local", "global"]).default("local"),
-  rfcStoragePath: z8.string().optional(),
-  qaRecipe: z8.string().optional().describe(
+  defaultLabels: z11.array(z11.string()).default([]),
+  rfcStorage: z11.enum(["local", "global"]).default("local"),
+  rfcStoragePath: z11.string().optional(),
+  qaRecipe: z11.string().optional().describe(
     "Deprecated: path to a legacy QA recipe, read only when no QA.md or AGENTS.md QA section exists; relative paths resolve against the directory holding this config file; defaults to flight-rules.qa.md beside it"
   ),
-  competencies: z8.array(z8.string()).default([...seedCompetencies]),
+  competencies: z11.array(z11.string()).default([...seedCompetencies]),
   "ariadne.url": AriadneUrlSchema.optional().describe(
     "Ariadne API base URL for `flight-rules board`; https only (http for localhost); read only from user or local scope; defaults to the production Ariadne API"
   ),
-  "ariadne.enabled": z8.boolean().optional().describe(
+  "ariadne.enabled": z11.boolean().optional().describe(
     "Set false to stop `flight-rules board` reporting even when an Ariadne token is set; read only from user or local scope; defaults to true"
   )
 }).superRefine((cfg, ctx) => {
@@ -773,11 +1324,11 @@ function getQaRecipePath(config, configPath) {
 import { existsSync as existsSync3, mkdirSync, readFileSync as readFileSync3, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname as dirname3, join as join4 } from "node:path";
-import { z as z9 } from "zod";
+import { z as z12 } from "zod";
 var pluginId = "flight-rules@flight-rules";
 var pluginKeyPattern = /^flight-rules(@.+)?$/;
-var SettingsSchema = z9.looseObject({
-  pluginConfigs: z9.record(z9.string(), z9.looseObject({ options: z9.record(z9.string(), z9.unknown()).optional() })).optional()
+var SettingsSchema = z12.looseObject({
+  pluginConfigs: z12.record(z12.string(), z12.looseObject({ options: z12.record(z12.string(), z12.unknown()).optional() })).optional()
 });
 var ClaudeSettingsSource = class {
   host = "claude";
@@ -847,13 +1398,13 @@ var ClaudeSettingsSource = class {
 import { existsSync as existsSync4, mkdirSync as mkdirSync2, readFileSync as readFileSync4, writeFileSync as writeFileSync2 } from "node:fs";
 import { homedir as homedir2 } from "node:os";
 import { dirname as dirname4, join as join5 } from "node:path";
-import { z as z10 } from "zod";
-var PropsSchema = z10.object({
-  cwd: z10.string().min(1),
-  home: z10.string().min(1).default(homedir2),
-  untrackedCwd: z10.string().min(1).optional()
+import { z as z13 } from "zod";
+var PropsSchema = z13.object({
+  cwd: z13.string().min(1),
+  home: z13.string().min(1).default(homedir2),
+  untrackedCwd: z13.string().min(1).optional()
 });
-var SettingsSchema2 = z10.record(z10.string(), z10.unknown());
+var SettingsSchema2 = z13.record(z13.string(), z13.unknown());
 var InvalidSettingsError = class extends Error {
   name = "InvalidSettingsError";
 };
@@ -891,40 +1442,40 @@ var NeutralSettingsSource = class {
 };
 
 // src/plugins/native-installation/native-installation.ts
-import { createHash } from "node:crypto";
+import { createHash as createHash2 } from "node:crypto";
 import { existsSync as existsSync5, lstatSync, mkdirSync as mkdirSync3, readFileSync as readFileSync5, realpathSync as realpathSync2, writeFileSync as writeFileSync3 } from "node:fs";
 import { homedir as homedir3 } from "node:os";
 import { dirname as dirname5, join as join6, resolve as resolve3 } from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
-import { z as z12 } from "zod";
+import { z as z15 } from "zod";
 
 // src/agents/agent-frontmatter/agent-frontmatter.schema.ts
-import { z as z11 } from "zod";
+import { z as z14 } from "zod";
 var agentCapabilities = ["read", "edit", "shell", "web", "spawn", "ask"];
 var modelTiers = ["standard", "escalated", "expert"];
 var reasoningLevels = ["low", "medium", "high"];
 var claudeAgentColors = ["red", "blue", "green", "yellow", "purple", "orange", "pink", "cyan"];
-var AgentCapabilitySchema = z11.enum(agentCapabilities);
-var ModelTierSchema = z11.enum(modelTiers);
-var AgentFrontmatterSchema = z11.strictObject({
-  name: z11.string().regex(/^[a-z][a-z0-9-]*$/),
-  description: z11.string().min(1),
-  capabilities: z11.array(AgentCapabilitySchema).min(1).refine(
+var AgentCapabilitySchema = z14.enum(agentCapabilities);
+var ModelTierSchema = z14.enum(modelTiers);
+var AgentFrontmatterSchema = z14.strictObject({
+  name: z14.string().regex(/^[a-z][a-z0-9-]*$/),
+  description: z14.string().min(1),
+  capabilities: z14.array(AgentCapabilitySchema).min(1).refine(
     (capabilities) => new Set(capabilities).size === capabilities.length,
     { message: "duplicate capability" }
   ),
   model: ModelTierSchema,
-  modelReason: z11.string().trim().min(1).optional(),
-  reasoning: z11.enum(reasoningLevels).optional(),
-  sandbox: z11.strictObject({
-    fs: z11.enum(["read-only", "workspace-write"]),
-    network: z11.enum(["none", "enabled"])
+  modelReason: z14.string().trim().min(1).optional(),
+  reasoning: z14.enum(reasoningLevels).optional(),
+  sandbox: z14.strictObject({
+    fs: z14.enum(["read-only", "workspace-write"]),
+    network: z14.enum(["none", "enabled"])
   }).optional(),
-  dispatch: z11.strictObject({
-    maxConcurrent: z11.int().positive(),
-    maxDepth: z11.int().positive()
+  dispatch: z14.strictObject({
+    maxConcurrent: z14.int().positive(),
+    maxDepth: z14.int().positive()
   }).optional(),
-  "x-claude": z11.strictObject({ color: z11.enum(claudeAgentColors).optional() }).optional()
+  "x-claude": z14.strictObject({ color: z14.enum(claudeAgentColors).optional() }).optional()
 });
 var AgentRegistrationSchema = AgentFrontmatterSchema.refine(
   (agent) => agent.model !== "expert" || agent.modelReason !== void 0,
@@ -932,21 +1483,21 @@ var AgentRegistrationSchema = AgentFrontmatterSchema.refine(
 );
 
 // src/plugins/native-installation/native-installation.ts
-var NativeHostSchema = z12.enum(["claude", "codex"]);
-var AgentInstallScopeSchema = z12.enum(["project", "user"]);
-var InstallationManifestSchema = z12.strictObject({
+var NativeHostSchema = z15.enum(["claude", "codex"]);
+var AgentInstallScopeSchema = z15.enum(["project", "user"]);
+var InstallationManifestSchema = z15.strictObject({
   host: NativeHostSchema,
-  agents: z12.array(z12.strictObject({
-    name: z12.string().regex(/^[a-z][a-z0-9-]*$/),
-    sha256: z12.string().regex(/^[a-f0-9]{64}$/),
+  agents: z15.array(z15.strictObject({
+    name: z15.string().regex(/^[a-z][a-z0-9-]*$/),
+    sha256: z15.string().regex(/^[a-f0-9]{64}$/),
     registration: AgentRegistrationSchema
   })).min(1)
 }).refine((value) => new Set(value.agents.map((agent) => agent.name)).size === value.agents.length, "Duplicate agent names").refine((value) => value.agents.every((agent) => agent.name === agent.registration.name), "Registration name mismatch");
-var PropsSchema2 = z12.object({
-  root: z12.string().min(1),
-  cwd: z12.string().min(1),
-  home: z12.string().min(1).default(homedir3),
-  env: z12.record(z12.string(), z12.string().optional()).default({})
+var PropsSchema2 = z15.object({
+  root: z15.string().min(1),
+  cwd: z15.string().min(1),
+  home: z15.string().min(1).default(homedir3),
+  env: z15.record(z15.string(), z15.string().optional()).default({})
 });
 var NativeInstallationError = class extends Error {
   name = "NativeInstallationError";
@@ -1016,7 +1567,7 @@ var FileNativeInstallation = class _FileNativeInstallation {
     }
   }
   hash(contents) {
-    return createHash("sha256").update(contents).digest("hex");
+    return createHash2("sha256").update(contents).digest("hex");
   }
   assertRegularPath(path) {
     let current = resolve3(path);
@@ -1258,11 +1809,11 @@ var EvidenceLocation = class {
 };
 
 // src/shared/env.ts
-import { z as z13 } from "zod";
-var EnvSchema = z13.object({
-  githubToken: z13.string().optional(),
-  jiraToken: z13.string().optional(),
-  jiraEmail: z13.string().optional(),
+import { z as z16 } from "zod";
+var EnvSchema = z16.object({
+  githubToken: z16.string().optional(),
+  jiraToken: z16.string().optional(),
+  jiraEmail: z16.string().optional(),
   jiraHost: JiraHostSchema.optional()
 });
 var EnvLoader = class {
@@ -1288,10 +1839,10 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.94.4";
+var appVersion = false ? "0.0.0-dev" : "1.97.0";
 
 // src/shared/ariadne/review-packet.schema.ts
-import { z as z14 } from "zod";
+import { z as z17 } from "zod";
 var packetLimits = {
   title: 200,
   objective: 600,
@@ -1307,74 +1858,74 @@ var packetLimits = {
 };
 var focusAreaKinds = ["design-pattern", "business-logic", "data-schema", "other"];
 var anchorSides = ["LEFT", "RIGHT"];
-var textSchema = (max) => z14.string().min(1, "must not be blank").max(max, `must be at most ${max} characters`);
+var textSchema = (max) => z17.string().min(1, "must not be blank").max(max, `must be at most ${max} characters`);
 var oneLineTextSchema = (max) => textSchema(max).refine((value) => !/[\r\n]/.test(value), "must be one line");
-var PositiveIntSchema = z14.number().int().positive();
+var PositiveIntSchema = z17.number().int().positive();
 var PacketIdSchema = AgentRecordIdSchema;
-var OperationIdSchema = z14.string().regex(/^[A-Za-z0-9_-]{16,80}$/, "must be 16\u201380 letters, digits, underscores or hyphens");
-var HeadShaSchema = z14.string().regex(/^[0-9a-f]{40}$/, "must be a 40-character lowercase hex commit sha");
-var GithubLoginSchema = z14.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/, "must be a GitHub login");
-var PacketAnchorSchema = z14.strictObject({
+var OperationIdSchema = z17.string().regex(/^[A-Za-z0-9_-]{16,80}$/, "must be 16\u201380 letters, digits, underscores or hyphens");
+var HeadShaSchema2 = z17.string().regex(/^[0-9a-f]{40}$/, "must be a 40-character lowercase hex commit sha");
+var GithubLoginSchema = z17.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/, "must be a GitHub login");
+var PacketAnchorSchema = z17.strictObject({
   path: textSchema(packetLimits.path),
   line: PositiveIntSchema,
   startLine: optionalSchema(PositiveIntSchema),
-  side: z14.enum(anchorSides)
+  side: z17.enum(anchorSides)
 }).refine((anchor) => anchor.startLine === void 0 || anchor.startLine < anchor.line, {
   path: ["startLine"],
   message: "must be before line"
 });
-var SignOffTimeSchema = z14.string().regex(/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,3})?Z$/, "must be an ISO 8601 UTC time ending in Z").refine((value) => {
+var SignOffTimeSchema = z17.string().regex(/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,3})?Z$/, "must be an ISO 8601 UTC time ending in Z").refine((value) => {
   const [year = 0, month = 0, day = 0] = value.slice(0, 10).split("-").map(Number);
   const date = new Date(Date.UTC(year, month - 1, day));
   return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
 }, "must be a real calendar date");
-var FocusAreaSchema = z14.strictObject({
+var FocusAreaSchema = z17.strictObject({
   id: AgentRecordIdSchema,
-  kind: z14.enum(focusAreaKinds),
+  kind: z17.enum(focusAreaKinds),
   title: oneLineTextSchema(packetLimits.title),
   rationale: textSchema(packetLimits.rationale),
-  anchors: z14.array(PacketAnchorSchema).max(packetLimits.anchors, `up to ${packetLimits.anchors} anchors`)
+  anchors: z17.array(PacketAnchorSchema).max(packetLimits.anchors, `up to ${packetLimits.anchors} anchors`)
 });
-var PacketPrSchema = z14.strictObject({
-  repo: z14.string().regex(/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9_.-]{1,100}$/, "must be owner/name"),
+var PacketPrSchema = z17.strictObject({
+  repo: z17.string().regex(/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9_.-]{1,100}$/, "must be owner/name"),
   number: PositiveIntSchema,
-  headSha: HeadShaSchema,
+  headSha: HeadShaSchema2,
   title: oneLineTextSchema(packetLimits.title),
   ticket: optionalSchema(oneLineTextSchema(packetLimits.ticket)),
-  signOff: z14.strictObject({ at: SignOffTimeSchema, headSha: HeadShaSchema }).nullable().optional(),
-  focusAreas: z14.array(FocusAreaSchema).max(packetLimits.focusAreas, `up to ${packetLimits.focusAreas} focus areas per PR`)
+  signOff: z17.strictObject({ at: SignOffTimeSchema, headSha: HeadShaSchema2 }).nullable().optional(),
+  focusAreas: z17.array(FocusAreaSchema).max(packetLimits.focusAreas, `up to ${packetLimits.focusAreas} focus areas per PR`)
 });
-var PacketInputSchema = z14.strictObject({
+var PacketInputSchema = z17.strictObject({
   id: PacketIdSchema,
   title: oneLineTextSchema(packetLimits.title),
-  overview: z14.strictObject({
+  overview: z17.strictObject({
     objective: textSchema(packetLimits.objective),
-    highlights: z14.array(oneLineTextSchema(packetLimits.highlight)).min(1, "at least 1 highlight").max(packetLimits.highlights, `up to ${packetLimits.highlights} highlights`)
+    highlights: z17.array(oneLineTextSchema(packetLimits.highlight)).min(1, "at least 1 highlight").max(packetLimits.highlights, `up to ${packetLimits.highlights} highlights`)
   }),
-  prs: z14.array(PacketPrSchema).min(1, "at least 1 PR").max(packetLimits.prs, `up to ${packetLimits.prs} PRs`),
-  reviewers: z14.array(GithubLoginSchema).min(1, "at least 1 reviewer").max(packetLimits.reviewers, `up to ${packetLimits.reviewers} reviewers`)
+  prs: z17.array(PacketPrSchema).min(1, "at least 1 PR").max(packetLimits.prs, `up to ${packetLimits.prs} PRs`),
+  reviewers: z17.array(GithubLoginSchema).min(1, "at least 1 reviewer").max(packetLimits.reviewers, `up to ${packetLimits.reviewers} reviewers`)
 });
-var PacketUpdateSchema = z14.strictObject({
-  expectedRevision: z14.number().int().nonnegative(),
+var PacketUpdateSchema = z17.strictObject({
+  expectedRevision: z17.number().int().nonnegative(),
   operationId: OperationIdSchema,
   packet: PacketInputSchema.omit({ id: true })
 });
-var GithubSnapshotSchema = z14.looseObject({ id: z14.union([z14.string(), z14.number()]), login: z14.string() });
-var PacketSchema = z14.looseObject({
-  id: z14.string(),
-  authorId: z14.string(),
-  title: z14.string(),
-  overview: z14.looseObject({ objective: z14.string(), highlights: z14.array(z14.string()) }),
-  prs: z14.array(z14.looseObject({ repo: z14.string(), number: z14.number() })),
-  reviewers: z14.array(z14.looseObject({ id: z14.string(), github: GithubSnapshotSchema })),
-  status: z14.enum(["open", "closed"]),
-  revision: z14.number().int(),
-  createdAt: z14.string(),
-  updatedAt: z14.string()
+var GithubSnapshotSchema = z17.looseObject({ id: z17.union([z17.string(), z17.number()]), login: z17.string() });
+var PacketSchema = z17.looseObject({
+  id: z17.string(),
+  authorId: z17.string(),
+  title: z17.string(),
+  overview: z17.looseObject({ objective: z17.string(), highlights: z17.array(z17.string()) }),
+  prs: z17.array(z17.looseObject({ repo: z17.string(), number: z17.number() })),
+  reviewers: z17.array(z17.looseObject({ id: z17.string(), github: GithubSnapshotSchema })),
+  status: z17.enum(["open", "closed"]),
+  revision: z17.number().int(),
+  createdAt: z17.string(),
+  updatedAt: z17.string()
 });
-var ReviewerSchema = z14.looseObject({ id: z14.string(), name: z14.string(), github: GithubSnapshotSchema });
-var PacketResponseSchema = z14.looseObject({ packet: PacketSchema }).transform((response) => response.packet);
-var ReviewerListResponseSchema = z14.looseObject({ reviewers: z14.array(ReviewerSchema) });
+var ReviewerSchema = z17.looseObject({ id: z17.string(), name: z17.string(), github: GithubSnapshotSchema });
+var PacketResponseSchema = z17.looseObject({ packet: PacketSchema }).transform((response) => response.packet);
+var ReviewerListResponseSchema = z17.looseObject({ reviewers: z17.array(ReviewerSchema) });
 
 // src/shared/ariadne/ariadne-transport.ts
 var FetchAriadneTransport = class {
@@ -1552,7 +2103,7 @@ var AriadneClient = class {
 };
 
 // src/shared/ariadne/board-session-store.ts
-import { z as z15 } from "zod";
+import { z as z18 } from "zod";
 
 // src/shared/ariadne/board-state-files.ts
 import { existsSync as existsSync7, mkdirSync as mkdirSync5, readFileSync as readFileSync7, readdirSync as readdirSync2, rmSync, statSync as statSync3, writeFileSync as writeFileSync5 } from "node:fs";
@@ -1628,35 +2179,35 @@ var BoardStateFiles = class {
 };
 
 // src/shared/ariadne/board-session-store.ts
-var HeartbeatRecordSchema = z15.object({
-  session: z15.string(),
-  step: z15.string(),
-  state: z15.enum(agentStates),
-  ticket: z15.string().optional(),
-  repo: z15.string().optional(),
-  branch: z15.string().optional(),
-  skill: z15.string().optional(),
-  detail: z15.string().optional()
+var HeartbeatRecordSchema = z18.object({
+  session: z18.string(),
+  step: z18.string(),
+  state: z18.enum(agentStates),
+  ticket: z18.string().optional(),
+  repo: z18.string().optional(),
+  branch: z18.string().optional(),
+  skill: z18.string().optional(),
+  detail: z18.string().optional()
 });
-var SessionRecordSchema = z15.object({
+var SessionRecordSchema = z18.object({
   heartbeat: HeartbeatRecordSchema,
   /** When a skill last posted this heartbeat. */
-  recordedAt: z15.number(),
+  recordedAt: z18.number(),
   /** When any heartbeat for the session was last sent, by a skill or the hook. */
-  sentAt: z15.number()
+  sentAt: z18.number()
 });
-var InferredRecordSchema = z15.object({
+var InferredRecordSchema = z18.object({
   heartbeat: HeartbeatRecordSchema,
   /** When the hook last sent this inferred heartbeat. */
-  sentAt: z15.number()
+  sentAt: z18.number()
 });
-var ThreadRecordSchema = z15.object({
+var ThreadRecordSchema = z18.object({
   /** The board session a skill last posted to by default from this Claude Code session. */
-  board: z15.string().optional(),
+  board: z18.string().optional(),
   /** When the hook last spawned a branch lookup for this Claude Code session's main thread. */
-  branchCheckedAt: z15.number().optional()
+  branchCheckedAt: z18.number().optional()
 });
-var ThreadSkillRecordSchema = z15.object({ skill: z15.string() });
+var ThreadSkillRecordSchema = z18.object({ skill: z18.string() });
 var inferredFolder = "inferred";
 var threadsFolder = "threads";
 var threadSkillsFolder = "thread-skills";
@@ -2350,28 +2901,28 @@ var AriadneTokenStore = class {
 // src/shared/ariadne/board-agent-store.ts
 import { existsSync as existsSync9, readdirSync as readdirSync3 } from "node:fs";
 import { join as join10 } from "node:path";
-import { z as z16 } from "zod";
-var DispatchRecordSchema = z16.object({
+import { z as z19 } from "zod";
+var DispatchRecordSchema = z19.object({
   /** The Jira key the dispatch named, or null when it named none. */
-  ticket: z16.string().nullable(),
-  description: z16.string(),
+  ticket: z19.string().nullable(),
+  description: z19.string(),
   /** The dispatching Claude Code session. */
-  session: z16.string(),
+  session: z19.string(),
   /** A digest of the prompt, so a sub-agent found only through its transcript still finds its dispatch. */
-  promptDigest: z16.string().optional(),
-  at: z16.number()
+  promptDigest: z19.string().optional(),
+  at: z19.number()
 });
-var AgentRecordSchema = z16.object({
+var AgentRecordSchema = z19.object({
   /** The Jira key the sub-agent works on, or null once resolved to none. */
-  ticket: z16.string().nullable(),
-  description: z16.string().optional(),
-  agentType: z16.string().optional(),
-  toolUseId: z16.string().optional(),
+  ticket: z19.string().nullable(),
+  description: z19.string().optional(),
+  agentType: z19.string().optional(),
+  toolUseId: z19.string().optional(),
   /** The Claude Code session the sub-agent runs in. */
-  session: z16.string(),
-  at: z16.number()
+  session: z19.string(),
+  at: z19.number()
 });
-var AgentSkillRecordSchema = z16.object({ skill: z16.string() });
+var AgentSkillRecordSchema = z19.object({ skill: z19.string() });
 var dispatchFolder = "dispatch";
 var agentsFolder = "agents";
 var agentSkillsFolder = "agent-skills";
@@ -2437,123 +2988,123 @@ import { graphql } from "@octokit/graphql";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
 // src/tasks/task-tracker/task-tracker.ts
-import { z as z17 } from "zod";
-var TrackerUserSchema = z17.object({
-  accountId: z17.string(),
-  displayName: z17.string()
+import { z as z20 } from "zod";
+var TrackerUserSchema = z20.object({
+  accountId: z20.string(),
+  displayName: z20.string()
 });
-var EntityMetadataSchema = z17.object({
-  tddId: z17.number().optional(),
-  epicId: z17.number().optional(),
-  notes: z17.string().optional(),
+var EntityMetadataSchema = z20.object({
+  tddId: z20.number().optional(),
+  epicId: z20.number().optional(),
+  notes: z20.string().optional(),
   /** Explicit body-format override read first by BodyFormatDetector (docs/bug-report-format.md). */
-  kind: z17.enum(["bug", "story"]).optional(),
+  kind: z20.enum(["bug", "story"]).optional(),
   /** Why a blocked-by edge leaves this ticket's epic, keyed by blocker id (docs/epic-boundaries.md). */
-  crossEpicReasons: z17.record(z17.string(), z17.string()).optional()
+  crossEpicReasons: z20.record(z20.string(), z20.string()).optional()
 }).passthrough();
-var CommentSchema = z17.object({
-  id: z17.string(),
-  body: z17.string(),
-  author: z17.string(),
-  createdAt: z17.string(),
-  updatedAt: z17.string()
+var CommentSchema = z20.object({
+  id: z20.string(),
+  body: z20.string(),
+  author: z20.string(),
+  createdAt: z20.string(),
+  updatedAt: z20.string()
 });
-var AttachmentSchema = z17.object({
-  id: z17.string(),
-  filename: z17.string(),
-  mimeType: z17.string(),
-  size: z17.number().optional(),
-  mediaUuid: z17.string().optional()
+var AttachmentSchema = z20.object({
+  id: z20.string(),
+  filename: z20.string(),
+  mimeType: z20.string(),
+  size: z20.number().optional(),
+  mediaUuid: z20.string().optional()
 });
-var TechnicalDesignSchema = z17.object({
-  id: z17.string(),
-  epicId: z17.string(),
-  url: z17.string().optional(),
-  body: z17.string(),
-  comments: z17.array(CommentSchema),
+var TechnicalDesignSchema = z20.object({
+  id: z20.string(),
+  epicId: z20.string(),
+  url: z20.string().optional(),
+  body: z20.string(),
+  comments: z20.array(CommentSchema),
   metadata: EntityMetadataSchema.default({}),
-  updatedAt: z17.string()
+  updatedAt: z20.string()
 });
-var TicketSchema = z17.object({
-  id: z17.string(),
-  size: z17.literal("ticket"),
-  status: z17.string(),
-  labels: z17.array(z17.string()),
-  title: z17.string(),
-  body: z17.string(),
-  comments: z17.array(CommentSchema),
-  assignee: z17.string().nullable(),
-  attachments: z17.array(AttachmentSchema).default([]),
-  reporter: z17.string().nullable().default(null),
-  issueType: z17.string().default("unknown"),
-  blockedBy: z17.array(z17.string()).default([]),
-  blocking: z17.array(z17.string()).default([]),
+var TicketSchema = z20.object({
+  id: z20.string(),
+  size: z20.literal("ticket"),
+  status: z20.string(),
+  labels: z20.array(z20.string()),
+  title: z20.string(),
+  body: z20.string(),
+  comments: z20.array(CommentSchema),
+  assignee: z20.string().nullable(),
+  attachments: z20.array(AttachmentSchema).default([]),
+  reporter: z20.string().nullable().default(null),
+  issueType: z20.string().default("unknown"),
+  blockedBy: z20.array(z20.string()).default([]),
+  blocking: z20.array(z20.string()).default([]),
   metadata: EntityMetadataSchema.default({}),
-  updatedAt: z17.string()
+  updatedAt: z20.string()
 });
-var EpicSchema = z17.object({
-  id: z17.string(),
-  size: z17.literal("epic"),
-  status: z17.string(),
-  labels: z17.array(z17.string()),
-  title: z17.string(),
-  body: z17.string(),
-  childIssues: z17.array(TicketSchema),
-  comments: z17.array(CommentSchema),
+var EpicSchema = z20.object({
+  id: z20.string(),
+  size: z20.literal("epic"),
+  status: z20.string(),
+  labels: z20.array(z20.string()),
+  title: z20.string(),
+  body: z20.string(),
+  childIssues: z20.array(TicketSchema),
+  comments: z20.array(CommentSchema),
   tdd: TechnicalDesignSchema.optional(),
   metadata: EntityMetadataSchema.default({}),
-  updatedAt: z17.string()
+  updatedAt: z20.string()
 });
-var CreateEpicInputSchema = z17.object({
-  title: z17.string(),
-  body: z17.string(),
-  labels: z17.array(z17.string()).default([]),
+var CreateEpicInputSchema = z20.object({
+  title: z20.string(),
+  body: z20.string(),
+  labels: z20.array(z20.string()).default([]),
   metadata: EntityMetadataSchema.partial().optional()
 });
-var CreateTicketInputSchema = z17.object({
-  title: z17.string(),
-  body: z17.string(),
+var CreateTicketInputSchema = z20.object({
+  title: z20.string(),
+  body: z20.string(),
   /** Absent for a standalone ticket: a ticket-sized RFC has no epic to parent to. */
-  epicId: z17.string().optional(),
-  labels: z17.array(z17.string()).default([]),
-  assignee: z17.string().optional(),
+  epicId: z20.string().optional(),
+  labels: z20.array(z20.string()).default([]),
+  assignee: z20.string().optional(),
   metadata: EntityMetadataSchema.partial().optional()
 });
-var CreateTechnicalDesignInputSchema = z17.object({
-  title: z17.string(),
-  body: z17.string(),
-  epicId: z17.string(),
+var CreateTechnicalDesignInputSchema = z20.object({
+  title: z20.string(),
+  body: z20.string(),
+  epicId: z20.string(),
   metadata: EntityMetadataSchema.partial().optional()
 });
-var UpdateEpicInputSchema = z17.object({
-  body: z17.string(),
-  title: z17.string().optional(),
-  labels: z17.array(z17.string()).optional()
+var UpdateEpicInputSchema = z20.object({
+  body: z20.string(),
+  title: z20.string().optional(),
+  labels: z20.array(z20.string()).optional()
 });
-var UpdateTicketInputSchema = z17.object({
-  body: z17.string(),
-  title: z17.string().optional(),
-  labels: z17.array(z17.string()).optional()
+var UpdateTicketInputSchema = z20.object({
+  body: z20.string(),
+  title: z20.string().optional(),
+  labels: z20.array(z20.string()).optional()
 });
-var UpdateInitiativeInputSchema = z17.object({
-  body: z17.string(),
-  title: z17.string().optional()
+var UpdateInitiativeInputSchema = z20.object({
+  body: z20.string(),
+  title: z20.string().optional()
 });
-var InitiativeSchema = z17.object({
-  id: z17.string(),
-  size: z17.literal("initiative"),
-  title: z17.string(),
-  body: z17.string(),
-  epics: z17.array(z17.object({ id: z17.string(), title: z17.string() })).default([])
+var InitiativeSchema = z20.object({
+  id: z20.string(),
+  size: z20.literal("initiative"),
+  title: z20.string(),
+  body: z20.string(),
+  epics: z20.array(z20.object({ id: z20.string(), title: z20.string() })).default([])
 });
-var CreateInitiativeInputSchema = z17.object({
-  title: z17.string(),
-  body: z17.string()
+var CreateInitiativeInputSchema = z20.object({
+  title: z20.string(),
+  body: z20.string()
 });
-var partialWriteErrorSchema = z17.object({
-  name: z17.literal("TaskTrackerPartialWriteError"),
-  id: z17.string().min(1),
-  message: z17.string()
+var partialWriteErrorSchema = z20.object({
+  name: z20.literal("TaskTrackerPartialWriteError"),
+  id: z20.string().min(1),
+  message: z20.string()
 });
 var TaskTrackerPartialWriteError = class extends Error {
   name = "TaskTrackerPartialWriteError";
@@ -2615,14 +3166,14 @@ ${block}`;
 };
 
 // src/tasks/github-task-tracker/github-task-tracker.ts
-import { z as z19 } from "zod";
+import { z as z22 } from "zod";
 
 // src/tasks/task-tracker/unsupported-tracker-operation-error.ts
-import { z as z18 } from "zod";
-var UnsupportedTrackerOperationPropsSchema = z18.object({
-  tracker: z18.string().min(1),
-  operation: z18.string().min(1),
-  remedy: z18.string().min(1).optional()
+import { z as z21 } from "zod";
+var UnsupportedTrackerOperationPropsSchema = z21.object({
+  tracker: z21.string().min(1),
+  operation: z21.string().min(1),
+  remedy: z21.string().min(1).optional()
 });
 var UnsupportedTrackerOperationError = class extends Error {
   tracker;
@@ -2639,9 +3190,9 @@ var UnsupportedTrackerOperationError = class extends Error {
 };
 
 // src/tasks/github-task-tracker/github-task-tracker.ts
-var IssueRefSchema = z19.object({ number: z19.number() });
-var IssueRefListSchema = z19.array(IssueRefSchema);
-var ParentNotFoundSchema = z19.object({ status: z19.literal(404) });
+var IssueRefSchema = z22.object({ number: z22.number() });
+var IssueRefListSchema = z22.array(IssueRefSchema);
+var ParentNotFoundSchema = z22.object({ status: z22.literal(404) });
 var GitHubTaskTracker = class {
   octokit;
   gql;
@@ -3231,10 +3782,10 @@ var GitHubTaskTracker = class {
 // src/tasks/jira-task-tracker/jira-task-tracker.ts
 import { readFileSync as readFileSync9 } from "node:fs";
 import { basename as basename2 } from "node:path";
-import { z as z23 } from "zod";
+import { z as z26 } from "zod";
 
 // src/tasks/jira-task-tracker/jira-client.ts
-import { z as z20 } from "zod";
+import { z as z23 } from "zod";
 
 // src/tasks/jira-task-tracker/jira-api-error.ts
 var JiraApiError = class extends Error {
@@ -3257,11 +3808,11 @@ var defaultRetryAfterSeconds = 2;
 var maxBackoffMs = 3e4;
 var attachmentXsrfHeader = "no-check";
 var redirectStatuses = /* @__PURE__ */ new Set([301, 302, 303, 307, 308]);
-var JiraErrorBodySchema = z20.object({
-  errorMessages: z20.array(z20.string()).optional(),
+var JiraErrorBodySchema = z23.object({
+  errorMessages: z23.array(z23.string()).optional(),
   // Caught per-field so an off-contract `errors` map cannot discard a valid sibling `errorMessages`.
-  errors: z20.record(z20.string(), z20.string()).optional().catch(void 0),
-  message: z20.string().optional()
+  errors: z23.record(z23.string(), z23.string()).optional().catch(void 0),
+  message: z23.string().optional()
 });
 var JiraClient = class {
   baseUrl;
@@ -3348,13 +3899,13 @@ var JiraClient = class {
 };
 
 // src/tasks/jira-task-tracker/confluence-client.ts
-import { z as z21 } from "zod";
+import { z as z24 } from "zod";
 var maxRetries2 = 4;
 var defaultRetryAfterSeconds2 = 2;
 var maxBackoffMs2 = 3e4;
-var ConfluenceErrorBodySchema = z21.object({
-  errors: z21.array(z21.object({ title: z21.string().optional(), detail: z21.string().optional() })).optional().catch(void 0),
-  message: z21.string().optional()
+var ConfluenceErrorBodySchema = z24.object({
+  errors: z24.array(z24.object({ title: z24.string().optional(), detail: z24.string().optional() })).optional().catch(void 0),
+  message: z24.string().optional()
 });
 var ConfluenceClient = class {
   siteBaseUrl;
@@ -3429,14 +3980,14 @@ import { fromMarkdown } from "mdast-util-from-markdown";
 import { gfmFromMarkdown } from "mdast-util-gfm";
 import { gfm } from "micromark-extension-gfm";
 import { decodeString } from "micromark-util-decode-string";
-import { z as z22 } from "zod";
-var MediaRefSchema = z22.object({
-  mediaUuid: z22.string().min(1),
-  collection: z22.string().default(""),
-  width: z22.number().int().positive().optional(),
-  height: z22.number().int().positive().optional()
+import { z as z25 } from "zod";
+var MediaRefSchema = z25.object({
+  mediaUuid: z25.string().min(1),
+  collection: z25.string().default(""),
+  width: z25.number().int().positive().optional(),
+  height: z25.number().int().positive().optional()
 });
-var MediaLookupSchema = z22.record(z22.string(), MediaRefSchema);
+var MediaLookupSchema = z25.record(z25.string(), MediaRefSchema);
 var attachmentPrefix = /^attachment:/;
 var externalTarget = /^[a-zA-Z][a-zA-Z0-9+.-]*:|^\/\//;
 var detailsOpen = /^<details>/;
@@ -4429,13 +4980,13 @@ var deliveryLinkOutward = "implements";
 var tddMetadataPropertyKey = "flight-rules-metadata";
 var mediaFilePath = /^\/file\/([0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12})\/binary$/;
 var mediaLocationBase = "https://media.invalid/";
-var JiraUploadedAttachmentSchema = z23.object({
-  id: z23.union([z23.string(), z23.number()]).transform(String),
-  filename: z23.string(),
-  mimeType: z23.string(),
-  size: z23.number().optional()
+var JiraUploadedAttachmentSchema = z26.object({
+  id: z26.union([z26.string(), z26.number()]).transform(String),
+  filename: z26.string(),
+  mimeType: z26.string(),
+  size: z26.number().optional()
 });
-var JiraUploadedAttachmentsSchema = z23.array(JiraUploadedAttachmentSchema);
+var JiraUploadedAttachmentsSchema = z26.array(JiraUploadedAttachmentSchema);
 var JiraTaskTracker = class {
   client;
   confluence;
@@ -5037,20 +5588,20 @@ var JiraTaskTracker = class {
 // src/tasks/tool-probe/tool-probe.ts
 import { execFile as execFile3 } from "node:child_process";
 import { promisify as promisify3 } from "node:util";
-import { z as z25 } from "zod";
+import { z as z28 } from "zod";
 
 // src/tasks/readiness/probe-diagnostics.ts
-import { z as z24 } from "zod";
-var ProbeDiagnosticsPropsSchema = z24.object({ env: z24.record(z24.string(), z24.string().optional()) });
-var ErrorFactsSchema = z24.object({
-  code: z24.union([z24.string(), z24.number()]).nullable().optional(),
-  status: z24.number().optional(),
-  statusCode: z24.number().optional(),
-  killed: z24.boolean().optional(),
-  name: z24.string().optional(),
-  message: z24.string().optional(),
-  stderr: z24.string().optional(),
-  cause: z24.unknown().optional()
+import { z as z27 } from "zod";
+var ProbeDiagnosticsPropsSchema = z27.object({ env: z27.record(z27.string(), z27.string().optional()) });
+var ErrorFactsSchema = z27.object({
+  code: z27.union([z27.string(), z27.number()]).nullable().optional(),
+  status: z27.number().optional(),
+  statusCode: z27.number().optional(),
+  killed: z27.boolean().optional(),
+  name: z27.string().optional(),
+  message: z27.string().optional(),
+  stderr: z27.string().optional(),
+  cause: z27.unknown().optional()
 });
 var RedactedProbeDiagnostics = class {
   secrets;
@@ -5113,7 +5664,7 @@ var RedactedProbeDiagnostics = class {
 // src/tasks/tool-probe/tool-probe.ts
 var minimumGhVersion = [2, 99, 0];
 var ghVersionLine = /gh version (\d+)\.(\d+)\.(\d+)/;
-var NodeToolProbePropsSchema = z25.object({ cwd: z25.string().optional(), env: z25.record(z25.string(), z25.string().optional()).optional(), timeoutMs: z25.int().positive().max(6e4).default(1e4) });
+var NodeToolProbePropsSchema = z28.object({ cwd: z28.string().optional(), env: z28.record(z28.string(), z28.string().optional()).optional(), timeoutMs: z28.int().positive().max(6e4).default(1e4) });
 var NodeToolProbe = class {
   execFile;
   env;
@@ -5215,7 +5766,7 @@ var NodeToolProbe = class {
 var nodeToolProbe = new NodeToolProbe();
 
 // src/tasks/readiness/repository-readiness.ts
-import { z as z31 } from "zod";
+import { z as z34 } from "zod";
 
 // src/tasks/readiness/workflow-preflight.ts
 import { execFile as execFile4 } from "node:child_process";
@@ -5223,34 +5774,34 @@ import { access, realpath } from "node:fs/promises";
 import { constants } from "node:fs";
 import { resolve as resolve4 } from "node:path";
 import { promisify as promisify4 } from "node:util";
-import { z as z30 } from "zod";
+import { z as z33 } from "zod";
 
 // src/orchestration/orchestration-policy.ts
 import { isDeepStrictEqual } from "node:util";
-import { z as z28 } from "zod";
+import { z as z31 } from "zod";
 
 // src/agents/agent-emitter/agent-emitter.schema.ts
-import { z as z26 } from "zod";
-var ModelBindingsSchema = z26.strictObject({
-  standard: z26.string().trim().min(1),
-  escalated: z26.string().trim().min(1),
-  expert: z26.string().trim().min(1)
+import { z as z29 } from "zod";
+var ModelBindingsSchema = z29.strictObject({
+  standard: z29.string().trim().min(1),
+  escalated: z29.string().trim().min(1),
+  expert: z29.string().trim().min(1)
 });
-var AgentDefinitionSchema = z26.strictObject({
+var AgentDefinitionSchema = z29.strictObject({
   frontmatter: AgentRegistrationSchema,
-  body: z26.string().refine((body) => body.trim() !== "", "agent prompt must not be empty")
+  body: z29.string().refine((body) => body.trim() !== "", "agent prompt must not be empty")
 });
 
 // src/orchestration/orchestration.schema.ts
 import { isAbsolute as isAbsolute2, relative, sep as sep2 } from "node:path";
-import { z as z27 } from "zod";
-var OrchestrationTextSchema = z27.string().refine((value) => value.trim().length > 0, "must not be blank");
+import { z as z30 } from "zod";
+var OrchestrationTextSchema = z30.string().refine((value) => value.trim().length > 0, "must not be blank");
 var AbsolutePathSchema = OrchestrationTextSchema.refine(
   isAbsolute2,
   "must be an absolute path on this host"
 );
-var CapabilityNameSchema = z27.string().regex(/^[a-z][a-zA-Z0-9:.-]*$/);
-var RunContextObjectSchema = z27.strictObject({
+var CapabilityNameSchema = z30.string().regex(/^[a-z][a-zA-Z0-9:.-]*$/);
+var RunContextObjectSchema = z30.strictObject({
   runId: OrchestrationTextSchema,
   taskId: OrchestrationTextSchema,
   cwd: AbsolutePathSchema,
@@ -5262,41 +5813,41 @@ var RunContextSchema = RunContextObjectSchema.refine((value) => {
   const path = relative(value.repositoryRoot, value.cwd);
   return path !== ".." && !path.startsWith(`..${sep2}`) && !isAbsolute2(path);
 }, "working directory must be inside the active repository root");
-var CallerContextSchema = RunContextSchema.safeExtend({ attempt: z27.int().positive() });
-var CapabilityEvidenceSchema = z27.discriminatedUnion("state", [
-  z27.strictObject({ state: z27.literal("available"), evidence: OrchestrationTextSchema }),
-  z27.strictObject({
-    state: z27.enum(["denied", "unknown"]),
+var CallerContextSchema = RunContextSchema.safeExtend({ attempt: z30.int().positive() });
+var CapabilityEvidenceSchema = z30.discriminatedUnion("state", [
+  z30.strictObject({ state: z30.literal("available"), evidence: OrchestrationTextSchema }),
+  z30.strictObject({
+    state: z30.enum(["denied", "unknown"]),
     evidence: OrchestrationTextSchema,
     remedy: OrchestrationTextSchema
   })
 ]);
-var AdapterLimitsSchema = z27.strictObject({
-  maxConcurrent: z27.int().nonnegative().nullable(),
-  activeWorkers: z27.int().nonnegative(),
-  currentDepth: z27.int().nonnegative(),
-  maxDepth: z27.int().nonnegative().nullable(),
+var AdapterLimitsSchema = z30.strictObject({
+  maxConcurrent: z30.int().nonnegative().nullable(),
+  activeWorkers: z30.int().nonnegative(),
+  currentDepth: z30.int().nonnegative(),
+  maxDepth: z30.int().nonnegative().nullable(),
   source: OrchestrationTextSchema
 });
-var RuntimeSnapshotSchema = z27.strictObject({
+var RuntimeSnapshotSchema = z30.strictObject({
   context: CallerContextSchema,
-  host: z27.strictObject({ name: OrchestrationTextSchema, version: OrchestrationTextSchema }),
-  observedAt: z27.iso.datetime(),
+  host: z30.strictObject({ name: OrchestrationTextSchema, version: OrchestrationTextSchema }),
+  observedAt: z30.iso.datetime(),
   agent: AgentFrontmatterSchema.shape.name.nullable(),
   spawn: CapabilityEvidenceSchema,
   ask: CapabilityEvidenceSchema,
-  permissions: z27.record(CapabilityNameSchema, CapabilityEvidenceSchema),
+  permissions: z30.record(CapabilityNameSchema, CapabilityEvidenceSchema),
   limits: AdapterLimitsSchema
 });
-var DispatchRequestSchema = z27.strictObject({
+var DispatchRequestSchema = z30.strictObject({
   id: OrchestrationTextSchema,
   agent: AgentFrontmatterSchema.shape.name,
   context: CallerContextSchema,
-  input: z27.record(z27.string(), z27.json()),
-  requiredCapabilities: z27.array(CapabilityNameSchema).optional()
+  input: z30.record(z30.string(), z30.json()),
+  requiredCapabilities: z30.array(CapabilityNameSchema).optional()
 });
-var OrchestrationFailureSchema = z27.strictObject({
-  code: z27.enum([
+var OrchestrationFailureSchema = z30.strictObject({
+  code: z30.enum([
     "UNKNOWN_AGENT",
     "UNSUPPORTED_AGENT_SETTINGS",
     "CONTEXT_MISMATCH",
@@ -5321,35 +5872,35 @@ var OrchestrationFailureSchema = z27.strictObject({
   remedy: OrchestrationTextSchema,
   capability: CapabilityNameSchema.optional()
 });
-var OutcomeIdentitySchema = z27.strictObject({
+var OutcomeIdentitySchema = z30.strictObject({
   dispatchId: OrchestrationTextSchema,
   agent: AgentFrontmatterSchema.shape.name,
   context: CallerContextSchema
 });
-var DispatchOutcomeSchema = z27.discriminatedUnion("status", [
+var DispatchOutcomeSchema = z30.discriminatedUnion("status", [
   OutcomeIdentitySchema.extend({
-    status: z27.literal("completed"),
-    report: z27.record(z27.string(), z27.json())
+    status: z30.literal("completed"),
+    report: z30.record(z30.string(), z30.json())
   }),
   OutcomeIdentitySchema.extend({
-    status: z27.enum(["failed", "unavailable"]),
+    status: z30.enum(["failed", "unavailable"]),
     failure: OrchestrationFailureSchema
   })
 ]);
-var QuestionRequestSchema = z27.strictObject({
+var QuestionRequestSchema = z30.strictObject({
   context: CallerContextSchema,
   question: OrchestrationTextSchema,
-  allowHumanQuestions: z27.boolean()
+  allowHumanQuestions: z30.boolean()
 });
-var SiblingSkillRequestSchema = z27.strictObject({
+var SiblingSkillRequestSchema = z30.strictObject({
   context: CallerContextSchema,
   skill: OrchestrationTextSchema,
-  input: z27.record(z27.string(), z27.json())
+  input: z30.record(z30.string(), z30.json())
 });
 
 // src/orchestration/orchestration-policy.ts
-var RegistryOrchestrationPolicyPropsSchema = z28.strictObject({
-  agents: z28.array(AgentDefinitionSchema).min(1).refine(
+var RegistryOrchestrationPolicyPropsSchema = z31.strictObject({
+  agents: z31.array(AgentDefinitionSchema).min(1).refine(
     (agents) => new Set(agents.map((agent) => agent.frontmatter.name)).size === agents.length,
     "duplicate agent name"
   )
@@ -5503,25 +6054,25 @@ var RegistryOrchestrationPolicy = class {
 };
 
 // src/tasks/readiness/readiness.schema.ts
-import { z as z29 } from "zod";
-var WorkflowSchema = z29.enum([
+import { z as z32 } from "zod";
+var WorkflowSchema = z32.enum([
   "execute-work",
   "execute-wave",
   "break-down-work",
   "reproduce-bug",
   "verify-ticket"
 ]);
-var WorkflowEvidenceSchema = z29.strictObject({
+var WorkflowEvidenceSchema = z32.strictObject({
   context: CallerContextSchema,
-  callerCapabilities: z29.record(z29.string(), CapabilityEvidenceSchema),
-  workers: z29.array(
-    z29.strictObject({ registration: AgentRegistrationSchema, runtime: RuntimeSnapshotSchema })
+  callerCapabilities: z32.record(z32.string(), CapabilityEvidenceSchema),
+  workers: z32.array(
+    z32.strictObject({ registration: AgentRegistrationSchema, runtime: RuntimeSnapshotSchema })
   ).refine(
     (workers) => new Set(workers.map((worker) => worker.registration.name)).size === workers.length,
     "duplicate worker evidence"
   )
 });
-var ReadinessOptionsSchema = z29.strictObject({
+var ReadinessOptionsSchema = z32.strictObject({
   workflow: WorkflowSchema.optional(),
   /** Supplying evidence opts into host checks in addition to environment probes. */
   evidence: WorkflowEvidenceSchema.optional()
@@ -5531,10 +6082,10 @@ var ReadinessOptionsSchema = z29.strictObject({
 );
 
 // src/tasks/readiness/workflow-preflight.ts
-var WorkflowPreflightPropsSchema = z30.object({
-  cwd: z30.string(),
-  env: z30.record(z30.string(), z30.string().optional()),
-  timeoutMs: z30.int().positive().max(6e4).default(1e4)
+var WorkflowPreflightPropsSchema = z33.object({
+  cwd: z33.string(),
+  env: z33.record(z33.string(), z33.string().optional()),
+  timeoutMs: z33.int().positive().max(6e4).default(1e4)
 });
 var NodeWorkflowPreflight = class {
   cwd;
@@ -5738,10 +6289,10 @@ var NodeWorkflowPreflight = class {
 };
 
 // src/tasks/readiness/repository-readiness.ts
-var RepositoryReadinessPropsSchema = z31.object({
-  cwd: z31.string().optional(),
-  env: z31.record(z31.string(), z31.string().optional()).optional(),
-  timeoutMs: z31.int().positive().max(6e4).default(1e4)
+var RepositoryReadinessPropsSchema = z34.object({
+  cwd: z34.string().optional(),
+  env: z34.record(z34.string(), z34.string().optional()).optional(),
+  timeoutMs: z34.int().positive().max(6e4).default(1e4)
 });
 var NodeRepositoryReadiness = class {
   cwd;
@@ -5922,12 +6473,12 @@ var NodeRepositoryReadiness = class {
 };
 
 // src/flight-rules/flight-rules.schema.ts
-import { z as z34 } from "zod";
+import { z as z37 } from "zod";
 
 // src/operations/git-config-operations.ts
 import { existsSync as existsSync10, lstatSync as lstatSync2, realpathSync as realpathSync3 } from "node:fs";
 import { dirname as dirname11, isAbsolute as isAbsolute3, join as join12, parse, relative as relative2, resolve as resolve5, sep as sep3 } from "node:path";
-import { z as z33 } from "zod";
+import { z as z36 } from "zod";
 
 // src/git/commit-message-builder/commit-message-builder.ts
 import { readFileSync as readFileSync10 } from "node:fs";
@@ -5962,25 +6513,25 @@ ${line.trim()}`) === "";
 };
 
 // src/git/commit-message-builder/commit-message.schema.ts
-import { z as z32 } from "zod";
-var CommitMessageInputSchema = z32.object({
+import { z as z35 } from "zod";
+var CommitMessageInputSchema = z35.object({
   type: SemanticTypeSchema,
   // Bare issue numbers make one-character scopes legitimate; 32 clears a 10-character tracker key plus a six-digit number.
-  scope: z32.string().min(1).max(32),
-  description: z32.string().min(2).max(50),
-  body: z32.string().optional(),
-  model: z32.string().max(72).optional(),
-  footers: z32.array(z32.string().regex(/^[a-zA-Z0-9-]+(: |=).*$/)).default([])
+  scope: z35.string().min(1).max(32),
+  description: z35.string().min(2).max(50),
+  body: z35.string().optional(),
+  model: z35.string().max(72).optional(),
+  footers: z35.array(z35.string().regex(/^[a-zA-Z0-9-]+(: |=).*$/)).default([])
 });
-var CommitMessageHeaderSchema = z32.preprocess(
+var CommitMessageHeaderSchema = z35.preprocess(
   (arg) => {
-    return z32.string({ error: "Git Commit headers should be 72 characters or less" }).max(72).parse(arg);
+    return z35.string({ error: "Git Commit headers should be 72 characters or less" }).max(72).parse(arg);
   },
-  z32.templateLiteral([SemanticTypeSchema, "(", z32.string(), "): ", z32.string()])
+  z35.templateLiteral([SemanticTypeSchema, "(", z35.string(), "): ", z35.string()])
 );
-var CommitMessageBuilderPropsSchema = z32.object({
-  binPath: z32.string().min(1),
-  agentEnv: z32.string().optional()
+var CommitMessageBuilderPropsSchema = z35.object({
+  binPath: z35.string().min(1),
+  agentEnv: z35.string().optional()
 });
 
 // src/git/commit-message-builder/commit-message-builder.ts
@@ -6037,36 +6588,36 @@ var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
 };
 
 // src/operations/git-config-operations.ts
-var ConfigScopeSchema = z33.enum(configScopes);
-var ConfigSetInputSchema = z33.object({
-  key: z33.string().min(1),
-  values: z33.array(z33.string()).min(1),
+var ConfigScopeSchema = z36.enum(configScopes);
+var ConfigSetInputSchema = z36.object({
+  key: z36.string().min(1),
+  values: z36.array(z36.string()).min(1),
   scope: ConfigScopeSchema.optional()
 }).strict();
-var ConfigUnsetInputSchema = z33.object({ key: z33.string().min(1), scope: ConfigScopeSchema.optional() }).strict();
+var ConfigUnsetInputSchema = z36.object({ key: z36.string().min(1), scope: ConfigScopeSchema.optional() }).strict();
 var GitCommitInputSchema = CommitMessageInputSchema.extend({
-  files: z33.array(z33.string()).default([])
+  files: z36.array(z36.string()).default([])
 }).strict();
-var GitCheckoutInputSchema = z33.object({
-  type: z33.string().min(1),
-  scope: z33.string().min(1),
-  description: z33.string().optional(),
-  from: z33.string().optional()
+var GitCheckoutInputSchema = z36.object({
+  type: z36.string().min(1),
+  scope: z36.string().min(1),
+  description: z36.string().optional(),
+  from: z36.string().optional()
 }).strict();
-var GitPushInputSchema = z33.object({ remote: z33.string().min(1).default("origin"), setUpstream: z33.boolean().default(true) }).strict();
-var CommitMessageOutputSchema = z33.object({ message: z33.string() });
-var BranchNameInputSchema = z33.object({ type: z33.string().min(1), scope: z33.string().min(1), description: z33.string().optional() }).strict();
-var ConfigOperationPolicySchema = z33.object({
-  scopes: z33.array(ConfigScopeSchema).default(["project", "local"]),
-  roots: z33.array(z33.string().min(1)).default([])
+var GitPushInputSchema = z36.object({ remote: z36.string().min(1).default("origin"), setUpstream: z36.boolean().default(true) }).strict();
+var CommitMessageOutputSchema = z36.object({ message: z36.string() });
+var BranchNameInputSchema = z36.object({ type: z36.string().min(1), scope: z36.string().min(1), description: z36.string().optional() }).strict();
+var ConfigOperationPolicySchema = z36.object({
+  scopes: z36.array(ConfigScopeSchema).default(["project", "local"]),
+  roots: z36.array(z36.string().min(1)).default([])
 }).strict();
-var GitConfigOperationsPropsSchema = z33.object({
-  cwd: z33.string().min(1),
-  configStore: z33.custom((value) => typeof value === "object" && value !== null),
-  git: z33.custom((value) => typeof value === "object" && value !== null),
+var GitConfigOperationsPropsSchema = z36.object({
+  cwd: z36.string().min(1),
+  configStore: z36.custom((value) => typeof value === "object" && value !== null),
+  git: z36.custom((value) => typeof value === "object" && value !== null),
   configPolicy: ConfigOperationPolicySchema.default({ scopes: ["project", "local"], roots: [] }),
-  binPath: z33.string().default(process.argv[1] ?? ""),
-  agentEnv: z33.string().optional()
+  binPath: z36.string().default(process.argv[1] ?? ""),
+  agentEnv: z36.string().optional()
 });
 var LaunchConfigOperationDeniedError = class extends Error {
   name = "LaunchConfigOperationDeniedError";
@@ -6089,11 +6640,11 @@ var DefaultGitConfigOperations = class {
         ["write", "process"],
         ["config", "set"],
         ConfigSetInputSchema,
-        z33.object({
-          key: z33.string(),
+        z36.object({
+          key: z36.string(),
           scope: ConfigScopeSchema,
-          path: z33.string(),
-          warning: z33.string().optional()
+          path: z36.string(),
+          warning: z36.string().optional()
         }),
         (input) => this.setConfig(input)
       ),
@@ -6103,7 +6654,7 @@ var DefaultGitConfigOperations = class {
         ["write", "process"],
         ["config", "unset"],
         ConfigUnsetInputSchema,
-        z33.object({ key: z33.string(), scope: ConfigScopeSchema, path: z33.string() }),
+        z36.object({ key: z36.string(), scope: ConfigScopeSchema, path: z36.string() }),
         (input) => this.unsetConfig(input)
       ),
       this.descriptor(
@@ -6112,7 +6663,7 @@ var DefaultGitConfigOperations = class {
         ["write", "process"],
         ["git", "commit"],
         GitCommitInputSchema,
-        z33.object({ sha: z33.string(), message: z33.string() }),
+        z36.object({ sha: z36.string(), message: z36.string() }),
         (input) => this.commit(input)
       ),
       this.descriptor(
@@ -6121,10 +6672,10 @@ var DefaultGitConfigOperations = class {
         ["write", "process"],
         ["git", "checkout"],
         GitCheckoutInputSchema,
-        z33.object({
-          branch: z33.string(),
-          from: z33.string().nullable(),
-          renamedFrom: z33.string().nullable()
+        z36.object({
+          branch: z36.string(),
+          from: z36.string().nullable(),
+          renamedFrom: z36.string().nullable()
         }),
         (input) => this.checkout(input)
       ),
@@ -6134,7 +6685,7 @@ var DefaultGitConfigOperations = class {
         ["write", "network", "process"],
         ["git", "push"],
         GitPushInputSchema,
-        z33.object({ branch: z33.string(), remote: z33.string(), setUpstream: z33.boolean() }),
+        z36.object({ branch: z36.string(), remote: z36.string(), setUpstream: z36.boolean() }),
         (input) => this.push(input)
       ),
       this.descriptor(
@@ -6152,7 +6703,7 @@ var DefaultGitConfigOperations = class {
         ["read", "process"],
         ["branch-name"],
         BranchNameInputSchema,
-        z33.object({ branch: z33.string() }),
+        z36.object({ branch: z36.string() }),
         (input) => ({
           branch: branchNamer.name({
             type: input.type,
@@ -6276,23 +6827,23 @@ var DefaultGitConfigOperations = class {
 };
 
 // src/flight-rules/flight-rules.schema.ts
-var FlightRulesPropsSchema = z34.object({
-  cwd: z34.string().optional().describe("Directory used for config discovery; defaults to process.cwd()"),
-  env: z34.record(z34.string(), z34.string().optional()).optional().describe("Live environment record; defaults to process.env"),
-  configPath: z34.string().optional().describe("Explicit config file, taking precedence over FLIGHT_RULES_CONFIG and discovery"),
+var FlightRulesPropsSchema = z37.object({
+  cwd: z37.string().optional().describe("Directory used for config discovery; defaults to process.cwd()"),
+  env: z37.record(z37.string(), z37.string().optional()).optional().describe("Live environment record; defaults to process.env"),
+  configPath: z37.string().optional().describe("Explicit config file, taking precedence over FLIGHT_RULES_CONFIG and discovery"),
   host: NativeHostSchema.optional().describe(
     "Explicit configuration host; otherwise FLIGHT_RULES_HOST, the native package host, or Claude for compatibility"
   ),
-  configWritePolicy: z34.object({
-    scopes: z34.array(ConfigScopeSchema).optional(),
-    roots: z34.array(z34.string().min(1)).optional()
+  configWritePolicy: z37.object({
+    scopes: z37.array(ConfigScopeSchema).optional(),
+    roots: z37.array(z37.string().min(1)).optional()
   }).strict().optional()
 });
 
 // src/operations/local-discovery-operations.ts
 import { readdirSync as readdirSync4 } from "node:fs";
 import { resolve as resolve7 } from "node:path";
-import { z as z35 } from "zod";
+import { z as z38 } from "zod";
 
 // src/tasks/qa-instructions/qa-instructions.ts
 import { existsSync as existsSync11, readFileSync as readFileSync11, statSync as statSync4 } from "node:fs";
@@ -6386,81 +6937,81 @@ var QaInstructionsFinder = class {
 };
 
 // src/operations/local-discovery-operations.ts
-var QaSourceSchema = z35.object({
-  path: z35.string(),
-  kind: z35.enum(["agents-md-section", "qa-md", "agents-dir-qa-md", "legacy-recipe"]),
-  dir: z35.string(),
-  content: z35.string(),
-  legacy: z35.literal(true).optional(),
-  hint: z35.string().optional()
+var QaSourceSchema = z38.object({
+  path: z38.string(),
+  kind: z38.enum(["agents-md-section", "qa-md", "agents-dir-qa-md", "legacy-recipe"]),
+  dir: z38.string(),
+  content: z38.string(),
+  legacy: z38.literal(true).optional(),
+  hint: z38.string().optional()
 });
-var QaInstructionsSchema = z35.object({ found: z35.boolean(), sources: z35.array(QaSourceSchema) });
-var ReadinessCheckSchema = z35.object({
-  name: z35.string(),
-  ok: z35.boolean(),
-  detail: z35.string(),
-  required: z35.boolean().optional(),
-  code: z35.string().optional(),
-  remedy: z35.string().optional()
+var QaInstructionsSchema = z38.object({ found: z38.boolean(), sources: z38.array(QaSourceSchema) });
+var ReadinessCheckSchema = z38.object({
+  name: z38.string(),
+  ok: z38.boolean(),
+  detail: z38.string(),
+  required: z38.boolean().optional(),
+  code: z38.string().optional(),
+  remedy: z38.string().optional()
 });
-var ReadinessReportSchema = z35.object({
-  tracker: z35.string().nullable(),
-  repo: z35.string().nullable().optional(),
-  checks: z35.array(ReadinessCheckSchema),
-  ok: z35.boolean(),
+var ReadinessReportSchema = z38.object({
+  tracker: z38.string().nullable(),
+  repo: z38.string().nullable().optional(),
+  checks: z38.array(ReadinessCheckSchema),
+  ok: z38.boolean(),
   workflow: WorkflowSchema.optional(),
-  scope: z35.enum(["environment", "workflow"])
+  scope: z38.enum(["environment", "workflow"])
 });
-var ConfigInspectionSchema = z35.object({
-  host: z35.string(),
-  valid: z35.boolean(),
-  error: z35.string().optional(),
-  values: z35.record(z35.string(), z35.unknown()),
-  sources: z35.record(
-    z35.string(),
-    z35.object({ scope: z35.enum(["user", "project", "local", "file"]), path: z35.string() })
+var ConfigInspectionSchema = z38.object({
+  host: z38.string(),
+  valid: z38.boolean(),
+  error: z38.string().optional(),
+  values: z38.record(z38.string(), z38.unknown()),
+  sources: z38.record(
+    z38.string(),
+    z38.object({ scope: z38.enum(["user", "project", "local", "file"]), path: z38.string() })
   ),
-  layers: z35.array(
-    z35.object({
-      scope: z35.enum(["user", "project", "local", "file"]),
-      path: z35.string(),
-      present: z35.boolean()
+  layers: z38.array(
+    z38.object({
+      scope: z38.enum(["user", "project", "local", "file"]),
+      path: z38.string(),
+      present: z38.boolean()
     })
   )
 });
-var CharterInputSchema = z35.object({
-  paths: z35.array(z35.string()).optional(),
-  diff: z35.string().optional(),
-  repository: z35.boolean().default(false),
-  pathOutput: z35.boolean().default(false)
+var CharterInputSchema = z38.object({
+  paths: z38.array(z38.string()).optional(),
+  diff: z38.string().optional(),
+  repository: z38.boolean().default(false),
+  pathOutput: z38.boolean().default(false)
 }).strict().refine(
   (input) => Number(input.paths !== void 0 && input.paths.length > 0) + Number(input.diff !== void 0) + Number(input.repository) <= 1,
   "Choose one charter selection source"
 );
-var QaInstructionsInputSchema = z35.object({ from: z35.string().optional() }).strict();
-var RfcDirectoryOutputSchema = z35.object({ path: z35.string() });
-var RfcNextIdOutputSchema = z35.object({
-  id: z35.string().regex(/^RFC-\d+$/),
-  directory: z35.string()
+var QaInstructionsInputSchema = z38.object({ from: z38.string().optional() }).strict();
+var RfcDirectoryOutputSchema = z38.object({ path: z38.string() });
+var RfcNextIdOutputSchema = z38.object({
+  id: z38.string().regex(/^RFC-\d+$/),
+  directory: z38.string()
 });
-var QaRecipeOutputSchema = z35.object({ path: z35.string() });
-var EvidenceDirectoryOutputSchema = z35.object({
-  path: z35.string(),
-  gitignored: z35.boolean().nullable()
+var QaRecipeOutputSchema = z38.object({ path: z38.string() });
+var EvidenceDirectoryOutputSchema = z38.object({
+  path: z38.string(),
+  gitignored: z38.boolean().nullable()
 });
 var rfcIdPattern = /^RFC-(\d+)\.md$/;
-var LocalDiscoveryPropsSchema = z35.object({
-  cwd: z35.string().min(1),
-  getConfig: z35.custom((value) => typeof value === "function"),
-  getConfigStore: z35.custom((value) => typeof value === "function"),
-  getCharters: z35.custom((value) => typeof value === "function"),
-  getRepositoryPaths: z35.custom((value) => typeof value === "function"),
-  getEvidence: z35.custom((value) => typeof value === "function"),
-  getReadiness: z35.custom((value) => typeof value === "function"),
-  getProbe: z35.custom((value) => typeof value === "function"),
-  getTracker: z35.custom((value) => typeof value === "function"),
-  getConfigPath: z35.custom((value) => typeof value === "function"),
-  getQaFinder: z35.custom((value) => typeof value === "function").optional()
+var LocalDiscoveryPropsSchema = z38.object({
+  cwd: z38.string().min(1),
+  getConfig: z38.custom((value) => typeof value === "function"),
+  getConfigStore: z38.custom((value) => typeof value === "function"),
+  getCharters: z38.custom((value) => typeof value === "function"),
+  getRepositoryPaths: z38.custom((value) => typeof value === "function"),
+  getEvidence: z38.custom((value) => typeof value === "function"),
+  getReadiness: z38.custom((value) => typeof value === "function"),
+  getProbe: z38.custom((value) => typeof value === "function"),
+  getTracker: z38.custom((value) => typeof value === "function"),
+  getConfigPath: z38.custom((value) => typeof value === "function"),
+  getQaFinder: z38.custom((value) => typeof value === "function").optional()
 });
 var DefaultLocalDiscoveryOperations = class {
   props;
@@ -6475,11 +7026,11 @@ var DefaultLocalDiscoveryOperations = class {
         ["read", "process"],
         ["charter"],
         CharterInputSchema,
-        z35.object({
-          charters: z35.array(
-            z35.object({ path: z35.string(), contents: z35.string(), language: z35.string().nullable() })
+        z38.object({
+          charters: z38.array(
+            z38.object({ path: z38.string(), contents: z38.string(), language: z38.string().nullable() })
           ),
-          unmatched: z35.boolean()
+          unmatched: z38.boolean()
         }),
         (input) => this.charter(input)
       ),
@@ -6488,8 +7039,8 @@ var DefaultLocalDiscoveryOperations = class {
         "Read the configured worker competencies.",
         ["read", "process"],
         ["competencies"],
-        z35.object({}),
-        z35.array(z35.string()),
+        z38.object({}),
+        z38.array(z38.string()),
         () => this.props.getConfig().competencies
       ),
       this.descriptor(
@@ -6497,7 +7048,7 @@ var DefaultLocalDiscoveryOperations = class {
         "Resolve the RFC directory for this checkout.",
         ["read", "process"],
         ["rfc", "dir"],
-        z35.object({}),
+        z38.object({}),
         RfcDirectoryOutputSchema,
         () => ({ path: getRfcDir(this.props.getConfig(), this.props.cwd) })
       ),
@@ -6506,7 +7057,7 @@ var DefaultLocalDiscoveryOperations = class {
         "Find the next RFC number in the configured RFC directory.",
         ["read", "process"],
         ["rfc", "next-id"],
-        z35.object({}),
+        z38.object({}),
         RfcNextIdOutputSchema,
         () => this.nextRfcId()
       ),
@@ -6524,7 +7075,7 @@ var DefaultLocalDiscoveryOperations = class {
         "Resolve the persistent evidence directory for a ticket.",
         ["read", "process"],
         ["qa", "evidence-dir"],
-        z35.object({ ticket: z35.string().min(1) }),
+        z38.object({ ticket: z38.string().min(1) }),
         EvidenceDirectoryOutputSchema,
         (input) => this.props.getEvidence().dirFor(input.ticket)
       ),
@@ -6533,7 +7084,7 @@ var DefaultLocalDiscoveryOperations = class {
         "Resolve the nearest QA instruction path (deprecated CLI route).",
         ["read", "process"],
         ["qa", "recipe"],
-        z35.object({}),
+        z38.object({}),
         QaRecipeOutputSchema,
         () => this.qaRecipe()
       ),
@@ -6542,8 +7093,8 @@ var DefaultLocalDiscoveryOperations = class {
         "Resolve the config file path for this checkout.",
         ["read", "process"],
         ["config", "path"],
-        z35.object({}),
-        z35.object({ path: z35.string() }),
+        z38.object({}),
+        z38.object({ path: z38.string() }),
         () => ({ path: this.props.getConfigStore().filePath() })
       ),
       this.descriptor(
@@ -6551,7 +7102,7 @@ var DefaultLocalDiscoveryOperations = class {
         "Inspect merged configuration and its sources.",
         ["read", "process"],
         ["config", "show"],
-        z35.object({}),
+        z38.object({}),
         ConfigInspectionSchema,
         () => this.props.getConfigStore().inspect()
       ),
@@ -6654,18 +7205,18 @@ var BlankQaRecipeError = class extends Error {
 // src/bundled-docs/charter-catalog/charter-catalog.ts
 import { matchesGlob } from "node:path";
 import { parse as parseYaml3 } from "yaml";
-import { z as z36 } from "zod";
+import { z as z39 } from "zod";
 var coreCharterId = "coding-charter";
 var languageCharterPrefix = `${coreCharterId}-`;
-var LanguageFrontmatterSchema = z36.strictObject({
-  language: z36.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
-  "applies-to": z36.array(z36.string().min(1)).min(1)
+var LanguageFrontmatterSchema = z39.strictObject({
+  language: z39.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+  "applies-to": z39.array(z39.string().min(1)).min(1)
 }).transform(({ language, "applies-to": appliesTo }) => ({ language, appliesTo }));
-var FrontmatterSchema = z36.string().transform((contents, ctx) => {
+var FrontmatterSchema = z39.string().transform((contents, ctx) => {
   const block = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/.exec(contents)?.[1];
   if (block === void 0) {
     ctx.addIssue({ code: "custom", message: "missing YAML frontmatter" });
-    return z36.NEVER;
+    return z39.NEVER;
   }
   return parseYaml3(block);
 }).pipe(LanguageFrontmatterSchema);
@@ -6691,7 +7242,7 @@ var DocCharterCatalog = class {
   languageCharter(doc) {
     const parsed = FrontmatterSchema.safeParse(doc.contents);
     if (!parsed.success) {
-      throw new CharterFormatError(`Charter "${doc.id}" has invalid frontmatter: ${z36.prettifyError(parsed.error)}`);
+      throw new CharterFormatError(`Charter "${doc.id}" has invalid frontmatter: ${z39.prettifyError(parsed.error)}`);
     }
     const expectedId = `${languageCharterPrefix}${parsed.data.language}`;
     if (doc.id !== expectedId) {
@@ -6712,10 +7263,10 @@ var CharterFormatError = class extends Error {
 // src/bundled-docs/charter-catalog/repository-paths.ts
 import { execFile as execFile5 } from "node:child_process";
 import { promisify as promisify5 } from "node:util";
-import { z as z37 } from "zod";
+import { z as z40 } from "zod";
 var run = promisify5(execFile5);
-var BaseRefSchema = z37.string().regex(/^[^\s-]\S*$/, 'base must be a git ref or commit, and cannot start with "-"');
-var GitRepositoryPathsPropsSchema = z37.object({ cwd: z37.string().min(1) });
+var BaseRefSchema = z40.string().regex(/^[^\s-]\S*$/, 'base must be a git ref or commit, and cannot start with "-"');
+var GitRepositoryPathsPropsSchema = z40.object({ cwd: z40.string().min(1) });
 var GitRepositoryPaths = class {
   cwd;
   constructor(props) {
@@ -6763,236 +7314,17 @@ import { execFileSync as execFileSync3 } from "node:child_process";
 import { readFileSync as readFileSync12, realpathSync as realpathSync4 } from "node:fs";
 import { dirname as dirname13, join as join14, relative as relative3 } from "node:path";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
-import { z as z39 } from "zod";
-
-// src/code-review/review.schema.ts
-import { z as z38 } from "zod";
-var reviewContractVersion = 1;
-var reviewSchemaRevision = 1;
-var ReviewOutcomeSchema = z38.enum(["APPROVED", "CHANGES_NEEDED", "ESCALATE", "INCOMPLETE"]);
-var FindingIdSchema = z38.string().regex(/^f-[a-f0-9]{10}$/);
-var HeadShaSchema2 = z38.string().regex(/^[a-f0-9]{40}$/);
-var ReviewPathSchema = z38.string().max(400).regex(/^(?!\/)(?!.*\\)(?!.*(?:^|\/)\.{1,2}(?:\/|$))[^\p{Cc}]*$/u);
-var TextSchema = z38.string().min(1).max(16e3);
-var LineTextSchema = z38.string().min(1).max(400).regex(/^[^\r\n]+$/);
-var PositiveIdSchema = z38.number().int().positive().max(Number.MAX_SAFE_INTEGER);
-var HttpsUrlSchema = z38.url().regex(/^https:\/\//);
-var CategorySchema = z38.enum([
-  "security",
-  "correctness",
-  "data",
-  "deployment",
-  "design",
-  "testing",
-  "performance",
-  "readability",
-  "docs"
-]);
-var ActionLabelSchema = z38.enum([
-  "issue",
-  "todo",
-  "suggestion",
-  "question",
-  "chore",
-  "nitpick",
-  "typo",
-  "polish"
-]);
-var InformationLabelSchema = z38.enum(["praise", "note", "thought"]);
-var SeveritySchema = z38.enum(["critical", "major", "minor", "trivial"]);
-var DecisionOptionsSchema = z38.array(
-  z38.strictObject({ id: z38.string().regex(/^[a-z][a-z0-9-]{0,79}$/), description: TextSchema })
-).min(2);
-var findingFields = {
-  path: ReviewPathSchema,
-  line: z38.number().int().nonnegative(),
-  start_line: z38.number().int().positive().optional(),
-  category: CategorySchema.optional(),
-  subject: LineTextSchema,
-  discussion: TextSchema,
-  related_finding_id: FindingIdSchema.optional()
-};
-var actionFields = {
-  ...findingFields,
-  label: ActionLabelSchema,
-  type: z38.enum(["fix", "clarify"]),
-  blocking: z38.boolean(),
-  severity: SeveritySchema,
-  details: TextSchema,
-  resolved_when: TextSchema
-};
-var decisionFields = {
-  ...actionFields,
-  type: z38.literal("decide"),
-  decision_owner: LineTextSchema,
-  decision_options: DecisionOptionsSchema
-};
-var informationFields = {
-  ...findingFields,
-  label: InformationLabelSchema,
-  blocking: z38.literal(false),
-  details: TextSchema.optional()
-};
-var NewFindingSchema = z38.union([
-  z38.strictObject(actionFields),
-  z38.strictObject(decisionFields),
-  z38.strictObject(informationFields)
-]);
-var ActionableFindingSchema = z38.union([
-  z38.strictObject({ ...actionFields, id: FindingIdSchema }),
-  z38.strictObject({ ...decisionFields, id: FindingIdSchema })
-]);
-var StoredFindingSchema = z38.union([
-  ...ActionableFindingSchema.options,
-  z38.strictObject({ ...informationFields, id: FindingIdSchema })
-]);
-var ReviewEvidenceSchema = z38.discriminatedUnion("kind", [
-  z38.strictObject({
-    kind: z38.literal("github_comment"),
-    comment_id: PositiveIdSchema,
-    url: HttpsUrlSchema
-  }),
-  z38.strictObject({
-    kind: z38.literal("code"),
-    commit_sha: HeadShaSchema2,
-    path: ReviewPathSchema.min(1),
-    line: z38.number().int().positive()
-  }),
-  z38.strictObject({ kind: z38.literal("commit"), sha: HeadShaSchema2 }),
-  z38.strictObject({
-    kind: z38.literal("check_run"),
-    check_run_id: PositiveIdSchema,
-    commit_sha: HeadShaSchema2
-  }),
-  z38.strictObject({ kind: z38.literal("document"), url: HttpsUrlSchema }),
-  z38.strictObject({
-    kind: z38.literal("verification"),
-    commit_sha: HeadShaSchema2,
-    command: TextSchema,
-    result: z38.literal("passed"),
-    report_url: HttpsUrlSchema
-  }),
-  z38.strictObject({
-    kind: z38.literal("thread_resolution"),
-    thread_id: z38.string().min(1),
-    author_id: PositiveIdSchema
-  })
-]);
-var DecisionAnswerSchema = z38.strictObject({
-  comment_id: PositiveIdSchema,
-  author_id: PositiveIdSchema,
-  option_id: z38.string().min(1)
-});
-var transitionFields = {
-  id: FindingIdSchema,
-  reason: TextSchema,
-  reply: TextSchema.optional(),
-  decision: DecisionAnswerSchema.optional()
-};
-var PriorFindingSchema = z38.union([
-  z38.strictObject({
-    ...transitionFields,
-    status: z38.literal("resolved"),
-    evidence: z38.array(ReviewEvidenceSchema).min(1)
-  }),
-  z38.strictObject({
-    ...transitionFields,
-    status: z38.literal("withdrawn"),
-    evidence: z38.array(ReviewEvidenceSchema).min(1),
-    withdrawal_basis: z38.enum(["incorrect", "no_longer_applicable", "dismissed"])
-  }),
-  z38.strictObject({
-    ...transitionFields,
-    status: z38.literal("still_open"),
-    evidence: z38.array(ReviewEvidenceSchema).optional(),
-    updated_finding: ActionableFindingSchema.optional()
-  })
-]);
-var reviewFields = {
-  contract_version: z38.literal(reviewContractVersion),
-  schema_revision: z38.literal(reviewSchemaRevision),
-  head_sha: HeadShaSchema2,
-  review_complete: z38.boolean(),
-  incomplete_reason: z38.string().max(16e3).optional(),
-  summary: TextSchema,
-  outcome: ReviewOutcomeSchema,
-  outcome_reason: TextSchema,
-  remaining_risk: TextSchema,
-  extensions: z38.record(z38.string(), z38.json()).optional()
-};
-var ReviewSchema = z38.strictObject({
-  ...reviewFields,
-  findings: z38.array(NewFindingSchema),
-  prior_findings: z38.array(PriorFindingSchema)
-});
-var FindingRecordSchema = z38.strictObject({
-  v: z38.literal(reviewContractVersion),
-  schema_revision: z38.literal(reviewSchemaRevision),
-  finding: ActionableFindingSchema,
-  status: z38.enum(["open", "resolved", "withdrawn"]),
-  evidence: z38.array(ReviewEvidenceSchema),
-  decision: DecisionAnswerSchema.optional()
-});
-var ReviewStateSchema = z38.strictObject({
-  v: z38.literal(reviewContractVersion),
-  schema_revision: z38.literal(reviewSchemaRevision),
-  sha: HeadShaSchema2,
-  outcome: ReviewOutcomeSchema,
-  records: z38.array(
-    z38.union([
-      z38.strictObject({
-        id: FindingIdSchema,
-        status: z38.enum(["open", "resolved", "withdrawn"]),
-        location: z38.union([
-          z38.strictObject({ kind: z38.literal("review_comment"), comment_id: PositiveIdSchema }),
-          z38.strictObject({ kind: z38.literal("review_body"), review_id: PositiveIdSchema })
-        ])
-      }),
-      z38.strictObject({
-        id: FindingIdSchema,
-        status: z38.literal("informational"),
-        fingerprint: z38.string().min(1),
-        finding: z38.strictObject({ ...informationFields, id: FindingIdSchema }).optional()
-      })
-    ])
-  )
-});
-var TransportReviewSchema = z38.strictObject({
-  ...reviewFields,
-  findings: z38.array(
-    z38.strictObject({
-      ...actionFields,
-      type: z38.enum(["fix", "clarify", "decide"]).optional(),
-      label: z38.enum([...ActionLabelSchema.options, ...InformationLabelSchema.options]),
-      severity: SeveritySchema.optional(),
-      details: TextSchema.optional(),
-      resolved_when: TextSchema.optional(),
-      decision_owner: LineTextSchema.optional(),
-      decision_options: DecisionOptionsSchema.optional()
-    })
-  ),
-  prior_findings: z38.array(
-    z38.strictObject({
-      ...transitionFields,
-      status: z38.enum(["resolved", "still_open", "withdrawn"]),
-      evidence: z38.array(ReviewEvidenceSchema).optional(),
-      withdrawal_basis: z38.enum(["incorrect", "no_longer_applicable", "dismissed"]).optional(),
-      updated_finding: StoredFindingSchema.optional()
-    })
-  )
-});
-
-// src/code-review/review-policy.ts
-var ReviewPolicyPropsSchema = z39.strictObject({
-  home: z39.string().min(1).optional(),
-  env: z39.custom(
+import { z as z41 } from "zod";
+var ReviewPolicyPropsSchema = z41.strictObject({
+  home: z41.string().min(1).optional(),
+  env: z41.custom(
     (value) => typeof value === "object" && value !== null && !Array.isArray(value)
   ).optional()
 });
-var LoadPolicyPropsSchema = z39.strictObject({ paths: z39.array(z39.string()).optional() });
-var RepositoryContextPropsSchema = z39.strictObject({
-  cwd: z39.string().min(1),
-  trustedRef: HeadShaSchema2,
+var LoadPolicyPropsSchema = z41.strictObject({ paths: z41.array(z41.string()).optional() });
+var RepositoryContextPropsSchema = z41.strictObject({
+  cwd: z41.string().min(1),
+  trustedRef: HeadShaSchema,
   contextPath: ReviewPathSchema.min(1).default("CODE-REVIEW.md")
 });
 var FileReviewPolicy = class {
@@ -7077,10 +7409,10 @@ var ReviewPolicyError = class extends Error {
 // src/code-review/github-review-verifier.ts
 import { execFile as execFile6 } from "node:child_process";
 import { promisify as promisify6 } from "node:util";
-import { z as z40 } from "zod";
-var GhReviewGitHubApiPropsSchema = z40.strictObject({
-  cwd: z40.string().min(1).optional(),
-  env: z40.custom(
+import { z as z42 } from "zod";
+var GhReviewGitHubApiPropsSchema = z42.strictObject({
+  cwd: z42.string().min(1).optional(),
+  env: z42.custom(
     (value) => typeof value === "object" && value !== null && !Array.isArray(value)
   ).optional()
 });
@@ -7116,20 +7448,20 @@ var GhReviewGitHubApi = class {
     return JSON.parse(stdout);
   }
 };
-var GitHubReviewVerifierPropsSchema = z40.strictObject({
-  repo: z40.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
-  prNumber: z40.number().int().positive(),
-  prAuthorId: z40.number().int().positive(),
-  owners: z40.record(z40.string(), z40.array(z40.string().min(1))).default({}),
-  requireMapping: z40.boolean().default(false)
+var GitHubReviewVerifierPropsSchema = z42.strictObject({
+  repo: z42.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
+  prNumber: z42.number().int().positive(),
+  prAuthorId: z42.number().int().positive(),
+  owners: z42.record(z42.string(), z42.array(z42.string().min(1))).default({}),
+  requireMapping: z42.boolean().default(false)
 });
-var UserSchema = z40.looseObject({ id: z40.number(), login: z40.string(), type: z40.string() });
-var CommentSchema2 = z40.looseObject({
-  id: z40.number(),
+var UserSchema = z42.looseObject({ id: z42.number(), login: z42.string(), type: z42.string() });
+var CommentSchema2 = z42.looseObject({
+  id: z42.number(),
   user: UserSchema,
-  issue_url: z40.string().optional(),
-  pull_request_url: z40.string().optional(),
-  body: z40.string()
+  issue_url: z42.string().optional(),
+  pull_request_url: z42.string().optional(),
+  body: z42.string()
 });
 var GitHubReviewVerifier = class {
   props;
@@ -7150,10 +7482,10 @@ var GitHubReviewVerifier = class {
     if (evidence.kind === "commit") return this.reaches(evidence.sha, headSha);
     if (evidence.kind === "check_run") {
       if (evidence.commit_sha !== headSha) return false;
-      const check = z40.looseObject({
-        head_sha: z40.string(),
-        status: z40.string(),
-        conclusion: z40.string().nullable()
+      const check = z42.looseObject({
+        head_sha: z42.string(),
+        status: z42.string(),
+        conclusion: z42.string().nullable()
       }).parse(await this.api.get(`/repos/${this.props.repo}/check-runs/${evidence.check_run_id}`));
       return check.head_sha === headSha && check.status === "completed" && check.conclusion === "success";
     }
@@ -7170,7 +7502,7 @@ var GitHubReviewVerifier = class {
     if (owners !== void 0)
       return owners.some((login) => login.toLowerCase() === comment.user.login.toLowerCase());
     if (this.props.requireMapping || comment.user.id === this.props.prAuthorId) return false;
-    const permission = z40.looseObject({ permission: z40.string() }).parse(
+    const permission = z42.looseObject({ permission: z42.string() }).parse(
       await this.api.get(
         `/repos/${this.props.repo}/collaborators/${encodeURIComponent(comment.user.login)}/permission`
       )
@@ -7180,14 +7512,14 @@ var GitHubReviewVerifier = class {
   async dismissal(evidence) {
     if (evidence.kind !== "thread_resolution" || evidence.author_id === this.props.prAuthorId)
       return false;
-    const result = z40.looseObject({
-      data: z40.looseObject({
-        node: z40.looseObject({
-          isResolved: z40.boolean(),
-          resolvedBy: z40.looseObject({ databaseId: z40.number(), actorType: z40.string() }).nullable(),
-          pullRequest: z40.looseObject({
-            number: z40.number(),
-            repository: z40.looseObject({ nameWithOwner: z40.string() })
+    const result = z42.looseObject({
+      data: z42.looseObject({
+        node: z42.looseObject({
+          isResolved: z42.boolean(),
+          resolvedBy: z42.looseObject({ databaseId: z42.number(), actorType: z42.string() }).nullable(),
+          pullRequest: z42.looseObject({
+            number: z42.number(),
+            repository: z42.looseObject({ nameWithOwner: z42.string() })
           })
         }).nullable()
       })
@@ -7203,12 +7535,12 @@ var GitHubReviewVerifier = class {
   /** True when `sha` is the head or an ancestor of it, so the head contains that commit. */
   async reaches(sha, headSha) {
     if (sha === headSha) return true;
-    const comparison = z40.looseObject({ status: z40.string() }).parse(await this.api.get(`/repos/${this.props.repo}/compare/${sha}...${headSha}`));
+    const comparison = z42.looseObject({ status: z42.string() }).parse(await this.api.get(`/repos/${this.props.repo}/compare/${sha}...${headSha}`));
     return ["ahead", "identical"].includes(comparison.status);
   }
   /** True when `ref` has `path` as a file with at least `line` lines. */
   async hasLine(path, line, ref) {
-    const file = z40.looseObject({ type: z40.string(), encoding: z40.string(), content: z40.string() }).parse(
+    const file = z42.looseObject({ type: z42.string(), encoding: z42.string(), content: z42.string() }).parse(
       await this.api.get(
         `/repos/${this.props.repo}/contents/${path.split("/").map(encodeURIComponent).join("/")}?ref=${ref}`
       )
@@ -7242,103 +7574,14 @@ var GitHubReviewVerifier = class {
 
 // src/code-review/review-planner.ts
 import { randomBytes as randomBytes2 } from "node:crypto";
-import { z as z42 } from "zod";
-
-// src/code-review/review-contract.ts
-import { z as z41 } from "zod";
-var InvalidReviewError = class extends Error {
-  name = "InvalidReviewError";
-};
-var ZodReviewContract = class {
-  parse(value) {
-    const result = ReviewSchema.parse(value);
-    const ids = result.prior_findings.map((finding) => finding.id);
-    if (new Set(ids).size !== ids.length)
-      throw new InvalidReviewError("duplicate prior finding IDs");
-    if (!result.review_complete && !result.incomplete_reason?.trim()) {
-      throw new InvalidReviewError("an incomplete review must explain what could not be reviewed");
-    }
-    const findings = result.findings.map((finding) => this.normalize(finding));
-    const priorFindings = result.prior_findings.map((transition) => {
-      if (transition.status !== "still_open") return transition;
-      if ((transition.decision !== void 0 || transition.updated_finding !== void 0) && !transition.evidence?.length) {
-        throw new InvalidReviewError(`transition ${transition.id} requires evidence`);
-      }
-      if (transition.updated_finding === void 0) return transition;
-      if (transition.id !== transition.updated_finding.id)
-        throw new InvalidReviewError("a replacement must preserve the finding ID");
-      return {
-        ...transition,
-        updated_finding: this.normalizeActionable(transition.updated_finding)
-      };
-    });
-    for (const transition of priorFindings) {
-      if (transition.decision !== void 0 && !transition.evidence?.some(
-        (evidence) => evidence.kind === "github_comment" && evidence.comment_id === transition.decision?.comment_id
-      )) {
-        throw new InvalidReviewError(
-          `decision ${transition.id} must reference its human comment in evidence`
-        );
-      }
-    }
-    return { ...result, findings, prior_findings: priorFindings };
-  }
-  record(value) {
-    const result = FindingRecordSchema.parse(value);
-    if (result.status !== "open" && result.evidence.length === 0)
-      throw new InvalidReviewError("closed records require evidence");
-    return { ...result, finding: this.normalizeActionable(result.finding) };
-  }
-  state(value) {
-    const result = ReviewStateSchema.parse(value);
-    const ids = result.records.map((record) => record.id);
-    if (new Set(ids).size !== ids.length)
-      throw new InvalidReviewError("duplicate finding IDs in state");
-    for (const record of result.records) {
-      if (record.status === "informational" && record.finding !== void 0 && record.id !== record.finding.id) {
-        throw new InvalidReviewError("informational index ID does not match its finding");
-      }
-    }
-    return result;
-  }
-  schemas() {
-    return {
-      full: z41.toJSONSchema(ReviewSchema, { target: "draft-07" }),
-      transport: z41.toJSONSchema(TransportReviewSchema, { target: "draft-07" })
-    };
-  }
-  normalize(finding) {
-    this.checkRange(finding);
-    if (!("type" in finding)) return finding;
-    if (finding.type === "decide") this.checkOptions(finding);
-    const blocking = finding.blocking || finding.severity === "critical" || finding.severity === "major";
-    const label = blocking && ["nitpick", "typo", "polish"].includes(finding.label) ? "issue" : finding.label;
-    return { ...finding, blocking, label };
-  }
-  normalizeActionable(finding) {
-    return ActionableFindingSchema.parse({ ...this.normalize(finding), id: finding.id });
-  }
-  checkRange(finding) {
-    if (finding.start_line !== void 0 && (finding.line === 0 || finding.start_line > finding.line)) {
-      throw new InvalidReviewError("start_line must not exceed a positive line anchor");
-    }
-  }
-  checkOptions(finding) {
-    const ids = finding.decision_options.map((option) => option.id);
-    if (new Set(ids).size !== ids.length)
-      throw new InvalidReviewError("decision option IDs must be unique");
-  }
-};
-var reviewContract = new ZodReviewContract();
-
-// src/code-review/review-planner.ts
+import { z as z43 } from "zod";
 var EvidenceReviewPlanner = class {
   verifier;
   constructor(props) {
     this.verifier = props.verifier;
   }
   async plan(input) {
-    const headSha = HeadShaSchema2.parse(input.headSha);
+    const headSha = HeadShaSchema.parse(input.headSha);
     const review = reviewContract.parse(input.review);
     const records = input.records.map((record) => reviewContract.record(record));
     const known = new Map(records.map((record) => [record.finding.id, record]));
@@ -7470,93 +7713,16 @@ var EvidenceReviewPlanner = class {
     return "APPROVED";
   }
 };
-var ValidatedEvidencePropsSchema = z42.strictObject({
-  verified: z42.array(z42.string()),
-  authorizedDecisions: z42.array(z42.string()),
-  dismissals: z42.array(z42.string())
+var ValidatedEvidencePropsSchema = z43.strictObject({
+  verified: z43.array(z43.string()),
+  authorizedDecisions: z43.array(z43.string()),
+  dismissals: z43.array(z43.string())
 });
-
-// src/code-review/review-codec.ts
-import { createHash as createHash2 } from "node:crypto";
-import { z as z43 } from "zod";
-var MarkerInputSchema = z43.strictObject({
-  body: z43.string(),
-  authorId: z43.number().int().positive(),
-  trustedAuthorIds: z43.array(z43.number().int().positive())
-});
-var JsonReviewCodec = class {
-  finding(record) {
-    return this.marker("finding", reviewContract.record(record));
-  }
-  state(state) {
-    return this.marker("state", reviewContract.state(state));
-  }
-  readFindings(input) {
-    const parsed = MarkerInputSchema.parse(input);
-    if (!parsed.trustedAuthorIds.includes(parsed.authorId)) return [];
-    return this.readMarkers(parsed.body, "finding").map((value) => reviewContract.record(value));
-  }
-  readState(input) {
-    const parsed = MarkerInputSchema.parse(input);
-    if (!parsed.trustedAuthorIds.includes(parsed.authorId)) return void 0;
-    const states = this.readMarkers(parsed.body, "state");
-    if (states.length > 1)
-      throw new InvalidReviewError("multiple review state markers in one summary");
-    return states.length === 0 ? void 0 : reviewContract.state(states[0]);
-  }
-  render(record) {
-    const validated = reviewContract.record(record);
-    const finding = validated.finding;
-    const decorations = [
-      ...["nitpick", "typo", "polish"].includes(finding.label) ? [] : [finding.blocking ? "blocking" : "non-blocking"],
-      finding.type
-    ];
-    if (finding.category !== void 0) decorations.push(finding.category);
-    const owner = finding.type === "decide" ? `
-
-**Decision owner:** ${finding.decision_owner}
-**Decision options:** ${finding.decision_options.map((option) => `\`${option.id}\`: ${option.description}`).join("; ")}` : "";
-    return `**${finding.label} (${decorations.join(", ")}):** ${finding.subject}
-
-${finding.discussion}
-
-<details>
-<summary>Details For LLM</summary>
-
-${finding.details}${owner}
-
-**Resolved when:** ${finding.resolved_when}
-</details>
-
-${this.finding(validated)}`;
-  }
-  fingerprint(finding) {
-    return createHash2("sha256").update(`${finding.path}|${finding.label}|${finding.subject.trim().toLowerCase()}`).digest("hex");
-  }
-  marker(kind, value) {
-    return `<!-- code-review:${kind} ${JSON.stringify(value).replaceAll(">", "\\u003e")} -->`;
-  }
-  readMarkers(body, kind) {
-    const prefix = `<!-- code-review:${kind} `;
-    const matches = [...body.matchAll(new RegExp(`${prefix}([\\s\\S]*?) -->`, "g"))];
-    if (body.split(prefix).length - 1 !== matches.length)
-      throw new InvalidReviewError("unterminated review marker");
-    return matches.map((match) => {
-      try {
-        return JSON.parse(match[1] ?? "");
-      } catch {
-        throw new InvalidReviewError(
-          "review marker contains invalid JSON; recover state before approving"
-        );
-      }
-    });
-  }
-};
 
 // src/operations/review-operations.ts
 var ReviewOperationsLaunchPropsSchema = z44.strictObject({
   cwd: z44.string().min(1).optional(),
-  trustedRef: HeadShaSchema2.optional(),
+  trustedRef: HeadShaSchema.optional(),
   owners: z44.record(z44.string(), z44.array(z44.string().min(1))).default({}),
   requireMapping: z44.boolean().default(false)
 });
@@ -7582,7 +7748,7 @@ var contextInput = z44.strictObject({
   contextPath: z44.string().min(1).default("CODE-REVIEW.md")
 });
 var contextOutput = z44.object({
-  trustedRef: HeadShaSchema2,
+  trustedRef: HeadShaSchema,
   contextPath: z44.string(),
   sources: z44.array(z44.object({ path: z44.string(), contents: z44.string() })),
   missing: z44.array(z44.string())
@@ -7724,7 +7890,7 @@ var DefaultReviewOperations = class {
         planOutput,
         async ({ number, repo, review, records }) => {
           const pullRequest = z44.looseObject({
-            head: z44.looseObject({ sha: HeadShaSchema2 }),
+            head: z44.looseObject({ sha: HeadShaSchema }),
             user: z44.looseObject({ id: z44.number().int().positive() })
           }).parse(await this.api.get(`/repos/${repo}/pulls/${number}`));
           const planner = new EvidenceReviewPlanner({
@@ -9973,6 +10139,18 @@ var FileAgentRegistry = class {
 import { stringify as stringifyYaml3 } from "yaml";
 import { z as z53 } from "zod";
 
+// src/sdk/claude-builtin-tools.ts
+var StandardClaudeBuiltInToolCatalog = class {
+  toolsFor(capability) {
+    if (capability === "read") return ["Glob", "Grep", "Read"];
+    if (capability === "edit") return ["Write", "Edit"];
+    if (capability === "shell") return ["Bash"];
+    if (capability === "web") return ["WebSearch", "WebFetch"];
+    return [];
+  }
+};
+var claudeBuiltInTools = new StandardClaudeBuiltInToolCatalog();
+
 // src/agents/agent-emitter/agent-emitter.ts
 var UnsupportedAgentSettingError = class extends Error {
   name = "UnsupportedAgentSettingError";
@@ -10003,11 +10181,10 @@ ${stringifyYaml3(native, { lineWidth: 0 })}---
 ${body}`;
   }
   tools(capability) {
-    if (capability === "read") return ["Glob", "Grep", "Read"];
-    if (capability === "edit") return ["Write", "Edit"];
-    if (capability === "shell") return ["Bash"];
-    if (capability === "web") return ["WebSearch", "WebFetch"];
-    throw new UnsupportedAgentSettingError(`Worker agent capability ${capability} needs an orchestration adapter`);
+    if (capability === "spawn" || capability === "ask") {
+      throw new UnsupportedAgentSettingError(`Worker agent capability ${capability} needs an orchestration adapter`);
+    }
+    return claudeBuiltInTools.toolsFor(capability);
   }
 };
 

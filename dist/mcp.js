@@ -1909,6 +1909,11 @@ var JsonReviewCodec = class {
       throw new InvalidReviewError("multiple review state markers in one summary");
     return states.length === 0 ? void 0 : reviewContract.state(states[0]);
   }
+  parseFinding(body) {
+    const markers = this.readMarkers(body, "finding");
+    if (markers.length > 1) throw new InvalidReviewError("multiple finding markers in one comment");
+    return markers.length === 0 ? null : reviewContract.record(markers[0]);
+  }
   render(record) {
     const validated = reviewContract.record(record);
     const finding = validated.finding;
@@ -4013,6 +4018,48 @@ var reviewInput2 = z28.strictObject({
   number: z28.number().int().positive(),
   reviewer: z28.array(z28.string().min(1)).min(1)
 });
+var threadsInput = z28.strictObject({
+  number: z28.number().int().positive(),
+  trustedAuthors: z28.array(z28.string().min(1)).default([])
+});
+var threadReplyInput = z28.strictObject({
+  threadId: z28.string().min(1),
+  body: z28.string().min(1)
+});
+var threadReplyResultSchema = z28.strictObject({ id: z28.string(), url: z28.string() });
+var threadCommentSchema = z28.strictObject({
+  id: z28.string(),
+  url: z28.string(),
+  authorLogin: z28.string(),
+  authorType: z28.enum(["User", "Bot"]),
+  body: z28.string(),
+  createdAt: z28.string()
+});
+var reviewThreadSchema = z28.strictObject({
+  id: z28.string(),
+  path: z28.string(),
+  line: z28.number().nullable(),
+  originalLine: z28.number().nullable(),
+  isResolved: z28.boolean(),
+  isOutdated: z28.boolean(),
+  commentsTruncated: z28.boolean(),
+  comments: z28.array(threadCommentSchema),
+  finding: FindingRecordSchema.nullable(),
+  markerError: z28.string().nullable()
+});
+var pullRequestThreadsSchema = z28.strictObject({
+  pullRequest: z28.strictObject({
+    number: z28.number(),
+    url: z28.string(),
+    title: z28.string(),
+    body: z28.string(),
+    headRefName: z28.string(),
+    headRefOid: z28.string(),
+    baseRefName: z28.string(),
+    authorLogin: z28.string()
+  }),
+  threads: z28.array(reviewThreadSchema)
+});
 var createdSchema = z28.object({ number: z28.number().int().positive(), url: z28.string().url() });
 var commentResultSchema = z28.object({ url: z28.string() });
 var openPullRequestSchema = z28.object({
@@ -4072,6 +4119,8 @@ var DefaultPrOperations = class {
         return this.getHost().commentOnPullRequest(input.number, input.body, { attach: input.attach });
       }),
       this.descriptor("pr-list", "List open pull requests matched to ticket identifiers.", ["read", "network", "process"], ["pr", "list"], listInput, z28.array(openPullRequestSchema), (input) => this.getHost().listOpenPullRequestsForTickets(input.ticket)),
+      this.descriptor("pr-threads", "List a pull request's review threads with trusted finding markers.", ["read", "network", "process"], ["pr", "threads"], threadsInput, pullRequestThreadsSchema, (input) => this.getHost().listReviewThreads(input.number, { trustedAuthors: input.trustedAuthors })),
+      this.descriptor("pr-thread-reply", "Reply in an existing pull request review thread.", ["write", "network", "process"], ["pr", "thread-reply"], threadReplyInput, threadReplyResultSchema, (input) => this.getHost().replyToReviewThread(input.threadId, input.body)),
       this.descriptor("pr-request-review", "Request reviewers for a pull request and preserve each outcome.", effects, ["pr", "request-review"], reviewInput2, reviewerResultSchema, async (input) => {
         const result = await this.getHost().requestReviewers(input.number, input.reviewer);
         if (result.failed.length > 0) {
@@ -4298,6 +4347,77 @@ var GhPullRequestListSchema = z30.array(
     title: z30.string()
   })
 );
+var reviewThreadsQuery = `query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      number url title body headRefName headRefOid baseRefName
+      author { login }
+      reviewThreads(first: 100, after: $endCursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id isResolved isOutdated path line originalLine
+          comments(first: 100) {
+            totalCount
+            nodes { id url body createdAt author { type: __typename login } }
+          }
+        }
+      }
+    }
+  }
+}`;
+var replyToReviewThreadMutation = `mutation($id: ID!, $body: String!) {
+  addPullRequestReviewThreadReply(input: {pullRequestReviewThreadId: $id, body: $body}) {
+    comment { id url }
+  }
+}`;
+var GhReplyToReviewThreadSchema = z30.object({
+  data: z30.object({
+    addPullRequestReviewThreadReply: z30.object({
+      comment: z30.object({ id: z30.string(), url: z30.string() })
+    })
+  })
+});
+var GhReviewThreadsPageSchema = z30.object({
+  data: z30.object({
+    repository: z30.object({
+      pullRequest: z30.object({
+        number: z30.number(),
+        url: z30.string(),
+        title: z30.string(),
+        body: z30.string(),
+        headRefName: z30.string(),
+        headRefOid: z30.string(),
+        baseRefName: z30.string(),
+        author: z30.object({ login: z30.string() }).nullable(),
+        reviewThreads: z30.object({
+          pageInfo: z30.object({ hasNextPage: z30.boolean(), endCursor: z30.string().nullable() }),
+          nodes: z30.array(
+            z30.object({
+              id: z30.string(),
+              isResolved: z30.boolean(),
+              isOutdated: z30.boolean(),
+              path: z30.string(),
+              line: z30.number().nullable(),
+              originalLine: z30.number().nullable(),
+              comments: z30.object({
+                totalCount: z30.number(),
+                nodes: z30.array(
+                  z30.object({
+                    id: z30.string(),
+                    url: z30.string(),
+                    body: z30.string(),
+                    createdAt: z30.string(),
+                    author: z30.object({ type: z30.string(), login: z30.string() }).nullable()
+                  })
+                )
+              })
+            })
+          )
+        })
+      })
+    })
+  })
+});
 var pullUrl = /\/pull\/(\d+)\b/;
 var GhOutputParseError = class extends Error {
   name = "GhOutputParseError";
@@ -4308,11 +4428,13 @@ var GhOutputParseError = class extends Error {
 var GhPullRequestHost = class {
   repo;
   builder;
+  codec;
   execFile;
   constructor(props) {
     const parsed = GhPullRequestHostPropsSchema.parse(props);
     this.repo = parsed.repo;
     this.builder = props.builder ?? new DefaultPullRequestBuilder();
+    this.codec = new JsonReviewCodec();
     const promisified = promisify4(execFile4);
     const cwd = parsed.cwd ?? process.cwd();
     const env = { ...props.env ?? process.env };
@@ -4395,6 +4517,94 @@ var GhPullRequestHost = class {
       }
     }
     return result;
+  }
+  async listReviewThreads(number, options) {
+    const [owner = "", name = ""] = this.repo.split("/");
+    let first;
+    const nodes = [];
+    let cursor;
+    for (; ; ) {
+      const { stdout } = await this.execFile("gh", [
+        "api",
+        "graphql",
+        "-f",
+        `query=${reviewThreadsQuery}`,
+        "-f",
+        `owner=${owner}`,
+        "-f",
+        `name=${name}`,
+        "-F",
+        `number=${number}`,
+        ...cursor === void 0 ? [] : ["-f", `endCursor=${cursor}`]
+      ]);
+      const { reviewThreads, ...header } = GhReviewThreadsPageSchema.parse(JSON.parse(stdout)).data.repository.pullRequest;
+      first ??= { ...header, reviewThreads };
+      nodes.push(...reviewThreads.nodes);
+      if (!reviewThreads.pageInfo.hasNextPage || reviewThreads.pageInfo.endCursor === null) break;
+      cursor = reviewThreads.pageInfo.endCursor;
+    }
+    const trusted = new Set(options.trustedAuthors);
+    return {
+      pullRequest: {
+        number: first.number,
+        url: first.url,
+        title: first.title,
+        body: first.body,
+        headRefName: first.headRefName,
+        headRefOid: first.headRefOid,
+        baseRefName: first.baseRefName,
+        authorLogin: first.author?.login ?? "ghost"
+      },
+      threads: nodes.map((node) => this.toReviewThread(node, trusted))
+    };
+  }
+  async replyToReviewThread(threadId, body) {
+    const { stdout } = await this.withBodyFile(
+      body,
+      (bodyFile) => this.execFile("gh", [
+        "api",
+        "graphql",
+        "-f",
+        `query=${replyToReviewThreadMutation}`,
+        "-f",
+        `id=${threadId}`,
+        "-F",
+        `body=@${bodyFile}`
+      ])
+    );
+    return GhReplyToReviewThreadSchema.parse(JSON.parse(stdout)).data.addPullRequestReviewThreadReply.comment;
+  }
+  toReviewThread(node, trusted) {
+    const comments = node.comments.nodes.map((comment) => ({
+      id: comment.id,
+      url: comment.url,
+      authorLogin: (comment.author?.login ?? "ghost").replace(/\[bot\]$/, ""),
+      authorType: comment.author?.type === "Bot" ? "Bot" : "User",
+      body: comment.body,
+      createdAt: comment.createdAt
+    }));
+    const root = comments[0];
+    let finding = null;
+    let markerError = null;
+    if (root !== void 0 && trusted.has(root.authorType === "Bot" ? `${root.authorLogin}[bot]` : root.authorLogin)) {
+      try {
+        finding = this.codec.parseFinding(root.body);
+      } catch (err) {
+        markerError = err instanceof Error ? err.message : String(err);
+      }
+    }
+    return {
+      id: node.id,
+      path: node.path,
+      line: node.line,
+      originalLine: node.originalLine,
+      isResolved: node.isResolved,
+      isOutdated: node.isOutdated,
+      commentsTruncated: node.comments.totalCount > node.comments.nodes.length,
+      comments,
+      finding,
+      markerError
+    };
   }
   describeFailure(err) {
     const stderr = this.readStringProperty(err, "stderr")?.trim();
@@ -10159,15 +10369,28 @@ var InstructionsUnavailableError = class extends Error {
 var UnsafeInstructionPathError = class extends Error {
   name = "UnsafeInstructionPathError";
 };
+var ModulePackageHomeLocator = class {
+  locate(props) {
+    const parsed = CatalogPropsSchema.parse({ ...props, env: { ...props.env } });
+    const override = parsed.env["FLIGHT_RULES_HOME"]?.trim();
+    if (override) return override;
+    const moduleDirectory = dirname14(fileURLToPath4(parsed.moduleUrl));
+    if (basename5(moduleDirectory) === "sdk") return resolve12(moduleDirectory, "../..");
+    const bindingParent = dirname14(moduleDirectory);
+    if (basename5(bindingParent) === "sdk" && basename5(dirname14(bindingParent)) === "src") {
+      return resolve12(moduleDirectory, "../../..");
+    }
+    return resolve12(moduleDirectory, "..");
+  }
+};
+var packageHomeLocator = new ModulePackageHomeLocator();
 var FileInstructionCatalog = class {
   skillDir;
   agentDir;
   agents;
   constructor(props) {
     const parsed = CatalogPropsSchema.parse({ ...props, env: { ...props.env } });
-    const override = parsed.env["FLIGHT_RULES_HOME"]?.trim();
-    const moduleDirectory = dirname14(fileURLToPath4(parsed.moduleUrl));
-    const home = override || resolve12(moduleDirectory, basename5(moduleDirectory) === "sdk" ? "../.." : "..");
+    const home = packageHomeLocator.locate(parsed);
     this.skillDir = this.findResourceDirectory(home, ["skills"]);
     this.agentDir = this.findResourceDirectory(home, [
       "bin/resources/agents",

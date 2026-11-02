@@ -41,6 +41,11 @@ const threadsInput = z.strictObject({
   number: z.number().int().positive(),
   trustedAuthors: z.array(z.string().min(1)).default([]),
 });
+const threadReplyInput = z.strictObject({
+  threadId: z.string().min(1),
+  body: z.string().min(1),
+});
+const threadReplyResultSchema = z.strictObject({ id: z.string(), url: z.string() });
 const threadCommentSchema = z.strictObject({
   id: z.string(),
   url: z.string(),
@@ -143,6 +148,7 @@ export class DefaultPrOperations implements PrOperations {
       }),
       this.descriptor("pr-list", "List open pull requests matched to ticket identifiers.", ["read", "network", "process"], ["pr", "list"], listInput, z.array(openPullRequestSchema), (input) => this.getHost().listOpenPullRequestsForTickets(input.ticket)),
       this.descriptor("pr-threads", "List a pull request's review threads with trusted finding markers.", ["read", "network", "process"], ["pr", "threads"], threadsInput, pullRequestThreadsSchema, (input) => this.getHost().listReviewThreads(input.number, { trustedAuthors: input.trustedAuthors })),
+      this.descriptor("pr-thread-reply", "Reply in an existing pull request review thread.", ["write", "network", "process"], ["pr", "thread-reply"], threadReplyInput, threadReplyResultSchema, (input) => this.getHost().replyToReviewThread(input.threadId, input.body)),
       this.descriptor("pr-request-review", "Request reviewers for a pull request and preserve each outcome.", effects, ["pr", "request-review"], reviewInput, reviewerResultSchema, async (input) => {
         const result = await this.getHost().requestReviewers(input.number, input.reviewer);
         if (result.failed.length > 0) {

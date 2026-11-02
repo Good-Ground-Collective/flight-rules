@@ -22,6 +22,7 @@ import type {
   ReviewerRequestResult,
   ReviewThread,
   ReviewThreadComment,
+  ReviewThreadReply,
 } from './pull-request-host.js'
 
 type ExecFileFn = (file: string, args: readonly string[]) => Promise<{ stdout: string; stderr: string }>
@@ -68,6 +69,20 @@ const reviewThreadsQuery = `query($owner: String!, $name: String!, $number: Int!
     }
   }
 }`
+
+const replyToReviewThreadMutation = `mutation($id: ID!, $body: String!) {
+  addPullRequestReviewThreadReply(input: {pullRequestReviewThreadId: $id, body: $body}) {
+    comment { id url }
+  }
+}`
+
+const GhReplyToReviewThreadSchema = z.object({
+  data: z.object({
+    addPullRequestReviewThreadReply: z.object({
+      comment: z.object({ id: z.string(), url: z.string() }),
+    }),
+  }),
+})
 
 const GhReviewThreadsPageSchema = z.object({
   data: z.object({
@@ -283,6 +298,22 @@ export class GhPullRequestHost implements PullRequestHost {
       },
       threads: nodes.map((node) => this.toReviewThread(node, trusted)),
     }
+  }
+
+  async replyToReviewThread(threadId: string, body: string): Promise<ReviewThreadReply> {
+    const { stdout } = await this.withBodyFile(body, (bodyFile) =>
+      this.execFile('gh', [
+        'api',
+        'graphql',
+        '-f',
+        `query=${replyToReviewThreadMutation}`,
+        '-f',
+        `id=${threadId}`,
+        '-F',
+        `body=@${bodyFile}`,
+      ]),
+    )
+    return GhReplyToReviewThreadSchema.parse(JSON.parse(stdout)).data.addPullRequestReviewThreadReply.comment
   }
 
   private toReviewThread(node: GhReviewThreadNode, trusted: ReadonlySet<string>): ReviewThread {
