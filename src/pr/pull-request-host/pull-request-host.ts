@@ -63,7 +63,11 @@ export interface PullRequestThreads {
 }
 
 export interface ListReviewThreadsOptions {
-  /** Logins whose root comments may carry finding markers; with none, no marker is parsed. */
+  /**
+   * Authors whose root comments may carry finding markers; with none, no marker is parsed.
+   * An entry ending in `[bot]` (e.g. `coderabbit[bot]`) trusts only the Bot with that login;
+   * any other entry trusts only the User with that exact login.
+   */
   trustedAuthors: readonly string[]
 }
 

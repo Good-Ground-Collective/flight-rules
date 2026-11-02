@@ -37,7 +37,6 @@ const GhPullRequestHostPropsSchema = z.object({
 
 export type GhPullRequestHostProps = z.input<typeof GhPullRequestHostPropsSchema> & {
   builder?: PullRequestBuilder
-  codec?: ReviewCodec
   execFileFn?: ExecFileFn
 }
 
@@ -142,7 +141,7 @@ export class GhPullRequestHost implements PullRequestHost {
     const parsed = GhPullRequestHostPropsSchema.parse(props)
     this.repo = parsed.repo
     this.builder = props.builder ?? new DefaultPullRequestBuilder()
-    this.codec = props.codec ?? new JsonReviewCodec()
+    this.codec = new JsonReviewCodec()
 
     const promisified = promisify(execFile)
     const cwd = parsed.cwd ?? process.cwd()
@@ -299,7 +298,7 @@ export class GhPullRequestHost implements PullRequestHost {
     let finding: ReviewThread['finding'] = null
     let markerError: string | null = null
 
-    if (root !== undefined && trusted.has(root.authorLogin)) {
+    if (root !== undefined && trusted.has(root.authorType === 'Bot' ? `${root.authorLogin}[bot]` : root.authorLogin)) {
       try {
         finding = this.codec.parseFinding(root.body)
       } catch (err) {

@@ -469,13 +469,36 @@ describe('GhPullRequestHost.listReviewThreads', () => {
         null,
       ),
     ])
-    const { threads } = await host.listReviewThreads(9, { trustedAuthors: ['reviewer'] })
+    const { threads } = await host.listReviewThreads(9, { trustedAuthors: ['reviewer[bot]'] })
 
     expect(threads.map((t) => [t.id, t.finding === null ? null : t.finding.finding.id, t.markerError])).toEqual([
       ['trusted', 'f-0000000001', null],
       ['untrusted', null, null],
       ['reply', null, null],
     ])
+  })
+
+  it('trusts a [bot] entry only for a Bot author, and a bare entry only for a User', async () => {
+    const { host } = hostFor([
+      page(
+        [
+          threadNode('bot', [commentNode('C1', 'coderabbit', marker, 'Bot')]),
+          threadNode('user', [commentNode('C2', 'coderabbit', marker)]),
+        ],
+        null,
+      ),
+    ])
+    const { threads } = await host.listReviewThreads(9, { trustedAuthors: ['coderabbit[bot]'] })
+    expect(threads.map((t) => [t.id, t.finding === null ? null : t.finding.finding.id, t.markerError])).toEqual([
+      ['bot', 'f-0000000001', null],
+      ['user', null, null],
+    ])
+  })
+
+  it('does not trust a Bot through a bare login entry', async () => {
+    const { host } = hostFor([page([threadNode('T1', [commentNode('C1', 'alice', marker, 'Bot')])], null)])
+    const { threads } = await host.listReviewThreads(9, { trustedAuthors: ['alice'] })
+    expect(threads[0]).toMatchObject({ finding: null, markerError: null })
   })
 
   it('parses nothing when no author is trusted', async () => {
