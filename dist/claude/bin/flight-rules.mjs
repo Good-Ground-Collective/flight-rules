@@ -31125,6 +31125,18 @@ var reviewThreadsQuery = `query($owner: String!, $name: String!, $number: Int!, 
     }
   }
 }`;
+var replyToReviewThreadMutation = `mutation($id: ID!, $body: String!) {
+  addPullRequestReviewThreadReply(input: {pullRequestReviewThreadId: $id, body: $body}) {
+    comment { id url }
+  }
+}`;
+var GhReplyToReviewThreadSchema = external_exports.object({
+  data: external_exports.object({
+    addPullRequestReviewThreadReply: external_exports.object({
+      comment: external_exports.object({ id: external_exports.string(), url: external_exports.string() })
+    })
+  })
+});
 var GhReviewThreadsPageSchema = external_exports.object({
   data: external_exports.object({
     repository: external_exports.object({
@@ -31305,6 +31317,22 @@ var GhPullRequestHost = class {
       },
       threads: nodes.map((node3) => this.toReviewThread(node3, trusted))
     };
+  }
+  async replyToReviewThread(threadId, body) {
+    const { stdout } = await this.withBodyFile(
+      body,
+      (bodyFile) => this.execFile("gh", [
+        "api",
+        "graphql",
+        "-f",
+        `query=${replyToReviewThreadMutation}`,
+        "-f",
+        `id=${threadId}`,
+        "-F",
+        `body=@${bodyFile}`
+      ])
+    );
+    return GhReplyToReviewThreadSchema.parse(JSON.parse(stdout)).data.addPullRequestReviewThreadReply.comment;
   }
   toReviewThread(node3, trusted) {
     const comments = node3.comments.nodes.map((comment) => ({
@@ -32202,7 +32230,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.95.0";
+var appVersion = false ? "0.0.0-dev" : "1.96.0";
 
 // src/shared/ariadne/review-packet.schema.ts
 var packetLimits = {
@@ -55395,6 +55423,10 @@ var CommanderPrCommand = class {
     pr.command("threads").exitOverride().argument("<number>", "pull request number", (value) => decimalIntegers.positive(value)).option("--trusted-author <login>", "author whose root comments may carry finding markers; `name[bot]` trusts only that Bot, a bare `name` only that User (repeatable)", collect, []).action(async (number4, opts, command) => {
       await this.invokeAndPrint("pr-threads", { number: number4, trustedAuthors: opts.trustedAuthor }, command);
     });
+    pr.command("thread-reply").exitOverride().argument("<thread-id>", "review thread GraphQL node id, as returned by `pr threads`").option("--body <body>", "reply body (or use --body-file)").option("--body-file <path>", "read the reply body from a file").action(async (threadId, opts, command) => {
+      const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
+      await this.invokeAndPrint("pr-thread-reply", { threadId, body }, command);
+    });
     pr.command("request-review").exitOverride().argument("<number>", "pull request number", (value) => decimalIntegers.positive(value)).option("--reviewer <login>", "reviewer to request (repeatable, required)", collect, []).action(async (number4, opts, command) => {
       await this.invokeAndPrint("pr-request-review", { number: number4, reviewer: opts.reviewer }, command);
     });
@@ -55684,6 +55716,7 @@ var cliRouteCoverage = new ManifestCliRouteCoverage({
       ["pr comment", "pr-comment"],
       ["pr list", "pr-list"],
       ["pr threads", "pr-threads"],
+      ["pr thread-reply", "pr-thread-reply"],
       ["pr request-review", "pr-request-review"],
       ["board post heartbeat", "board-post-heartbeat"],
       ["board post item", "board-post-item"],
@@ -70536,6 +70569,11 @@ var threadsInput = external_exports.strictObject({
   number: external_exports.number().int().positive(),
   trustedAuthors: external_exports.array(external_exports.string().min(1)).default([])
 });
+var threadReplyInput = external_exports.strictObject({
+  threadId: external_exports.string().min(1),
+  body: external_exports.string().min(1)
+});
+var threadReplyResultSchema = external_exports.strictObject({ id: external_exports.string(), url: external_exports.string() });
 var threadCommentSchema = external_exports.strictObject({
   id: external_exports.string(),
   url: external_exports.string(),
@@ -70629,6 +70667,7 @@ var DefaultPrOperations = class {
       }),
       this.descriptor("pr-list", "List open pull requests matched to ticket identifiers.", ["read", "network", "process"], ["pr", "list"], listInput, external_exports.array(openPullRequestSchema), (input2) => this.getHost().listOpenPullRequestsForTickets(input2.ticket)),
       this.descriptor("pr-threads", "List a pull request's review threads with trusted finding markers.", ["read", "network", "process"], ["pr", "threads"], threadsInput, pullRequestThreadsSchema, (input2) => this.getHost().listReviewThreads(input2.number, { trustedAuthors: input2.trustedAuthors })),
+      this.descriptor("pr-thread-reply", "Reply in an existing pull request review thread.", ["write", "network", "process"], ["pr", "thread-reply"], threadReplyInput, threadReplyResultSchema, (input2) => this.getHost().replyToReviewThread(input2.threadId, input2.body)),
       this.descriptor("pr-request-review", "Request reviewers for a pull request and preserve each outcome.", effects, ["pr", "request-review"], reviewInput2, reviewerResultSchema, async (input2) => {
         const result = await this.getHost().requestReviewers(input2.number, input2.reviewer);
         if (result.failed.length > 0) {
@@ -70775,15 +70814,28 @@ var InstructionsUnavailableError = class extends Error {
 var UnsafeInstructionPathError = class extends Error {
   name = "UnsafeInstructionPathError";
 };
+var ModulePackageHomeLocator = class {
+  locate(props) {
+    const parsed = CatalogPropsSchema.parse({ ...props, env: { ...props.env } });
+    const override = parsed.env["FLIGHT_RULES_HOME"]?.trim();
+    if (override) return override;
+    const moduleDirectory = dirname15(fileURLToPath4(parsed.moduleUrl));
+    if (basename7(moduleDirectory) === "sdk") return resolve13(moduleDirectory, "../..");
+    const bindingParent = dirname15(moduleDirectory);
+    if (basename7(bindingParent) === "sdk" && basename7(dirname15(bindingParent)) === "src") {
+      return resolve13(moduleDirectory, "../../..");
+    }
+    return resolve13(moduleDirectory, "..");
+  }
+};
+var packageHomeLocator = new ModulePackageHomeLocator();
 var FileInstructionCatalog = class {
   skillDir;
   agentDir;
   agents;
   constructor(props) {
     const parsed = CatalogPropsSchema.parse({ ...props, env: { ...props.env } });
-    const override = parsed.env["FLIGHT_RULES_HOME"]?.trim();
-    const moduleDirectory = dirname15(fileURLToPath4(parsed.moduleUrl));
-    const home = override || resolve13(moduleDirectory, basename7(moduleDirectory) === "sdk" ? "../.." : "..");
+    const home = packageHomeLocator.locate(parsed);
     this.skillDir = this.findResourceDirectory(home, ["skills"]);
     this.agentDir = this.findResourceDirectory(home, [
       "bin/resources/agents",

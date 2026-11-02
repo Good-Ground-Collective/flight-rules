@@ -48,6 +48,7 @@ export type PreparedWorkerRun = {
     status: "ready";
     mode: ReportMode;
     prompt: string;
+    task: string;
 } | {
     status: "rejected";
     outcome: DispatchOutcome<ValidatedWorkerReport>;

@@ -721,6 +721,18 @@ var reviewThreadsQuery = `query($owner: String!, $name: String!, $number: Int!, 
     }
   }
 }`;
+var replyToReviewThreadMutation = `mutation($id: ID!, $body: String!) {
+  addPullRequestReviewThreadReply(input: {pullRequestReviewThreadId: $id, body: $body}) {
+    comment { id url }
+  }
+}`;
+var GhReplyToReviewThreadSchema = z8.object({
+  data: z8.object({
+    addPullRequestReviewThreadReply: z8.object({
+      comment: z8.object({ id: z8.string(), url: z8.string() })
+    })
+  })
+});
 var GhReviewThreadsPageSchema = z8.object({
   data: z8.object({
     repository: z8.object({
@@ -901,6 +913,22 @@ var GhPullRequestHost = class {
       },
       threads: nodes.map((node) => this.toReviewThread(node, trusted))
     };
+  }
+  async replyToReviewThread(threadId, body) {
+    const { stdout } = await this.withBodyFile(
+      body,
+      (bodyFile) => this.execFile("gh", [
+        "api",
+        "graphql",
+        "-f",
+        `query=${replyToReviewThreadMutation}`,
+        "-f",
+        `id=${threadId}`,
+        "-F",
+        `body=@${bodyFile}`
+      ])
+    );
+    return GhReplyToReviewThreadSchema.parse(JSON.parse(stdout)).data.addPullRequestReviewThreadReply.comment;
   }
   toReviewThread(node, trusted) {
     const comments = node.comments.nodes.map((comment) => ({
@@ -1811,7 +1839,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.95.0";
+var appVersion = false ? "0.0.0-dev" : "1.96.0";
 
 // src/shared/ariadne/review-packet.schema.ts
 import { z as z17 } from "zod";

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { type PullRequestBuilder, type PullRequestTemplate } from '../../git/pr-template/pr-template.js';
-import type { CreatedPullRequest, ListReviewThreadsOptions, OpenPullRequest, PullRequestAttachOptions, PullRequestComment, PullRequestHost, PullRequestThreads, ReviewerRequestResult } from './pull-request-host.js';
+import type { CreatedPullRequest, ListReviewThreadsOptions, OpenPullRequest, PullRequestAttachOptions, PullRequestComment, PullRequestHost, PullRequestThreads, ReviewerRequestResult, ReviewThreadReply } from './pull-request-host.js';
 type ExecFileFn = (file: string, args: readonly string[]) => Promise<{
     stdout: string;
     stderr: string;
@@ -37,6 +37,7 @@ export declare class GhPullRequestHost implements PullRequestHost {
     defaultBranch(): Promise<string>;
     requestReviewers(number: number, logins: readonly string[]): Promise<ReviewerRequestResult>;
     listReviewThreads(number: number, options: ListReviewThreadsOptions): Promise<PullRequestThreads>;
+    replyToReviewThread(threadId: string, body: string): Promise<ReviewThreadReply>;
     private toReviewThread;
     private describeFailure;
     private escapeRegExp;

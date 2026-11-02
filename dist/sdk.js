@@ -126,15 +126,28 @@ var InstructionsUnavailableError = class extends Error {
 var UnsafeInstructionPathError = class extends Error {
   name = "UnsafeInstructionPathError";
 };
+var ModulePackageHomeLocator = class {
+  locate(props) {
+    const parsed = CatalogPropsSchema.parse({ ...props, env: { ...props.env } });
+    const override = parsed.env["FLIGHT_RULES_HOME"]?.trim();
+    if (override) return override;
+    const moduleDirectory = dirname(fileURLToPath(parsed.moduleUrl));
+    if (basename2(moduleDirectory) === "sdk") return resolve(moduleDirectory, "../..");
+    const bindingParent = dirname(moduleDirectory);
+    if (basename2(bindingParent) === "sdk" && basename2(dirname(bindingParent)) === "src") {
+      return resolve(moduleDirectory, "../../..");
+    }
+    return resolve(moduleDirectory, "..");
+  }
+};
+var packageHomeLocator = new ModulePackageHomeLocator();
 var FileInstructionCatalog = class {
   skillDir;
   agentDir;
   agents;
   constructor(props) {
     const parsed = CatalogPropsSchema.parse({ ...props, env: { ...props.env } });
-    const override = parsed.env["FLIGHT_RULES_HOME"]?.trim();
-    const moduleDirectory = dirname(fileURLToPath(parsed.moduleUrl));
-    const home = override || resolve(moduleDirectory, basename2(moduleDirectory) === "sdk" ? "../.." : "..");
+    const home = packageHomeLocator.locate(parsed);
     this.skillDir = this.findResourceDirectory(home, ["skills"]);
     this.agentDir = this.findResourceDirectory(home, [
       "bin/resources/agents",
@@ -2223,6 +2236,7 @@ var cliRouteCoverage = new ManifestCliRouteCoverage({
       ["pr comment", "pr-comment"],
       ["pr list", "pr-list"],
       ["pr threads", "pr-threads"],
+      ["pr thread-reply", "pr-thread-reply"],
       ["pr request-review", "pr-request-review"],
       ["board post heartbeat", "board-post-heartbeat"],
       ["board post item", "board-post-item"],
@@ -4337,6 +4351,11 @@ var threadsInput = z36.strictObject({
   number: z36.number().int().positive(),
   trustedAuthors: z36.array(z36.string().min(1)).default([])
 });
+var threadReplyInput = z36.strictObject({
+  threadId: z36.string().min(1),
+  body: z36.string().min(1)
+});
+var threadReplyResultSchema = z36.strictObject({ id: z36.string(), url: z36.string() });
 var threadCommentSchema = z36.strictObject({
   id: z36.string(),
   url: z36.string(),
@@ -4430,6 +4449,7 @@ var DefaultPrOperations = class {
       }),
       this.descriptor("pr-list", "List open pull requests matched to ticket identifiers.", ["read", "network", "process"], ["pr", "list"], listInput, z36.array(openPullRequestSchema), (input) => this.getHost().listOpenPullRequestsForTickets(input.ticket)),
       this.descriptor("pr-threads", "List a pull request's review threads with trusted finding markers.", ["read", "network", "process"], ["pr", "threads"], threadsInput, pullRequestThreadsSchema, (input) => this.getHost().listReviewThreads(input.number, { trustedAuthors: input.trustedAuthors })),
+      this.descriptor("pr-thread-reply", "Reply in an existing pull request review thread.", ["write", "network", "process"], ["pr", "thread-reply"], threadReplyInput, threadReplyResultSchema, (input) => this.getHost().replyToReviewThread(input.threadId, input.body)),
       this.descriptor("pr-request-review", "Request reviewers for a pull request and preserve each outcome.", effects, ["pr", "request-review"], reviewInput, reviewerResultSchema, async (input) => {
         const result = await this.getHost().requestReviewers(input.number, input.reviewer);
         if (result.failed.length > 0) {

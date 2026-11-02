@@ -24,6 +24,14 @@ export declare class InstructionsUnavailableError extends Error {
 export declare class UnsafeInstructionPathError extends Error {
     name: string;
 }
+export interface PackageHomeLocator {
+    locate(props: z.input<typeof CatalogPropsSchema>): string;
+}
+/** Finds the installed package root from a bundled entry, a source module or its binding subdirectory. */
+export declare class ModulePackageHomeLocator implements PackageHomeLocator {
+    locate(props: z.input<typeof CatalogPropsSchema>): string;
+}
+export declare const packageHomeLocator: PackageHomeLocator;
 /** Loads canonical worker prompts and skills from the installed package, independent of cwd. */
 export declare class FileInstructionCatalog implements InstructionCatalog {
     private readonly skillDir;

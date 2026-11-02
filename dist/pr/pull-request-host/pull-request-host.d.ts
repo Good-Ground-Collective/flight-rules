@@ -7,6 +7,11 @@ export interface CreatedPullRequest {
 export interface PullRequestComment {
     url: string;
 }
+export interface ReviewThreadReply {
+    /** GraphQL node id of the new comment. */
+    id: string;
+    url: string;
+}
 export interface OpenPullRequest {
     ticket: string;
     number: number;
@@ -92,4 +97,6 @@ export interface PullRequestHost {
     requestReviewers(number: number, logins: readonly string[]): Promise<ReviewerRequestResult>;
     /** Every review thread, resolved and outdated included, since neither state proves a finding closed. */
     listReviewThreads(number: number, options: ListReviewThreadsOptions): Promise<PullRequestThreads>;
+    /** Posts one reply in an existing review thread by its GraphQL node id. Never resolves the thread. */
+    replyToReviewThread(threadId: string, body: string): Promise<ReviewThreadReply>;
 }

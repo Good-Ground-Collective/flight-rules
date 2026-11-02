@@ -794,15 +794,15 @@ var StandardWorkerRunProtocol = class {
       };
     }
     const mode = parsedMode.data;
-    const prompt = [
-      definition.body.trim(),
+    const task = [
       "## Dispatch context",
       JSON.stringify(request.context),
       "## Dispatch input",
       JSON.stringify(request.input),
       `Return the canonical final fenced YAML report for mode ${mode.mode}.`
     ].join("\n\n");
-    return { status: "ready", mode, prompt };
+    const prompt = [definition.body.trim(), task].join("\n\n");
+    return { status: "ready", mode, prompt, task };
   }
   cancelled(request) {
     return this.failed(request, this.cancellationFailure());
