@@ -159,7 +159,7 @@ if (!appVersion || !createFlightRules({ cwd: process.cwd(), env: {} }) || !revie
       archive,
       "deepagents@1.15.0",
       "langchain@1.5.16",
-      "@langchain/core@1.2.17",
+      "@langchain/core@1.2.18",
       "@langchain/langgraph@1.5.0",
       "@modelcontextprotocol/client@2.3.1",
       "typescript@^6.0.3",
