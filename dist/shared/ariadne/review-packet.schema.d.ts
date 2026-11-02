@@ -126,8 +126,8 @@ export declare const PacketUpdateSchema: z.ZodObject<{
     expectedRevision: z.ZodNumber;
     operationId: z.ZodString;
     packet: z.ZodObject<{
-        reviewers: z.ZodArray<z.ZodString>;
         title: z.ZodString;
+        reviewers: z.ZodArray<z.ZodString>;
         overview: z.ZodObject<{
             objective: z.ZodString;
             highlights: z.ZodArray<z.ZodString>;

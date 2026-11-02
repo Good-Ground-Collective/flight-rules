@@ -30643,6 +30643,391 @@ import { tmpdir } from "node:os";
 import { join as join2 } from "node:path";
 import { promisify as promisify2 } from "node:util";
 
+// src/code-review/review-codec.ts
+import { createHash } from "node:crypto";
+
+// src/code-review/review.schema.ts
+var reviewContractVersion = 1;
+var reviewSchemaRevision = 1;
+var ReviewOutcomeSchema = external_exports.enum(["APPROVED", "CHANGES_NEEDED", "ESCALATE", "INCOMPLETE"]);
+var FindingIdSchema = external_exports.string().regex(/^f-[a-f0-9]{10}$/);
+var HeadShaSchema = external_exports.string().regex(/^[a-f0-9]{40}$/);
+var ReviewPathSchema = external_exports.string().max(400).regex(/^(?!\/)(?!.*\\)(?!.*(?:^|\/)\.{1,2}(?:\/|$))[^\p{Cc}]*$/u);
+var TextSchema = external_exports.string().min(1).max(16e3);
+var LineTextSchema = external_exports.string().min(1).max(400).regex(/^[^\r\n]+$/);
+var PositiveIdSchema = external_exports.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+var HttpsUrlSchema = external_exports.url().regex(/^https:\/\//);
+var CategorySchema = external_exports.enum([
+  "security",
+  "correctness",
+  "data",
+  "deployment",
+  "design",
+  "testing",
+  "performance",
+  "readability",
+  "docs"
+]);
+var ActionLabelSchema = external_exports.enum([
+  "issue",
+  "todo",
+  "suggestion",
+  "question",
+  "chore",
+  "nitpick",
+  "typo",
+  "polish"
+]);
+var InformationLabelSchema = external_exports.enum(["praise", "note", "thought"]);
+var SeveritySchema = external_exports.enum(["critical", "major", "minor", "trivial"]);
+var DecisionOptionsSchema = external_exports.array(
+  external_exports.strictObject({ id: external_exports.string().regex(/^[a-z][a-z0-9-]{0,79}$/), description: TextSchema })
+).min(2);
+var findingFields = {
+  path: ReviewPathSchema,
+  line: external_exports.number().int().nonnegative(),
+  start_line: external_exports.number().int().positive().optional(),
+  category: CategorySchema.optional(),
+  subject: LineTextSchema,
+  discussion: TextSchema,
+  related_finding_id: FindingIdSchema.optional()
+};
+var actionFields = {
+  ...findingFields,
+  label: ActionLabelSchema,
+  type: external_exports.enum(["fix", "clarify"]),
+  blocking: external_exports.boolean(),
+  severity: SeveritySchema,
+  details: TextSchema,
+  resolved_when: TextSchema
+};
+var decisionFields = {
+  ...actionFields,
+  type: external_exports.literal("decide"),
+  decision_owner: LineTextSchema,
+  decision_options: DecisionOptionsSchema
+};
+var informationFields = {
+  ...findingFields,
+  label: InformationLabelSchema,
+  blocking: external_exports.literal(false),
+  details: TextSchema.optional()
+};
+var NewFindingSchema = external_exports.union([
+  external_exports.strictObject(actionFields),
+  external_exports.strictObject(decisionFields),
+  external_exports.strictObject(informationFields)
+]);
+var ActionableFindingSchema = external_exports.union([
+  external_exports.strictObject({ ...actionFields, id: FindingIdSchema }),
+  external_exports.strictObject({ ...decisionFields, id: FindingIdSchema })
+]);
+var StoredFindingSchema = external_exports.union([
+  ...ActionableFindingSchema.options,
+  external_exports.strictObject({ ...informationFields, id: FindingIdSchema })
+]);
+var ReviewEvidenceSchema = external_exports.discriminatedUnion("kind", [
+  external_exports.strictObject({
+    kind: external_exports.literal("github_comment"),
+    comment_id: PositiveIdSchema,
+    url: HttpsUrlSchema
+  }),
+  external_exports.strictObject({
+    kind: external_exports.literal("code"),
+    commit_sha: HeadShaSchema,
+    path: ReviewPathSchema.min(1),
+    line: external_exports.number().int().positive()
+  }),
+  external_exports.strictObject({ kind: external_exports.literal("commit"), sha: HeadShaSchema }),
+  external_exports.strictObject({
+    kind: external_exports.literal("check_run"),
+    check_run_id: PositiveIdSchema,
+    commit_sha: HeadShaSchema
+  }),
+  external_exports.strictObject({ kind: external_exports.literal("document"), url: HttpsUrlSchema }),
+  external_exports.strictObject({
+    kind: external_exports.literal("verification"),
+    commit_sha: HeadShaSchema,
+    command: TextSchema,
+    result: external_exports.literal("passed"),
+    report_url: HttpsUrlSchema
+  }),
+  external_exports.strictObject({
+    kind: external_exports.literal("thread_resolution"),
+    thread_id: external_exports.string().min(1),
+    author_id: PositiveIdSchema
+  })
+]);
+var DecisionAnswerSchema = external_exports.strictObject({
+  comment_id: PositiveIdSchema,
+  author_id: PositiveIdSchema,
+  option_id: external_exports.string().min(1)
+});
+var transitionFields = {
+  id: FindingIdSchema,
+  reason: TextSchema,
+  reply: TextSchema.optional(),
+  decision: DecisionAnswerSchema.optional()
+};
+var PriorFindingSchema = external_exports.union([
+  external_exports.strictObject({
+    ...transitionFields,
+    status: external_exports.literal("resolved"),
+    evidence: external_exports.array(ReviewEvidenceSchema).min(1)
+  }),
+  external_exports.strictObject({
+    ...transitionFields,
+    status: external_exports.literal("withdrawn"),
+    evidence: external_exports.array(ReviewEvidenceSchema).min(1),
+    withdrawal_basis: external_exports.enum(["incorrect", "no_longer_applicable", "dismissed"])
+  }),
+  external_exports.strictObject({
+    ...transitionFields,
+    status: external_exports.literal("still_open"),
+    evidence: external_exports.array(ReviewEvidenceSchema).optional(),
+    updated_finding: ActionableFindingSchema.optional()
+  })
+]);
+var reviewFields = {
+  contract_version: external_exports.literal(reviewContractVersion),
+  schema_revision: external_exports.literal(reviewSchemaRevision),
+  head_sha: HeadShaSchema,
+  review_complete: external_exports.boolean(),
+  incomplete_reason: external_exports.string().max(16e3).optional(),
+  summary: TextSchema,
+  outcome: ReviewOutcomeSchema,
+  outcome_reason: TextSchema,
+  remaining_risk: TextSchema,
+  extensions: external_exports.record(external_exports.string(), external_exports.json()).optional()
+};
+var ReviewSchema = external_exports.strictObject({
+  ...reviewFields,
+  findings: external_exports.array(NewFindingSchema),
+  prior_findings: external_exports.array(PriorFindingSchema)
+});
+var FindingRecordSchema = external_exports.strictObject({
+  v: external_exports.literal(reviewContractVersion),
+  schema_revision: external_exports.literal(reviewSchemaRevision),
+  finding: ActionableFindingSchema,
+  status: external_exports.enum(["open", "resolved", "withdrawn"]),
+  evidence: external_exports.array(ReviewEvidenceSchema),
+  decision: DecisionAnswerSchema.optional()
+});
+var ReviewStateSchema = external_exports.strictObject({
+  v: external_exports.literal(reviewContractVersion),
+  schema_revision: external_exports.literal(reviewSchemaRevision),
+  sha: HeadShaSchema,
+  outcome: ReviewOutcomeSchema,
+  records: external_exports.array(
+    external_exports.union([
+      external_exports.strictObject({
+        id: FindingIdSchema,
+        status: external_exports.enum(["open", "resolved", "withdrawn"]),
+        location: external_exports.union([
+          external_exports.strictObject({ kind: external_exports.literal("review_comment"), comment_id: PositiveIdSchema }),
+          external_exports.strictObject({ kind: external_exports.literal("review_body"), review_id: PositiveIdSchema })
+        ])
+      }),
+      external_exports.strictObject({
+        id: FindingIdSchema,
+        status: external_exports.literal("informational"),
+        fingerprint: external_exports.string().min(1),
+        finding: external_exports.strictObject({ ...informationFields, id: FindingIdSchema }).optional()
+      })
+    ])
+  )
+});
+var TransportReviewSchema = external_exports.strictObject({
+  ...reviewFields,
+  findings: external_exports.array(
+    external_exports.strictObject({
+      ...actionFields,
+      type: external_exports.enum(["fix", "clarify", "decide"]).optional(),
+      label: external_exports.enum([...ActionLabelSchema.options, ...InformationLabelSchema.options]),
+      severity: SeveritySchema.optional(),
+      details: TextSchema.optional(),
+      resolved_when: TextSchema.optional(),
+      decision_owner: LineTextSchema.optional(),
+      decision_options: DecisionOptionsSchema.optional()
+    })
+  ),
+  prior_findings: external_exports.array(
+    external_exports.strictObject({
+      ...transitionFields,
+      status: external_exports.enum(["resolved", "still_open", "withdrawn"]),
+      evidence: external_exports.array(ReviewEvidenceSchema).optional(),
+      withdrawal_basis: external_exports.enum(["incorrect", "no_longer_applicable", "dismissed"]).optional(),
+      updated_finding: StoredFindingSchema.optional()
+    })
+  )
+});
+
+// src/code-review/review-contract.ts
+var InvalidReviewError = class extends Error {
+  name = "InvalidReviewError";
+};
+var ZodReviewContract = class {
+  parse(value) {
+    const result = ReviewSchema.parse(value);
+    const ids = result.prior_findings.map((finding) => finding.id);
+    if (new Set(ids).size !== ids.length)
+      throw new InvalidReviewError("duplicate prior finding IDs");
+    if (!result.review_complete && !result.incomplete_reason?.trim()) {
+      throw new InvalidReviewError("an incomplete review must explain what could not be reviewed");
+    }
+    const findings = result.findings.map((finding) => this.normalize(finding));
+    const priorFindings = result.prior_findings.map((transition) => {
+      if (transition.status !== "still_open") return transition;
+      if ((transition.decision !== void 0 || transition.updated_finding !== void 0) && !transition.evidence?.length) {
+        throw new InvalidReviewError(`transition ${transition.id} requires evidence`);
+      }
+      if (transition.updated_finding === void 0) return transition;
+      if (transition.id !== transition.updated_finding.id)
+        throw new InvalidReviewError("a replacement must preserve the finding ID");
+      return {
+        ...transition,
+        updated_finding: this.normalizeActionable(transition.updated_finding)
+      };
+    });
+    for (const transition of priorFindings) {
+      if (transition.decision !== void 0 && !transition.evidence?.some(
+        (evidence) => evidence.kind === "github_comment" && evidence.comment_id === transition.decision?.comment_id
+      )) {
+        throw new InvalidReviewError(
+          `decision ${transition.id} must reference its human comment in evidence`
+        );
+      }
+    }
+    return { ...result, findings, prior_findings: priorFindings };
+  }
+  record(value) {
+    const result = FindingRecordSchema.parse(value);
+    if (result.status !== "open" && result.evidence.length === 0)
+      throw new InvalidReviewError("closed records require evidence");
+    return { ...result, finding: this.normalizeActionable(result.finding) };
+  }
+  state(value) {
+    const result = ReviewStateSchema.parse(value);
+    const ids = result.records.map((record2) => record2.id);
+    if (new Set(ids).size !== ids.length)
+      throw new InvalidReviewError("duplicate finding IDs in state");
+    for (const record2 of result.records) {
+      if (record2.status === "informational" && record2.finding !== void 0 && record2.id !== record2.finding.id) {
+        throw new InvalidReviewError("informational index ID does not match its finding");
+      }
+    }
+    return result;
+  }
+  schemas() {
+    return {
+      full: external_exports.toJSONSchema(ReviewSchema, { target: "draft-07" }),
+      transport: external_exports.toJSONSchema(TransportReviewSchema, { target: "draft-07" })
+    };
+  }
+  normalize(finding) {
+    this.checkRange(finding);
+    if (!("type" in finding)) return finding;
+    if (finding.type === "decide") this.checkOptions(finding);
+    const blocking = finding.blocking || finding.severity === "critical" || finding.severity === "major";
+    const label = blocking && ["nitpick", "typo", "polish"].includes(finding.label) ? "issue" : finding.label;
+    return { ...finding, blocking, label };
+  }
+  normalizeActionable(finding) {
+    return ActionableFindingSchema.parse({ ...this.normalize(finding), id: finding.id });
+  }
+  checkRange(finding) {
+    if (finding.start_line !== void 0 && (finding.line === 0 || finding.start_line > finding.line)) {
+      throw new InvalidReviewError("start_line must not exceed a positive line anchor");
+    }
+  }
+  checkOptions(finding) {
+    const ids = finding.decision_options.map((option) => option.id);
+    if (new Set(ids).size !== ids.length)
+      throw new InvalidReviewError("decision option IDs must be unique");
+  }
+};
+var reviewContract = new ZodReviewContract();
+
+// src/code-review/review-codec.ts
+var MarkerInputSchema = external_exports.strictObject({
+  body: external_exports.string(),
+  authorId: external_exports.number().int().positive(),
+  trustedAuthorIds: external_exports.array(external_exports.number().int().positive())
+});
+var JsonReviewCodec = class {
+  finding(record2) {
+    return this.marker("finding", reviewContract.record(record2));
+  }
+  state(state) {
+    return this.marker("state", reviewContract.state(state));
+  }
+  readFindings(input2) {
+    const parsed = MarkerInputSchema.parse(input2);
+    if (!parsed.trustedAuthorIds.includes(parsed.authorId)) return [];
+    return this.readMarkers(parsed.body, "finding").map((value) => reviewContract.record(value));
+  }
+  readState(input2) {
+    const parsed = MarkerInputSchema.parse(input2);
+    if (!parsed.trustedAuthorIds.includes(parsed.authorId)) return void 0;
+    const states = this.readMarkers(parsed.body, "state");
+    if (states.length > 1)
+      throw new InvalidReviewError("multiple review state markers in one summary");
+    return states.length === 0 ? void 0 : reviewContract.state(states[0]);
+  }
+  parseFinding(body) {
+    const markers = this.readMarkers(body, "finding");
+    if (markers.length > 1) throw new InvalidReviewError("multiple finding markers in one comment");
+    return markers.length === 0 ? null : reviewContract.record(markers[0]);
+  }
+  render(record2) {
+    const validated = reviewContract.record(record2);
+    const finding = validated.finding;
+    const decorations = [
+      ...["nitpick", "typo", "polish"].includes(finding.label) ? [] : [finding.blocking ? "blocking" : "non-blocking"],
+      finding.type
+    ];
+    if (finding.category !== void 0) decorations.push(finding.category);
+    const owner = finding.type === "decide" ? `
+
+**Decision owner:** ${finding.decision_owner}
+**Decision options:** ${finding.decision_options.map((option) => `\`${option.id}\`: ${option.description}`).join("; ")}` : "";
+    return `**${finding.label} (${decorations.join(", ")}):** ${finding.subject}
+
+${finding.discussion}
+
+<details>
+<summary>Details For LLM</summary>
+
+${finding.details}${owner}
+
+**Resolved when:** ${finding.resolved_when}
+</details>
+
+${this.finding(validated)}`;
+  }
+  fingerprint(finding) {
+    return createHash("sha256").update(`${finding.path}|${finding.label}|${finding.subject.trim().toLowerCase()}`).digest("hex");
+  }
+  marker(kind, value) {
+    return `<!-- code-review:${kind} ${JSON.stringify(value).replaceAll(">", "\\u003e")} -->`;
+  }
+  readMarkers(body, kind) {
+    const prefix = `<!-- code-review:${kind} `;
+    const matches = [...body.matchAll(new RegExp(`${prefix}([\\s\\S]*?) -->`, "g"))];
+    if (body.split(prefix).length - 1 !== matches.length)
+      throw new InvalidReviewError("unterminated review marker");
+    return matches.map((match) => {
+      try {
+        return JSON.parse(match[1] ?? "");
+      } catch {
+        throw new InvalidReviewError(
+          "review marker contains invalid JSON; recover state before approving"
+        );
+      }
+    });
+  }
+};
+
 // src/git/pr-template/pr-template.ts
 var maxChangeLineLength = 256;
 var maxChangeLines = 5;
@@ -30722,6 +31107,65 @@ var GhPullRequestListSchema = external_exports.array(
     title: external_exports.string()
   })
 );
+var reviewThreadsQuery = `query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      number url title body headRefName headRefOid baseRefName
+      author { login }
+      reviewThreads(first: 100, after: $endCursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id isResolved isOutdated path line originalLine
+          comments(first: 100) {
+            totalCount
+            nodes { id url body createdAt author { type: __typename login } }
+          }
+        }
+      }
+    }
+  }
+}`;
+var GhReviewThreadsPageSchema = external_exports.object({
+  data: external_exports.object({
+    repository: external_exports.object({
+      pullRequest: external_exports.object({
+        number: external_exports.number(),
+        url: external_exports.string(),
+        title: external_exports.string(),
+        body: external_exports.string(),
+        headRefName: external_exports.string(),
+        headRefOid: external_exports.string(),
+        baseRefName: external_exports.string(),
+        author: external_exports.object({ login: external_exports.string() }).nullable(),
+        reviewThreads: external_exports.object({
+          pageInfo: external_exports.object({ hasNextPage: external_exports.boolean(), endCursor: external_exports.string().nullable() }),
+          nodes: external_exports.array(
+            external_exports.object({
+              id: external_exports.string(),
+              isResolved: external_exports.boolean(),
+              isOutdated: external_exports.boolean(),
+              path: external_exports.string(),
+              line: external_exports.number().nullable(),
+              originalLine: external_exports.number().nullable(),
+              comments: external_exports.object({
+                totalCount: external_exports.number(),
+                nodes: external_exports.array(
+                  external_exports.object({
+                    id: external_exports.string(),
+                    url: external_exports.string(),
+                    body: external_exports.string(),
+                    createdAt: external_exports.string(),
+                    author: external_exports.object({ type: external_exports.string(), login: external_exports.string() }).nullable()
+                  })
+                )
+              })
+            })
+          )
+        })
+      })
+    })
+  })
+});
 var pullUrl = /\/pull\/(\d+)\b/;
 var GhOutputParseError = class extends Error {
   name = "GhOutputParseError";
@@ -30732,11 +31176,13 @@ var GhOutputParseError = class extends Error {
 var GhPullRequestHost = class {
   repo;
   builder;
+  codec;
   execFile;
   constructor(props) {
     const parsed = GhPullRequestHostPropsSchema.parse(props);
     this.repo = parsed.repo;
     this.builder = props.builder ?? new DefaultPullRequestBuilder();
+    this.codec = new JsonReviewCodec();
     const promisified = promisify2(execFile2);
     const cwd = parsed.cwd ?? process.cwd();
     const env = { ...props.env ?? process.env };
@@ -30819,6 +31265,78 @@ var GhPullRequestHost = class {
       }
     }
     return result;
+  }
+  async listReviewThreads(number4, options) {
+    const [owner = "", name = ""] = this.repo.split("/");
+    let first;
+    const nodes = [];
+    let cursor;
+    for (; ; ) {
+      const { stdout } = await this.execFile("gh", [
+        "api",
+        "graphql",
+        "-f",
+        `query=${reviewThreadsQuery}`,
+        "-f",
+        `owner=${owner}`,
+        "-f",
+        `name=${name}`,
+        "-F",
+        `number=${number4}`,
+        ...cursor === void 0 ? [] : ["-f", `endCursor=${cursor}`]
+      ]);
+      const { reviewThreads, ...header } = GhReviewThreadsPageSchema.parse(JSON.parse(stdout)).data.repository.pullRequest;
+      first ??= { ...header, reviewThreads };
+      nodes.push(...reviewThreads.nodes);
+      if (!reviewThreads.pageInfo.hasNextPage || reviewThreads.pageInfo.endCursor === null) break;
+      cursor = reviewThreads.pageInfo.endCursor;
+    }
+    const trusted = new Set(options.trustedAuthors);
+    return {
+      pullRequest: {
+        number: first.number,
+        url: first.url,
+        title: first.title,
+        body: first.body,
+        headRefName: first.headRefName,
+        headRefOid: first.headRefOid,
+        baseRefName: first.baseRefName,
+        authorLogin: first.author?.login ?? "ghost"
+      },
+      threads: nodes.map((node3) => this.toReviewThread(node3, trusted))
+    };
+  }
+  toReviewThread(node3, trusted) {
+    const comments = node3.comments.nodes.map((comment) => ({
+      id: comment.id,
+      url: comment.url,
+      authorLogin: (comment.author?.login ?? "ghost").replace(/\[bot\]$/, ""),
+      authorType: comment.author?.type === "Bot" ? "Bot" : "User",
+      body: comment.body,
+      createdAt: comment.createdAt
+    }));
+    const root = comments[0];
+    let finding = null;
+    let markerError = null;
+    if (root !== void 0 && trusted.has(root.authorType === "Bot" ? `${root.authorLogin}[bot]` : root.authorLogin)) {
+      try {
+        finding = this.codec.parseFinding(root.body);
+      } catch (err) {
+        markerError = err instanceof Error ? err.message : String(err);
+      }
+    }
+    return {
+      id: node3.id,
+      path: node3.path,
+      line: node3.line,
+      originalLine: node3.originalLine,
+      isResolved: node3.isResolved,
+      isOutdated: node3.isOutdated,
+      commentsTruncated: node3.comments.totalCount > node3.comments.nodes.length,
+      comments,
+      finding,
+      markerError
+    };
   }
   describeFailure(err) {
     const stderr = this.readStringProperty(err, "stderr")?.trim();
@@ -31290,7 +31808,7 @@ var NeutralSettingsSource = class {
 };
 
 // src/plugins/native-installation/native-installation.ts
-import { createHash } from "node:crypto";
+import { createHash as createHash2 } from "node:crypto";
 import { existsSync as existsSync5, lstatSync, mkdirSync as mkdirSync3, readFileSync as readFileSync5, realpathSync as realpathSync2, writeFileSync as writeFileSync3 } from "node:fs";
 import { homedir as homedir3 } from "node:os";
 import { dirname as dirname5, join as join6, resolve as resolve3 } from "node:path";
@@ -31413,7 +31931,7 @@ var FileNativeInstallation = class _FileNativeInstallation {
     }
   }
   hash(contents) {
-    return createHash("sha256").update(contents).digest("hex");
+    return createHash2("sha256").update(contents).digest("hex");
   }
   assertRegularPath(path3) {
     let current = resolve3(path3);
@@ -31684,7 +32202,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.94.4";
+var appVersion = false ? "0.0.0-dev" : "1.95.0";
 
 // src/shared/ariadne/review-packet.schema.ts
 var packetLimits = {
@@ -31707,7 +32225,7 @@ var oneLineTextSchema = (max) => textSchema(max).refine((value) => !/[\r\n]/.tes
 var PositiveIntSchema = external_exports.number().int().positive();
 var PacketIdSchema = AgentRecordIdSchema;
 var OperationIdSchema = external_exports.string().regex(/^[A-Za-z0-9_-]{16,80}$/, "must be 16\u201380 letters, digits, underscores or hyphens");
-var HeadShaSchema = external_exports.string().regex(/^[0-9a-f]{40}$/, "must be a 40-character lowercase hex commit sha");
+var HeadShaSchema2 = external_exports.string().regex(/^[0-9a-f]{40}$/, "must be a 40-character lowercase hex commit sha");
 var GithubLoginSchema = external_exports.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/, "must be a GitHub login");
 var PacketAnchorSchema = external_exports.strictObject({
   path: textSchema(packetLimits.path),
@@ -31733,10 +32251,10 @@ var FocusAreaSchema = external_exports.strictObject({
 var PacketPrSchema = external_exports.strictObject({
   repo: external_exports.string().regex(/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9_.-]{1,100}$/, "must be owner/name"),
   number: PositiveIntSchema,
-  headSha: HeadShaSchema,
+  headSha: HeadShaSchema2,
   title: oneLineTextSchema(packetLimits.title),
   ticket: optionalSchema(oneLineTextSchema(packetLimits.ticket)),
-  signOff: external_exports.strictObject({ at: SignOffTimeSchema, headSha: HeadShaSchema }).nullable().optional(),
+  signOff: external_exports.strictObject({ at: SignOffTimeSchema, headSha: HeadShaSchema2 }).nullable().optional(),
   focusAreas: external_exports.array(FocusAreaSchema).max(packetLimits.focusAreas, `up to ${packetLimits.focusAreas} focus areas per PR`)
 });
 var PacketInputSchema = external_exports.strictObject({
@@ -50055,224 +50573,6 @@ import { execFileSync as execFileSync3 } from "node:child_process";
 import { readFileSync as readFileSync12, realpathSync as realpathSync4 } from "node:fs";
 import { dirname as dirname13, join as join14, relative as relative3 } from "node:path";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
-
-// src/code-review/review.schema.ts
-var reviewContractVersion = 1;
-var reviewSchemaRevision = 1;
-var ReviewOutcomeSchema = external_exports.enum(["APPROVED", "CHANGES_NEEDED", "ESCALATE", "INCOMPLETE"]);
-var FindingIdSchema = external_exports.string().regex(/^f-[a-f0-9]{10}$/);
-var HeadShaSchema2 = external_exports.string().regex(/^[a-f0-9]{40}$/);
-var ReviewPathSchema = external_exports.string().max(400).regex(/^(?!\/)(?!.*\\)(?!.*(?:^|\/)\.{1,2}(?:\/|$))[^\p{Cc}]*$/u);
-var TextSchema = external_exports.string().min(1).max(16e3);
-var LineTextSchema = external_exports.string().min(1).max(400).regex(/^[^\r\n]+$/);
-var PositiveIdSchema = external_exports.number().int().positive().max(Number.MAX_SAFE_INTEGER);
-var HttpsUrlSchema = external_exports.url().regex(/^https:\/\//);
-var CategorySchema = external_exports.enum([
-  "security",
-  "correctness",
-  "data",
-  "deployment",
-  "design",
-  "testing",
-  "performance",
-  "readability",
-  "docs"
-]);
-var ActionLabelSchema = external_exports.enum([
-  "issue",
-  "todo",
-  "suggestion",
-  "question",
-  "chore",
-  "nitpick",
-  "typo",
-  "polish"
-]);
-var InformationLabelSchema = external_exports.enum(["praise", "note", "thought"]);
-var SeveritySchema = external_exports.enum(["critical", "major", "minor", "trivial"]);
-var DecisionOptionsSchema = external_exports.array(
-  external_exports.strictObject({ id: external_exports.string().regex(/^[a-z][a-z0-9-]{0,79}$/), description: TextSchema })
-).min(2);
-var findingFields = {
-  path: ReviewPathSchema,
-  line: external_exports.number().int().nonnegative(),
-  start_line: external_exports.number().int().positive().optional(),
-  category: CategorySchema.optional(),
-  subject: LineTextSchema,
-  discussion: TextSchema,
-  related_finding_id: FindingIdSchema.optional()
-};
-var actionFields = {
-  ...findingFields,
-  label: ActionLabelSchema,
-  type: external_exports.enum(["fix", "clarify"]),
-  blocking: external_exports.boolean(),
-  severity: SeveritySchema,
-  details: TextSchema,
-  resolved_when: TextSchema
-};
-var decisionFields = {
-  ...actionFields,
-  type: external_exports.literal("decide"),
-  decision_owner: LineTextSchema,
-  decision_options: DecisionOptionsSchema
-};
-var informationFields = {
-  ...findingFields,
-  label: InformationLabelSchema,
-  blocking: external_exports.literal(false),
-  details: TextSchema.optional()
-};
-var NewFindingSchema = external_exports.union([
-  external_exports.strictObject(actionFields),
-  external_exports.strictObject(decisionFields),
-  external_exports.strictObject(informationFields)
-]);
-var ActionableFindingSchema = external_exports.union([
-  external_exports.strictObject({ ...actionFields, id: FindingIdSchema }),
-  external_exports.strictObject({ ...decisionFields, id: FindingIdSchema })
-]);
-var StoredFindingSchema = external_exports.union([
-  ...ActionableFindingSchema.options,
-  external_exports.strictObject({ ...informationFields, id: FindingIdSchema })
-]);
-var ReviewEvidenceSchema = external_exports.discriminatedUnion("kind", [
-  external_exports.strictObject({
-    kind: external_exports.literal("github_comment"),
-    comment_id: PositiveIdSchema,
-    url: HttpsUrlSchema
-  }),
-  external_exports.strictObject({
-    kind: external_exports.literal("code"),
-    commit_sha: HeadShaSchema2,
-    path: ReviewPathSchema.min(1),
-    line: external_exports.number().int().positive()
-  }),
-  external_exports.strictObject({ kind: external_exports.literal("commit"), sha: HeadShaSchema2 }),
-  external_exports.strictObject({
-    kind: external_exports.literal("check_run"),
-    check_run_id: PositiveIdSchema,
-    commit_sha: HeadShaSchema2
-  }),
-  external_exports.strictObject({ kind: external_exports.literal("document"), url: HttpsUrlSchema }),
-  external_exports.strictObject({
-    kind: external_exports.literal("verification"),
-    commit_sha: HeadShaSchema2,
-    command: TextSchema,
-    result: external_exports.literal("passed"),
-    report_url: HttpsUrlSchema
-  }),
-  external_exports.strictObject({
-    kind: external_exports.literal("thread_resolution"),
-    thread_id: external_exports.string().min(1),
-    author_id: PositiveIdSchema
-  })
-]);
-var DecisionAnswerSchema = external_exports.strictObject({
-  comment_id: PositiveIdSchema,
-  author_id: PositiveIdSchema,
-  option_id: external_exports.string().min(1)
-});
-var transitionFields = {
-  id: FindingIdSchema,
-  reason: TextSchema,
-  reply: TextSchema.optional(),
-  decision: DecisionAnswerSchema.optional()
-};
-var PriorFindingSchema = external_exports.union([
-  external_exports.strictObject({
-    ...transitionFields,
-    status: external_exports.literal("resolved"),
-    evidence: external_exports.array(ReviewEvidenceSchema).min(1)
-  }),
-  external_exports.strictObject({
-    ...transitionFields,
-    status: external_exports.literal("withdrawn"),
-    evidence: external_exports.array(ReviewEvidenceSchema).min(1),
-    withdrawal_basis: external_exports.enum(["incorrect", "no_longer_applicable", "dismissed"])
-  }),
-  external_exports.strictObject({
-    ...transitionFields,
-    status: external_exports.literal("still_open"),
-    evidence: external_exports.array(ReviewEvidenceSchema).optional(),
-    updated_finding: ActionableFindingSchema.optional()
-  })
-]);
-var reviewFields = {
-  contract_version: external_exports.literal(reviewContractVersion),
-  schema_revision: external_exports.literal(reviewSchemaRevision),
-  head_sha: HeadShaSchema2,
-  review_complete: external_exports.boolean(),
-  incomplete_reason: external_exports.string().max(16e3).optional(),
-  summary: TextSchema,
-  outcome: ReviewOutcomeSchema,
-  outcome_reason: TextSchema,
-  remaining_risk: TextSchema,
-  extensions: external_exports.record(external_exports.string(), external_exports.json()).optional()
-};
-var ReviewSchema = external_exports.strictObject({
-  ...reviewFields,
-  findings: external_exports.array(NewFindingSchema),
-  prior_findings: external_exports.array(PriorFindingSchema)
-});
-var FindingRecordSchema = external_exports.strictObject({
-  v: external_exports.literal(reviewContractVersion),
-  schema_revision: external_exports.literal(reviewSchemaRevision),
-  finding: ActionableFindingSchema,
-  status: external_exports.enum(["open", "resolved", "withdrawn"]),
-  evidence: external_exports.array(ReviewEvidenceSchema),
-  decision: DecisionAnswerSchema.optional()
-});
-var ReviewStateSchema = external_exports.strictObject({
-  v: external_exports.literal(reviewContractVersion),
-  schema_revision: external_exports.literal(reviewSchemaRevision),
-  sha: HeadShaSchema2,
-  outcome: ReviewOutcomeSchema,
-  records: external_exports.array(
-    external_exports.union([
-      external_exports.strictObject({
-        id: FindingIdSchema,
-        status: external_exports.enum(["open", "resolved", "withdrawn"]),
-        location: external_exports.union([
-          external_exports.strictObject({ kind: external_exports.literal("review_comment"), comment_id: PositiveIdSchema }),
-          external_exports.strictObject({ kind: external_exports.literal("review_body"), review_id: PositiveIdSchema })
-        ])
-      }),
-      external_exports.strictObject({
-        id: FindingIdSchema,
-        status: external_exports.literal("informational"),
-        fingerprint: external_exports.string().min(1),
-        finding: external_exports.strictObject({ ...informationFields, id: FindingIdSchema }).optional()
-      })
-    ])
-  )
-});
-var TransportReviewSchema = external_exports.strictObject({
-  ...reviewFields,
-  findings: external_exports.array(
-    external_exports.strictObject({
-      ...actionFields,
-      type: external_exports.enum(["fix", "clarify", "decide"]).optional(),
-      label: external_exports.enum([...ActionLabelSchema.options, ...InformationLabelSchema.options]),
-      severity: SeveritySchema.optional(),
-      details: TextSchema.optional(),
-      resolved_when: TextSchema.optional(),
-      decision_owner: LineTextSchema.optional(),
-      decision_options: DecisionOptionsSchema.optional()
-    })
-  ),
-  prior_findings: external_exports.array(
-    external_exports.strictObject({
-      ...transitionFields,
-      status: external_exports.enum(["resolved", "still_open", "withdrawn"]),
-      evidence: external_exports.array(ReviewEvidenceSchema).optional(),
-      withdrawal_basis: external_exports.enum(["incorrect", "no_longer_applicable", "dismissed"]).optional(),
-      updated_finding: StoredFindingSchema.optional()
-    })
-  )
-});
-
-// src/code-review/review-policy.ts
 var ReviewPolicyPropsSchema = external_exports.strictObject({
   home: external_exports.string().min(1).optional(),
   env: external_exports.custom(
@@ -50282,7 +50582,7 @@ var ReviewPolicyPropsSchema = external_exports.strictObject({
 var LoadPolicyPropsSchema = external_exports.strictObject({ paths: external_exports.array(external_exports.string()).optional() });
 var RepositoryContextPropsSchema = external_exports.strictObject({
   cwd: external_exports.string().min(1),
-  trustedRef: HeadShaSchema2,
+  trustedRef: HeadShaSchema,
   contextPath: ReviewPathSchema.min(1).default("CODE-REVIEW.md")
 });
 var FileReviewPolicy = class {
@@ -50531,101 +50831,13 @@ var GitHubReviewVerifier = class {
 
 // src/code-review/review-planner.ts
 import { randomBytes as randomBytes2 } from "node:crypto";
-
-// src/code-review/review-contract.ts
-var InvalidReviewError = class extends Error {
-  name = "InvalidReviewError";
-};
-var ZodReviewContract = class {
-  parse(value) {
-    const result = ReviewSchema.parse(value);
-    const ids = result.prior_findings.map((finding) => finding.id);
-    if (new Set(ids).size !== ids.length)
-      throw new InvalidReviewError("duplicate prior finding IDs");
-    if (!result.review_complete && !result.incomplete_reason?.trim()) {
-      throw new InvalidReviewError("an incomplete review must explain what could not be reviewed");
-    }
-    const findings = result.findings.map((finding) => this.normalize(finding));
-    const priorFindings = result.prior_findings.map((transition) => {
-      if (transition.status !== "still_open") return transition;
-      if ((transition.decision !== void 0 || transition.updated_finding !== void 0) && !transition.evidence?.length) {
-        throw new InvalidReviewError(`transition ${transition.id} requires evidence`);
-      }
-      if (transition.updated_finding === void 0) return transition;
-      if (transition.id !== transition.updated_finding.id)
-        throw new InvalidReviewError("a replacement must preserve the finding ID");
-      return {
-        ...transition,
-        updated_finding: this.normalizeActionable(transition.updated_finding)
-      };
-    });
-    for (const transition of priorFindings) {
-      if (transition.decision !== void 0 && !transition.evidence?.some(
-        (evidence) => evidence.kind === "github_comment" && evidence.comment_id === transition.decision?.comment_id
-      )) {
-        throw new InvalidReviewError(
-          `decision ${transition.id} must reference its human comment in evidence`
-        );
-      }
-    }
-    return { ...result, findings, prior_findings: priorFindings };
-  }
-  record(value) {
-    const result = FindingRecordSchema.parse(value);
-    if (result.status !== "open" && result.evidence.length === 0)
-      throw new InvalidReviewError("closed records require evidence");
-    return { ...result, finding: this.normalizeActionable(result.finding) };
-  }
-  state(value) {
-    const result = ReviewStateSchema.parse(value);
-    const ids = result.records.map((record2) => record2.id);
-    if (new Set(ids).size !== ids.length)
-      throw new InvalidReviewError("duplicate finding IDs in state");
-    for (const record2 of result.records) {
-      if (record2.status === "informational" && record2.finding !== void 0 && record2.id !== record2.finding.id) {
-        throw new InvalidReviewError("informational index ID does not match its finding");
-      }
-    }
-    return result;
-  }
-  schemas() {
-    return {
-      full: external_exports.toJSONSchema(ReviewSchema, { target: "draft-07" }),
-      transport: external_exports.toJSONSchema(TransportReviewSchema, { target: "draft-07" })
-    };
-  }
-  normalize(finding) {
-    this.checkRange(finding);
-    if (!("type" in finding)) return finding;
-    if (finding.type === "decide") this.checkOptions(finding);
-    const blocking = finding.blocking || finding.severity === "critical" || finding.severity === "major";
-    const label = blocking && ["nitpick", "typo", "polish"].includes(finding.label) ? "issue" : finding.label;
-    return { ...finding, blocking, label };
-  }
-  normalizeActionable(finding) {
-    return ActionableFindingSchema.parse({ ...this.normalize(finding), id: finding.id });
-  }
-  checkRange(finding) {
-    if (finding.start_line !== void 0 && (finding.line === 0 || finding.start_line > finding.line)) {
-      throw new InvalidReviewError("start_line must not exceed a positive line anchor");
-    }
-  }
-  checkOptions(finding) {
-    const ids = finding.decision_options.map((option) => option.id);
-    if (new Set(ids).size !== ids.length)
-      throw new InvalidReviewError("decision option IDs must be unique");
-  }
-};
-var reviewContract = new ZodReviewContract();
-
-// src/code-review/review-planner.ts
 var EvidenceReviewPlanner = class {
   verifier;
   constructor(props) {
     this.verifier = props.verifier;
   }
   async plan(input2) {
-    const headSha = HeadShaSchema2.parse(input2.headSha);
+    const headSha = HeadShaSchema.parse(input2.headSha);
     const review = reviewContract.parse(input2.review);
     const records = input2.records.map((record2) => reviewContract.record(record2));
     const known = new Map(records.map((record2) => [record2.finding.id, record2]));
@@ -50763,86 +50975,10 @@ var ValidatedEvidencePropsSchema = external_exports.strictObject({
   dismissals: external_exports.array(external_exports.string())
 });
 
-// src/code-review/review-codec.ts
-import { createHash as createHash2 } from "node:crypto";
-var MarkerInputSchema = external_exports.strictObject({
-  body: external_exports.string(),
-  authorId: external_exports.number().int().positive(),
-  trustedAuthorIds: external_exports.array(external_exports.number().int().positive())
-});
-var JsonReviewCodec = class {
-  finding(record2) {
-    return this.marker("finding", reviewContract.record(record2));
-  }
-  state(state) {
-    return this.marker("state", reviewContract.state(state));
-  }
-  readFindings(input2) {
-    const parsed = MarkerInputSchema.parse(input2);
-    if (!parsed.trustedAuthorIds.includes(parsed.authorId)) return [];
-    return this.readMarkers(parsed.body, "finding").map((value) => reviewContract.record(value));
-  }
-  readState(input2) {
-    const parsed = MarkerInputSchema.parse(input2);
-    if (!parsed.trustedAuthorIds.includes(parsed.authorId)) return void 0;
-    const states = this.readMarkers(parsed.body, "state");
-    if (states.length > 1)
-      throw new InvalidReviewError("multiple review state markers in one summary");
-    return states.length === 0 ? void 0 : reviewContract.state(states[0]);
-  }
-  render(record2) {
-    const validated = reviewContract.record(record2);
-    const finding = validated.finding;
-    const decorations = [
-      ...["nitpick", "typo", "polish"].includes(finding.label) ? [] : [finding.blocking ? "blocking" : "non-blocking"],
-      finding.type
-    ];
-    if (finding.category !== void 0) decorations.push(finding.category);
-    const owner = finding.type === "decide" ? `
-
-**Decision owner:** ${finding.decision_owner}
-**Decision options:** ${finding.decision_options.map((option) => `\`${option.id}\`: ${option.description}`).join("; ")}` : "";
-    return `**${finding.label} (${decorations.join(", ")}):** ${finding.subject}
-
-${finding.discussion}
-
-<details>
-<summary>Details For LLM</summary>
-
-${finding.details}${owner}
-
-**Resolved when:** ${finding.resolved_when}
-</details>
-
-${this.finding(validated)}`;
-  }
-  fingerprint(finding) {
-    return createHash2("sha256").update(`${finding.path}|${finding.label}|${finding.subject.trim().toLowerCase()}`).digest("hex");
-  }
-  marker(kind, value) {
-    return `<!-- code-review:${kind} ${JSON.stringify(value).replaceAll(">", "\\u003e")} -->`;
-  }
-  readMarkers(body, kind) {
-    const prefix = `<!-- code-review:${kind} `;
-    const matches = [...body.matchAll(new RegExp(`${prefix}([\\s\\S]*?) -->`, "g"))];
-    if (body.split(prefix).length - 1 !== matches.length)
-      throw new InvalidReviewError("unterminated review marker");
-    return matches.map((match) => {
-      try {
-        return JSON.parse(match[1] ?? "");
-      } catch {
-        throw new InvalidReviewError(
-          "review marker contains invalid JSON; recover state before approving"
-        );
-      }
-    });
-  }
-};
-
 // src/operations/review-operations.ts
 var ReviewOperationsLaunchPropsSchema = external_exports.strictObject({
   cwd: external_exports.string().min(1).optional(),
-  trustedRef: HeadShaSchema2.optional(),
+  trustedRef: HeadShaSchema.optional(),
   owners: external_exports.record(external_exports.string(), external_exports.array(external_exports.string().min(1))).default({}),
   requireMapping: external_exports.boolean().default(false)
 });
@@ -50868,7 +51004,7 @@ var contextInput = external_exports.strictObject({
   contextPath: external_exports.string().min(1).default("CODE-REVIEW.md")
 });
 var contextOutput = external_exports.object({
-  trustedRef: HeadShaSchema2,
+  trustedRef: HeadShaSchema,
   contextPath: external_exports.string(),
   sources: external_exports.array(external_exports.object({ path: external_exports.string(), contents: external_exports.string() })),
   missing: external_exports.array(external_exports.string())
@@ -51010,7 +51146,7 @@ var DefaultReviewOperations = class {
         planOutput,
         async ({ number: number4, repo, review, records }) => {
           const pullRequest = external_exports.looseObject({
-            head: external_exports.looseObject({ sha: HeadShaSchema2 }),
+            head: external_exports.looseObject({ sha: HeadShaSchema }),
             user: external_exports.looseObject({ id: external_exports.number().int().positive() })
           }).parse(await this.api.get(`/repos/${repo}/pulls/${number4}`));
           const planner = new EvidenceReviewPlanner({
@@ -55256,6 +55392,9 @@ var CommanderPrCommand = class {
     pr.command("list").exitOverride().option("--ticket <id>", "ticket id (repeatable, required)", collect, []).action(async (opts, command) => {
       await this.invokeAndPrint("pr-list", { ticket: opts.ticket }, command);
     });
+    pr.command("threads").exitOverride().argument("<number>", "pull request number", (value) => decimalIntegers.positive(value)).option("--trusted-author <login>", "author whose root comments may carry finding markers; `name[bot]` trusts only that Bot, a bare `name` only that User (repeatable)", collect, []).action(async (number4, opts, command) => {
+      await this.invokeAndPrint("pr-threads", { number: number4, trustedAuthors: opts.trustedAuthor }, command);
+    });
     pr.command("request-review").exitOverride().argument("<number>", "pull request number", (value) => decimalIntegers.positive(value)).option("--reviewer <login>", "reviewer to request (repeatable, required)", collect, []).action(async (number4, opts, command) => {
       await this.invokeAndPrint("pr-request-review", { number: number4, reviewer: opts.reviewer }, command);
     });
@@ -55544,6 +55683,7 @@ var cliRouteCoverage = new ManifestCliRouteCoverage({
       ["pr create", "pr-create"],
       ["pr comment", "pr-comment"],
       ["pr list", "pr-list"],
+      ["pr threads", "pr-threads"],
       ["pr request-review", "pr-request-review"],
       ["board post heartbeat", "board-post-heartbeat"],
       ["board post item", "board-post-item"],
@@ -70392,6 +70532,43 @@ var reviewInput2 = external_exports.strictObject({
   number: external_exports.number().int().positive(),
   reviewer: external_exports.array(external_exports.string().min(1)).min(1)
 });
+var threadsInput = external_exports.strictObject({
+  number: external_exports.number().int().positive(),
+  trustedAuthors: external_exports.array(external_exports.string().min(1)).default([])
+});
+var threadCommentSchema = external_exports.strictObject({
+  id: external_exports.string(),
+  url: external_exports.string(),
+  authorLogin: external_exports.string(),
+  authorType: external_exports.enum(["User", "Bot"]),
+  body: external_exports.string(),
+  createdAt: external_exports.string()
+});
+var reviewThreadSchema = external_exports.strictObject({
+  id: external_exports.string(),
+  path: external_exports.string(),
+  line: external_exports.number().nullable(),
+  originalLine: external_exports.number().nullable(),
+  isResolved: external_exports.boolean(),
+  isOutdated: external_exports.boolean(),
+  commentsTruncated: external_exports.boolean(),
+  comments: external_exports.array(threadCommentSchema),
+  finding: FindingRecordSchema.nullable(),
+  markerError: external_exports.string().nullable()
+});
+var pullRequestThreadsSchema = external_exports.strictObject({
+  pullRequest: external_exports.strictObject({
+    number: external_exports.number(),
+    url: external_exports.string(),
+    title: external_exports.string(),
+    body: external_exports.string(),
+    headRefName: external_exports.string(),
+    headRefOid: external_exports.string(),
+    baseRefName: external_exports.string(),
+    authorLogin: external_exports.string()
+  }),
+  threads: external_exports.array(reviewThreadSchema)
+});
 var createdSchema = external_exports.object({ number: external_exports.number().int().positive(), url: external_exports.string().url() });
 var commentResultSchema = external_exports.object({ url: external_exports.string() });
 var openPullRequestSchema = external_exports.object({
@@ -70451,6 +70628,7 @@ var DefaultPrOperations = class {
         return this.getHost().commentOnPullRequest(input2.number, input2.body, { attach: input2.attach });
       }),
       this.descriptor("pr-list", "List open pull requests matched to ticket identifiers.", ["read", "network", "process"], ["pr", "list"], listInput, external_exports.array(openPullRequestSchema), (input2) => this.getHost().listOpenPullRequestsForTickets(input2.ticket)),
+      this.descriptor("pr-threads", "List a pull request's review threads with trusted finding markers.", ["read", "network", "process"], ["pr", "threads"], threadsInput, pullRequestThreadsSchema, (input2) => this.getHost().listReviewThreads(input2.number, { trustedAuthors: input2.trustedAuthors })),
       this.descriptor("pr-request-review", "Request reviewers for a pull request and preserve each outcome.", effects, ["pr", "request-review"], reviewInput2, reviewerResultSchema, async (input2) => {
         const result = await this.getHost().requestReviewers(input2.number, input2.reviewer);
         if (result.failed.length > 0) {

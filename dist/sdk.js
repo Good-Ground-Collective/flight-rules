@@ -2222,6 +2222,7 @@ var cliRouteCoverage = new ManifestCliRouteCoverage({
       ["pr create", "pr-create"],
       ["pr comment", "pr-comment"],
       ["pr list", "pr-list"],
+      ["pr threads", "pr-threads"],
       ["pr request-review", "pr-request-review"],
       ["board post heartbeat", "board-post-heartbeat"],
       ["board post item", "board-post-item"],
@@ -4001,7 +4002,7 @@ var DefaultTrackerEntityOperations = class {
 // src/operations/pr-operations.ts
 import { realpathSync as realpathSync6, statSync as statSync7 } from "node:fs";
 import { isAbsolute as isAbsolute6, relative as relative5, resolve as resolve8 } from "node:path";
-import { z as z35 } from "zod";
+import { z as z36 } from "zod";
 
 // src/git/pr-template/pr-template.ts
 import { z as z34 } from "zod";
@@ -4085,50 +4086,304 @@ var DefaultPullRequestBuilder = class {
 };
 var pullRequestBuilder = new DefaultPullRequestBuilder();
 
+// src/code-review/review.schema.ts
+import { z as z35 } from "zod";
+var reviewContractVersion = 1;
+var reviewSchemaRevision = 1;
+var ReviewOutcomeSchema = z35.enum(["APPROVED", "CHANGES_NEEDED", "ESCALATE", "INCOMPLETE"]);
+var FindingIdSchema = z35.string().regex(/^f-[a-f0-9]{10}$/);
+var HeadShaSchema = z35.string().regex(/^[a-f0-9]{40}$/);
+var ReviewPathSchema = z35.string().max(400).regex(/^(?!\/)(?!.*\\)(?!.*(?:^|\/)\.{1,2}(?:\/|$))[^\p{Cc}]*$/u);
+var TextSchema = z35.string().min(1).max(16e3);
+var LineTextSchema = z35.string().min(1).max(400).regex(/^[^\r\n]+$/);
+var PositiveIdSchema = z35.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+var HttpsUrlSchema = z35.url().regex(/^https:\/\//);
+var CategorySchema = z35.enum([
+  "security",
+  "correctness",
+  "data",
+  "deployment",
+  "design",
+  "testing",
+  "performance",
+  "readability",
+  "docs"
+]);
+var ActionLabelSchema = z35.enum([
+  "issue",
+  "todo",
+  "suggestion",
+  "question",
+  "chore",
+  "nitpick",
+  "typo",
+  "polish"
+]);
+var InformationLabelSchema = z35.enum(["praise", "note", "thought"]);
+var SeveritySchema = z35.enum(["critical", "major", "minor", "trivial"]);
+var DecisionOptionsSchema = z35.array(
+  z35.strictObject({ id: z35.string().regex(/^[a-z][a-z0-9-]{0,79}$/), description: TextSchema })
+).min(2);
+var findingFields = {
+  path: ReviewPathSchema,
+  line: z35.number().int().nonnegative(),
+  start_line: z35.number().int().positive().optional(),
+  category: CategorySchema.optional(),
+  subject: LineTextSchema,
+  discussion: TextSchema,
+  related_finding_id: FindingIdSchema.optional()
+};
+var actionFields = {
+  ...findingFields,
+  label: ActionLabelSchema,
+  type: z35.enum(["fix", "clarify"]),
+  blocking: z35.boolean(),
+  severity: SeveritySchema,
+  details: TextSchema,
+  resolved_when: TextSchema
+};
+var decisionFields = {
+  ...actionFields,
+  type: z35.literal("decide"),
+  decision_owner: LineTextSchema,
+  decision_options: DecisionOptionsSchema
+};
+var informationFields = {
+  ...findingFields,
+  label: InformationLabelSchema,
+  blocking: z35.literal(false),
+  details: TextSchema.optional()
+};
+var NewFindingSchema = z35.union([
+  z35.strictObject(actionFields),
+  z35.strictObject(decisionFields),
+  z35.strictObject(informationFields)
+]);
+var ActionableFindingSchema = z35.union([
+  z35.strictObject({ ...actionFields, id: FindingIdSchema }),
+  z35.strictObject({ ...decisionFields, id: FindingIdSchema })
+]);
+var StoredFindingSchema = z35.union([
+  ...ActionableFindingSchema.options,
+  z35.strictObject({ ...informationFields, id: FindingIdSchema })
+]);
+var ReviewEvidenceSchema = z35.discriminatedUnion("kind", [
+  z35.strictObject({
+    kind: z35.literal("github_comment"),
+    comment_id: PositiveIdSchema,
+    url: HttpsUrlSchema
+  }),
+  z35.strictObject({
+    kind: z35.literal("code"),
+    commit_sha: HeadShaSchema,
+    path: ReviewPathSchema.min(1),
+    line: z35.number().int().positive()
+  }),
+  z35.strictObject({ kind: z35.literal("commit"), sha: HeadShaSchema }),
+  z35.strictObject({
+    kind: z35.literal("check_run"),
+    check_run_id: PositiveIdSchema,
+    commit_sha: HeadShaSchema
+  }),
+  z35.strictObject({ kind: z35.literal("document"), url: HttpsUrlSchema }),
+  z35.strictObject({
+    kind: z35.literal("verification"),
+    commit_sha: HeadShaSchema,
+    command: TextSchema,
+    result: z35.literal("passed"),
+    report_url: HttpsUrlSchema
+  }),
+  z35.strictObject({
+    kind: z35.literal("thread_resolution"),
+    thread_id: z35.string().min(1),
+    author_id: PositiveIdSchema
+  })
+]);
+var DecisionAnswerSchema = z35.strictObject({
+  comment_id: PositiveIdSchema,
+  author_id: PositiveIdSchema,
+  option_id: z35.string().min(1)
+});
+var transitionFields = {
+  id: FindingIdSchema,
+  reason: TextSchema,
+  reply: TextSchema.optional(),
+  decision: DecisionAnswerSchema.optional()
+};
+var PriorFindingSchema = z35.union([
+  z35.strictObject({
+    ...transitionFields,
+    status: z35.literal("resolved"),
+    evidence: z35.array(ReviewEvidenceSchema).min(1)
+  }),
+  z35.strictObject({
+    ...transitionFields,
+    status: z35.literal("withdrawn"),
+    evidence: z35.array(ReviewEvidenceSchema).min(1),
+    withdrawal_basis: z35.enum(["incorrect", "no_longer_applicable", "dismissed"])
+  }),
+  z35.strictObject({
+    ...transitionFields,
+    status: z35.literal("still_open"),
+    evidence: z35.array(ReviewEvidenceSchema).optional(),
+    updated_finding: ActionableFindingSchema.optional()
+  })
+]);
+var reviewFields = {
+  contract_version: z35.literal(reviewContractVersion),
+  schema_revision: z35.literal(reviewSchemaRevision),
+  head_sha: HeadShaSchema,
+  review_complete: z35.boolean(),
+  incomplete_reason: z35.string().max(16e3).optional(),
+  summary: TextSchema,
+  outcome: ReviewOutcomeSchema,
+  outcome_reason: TextSchema,
+  remaining_risk: TextSchema,
+  extensions: z35.record(z35.string(), z35.json()).optional()
+};
+var ReviewSchema = z35.strictObject({
+  ...reviewFields,
+  findings: z35.array(NewFindingSchema),
+  prior_findings: z35.array(PriorFindingSchema)
+});
+var FindingRecordSchema = z35.strictObject({
+  v: z35.literal(reviewContractVersion),
+  schema_revision: z35.literal(reviewSchemaRevision),
+  finding: ActionableFindingSchema,
+  status: z35.enum(["open", "resolved", "withdrawn"]),
+  evidence: z35.array(ReviewEvidenceSchema),
+  decision: DecisionAnswerSchema.optional()
+});
+var ReviewStateSchema = z35.strictObject({
+  v: z35.literal(reviewContractVersion),
+  schema_revision: z35.literal(reviewSchemaRevision),
+  sha: HeadShaSchema,
+  outcome: ReviewOutcomeSchema,
+  records: z35.array(
+    z35.union([
+      z35.strictObject({
+        id: FindingIdSchema,
+        status: z35.enum(["open", "resolved", "withdrawn"]),
+        location: z35.union([
+          z35.strictObject({ kind: z35.literal("review_comment"), comment_id: PositiveIdSchema }),
+          z35.strictObject({ kind: z35.literal("review_body"), review_id: PositiveIdSchema })
+        ])
+      }),
+      z35.strictObject({
+        id: FindingIdSchema,
+        status: z35.literal("informational"),
+        fingerprint: z35.string().min(1),
+        finding: z35.strictObject({ ...informationFields, id: FindingIdSchema }).optional()
+      })
+    ])
+  )
+});
+var TransportReviewSchema = z35.strictObject({
+  ...reviewFields,
+  findings: z35.array(
+    z35.strictObject({
+      ...actionFields,
+      type: z35.enum(["fix", "clarify", "decide"]).optional(),
+      label: z35.enum([...ActionLabelSchema.options, ...InformationLabelSchema.options]),
+      severity: SeveritySchema.optional(),
+      details: TextSchema.optional(),
+      resolved_when: TextSchema.optional(),
+      decision_owner: LineTextSchema.optional(),
+      decision_options: DecisionOptionsSchema.optional()
+    })
+  ),
+  prior_findings: z35.array(
+    z35.strictObject({
+      ...transitionFields,
+      status: z35.enum(["resolved", "still_open", "withdrawn"]),
+      evidence: z35.array(ReviewEvidenceSchema).optional(),
+      withdrawal_basis: z35.enum(["incorrect", "no_longer_applicable", "dismissed"]).optional(),
+      updated_finding: StoredFindingSchema.optional()
+    })
+  )
+});
+
 // src/operations/pr-operations.ts
-var propsSchema4 = z35.strictObject({
-  cwd: z35.string().min(1),
-  getHost: z35.custom((value) => typeof value === "function")
+var propsSchema4 = z36.strictObject({
+  cwd: z36.string().min(1),
+  getHost: z36.custom((value) => typeof value === "function")
 });
-var createInput = z35.strictObject({
+var createInput = z36.strictObject({
   type: SemanticTypeSchema,
-  scope: z35.string().min(1),
-  description: z35.string().min(1),
-  why: z35.string().min(1),
-  what: z35.array(z35.string().min(1).max(256)).min(1).max(5),
-  ots: z35.string().min(1).optional(),
-  base: z35.string().min(1),
-  head: z35.string().min(1),
-  ticketId: z35.string().min(1).optional(),
-  ticketUrl: z35.url().optional(),
-  reviewer: z35.array(z35.string()).default([]),
-  label: z35.array(z35.string()).default([]),
-  attach: z35.array(z35.string()).default([])
+  scope: z36.string().min(1),
+  description: z36.string().min(1),
+  why: z36.string().min(1),
+  what: z36.array(z36.string().min(1).max(256)).min(1).max(5),
+  ots: z36.string().min(1).optional(),
+  base: z36.string().min(1),
+  head: z36.string().min(1),
+  ticketId: z36.string().min(1).optional(),
+  ticketUrl: z36.url().optional(),
+  reviewer: z36.array(z36.string()).default([]),
+  label: z36.array(z36.string()).default([]),
+  attach: z36.array(z36.string()).default([])
 });
-var commentInput2 = z35.strictObject({
-  number: z35.number().int().positive(),
-  body: z35.string(),
-  attach: z35.array(z35.string()).default([])
+var commentInput2 = z36.strictObject({
+  number: z36.number().int().positive(),
+  body: z36.string(),
+  attach: z36.array(z36.string()).default([])
 });
-var listInput = z35.strictObject({ ticket: z35.array(z35.string().min(1)).min(1) });
-var reviewInput = z35.strictObject({
-  number: z35.number().int().positive(),
-  reviewer: z35.array(z35.string().min(1)).min(1)
+var listInput = z36.strictObject({ ticket: z36.array(z36.string().min(1)).min(1) });
+var reviewInput = z36.strictObject({
+  number: z36.number().int().positive(),
+  reviewer: z36.array(z36.string().min(1)).min(1)
 });
-var createdSchema = z35.object({ number: z35.number().int().positive(), url: z35.string().url() });
-var commentResultSchema = z35.object({ url: z35.string() });
-var openPullRequestSchema = z35.object({
-  ticket: z35.string(),
-  number: z35.number(),
-  url: z35.string(),
-  headRefName: z35.string(),
-  baseRefName: z35.string(),
-  title: z35.string()
+var threadsInput = z36.strictObject({
+  number: z36.number().int().positive(),
+  trustedAuthors: z36.array(z36.string().min(1)).default([])
 });
-var reviewerResultSchema = z35.object({
-  number: z35.number().int().positive(),
-  requested: z35.array(z35.string()),
-  failed: z35.array(z35.object({ login: z35.string(), error: z35.string() }))
+var threadCommentSchema = z36.strictObject({
+  id: z36.string(),
+  url: z36.string(),
+  authorLogin: z36.string(),
+  authorType: z36.enum(["User", "Bot"]),
+  body: z36.string(),
+  createdAt: z36.string()
+});
+var reviewThreadSchema = z36.strictObject({
+  id: z36.string(),
+  path: z36.string(),
+  line: z36.number().nullable(),
+  originalLine: z36.number().nullable(),
+  isResolved: z36.boolean(),
+  isOutdated: z36.boolean(),
+  commentsTruncated: z36.boolean(),
+  comments: z36.array(threadCommentSchema),
+  finding: FindingRecordSchema.nullable(),
+  markerError: z36.string().nullable()
+});
+var pullRequestThreadsSchema = z36.strictObject({
+  pullRequest: z36.strictObject({
+    number: z36.number(),
+    url: z36.string(),
+    title: z36.string(),
+    body: z36.string(),
+    headRefName: z36.string(),
+    headRefOid: z36.string(),
+    baseRefName: z36.string(),
+    authorLogin: z36.string()
+  }),
+  threads: z36.array(reviewThreadSchema)
+});
+var createdSchema = z36.object({ number: z36.number().int().positive(), url: z36.string().url() });
+var commentResultSchema = z36.object({ url: z36.string() });
+var openPullRequestSchema = z36.object({
+  ticket: z36.string(),
+  number: z36.number(),
+  url: z36.string(),
+  headRefName: z36.string(),
+  baseRefName: z36.string(),
+  title: z36.string()
+});
+var reviewerResultSchema = z36.object({
+  number: z36.number().int().positive(),
+  requested: z36.array(z36.string()),
+  failed: z36.array(z36.object({ login: z36.string(), error: z36.string() }))
 });
 var PullRequestAttachmentPathError = class extends Error {
   name = "PullRequestAttachmentPathError";
@@ -4173,7 +4428,8 @@ var DefaultPrOperations = class {
         this.validateAttachments(input.attach);
         return this.getHost().commentOnPullRequest(input.number, input.body, { attach: input.attach });
       }),
-      this.descriptor("pr-list", "List open pull requests matched to ticket identifiers.", ["read", "network", "process"], ["pr", "list"], listInput, z35.array(openPullRequestSchema), (input) => this.getHost().listOpenPullRequestsForTickets(input.ticket)),
+      this.descriptor("pr-list", "List open pull requests matched to ticket identifiers.", ["read", "network", "process"], ["pr", "list"], listInput, z36.array(openPullRequestSchema), (input) => this.getHost().listOpenPullRequestsForTickets(input.ticket)),
+      this.descriptor("pr-threads", "List a pull request's review threads with trusted finding markers.", ["read", "network", "process"], ["pr", "threads"], threadsInput, pullRequestThreadsSchema, (input) => this.getHost().listReviewThreads(input.number, { trustedAuthors: input.trustedAuthors })),
       this.descriptor("pr-request-review", "Request reviewers for a pull request and preserve each outcome.", effects, ["pr", "request-review"], reviewInput, reviewerResultSchema, async (input) => {
         const result = await this.getHost().requestReviewers(input.number, input.reviewer);
         if (result.failed.length > 0) {
@@ -4230,7 +4486,7 @@ var DefaultPrOperations = class {
 };
 
 // src/operations/ariadne-operations.ts
-import { z as z37 } from "zod";
+import { z as z38 } from "zod";
 
 // src/shared/ariadne/packet-id-generator.ts
 import { randomBytes } from "node:crypto";
@@ -4262,7 +4518,7 @@ var RandomPacketIdGenerator = class {
 var packetIdGenerator = new RandomPacketIdGenerator();
 
 // src/shared/ariadne/review-packet.schema.ts
-import { z as z36 } from "zod";
+import { z as z37 } from "zod";
 var packetLimits = {
   title: 200,
   objective: 600,
@@ -4278,145 +4534,145 @@ var packetLimits = {
 };
 var focusAreaKinds = ["design-pattern", "business-logic", "data-schema", "other"];
 var anchorSides = ["LEFT", "RIGHT"];
-var textSchema = (max) => z36.string().min(1, "must not be blank").max(max, `must be at most ${max} characters`);
+var textSchema = (max) => z37.string().min(1, "must not be blank").max(max, `must be at most ${max} characters`);
 var oneLineTextSchema = (max) => textSchema(max).refine((value) => !/[\r\n]/.test(value), "must be one line");
-var PositiveIntSchema = z36.number().int().positive();
+var PositiveIntSchema = z37.number().int().positive();
 var PacketIdSchema = AgentRecordIdSchema;
-var OperationIdSchema2 = z36.string().regex(/^[A-Za-z0-9_-]{16,80}$/, "must be 16\u201380 letters, digits, underscores or hyphens");
-var HeadShaSchema = z36.string().regex(/^[0-9a-f]{40}$/, "must be a 40-character lowercase hex commit sha");
-var GithubLoginSchema = z36.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/, "must be a GitHub login");
-var PacketAnchorSchema = z36.strictObject({
+var OperationIdSchema2 = z37.string().regex(/^[A-Za-z0-9_-]{16,80}$/, "must be 16\u201380 letters, digits, underscores or hyphens");
+var HeadShaSchema2 = z37.string().regex(/^[0-9a-f]{40}$/, "must be a 40-character lowercase hex commit sha");
+var GithubLoginSchema = z37.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/, "must be a GitHub login");
+var PacketAnchorSchema = z37.strictObject({
   path: textSchema(packetLimits.path),
   line: PositiveIntSchema,
   startLine: optionalSchema(PositiveIntSchema),
-  side: z36.enum(anchorSides)
+  side: z37.enum(anchorSides)
 }).refine((anchor) => anchor.startLine === void 0 || anchor.startLine < anchor.line, {
   path: ["startLine"],
   message: "must be before line"
 });
-var SignOffTimeSchema = z36.string().regex(/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,3})?Z$/, "must be an ISO 8601 UTC time ending in Z").refine((value) => {
+var SignOffTimeSchema = z37.string().regex(/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,3})?Z$/, "must be an ISO 8601 UTC time ending in Z").refine((value) => {
   const [year = 0, month = 0, day = 0] = value.slice(0, 10).split("-").map(Number);
   const date = new Date(Date.UTC(year, month - 1, day));
   return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
 }, "must be a real calendar date");
-var FocusAreaSchema = z36.strictObject({
+var FocusAreaSchema = z37.strictObject({
   id: AgentRecordIdSchema,
-  kind: z36.enum(focusAreaKinds),
+  kind: z37.enum(focusAreaKinds),
   title: oneLineTextSchema(packetLimits.title),
   rationale: textSchema(packetLimits.rationale),
-  anchors: z36.array(PacketAnchorSchema).max(packetLimits.anchors, `up to ${packetLimits.anchors} anchors`)
+  anchors: z37.array(PacketAnchorSchema).max(packetLimits.anchors, `up to ${packetLimits.anchors} anchors`)
 });
-var PacketPrSchema = z36.strictObject({
-  repo: z36.string().regex(/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9_.-]{1,100}$/, "must be owner/name"),
+var PacketPrSchema = z37.strictObject({
+  repo: z37.string().regex(/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9_.-]{1,100}$/, "must be owner/name"),
   number: PositiveIntSchema,
-  headSha: HeadShaSchema,
+  headSha: HeadShaSchema2,
   title: oneLineTextSchema(packetLimits.title),
   ticket: optionalSchema(oneLineTextSchema(packetLimits.ticket)),
-  signOff: z36.strictObject({ at: SignOffTimeSchema, headSha: HeadShaSchema }).nullable().optional(),
-  focusAreas: z36.array(FocusAreaSchema).max(packetLimits.focusAreas, `up to ${packetLimits.focusAreas} focus areas per PR`)
+  signOff: z37.strictObject({ at: SignOffTimeSchema, headSha: HeadShaSchema2 }).nullable().optional(),
+  focusAreas: z37.array(FocusAreaSchema).max(packetLimits.focusAreas, `up to ${packetLimits.focusAreas} focus areas per PR`)
 });
-var PacketInputSchema = z36.strictObject({
+var PacketInputSchema = z37.strictObject({
   id: PacketIdSchema,
   title: oneLineTextSchema(packetLimits.title),
-  overview: z36.strictObject({
+  overview: z37.strictObject({
     objective: textSchema(packetLimits.objective),
-    highlights: z36.array(oneLineTextSchema(packetLimits.highlight)).min(1, "at least 1 highlight").max(packetLimits.highlights, `up to ${packetLimits.highlights} highlights`)
+    highlights: z37.array(oneLineTextSchema(packetLimits.highlight)).min(1, "at least 1 highlight").max(packetLimits.highlights, `up to ${packetLimits.highlights} highlights`)
   }),
-  prs: z36.array(PacketPrSchema).min(1, "at least 1 PR").max(packetLimits.prs, `up to ${packetLimits.prs} PRs`),
-  reviewers: z36.array(GithubLoginSchema).min(1, "at least 1 reviewer").max(packetLimits.reviewers, `up to ${packetLimits.reviewers} reviewers`)
+  prs: z37.array(PacketPrSchema).min(1, "at least 1 PR").max(packetLimits.prs, `up to ${packetLimits.prs} PRs`),
+  reviewers: z37.array(GithubLoginSchema).min(1, "at least 1 reviewer").max(packetLimits.reviewers, `up to ${packetLimits.reviewers} reviewers`)
 });
-var PacketUpdateSchema = z36.strictObject({
-  expectedRevision: z36.number().int().nonnegative(),
+var PacketUpdateSchema = z37.strictObject({
+  expectedRevision: z37.number().int().nonnegative(),
   operationId: OperationIdSchema2,
   packet: PacketInputSchema.omit({ id: true })
 });
-var GithubSnapshotSchema = z36.looseObject({ id: z36.union([z36.string(), z36.number()]), login: z36.string() });
-var PacketSchema = z36.looseObject({
-  id: z36.string(),
-  authorId: z36.string(),
-  title: z36.string(),
-  overview: z36.looseObject({ objective: z36.string(), highlights: z36.array(z36.string()) }),
-  prs: z36.array(z36.looseObject({ repo: z36.string(), number: z36.number() })),
-  reviewers: z36.array(z36.looseObject({ id: z36.string(), github: GithubSnapshotSchema })),
-  status: z36.enum(["open", "closed"]),
-  revision: z36.number().int(),
-  createdAt: z36.string(),
-  updatedAt: z36.string()
+var GithubSnapshotSchema = z37.looseObject({ id: z37.union([z37.string(), z37.number()]), login: z37.string() });
+var PacketSchema = z37.looseObject({
+  id: z37.string(),
+  authorId: z37.string(),
+  title: z37.string(),
+  overview: z37.looseObject({ objective: z37.string(), highlights: z37.array(z37.string()) }),
+  prs: z37.array(z37.looseObject({ repo: z37.string(), number: z37.number() })),
+  reviewers: z37.array(z37.looseObject({ id: z37.string(), github: GithubSnapshotSchema })),
+  status: z37.enum(["open", "closed"]),
+  revision: z37.number().int(),
+  createdAt: z37.string(),
+  updatedAt: z37.string()
 });
-var ReviewerSchema = z36.looseObject({ id: z36.string(), name: z36.string(), github: GithubSnapshotSchema });
-var PacketResponseSchema = z36.looseObject({ packet: PacketSchema }).transform((response) => response.packet);
-var ReviewerListResponseSchema = z36.looseObject({ reviewers: z36.array(ReviewerSchema) });
+var ReviewerSchema = z37.looseObject({ id: z37.string(), name: z37.string(), github: GithubSnapshotSchema });
+var PacketResponseSchema = z37.looseObject({ packet: PacketSchema }).transform((response) => response.packet);
+var ReviewerListResponseSchema = z37.looseObject({ reviewers: z37.array(ReviewerSchema) });
 
 // src/operations/ariadne-operations.ts
-var BoardResultSchema = (value) => z37.discriminatedUnion("status", [
-  z37.object({
-    status: z37.literal("skipped"),
-    reason: z37.enum([
+var BoardResultSchema = (value) => z38.discriminatedUnion("status", [
+  z38.object({
+    status: z38.literal("skipped"),
+    reason: z38.enum([
       "disabled",
       "no-token",
       "invalid-url",
       "not-jira-ticket",
       "nothing-recorded"
     ]),
-    notices: z37.array(z37.string()).optional()
+    notices: z38.array(z38.string()).optional()
   }),
-  z37.object({
-    status: z37.literal("failed"),
-    message: z37.string(),
-    notices: z37.array(z37.string()).optional()
+  z38.object({
+    status: z38.literal("failed"),
+    message: z38.string(),
+    notices: z38.array(z38.string()).optional()
   }),
-  z37.object({ status: z37.literal("ok"), value, notices: z37.array(z37.string()).optional() })
+  z38.object({ status: z38.literal("ok"), value, notices: z38.array(z38.string()).optional() })
 ]);
-var packetInput = z37.unknown();
-var packetIdInput = z37.strictObject({ title: z37.string() });
-var packetUpdateInput = z37.strictObject({
-  id: z37.string().min(1),
-  packet: z37.unknown(),
-  expectedRevision: z37.number().int().nonnegative()
+var packetInput = z38.unknown();
+var packetIdInput = z38.strictObject({ title: z38.string() });
+var packetUpdateInput = z38.strictObject({
+  id: z38.string().min(1),
+  packet: z38.unknown(),
+  expectedRevision: z38.number().int().nonnegative()
 });
 var packetOutput = PacketSchema;
 var reviewersOutput = ReviewerListResponseSchema;
-var AriadneOperationsPropsSchema = z37.object({
-  getBoard: z37.custom((value) => typeof value === "function"),
-  getPackets: z37.custom((value) => typeof value === "function")
+var AriadneOperationsPropsSchema = z38.object({
+  getBoard: z38.custom((value) => typeof value === "function"),
+  getPackets: z38.custom((value) => typeof value === "function")
 });
 var inputSchemas = {
-  heartbeat: z37.object({
+  heartbeat: z38.object({
     input: HeartbeatInputSchema.omit({ session: true }).extend({
-      session: z37.string().optional(),
-      ticket: z37.string().optional(),
-      step: z37.string(),
-      repo: z37.string().optional(),
-      branch: z37.string().optional(),
-      skill: z37.string().optional(),
-      detail: z37.string().optional()
+      session: z38.string().optional(),
+      ticket: z38.string().optional(),
+      step: z38.string(),
+      repo: z38.string().optional(),
+      branch: z38.string().optional(),
+      skill: z38.string().optional(),
+      detail: z38.string().optional()
     }),
-    options: z37.object({ strict: z37.boolean().optional(), skill: z37.string().optional() }).optional()
+    options: z38.object({ strict: z38.boolean().optional(), skill: z38.string().optional() }).optional()
   }),
-  item: z37.object({
+  item: z38.object({
     input: ItemInputSchema.omit({ session: true }).extend({
-      session: z37.string().optional(),
-      ticket: z37.string().optional(),
-      title: z37.string(),
-      detail: z37.string().optional(),
-      options: z37.array(z37.string()).optional(),
-      id: z37.string().optional()
+      session: z38.string().optional(),
+      ticket: z38.string().optional(),
+      title: z38.string(),
+      detail: z38.string().optional(),
+      options: z38.array(z38.string()).optional(),
+      id: z38.string().optional()
     }),
-    options: z37.object({ strict: z37.boolean().optional(), skill: z37.string().optional() }).optional()
+    options: z38.object({ strict: z38.boolean().optional(), skill: z38.string().optional() }).optional()
   }),
-  activity: z37.object({
+  activity: z38.object({
     input: ActivityInputSchema.omit({ session: true }).extend({
-      session: z37.string().optional(),
-      ticket: z37.string().optional(),
-      text: z37.string(),
-      id: z37.string().optional()
+      session: z38.string().optional(),
+      ticket: z38.string().optional(),
+      text: z38.string(),
+      id: z38.string().optional()
     }),
-    options: z37.object({ strict: z37.boolean().optional(), skill: z37.string().optional() }).optional()
+    options: z38.object({ strict: z38.boolean().optional(), skill: z38.string().optional() }).optional()
   }),
-  items: z37.strictObject({
-    session: z37.string().optional(),
-    ticket: z37.string().optional(),
-    strict: z37.boolean().optional()
+  items: z38.strictObject({
+    session: z38.string().optional(),
+    ticket: z38.string().optional(),
+    strict: z38.boolean().optional()
   })
 };
 var DefaultAriadneOperations = class {
@@ -4479,7 +4735,7 @@ var DefaultAriadneOperations = class {
         "Publish a validated Ariadne review packet.",
         ["write", "network"],
         ["packet", "create"],
-        z37.strictObject({ packet: packetInput }),
+        z38.strictObject({ packet: packetInput }),
         packetOutput,
         ({ packet }) => this.props.getPackets().create(packet)
       ),
@@ -4489,7 +4745,7 @@ var DefaultAriadneOperations = class {
         [],
         ["packet", "new-id"],
         packetIdInput,
-        z37.object({ id: z37.string() }),
+        z38.object({ id: z38.string() }),
         ({ title }) => ({ id: packetIdGenerator.generate(title) })
       ),
       this.descriptor(
@@ -4506,7 +4762,7 @@ var DefaultAriadneOperations = class {
         "Read an Ariadne review packet and its revision.",
         ["read", "network"],
         ["packet", "get"],
-        z37.object({ id: z37.string().min(1) }),
+        z38.object({ id: z38.string().min(1) }),
         packetOutput,
         ({ id }) => this.props.getPackets().get(id)
       ),
@@ -4515,7 +4771,7 @@ var DefaultAriadneOperations = class {
         "List Ariadne members who can review packets.",
         ["read", "network"],
         ["packet", "reviewers"],
-        z37.strictObject({}),
+        z38.strictObject({}),
         reviewersOutput,
         () => this.props.getPackets().reviewers()
       )
@@ -4548,7 +4804,7 @@ var DefaultAriadneOperations = class {
 // src/operations/git-config-operations.ts
 import { existsSync as existsSync7, lstatSync, realpathSync as realpathSync7 } from "node:fs";
 import { dirname as dirname6, isAbsolute as isAbsolute7, join as join7, parse, relative as relative6, resolve as resolve9, sep as sep4 } from "node:path";
-import { z as z39 } from "zod";
+import { z as z40 } from "zod";
 
 // src/git/branch-namer/branch-namer.ts
 var BranchNamer = class {
@@ -4601,25 +4857,25 @@ ${line.trim()}`) === "";
 };
 
 // src/git/commit-message-builder/commit-message.schema.ts
-import { z as z38 } from "zod";
-var CommitMessageInputSchema = z38.object({
+import { z as z39 } from "zod";
+var CommitMessageInputSchema = z39.object({
   type: SemanticTypeSchema,
   // Bare issue numbers make one-character scopes legitimate; 32 clears a 10-character tracker key plus a six-digit number.
-  scope: z38.string().min(1).max(32),
-  description: z38.string().min(2).max(50),
-  body: z38.string().optional(),
-  model: z38.string().max(72).optional(),
-  footers: z38.array(z38.string().regex(/^[a-zA-Z0-9-]+(: |=).*$/)).default([])
+  scope: z39.string().min(1).max(32),
+  description: z39.string().min(2).max(50),
+  body: z39.string().optional(),
+  model: z39.string().max(72).optional(),
+  footers: z39.array(z39.string().regex(/^[a-zA-Z0-9-]+(: |=).*$/)).default([])
 });
-var CommitMessageHeaderSchema = z38.preprocess(
+var CommitMessageHeaderSchema = z39.preprocess(
   (arg) => {
-    return z38.string({ error: "Git Commit headers should be 72 characters or less" }).max(72).parse(arg);
+    return z39.string({ error: "Git Commit headers should be 72 characters or less" }).max(72).parse(arg);
   },
-  z38.templateLiteral([SemanticTypeSchema, "(", z38.string(), "): ", z38.string()])
+  z39.templateLiteral([SemanticTypeSchema, "(", z39.string(), "): ", z39.string()])
 );
-var CommitMessageBuilderPropsSchema = z38.object({
-  binPath: z38.string().min(1),
-  agentEnv: z38.string().optional()
+var CommitMessageBuilderPropsSchema = z39.object({
+  binPath: z39.string().min(1),
+  agentEnv: z39.string().optional()
 });
 
 // src/git/commit-message-builder/commit-message-builder.ts
@@ -4676,36 +4932,36 @@ var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
 };
 
 // src/operations/git-config-operations.ts
-var ConfigScopeSchema = z39.enum(configScopes);
-var ConfigSetInputSchema = z39.object({
-  key: z39.string().min(1),
-  values: z39.array(z39.string()).min(1),
+var ConfigScopeSchema = z40.enum(configScopes);
+var ConfigSetInputSchema = z40.object({
+  key: z40.string().min(1),
+  values: z40.array(z40.string()).min(1),
   scope: ConfigScopeSchema.optional()
 }).strict();
-var ConfigUnsetInputSchema = z39.object({ key: z39.string().min(1), scope: ConfigScopeSchema.optional() }).strict();
+var ConfigUnsetInputSchema = z40.object({ key: z40.string().min(1), scope: ConfigScopeSchema.optional() }).strict();
 var GitCommitInputSchema = CommitMessageInputSchema.extend({
-  files: z39.array(z39.string()).default([])
+  files: z40.array(z40.string()).default([])
 }).strict();
-var GitCheckoutInputSchema = z39.object({
-  type: z39.string().min(1),
-  scope: z39.string().min(1),
-  description: z39.string().optional(),
-  from: z39.string().optional()
+var GitCheckoutInputSchema = z40.object({
+  type: z40.string().min(1),
+  scope: z40.string().min(1),
+  description: z40.string().optional(),
+  from: z40.string().optional()
 }).strict();
-var GitPushInputSchema = z39.object({ remote: z39.string().min(1).default("origin"), setUpstream: z39.boolean().default(true) }).strict();
-var CommitMessageOutputSchema = z39.object({ message: z39.string() });
-var BranchNameInputSchema = z39.object({ type: z39.string().min(1), scope: z39.string().min(1), description: z39.string().optional() }).strict();
-var ConfigOperationPolicySchema = z39.object({
-  scopes: z39.array(ConfigScopeSchema).default(["project", "local"]),
-  roots: z39.array(z39.string().min(1)).default([])
+var GitPushInputSchema = z40.object({ remote: z40.string().min(1).default("origin"), setUpstream: z40.boolean().default(true) }).strict();
+var CommitMessageOutputSchema = z40.object({ message: z40.string() });
+var BranchNameInputSchema = z40.object({ type: z40.string().min(1), scope: z40.string().min(1), description: z40.string().optional() }).strict();
+var ConfigOperationPolicySchema = z40.object({
+  scopes: z40.array(ConfigScopeSchema).default(["project", "local"]),
+  roots: z40.array(z40.string().min(1)).default([])
 }).strict();
-var GitConfigOperationsPropsSchema = z39.object({
-  cwd: z39.string().min(1),
-  configStore: z39.custom((value) => typeof value === "object" && value !== null),
-  git: z39.custom((value) => typeof value === "object" && value !== null),
+var GitConfigOperationsPropsSchema = z40.object({
+  cwd: z40.string().min(1),
+  configStore: z40.custom((value) => typeof value === "object" && value !== null),
+  git: z40.custom((value) => typeof value === "object" && value !== null),
   configPolicy: ConfigOperationPolicySchema.default({ scopes: ["project", "local"], roots: [] }),
-  binPath: z39.string().default(process.argv[1] ?? ""),
-  agentEnv: z39.string().optional()
+  binPath: z40.string().default(process.argv[1] ?? ""),
+  agentEnv: z40.string().optional()
 });
 var LaunchConfigOperationDeniedError = class extends Error {
   name = "LaunchConfigOperationDeniedError";
@@ -4728,11 +4984,11 @@ var DefaultGitConfigOperations = class {
         ["write", "process"],
         ["config", "set"],
         ConfigSetInputSchema,
-        z39.object({
-          key: z39.string(),
+        z40.object({
+          key: z40.string(),
           scope: ConfigScopeSchema,
-          path: z39.string(),
-          warning: z39.string().optional()
+          path: z40.string(),
+          warning: z40.string().optional()
         }),
         (input) => this.setConfig(input)
       ),
@@ -4742,7 +4998,7 @@ var DefaultGitConfigOperations = class {
         ["write", "process"],
         ["config", "unset"],
         ConfigUnsetInputSchema,
-        z39.object({ key: z39.string(), scope: ConfigScopeSchema, path: z39.string() }),
+        z40.object({ key: z40.string(), scope: ConfigScopeSchema, path: z40.string() }),
         (input) => this.unsetConfig(input)
       ),
       this.descriptor(
@@ -4751,7 +5007,7 @@ var DefaultGitConfigOperations = class {
         ["write", "process"],
         ["git", "commit"],
         GitCommitInputSchema,
-        z39.object({ sha: z39.string(), message: z39.string() }),
+        z40.object({ sha: z40.string(), message: z40.string() }),
         (input) => this.commit(input)
       ),
       this.descriptor(
@@ -4760,10 +5016,10 @@ var DefaultGitConfigOperations = class {
         ["write", "process"],
         ["git", "checkout"],
         GitCheckoutInputSchema,
-        z39.object({
-          branch: z39.string(),
-          from: z39.string().nullable(),
-          renamedFrom: z39.string().nullable()
+        z40.object({
+          branch: z40.string(),
+          from: z40.string().nullable(),
+          renamedFrom: z40.string().nullable()
         }),
         (input) => this.checkout(input)
       ),
@@ -4773,7 +5029,7 @@ var DefaultGitConfigOperations = class {
         ["write", "network", "process"],
         ["git", "push"],
         GitPushInputSchema,
-        z39.object({ branch: z39.string(), remote: z39.string(), setUpstream: z39.boolean() }),
+        z40.object({ branch: z40.string(), remote: z40.string(), setUpstream: z40.boolean() }),
         (input) => this.push(input)
       ),
       this.descriptor(
@@ -4791,7 +5047,7 @@ var DefaultGitConfigOperations = class {
         ["read", "process"],
         ["branch-name"],
         BranchNameInputSchema,
-        z39.object({ branch: z39.string() }),
+        z40.object({ branch: z40.string() }),
         (input) => ({
           branch: branchNamer.name({
             type: input.type,
@@ -4927,18 +5183,18 @@ import { z as z42 } from "zod";
 // src/bundled-docs/charter-catalog/charter-catalog.ts
 import { matchesGlob } from "node:path";
 import { parse as parseYaml3 } from "yaml";
-import { z as z40 } from "zod";
+import { z as z41 } from "zod";
 var coreCharterId = "coding-charter";
 var languageCharterPrefix = `${coreCharterId}-`;
-var LanguageFrontmatterSchema = z40.strictObject({
-  language: z40.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
-  "applies-to": z40.array(z40.string().min(1)).min(1)
+var LanguageFrontmatterSchema = z41.strictObject({
+  language: z41.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+  "applies-to": z41.array(z41.string().min(1)).min(1)
 }).transform(({ language, "applies-to": appliesTo }) => ({ language, appliesTo }));
-var FrontmatterSchema = z40.string().transform((contents, ctx) => {
+var FrontmatterSchema = z41.string().transform((contents, ctx) => {
   const block = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/.exec(contents)?.[1];
   if (block === void 0) {
     ctx.addIssue({ code: "custom", message: "missing YAML frontmatter" });
-    return z40.NEVER;
+    return z41.NEVER;
   }
   return parseYaml3(block);
 }).pipe(LanguageFrontmatterSchema);
@@ -4964,7 +5220,7 @@ var DocCharterCatalog = class {
   languageCharter(doc) {
     const parsed = FrontmatterSchema.safeParse(doc.contents);
     if (!parsed.success) {
-      throw new CharterFormatError(`Charter "${doc.id}" has invalid frontmatter: ${z40.prettifyError(parsed.error)}`);
+      throw new CharterFormatError(`Charter "${doc.id}" has invalid frontmatter: ${z41.prettifyError(parsed.error)}`);
     }
     const expectedId = `${languageCharterPrefix}${parsed.data.language}`;
     if (doc.id !== expectedId) {
@@ -4982,223 +5238,6 @@ var CharterFormatError = class extends Error {
   name = "CharterFormatError";
 };
 
-// src/code-review/review.schema.ts
-import { z as z41 } from "zod";
-var reviewContractVersion = 1;
-var reviewSchemaRevision = 1;
-var ReviewOutcomeSchema = z41.enum(["APPROVED", "CHANGES_NEEDED", "ESCALATE", "INCOMPLETE"]);
-var FindingIdSchema = z41.string().regex(/^f-[a-f0-9]{10}$/);
-var HeadShaSchema2 = z41.string().regex(/^[a-f0-9]{40}$/);
-var ReviewPathSchema = z41.string().max(400).regex(/^(?!\/)(?!.*\\)(?!.*(?:^|\/)\.{1,2}(?:\/|$))[^\p{Cc}]*$/u);
-var TextSchema = z41.string().min(1).max(16e3);
-var LineTextSchema = z41.string().min(1).max(400).regex(/^[^\r\n]+$/);
-var PositiveIdSchema = z41.number().int().positive().max(Number.MAX_SAFE_INTEGER);
-var HttpsUrlSchema = z41.url().regex(/^https:\/\//);
-var CategorySchema = z41.enum([
-  "security",
-  "correctness",
-  "data",
-  "deployment",
-  "design",
-  "testing",
-  "performance",
-  "readability",
-  "docs"
-]);
-var ActionLabelSchema = z41.enum([
-  "issue",
-  "todo",
-  "suggestion",
-  "question",
-  "chore",
-  "nitpick",
-  "typo",
-  "polish"
-]);
-var InformationLabelSchema = z41.enum(["praise", "note", "thought"]);
-var SeveritySchema = z41.enum(["critical", "major", "minor", "trivial"]);
-var DecisionOptionsSchema = z41.array(
-  z41.strictObject({ id: z41.string().regex(/^[a-z][a-z0-9-]{0,79}$/), description: TextSchema })
-).min(2);
-var findingFields = {
-  path: ReviewPathSchema,
-  line: z41.number().int().nonnegative(),
-  start_line: z41.number().int().positive().optional(),
-  category: CategorySchema.optional(),
-  subject: LineTextSchema,
-  discussion: TextSchema,
-  related_finding_id: FindingIdSchema.optional()
-};
-var actionFields = {
-  ...findingFields,
-  label: ActionLabelSchema,
-  type: z41.enum(["fix", "clarify"]),
-  blocking: z41.boolean(),
-  severity: SeveritySchema,
-  details: TextSchema,
-  resolved_when: TextSchema
-};
-var decisionFields = {
-  ...actionFields,
-  type: z41.literal("decide"),
-  decision_owner: LineTextSchema,
-  decision_options: DecisionOptionsSchema
-};
-var informationFields = {
-  ...findingFields,
-  label: InformationLabelSchema,
-  blocking: z41.literal(false),
-  details: TextSchema.optional()
-};
-var NewFindingSchema = z41.union([
-  z41.strictObject(actionFields),
-  z41.strictObject(decisionFields),
-  z41.strictObject(informationFields)
-]);
-var ActionableFindingSchema = z41.union([
-  z41.strictObject({ ...actionFields, id: FindingIdSchema }),
-  z41.strictObject({ ...decisionFields, id: FindingIdSchema })
-]);
-var StoredFindingSchema = z41.union([
-  ...ActionableFindingSchema.options,
-  z41.strictObject({ ...informationFields, id: FindingIdSchema })
-]);
-var ReviewEvidenceSchema = z41.discriminatedUnion("kind", [
-  z41.strictObject({
-    kind: z41.literal("github_comment"),
-    comment_id: PositiveIdSchema,
-    url: HttpsUrlSchema
-  }),
-  z41.strictObject({
-    kind: z41.literal("code"),
-    commit_sha: HeadShaSchema2,
-    path: ReviewPathSchema.min(1),
-    line: z41.number().int().positive()
-  }),
-  z41.strictObject({ kind: z41.literal("commit"), sha: HeadShaSchema2 }),
-  z41.strictObject({
-    kind: z41.literal("check_run"),
-    check_run_id: PositiveIdSchema,
-    commit_sha: HeadShaSchema2
-  }),
-  z41.strictObject({ kind: z41.literal("document"), url: HttpsUrlSchema }),
-  z41.strictObject({
-    kind: z41.literal("verification"),
-    commit_sha: HeadShaSchema2,
-    command: TextSchema,
-    result: z41.literal("passed"),
-    report_url: HttpsUrlSchema
-  }),
-  z41.strictObject({
-    kind: z41.literal("thread_resolution"),
-    thread_id: z41.string().min(1),
-    author_id: PositiveIdSchema
-  })
-]);
-var DecisionAnswerSchema = z41.strictObject({
-  comment_id: PositiveIdSchema,
-  author_id: PositiveIdSchema,
-  option_id: z41.string().min(1)
-});
-var transitionFields = {
-  id: FindingIdSchema,
-  reason: TextSchema,
-  reply: TextSchema.optional(),
-  decision: DecisionAnswerSchema.optional()
-};
-var PriorFindingSchema = z41.union([
-  z41.strictObject({
-    ...transitionFields,
-    status: z41.literal("resolved"),
-    evidence: z41.array(ReviewEvidenceSchema).min(1)
-  }),
-  z41.strictObject({
-    ...transitionFields,
-    status: z41.literal("withdrawn"),
-    evidence: z41.array(ReviewEvidenceSchema).min(1),
-    withdrawal_basis: z41.enum(["incorrect", "no_longer_applicable", "dismissed"])
-  }),
-  z41.strictObject({
-    ...transitionFields,
-    status: z41.literal("still_open"),
-    evidence: z41.array(ReviewEvidenceSchema).optional(),
-    updated_finding: ActionableFindingSchema.optional()
-  })
-]);
-var reviewFields = {
-  contract_version: z41.literal(reviewContractVersion),
-  schema_revision: z41.literal(reviewSchemaRevision),
-  head_sha: HeadShaSchema2,
-  review_complete: z41.boolean(),
-  incomplete_reason: z41.string().max(16e3).optional(),
-  summary: TextSchema,
-  outcome: ReviewOutcomeSchema,
-  outcome_reason: TextSchema,
-  remaining_risk: TextSchema,
-  extensions: z41.record(z41.string(), z41.json()).optional()
-};
-var ReviewSchema = z41.strictObject({
-  ...reviewFields,
-  findings: z41.array(NewFindingSchema),
-  prior_findings: z41.array(PriorFindingSchema)
-});
-var FindingRecordSchema = z41.strictObject({
-  v: z41.literal(reviewContractVersion),
-  schema_revision: z41.literal(reviewSchemaRevision),
-  finding: ActionableFindingSchema,
-  status: z41.enum(["open", "resolved", "withdrawn"]),
-  evidence: z41.array(ReviewEvidenceSchema),
-  decision: DecisionAnswerSchema.optional()
-});
-var ReviewStateSchema = z41.strictObject({
-  v: z41.literal(reviewContractVersion),
-  schema_revision: z41.literal(reviewSchemaRevision),
-  sha: HeadShaSchema2,
-  outcome: ReviewOutcomeSchema,
-  records: z41.array(
-    z41.union([
-      z41.strictObject({
-        id: FindingIdSchema,
-        status: z41.enum(["open", "resolved", "withdrawn"]),
-        location: z41.union([
-          z41.strictObject({ kind: z41.literal("review_comment"), comment_id: PositiveIdSchema }),
-          z41.strictObject({ kind: z41.literal("review_body"), review_id: PositiveIdSchema })
-        ])
-      }),
-      z41.strictObject({
-        id: FindingIdSchema,
-        status: z41.literal("informational"),
-        fingerprint: z41.string().min(1),
-        finding: z41.strictObject({ ...informationFields, id: FindingIdSchema }).optional()
-      })
-    ])
-  )
-});
-var TransportReviewSchema = z41.strictObject({
-  ...reviewFields,
-  findings: z41.array(
-    z41.strictObject({
-      ...actionFields,
-      type: z41.enum(["fix", "clarify", "decide"]).optional(),
-      label: z41.enum([...ActionLabelSchema.options, ...InformationLabelSchema.options]),
-      severity: SeveritySchema.optional(),
-      details: TextSchema.optional(),
-      resolved_when: TextSchema.optional(),
-      decision_owner: LineTextSchema.optional(),
-      decision_options: DecisionOptionsSchema.optional()
-    })
-  ),
-  prior_findings: z41.array(
-    z41.strictObject({
-      ...transitionFields,
-      status: z41.enum(["resolved", "still_open", "withdrawn"]),
-      evidence: z41.array(ReviewEvidenceSchema).optional(),
-      withdrawal_basis: z41.enum(["incorrect", "no_longer_applicable", "dismissed"]).optional(),
-      updated_finding: StoredFindingSchema.optional()
-    })
-  )
-});
-
 // src/code-review/review-policy.ts
 var ReviewPolicyPropsSchema = z42.strictObject({
   home: z42.string().min(1).optional(),
@@ -5209,7 +5248,7 @@ var ReviewPolicyPropsSchema = z42.strictObject({
 var LoadPolicyPropsSchema = z42.strictObject({ paths: z42.array(z42.string()).optional() });
 var RepositoryContextPropsSchema = z42.strictObject({
   cwd: z42.string().min(1),
-  trustedRef: HeadShaSchema2,
+  trustedRef: HeadShaSchema,
   contextPath: ReviewPathSchema.min(1).default("CODE-REVIEW.md")
 });
 var FileReviewPolicy = class {
@@ -5555,7 +5594,7 @@ var EvidenceReviewPlanner = class {
     this.verifier = props.verifier;
   }
   async plan(input) {
-    const headSha = HeadShaSchema2.parse(input.headSha);
+    const headSha = HeadShaSchema.parse(input.headSha);
     const review = reviewContract.parse(input.review);
     const records = input.records.map((record) => reviewContract.record(record));
     const known = new Map(records.map((record) => [record.finding.id, record]));
@@ -5721,6 +5760,11 @@ var JsonReviewCodec = class {
       throw new InvalidReviewError("multiple review state markers in one summary");
     return states.length === 0 ? void 0 : reviewContract.state(states[0]);
   }
+  parseFinding(body) {
+    const markers = this.readMarkers(body, "finding");
+    if (markers.length > 1) throw new InvalidReviewError("multiple finding markers in one comment");
+    return markers.length === 0 ? null : reviewContract.record(markers[0]);
+  }
   render(record) {
     const validated = reviewContract.record(record);
     const finding = validated.finding;
@@ -5773,7 +5817,7 @@ ${this.finding(validated)}`;
 // src/operations/review-operations.ts
 var ReviewOperationsLaunchPropsSchema = z47.strictObject({
   cwd: z47.string().min(1).optional(),
-  trustedRef: HeadShaSchema2.optional(),
+  trustedRef: HeadShaSchema.optional(),
   owners: z47.record(z47.string(), z47.array(z47.string().min(1))).default({}),
   requireMapping: z47.boolean().default(false)
 });
@@ -5799,7 +5843,7 @@ var contextInput = z47.strictObject({
   contextPath: z47.string().min(1).default("CODE-REVIEW.md")
 });
 var contextOutput = z47.object({
-  trustedRef: HeadShaSchema2,
+  trustedRef: HeadShaSchema,
   contextPath: z47.string(),
   sources: z47.array(z47.object({ path: z47.string(), contents: z47.string() })),
   missing: z47.array(z47.string())
@@ -5941,7 +5985,7 @@ var DefaultReviewOperations = class {
         planOutput,
         async ({ number, repo, review, records }) => {
           const pullRequest = z47.looseObject({
-            head: z47.looseObject({ sha: HeadShaSchema2 }),
+            head: z47.looseObject({ sha: HeadShaSchema }),
             user: z47.looseObject({ id: z47.number().int().positive() })
           }).parse(await this.api.get(`/repos/${repo}/pulls/${number}`));
           const planner = new EvidenceReviewPlanner({
