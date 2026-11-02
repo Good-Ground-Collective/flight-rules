@@ -12,6 +12,8 @@ export interface ReviewCodec {
         authorId: number;
         trustedAuthorIds: number[];
     }): ReviewState | undefined;
+    /** Returns the single finding marker in `body`, or null when it has none; throws InvalidReviewError on a malformed or repeated marker. */
+    parseFinding(body: string): FindingRecord | null;
     render(record: FindingRecord): string;
     fingerprint(finding: StoredFinding): string;
 }
@@ -29,6 +31,7 @@ export declare class JsonReviewCodec implements ReviewCodec {
         authorId: number;
         trustedAuthorIds: number[];
     }): ReviewState | undefined;
+    parseFinding(body: string): FindingRecord | null;
     render(record: FindingRecord): string;
     fingerprint(finding: StoredFinding): string;
     private marker;

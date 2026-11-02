@@ -91,7 +91,13 @@ try {
     lean,
   );
   const leanModules = join(lean, "node_modules");
-  for (const peer of ["deepagents", "langchain", "@langchain/core", "@langchain/langgraph"]) {
+  for (const peer of [
+    "deepagents",
+    "langchain",
+    "@langchain/core",
+    "@langchain/langgraph",
+    "@anthropic-ai/claude-agent-sdk",
+  ]) {
     assert.equal(
       existsSync(join(leanModules, peer)),
       false,
@@ -148,6 +154,17 @@ if (!appVersion || !createFlightRules({ cwd: process.cwd(), env: {} }) || !revie
     ],
     lean,
   );
+  const leanClaudeAgent = spawnSync(
+    process.execPath,
+    ["--input-type=module", "-e", "import '@good-ground-collective/flight-rules/sdk/claude-agent'"],
+    { cwd: lean, env: scrubbedEnv(), encoding: "utf8", timeout: deadline },
+  );
+  assert.notEqual(leanClaudeAgent.status, 0, "the Claude Agent entry must need its optional peer");
+  assert.match(
+    leanClaudeAgent.stderr,
+    /ERR_MODULE_NOT_FOUND[\s\S]*@anthropic-ai\/claude-agent-sdk/,
+    "the Claude Agent entry must fail on its own missing peer, not on a bundled import",
+  );
 
   run(
     "npm",
@@ -159,8 +176,11 @@ if (!appVersion || !createFlightRules({ cwd: process.cwd(), env: {} }) || !revie
       archive,
       "deepagents@1.15.0",
       "langchain@1.5.16",
-      "@langchain/core@1.2.17",
+      "@langchain/core@1.2.18",
       "@langchain/langgraph@1.5.0",
+      "@anthropic-ai/claude-agent-sdk@0.3.316",
+      "@anthropic-ai/sdk@0.93.0",
+      "@modelcontextprotocol/sdk@1.32.2",
       "@modelcontextprotocol/client@2.3.1",
       "typescript@^6.0.3",
       "@types/node@^25.9.1",
@@ -197,8 +217,9 @@ if (!appVersion || !createFlightRules({ cwd: process.cwd(), env: {} }) || !revie
     adapterSource,
     `
 import { LangChainDeepAgentsSkillRuntime, DeepAgentsWorkerRuntime } from "@good-ground-collective/flight-rules/sdk/deepagents";
+import { ClaudeAgentWorkerRuntime } from "@good-ground-collective/flight-rules/sdk/claude-agent";
 import { FileReviewPolicy, EvidenceReviewPlanner, JsonReviewCodec } from "@good-ground-collective/flight-rules/review";
-void [LangChainDeepAgentsSkillRuntime, DeepAgentsWorkerRuntime, FileReviewPolicy, EvidenceReviewPlanner, JsonReviewCodec];
+void [LangChainDeepAgentsSkillRuntime, DeepAgentsWorkerRuntime, ClaudeAgentWorkerRuntime, FileReviewPolicy, EvidenceReviewPlanner, JsonReviewCodec];
 `,
   );
   run(
@@ -220,6 +241,48 @@ void [LangChainDeepAgentsSkillRuntime, DeepAgentsWorkerRuntime, FileReviewPolicy
       "false",
       adapterSource,
       join(full, "iterative-review.ts"),
+    ],
+    full,
+  );
+
+  const claudeAgentProof = run(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `
+    import assert from 'node:assert/strict';
+    import { instructionCatalog } from '@good-ground-collective/flight-rules/sdk';
+    import { ClaudeAgentWorkerRuntime } from '@good-ground-collective/flight-rules/sdk/claude-agent';
+    const available = { state: 'available', evidence: 'Installed consumer observation.' };
+    const seen = [];
+    const fence = String.fromCharCode(96).repeat(3);
+    const report = [fence + 'yaml', 'summary: Authored', 'whatWasChanged:', '  - Wrote it', 'whyWasItChanged: Requested', 'otsMaterials: None', fence].join(String.fromCharCode(10));
+    const query = (params) => {
+      seen.push(params.options);
+      return (async function* () {
+        yield { type: 'result', subtype: 'success', is_error: false, result: report };
+      })();
+    };
+    const context = { runId: 'installed', taskId: 'claude-agent', cwd: process.cwd(), repositoryRoot: process.cwd(), baseRef: 'main', skill: 'execute-work', attempt: 1 };
+    const workers = new ClaudeAgentWorkerRuntime({
+      agents: instructionCatalog.listAgents().map((name) => instructionCatalog.loadAgent(name)),
+      toolGrants: {},
+      query,
+      observe: async (request) => ({
+        context: request.context, agent: request.agent, host: { name: 'installed', version: '1' },
+        observedAt: new Date().toISOString(), spawn: available, ask: available,
+        permissions: { read: available, edit: available, shell: available, web: available, spawn: available, ask: available },
+        limits: { maxConcurrent: 1, activeWorkers: 0, currentDepth: 0, maxDepth: 1, source: 'Installed consumer bound' },
+      }),
+    });
+    const outcome = await workers.dispatch({ id: 'installed-1', agent: 'tech-writer', context, input: { mode: 'author', focus: 'proof' } });
+    assert.equal(outcome.status, 'completed', JSON.stringify(outcome));
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].model, 'opus');
+    assert.deepEqual(seen[0].settingSources, []);
+    console.log(JSON.stringify({ status: outcome.status, model: seen[0].model, tools: seen[0].tools }));
+  `,
     ],
     full,
   );
@@ -349,7 +412,7 @@ try {
       try {
         await client.connect(transport);
         const { tools } = await client.listTools();
-        assert.equal(tools.length, 60, binary + ' (' + mode + ')');
+        assert.equal(tools.length, 62, binary + ' (' + mode + ')');
         assert.ok(tools.some(({ name }) => name === 'ticket-create'));
         assert.ok(tools.some(({ name }) => name === 'packet-reviewers'));
         for (const tool of tools) {
@@ -456,8 +519,9 @@ console.log(JSON.stringify({ routeContractCalls, eofResults }));
       providerCalls: 0,
       result: JSON.parse(exampleResult),
     },
+    claudeAgentWorker: JSON.parse(claudeAgentProof),
     mcpClients: {
-      toolsPerBinary: 60,
+      toolsPerBinary: 62,
       packedAndRelocatedClis: relocatedArgs.length,
       validAndInvalidInputsPerRoute: true,
       ...mcpMetrics,

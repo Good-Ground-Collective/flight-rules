@@ -53,6 +53,9 @@ var AgentDefinitionSchema = z2.strictObject({
   body: z2.string().refine((body) => body.trim() !== "", "agent prompt must not be empty")
 });
 
+// src/sdk/worker-runtime-core.ts
+import { z as z9 } from "zod";
+
 // src/orchestration/dispatch-queue.ts
 import { z as z5 } from "zod";
 
@@ -752,15 +755,264 @@ var WorkerReportCodec = class {
 };
 var workerReportCodec = new WorkerReportCodec();
 
-// src/sdk/deepagents/tool-policy.ts
-import { createFilesystemMiddleware, createSubAgentMiddleware, StateBackend } from "deepagents";
-import { createMiddleware } from "langchain";
-import { z as z9 } from "zod";
+// src/sdk/worker-runtime-core.ts
 var WorkerCapabilitySchema = z9.enum(["read", "edit", "shell", "web", "spawn", "ask"]);
 var CapabilityToolDeniedPropsSchema = z9.strictObject({
   toolName: z9.string().min(1),
   capability: WorkerCapabilitySchema.optional()
 });
+var CapabilityToolDeniedError = class extends Error {
+  name = "CapabilityToolDeniedError";
+  capability;
+  constructor(props) {
+    const parsed = CapabilityToolDeniedPropsSchema.parse(props);
+    super(
+      parsed.capability === void 0 ? `The worker attempted unregistered tool ${parsed.toolName}.` : `The worker attempted ${parsed.toolName} without an effective ${parsed.capability} grant.`
+    );
+    this.capability = parsed.capability;
+  }
+};
+var WorkerDispatchConfigurationError = class extends Error {
+  name = "WorkerDispatchConfigurationError";
+};
+var StandardWorkerRunProtocol = class {
+  reports = new WorkerReportCodec();
+  prepare(admission) {
+    const { request, definition } = admission;
+    const parsedMode = ReportModeSchema.safeParse({
+      agent: request.agent,
+      mode: request.input.mode
+    });
+    if (!parsedMode.success) {
+      return {
+        status: "rejected",
+        outcome: this.failed(request, {
+          code: "INVALID_REPORT",
+          message: parsedMode.error.message,
+          remedy: "Choose a report mode supported by the named worker registration before dispatch."
+        })
+      };
+    }
+    const mode = parsedMode.data;
+    const task = [
+      "## Dispatch context",
+      JSON.stringify(request.context),
+      "## Dispatch input",
+      JSON.stringify(request.input),
+      `Return the canonical final fenced YAML report for mode ${mode.mode}.`
+    ].join("\n\n");
+    const prompt = [definition.body.trim(), task].join("\n\n");
+    return { status: "ready", mode, prompt, task };
+  }
+  cancelled(request) {
+    return this.failed(request, this.cancellationFailure());
+  }
+  failed(request, failure) {
+    return {
+      status: "failed",
+      dispatchId: request.id,
+      agent: request.agent,
+      context: request.context,
+      failure
+    };
+  }
+  finish(request, finalText, mode) {
+    let report;
+    try {
+      report = this.reports.parse(finalText, mode);
+    } catch (cause) {
+      return this.failed(request, {
+        code: "INVALID_REPORT",
+        message: cause instanceof Error ? cause.message : String(cause),
+        remedy: "Obtain a final report matching the named worker mode; do not infer success from tool activity."
+      });
+    }
+    return {
+      status: "completed",
+      dispatchId: request.id,
+      agent: request.agent,
+      context: request.context,
+      report
+    };
+  }
+  executionFailure(cause, signal) {
+    if (signal.aborted) return this.cancellationFailure();
+    if (cause instanceof CapabilityToolDeniedError) {
+      const capability = cause.capability;
+      return {
+        code: capability === void 0 ? "CAPABILITY_UNKNOWN" : "CAPABILITY_DENIED",
+        capability,
+        message: cause.message,
+        remedy: "Refresh effective host grants and provide only tools the host can enforce."
+      };
+    }
+    return {
+      code: "EXECUTION_FAILED",
+      message: cause instanceof Error ? cause.message : String(cause),
+      remedy: "Inspect the provider or host tool failure, then retry only when the caller chooses."
+    };
+  }
+  cancellationFailure() {
+    return {
+      code: "CANCELLED",
+      message: "The caller cancelled this worker and graph execution has stopped.",
+      remedy: "Start a new invocation only when the caller chooses to resume."
+    };
+  }
+};
+var workerRunProtocol = new StandardWorkerRunProtocol();
+var QueuedWorkerDispatcherPropsSchema = z9.strictObject({
+  agents: z9.array(AgentDefinitionSchema).min(1),
+  observe: z9.custom(
+    (value) => typeof value === "function"
+  ),
+  run: z9.custom((value) => typeof value === "function"),
+  createError: z9.custom((value) => typeof value === "function")
+});
+var QueuedWorkerDispatcher = class {
+  agents;
+  observe;
+  run;
+  createError;
+  activeExecutions = /* @__PURE__ */ new Map();
+  constructor(props) {
+    const parsed = QueuedWorkerDispatcherPropsSchema.parse(props);
+    this.agents = parsed.agents;
+    this.observe = parsed.observe;
+    this.run = parsed.run;
+    this.createError = parsed.createError;
+  }
+  async dispatch(request, options = {}) {
+    const [outcome] = await this.dispatchMany([request], {
+      maxConcurrent: 1,
+      ...options
+    });
+    if (outcome === void 0)
+      throw this.createError("Single dispatch completed without an outcome.");
+    return outcome;
+  }
+  async dispatchMany(requests, options) {
+    const validatedRequests = z9.array(DispatchRequestSchema).parse(requests);
+    const queue = new BoundedDispatchQueue({
+      agents: this.agents,
+      requests: validatedRequests,
+      maxConcurrent: options.maxConcurrent
+    });
+    const active = /* @__PURE__ */ new Map();
+    const controllers = /* @__PURE__ */ new Map();
+    const settledOutcomes = /* @__PURE__ */ new Map();
+    let wakeCancellationWait;
+    const cancellationWait = new Promise((resolve) => {
+      wakeCancellationWait = resolve;
+    });
+    const cancelActive = () => {
+      wakeCancellationWait();
+      queue.cancel();
+      for (const controller of controllers.values()) controller.abort(options.signal?.reason);
+    };
+    options.signal?.addEventListener("abort", cancelActive, { once: true });
+    try {
+      while (queue.results() === void 0) {
+        if (options.signal?.aborted) cancelActive();
+        const next = queue.pending();
+        if (next === void 0) {
+          if (active.size === 0) break;
+          await Promise.race([...active.values()].map((entry) => entry.promise));
+          continue;
+        }
+        const snapshot = RuntimeSnapshotSchema.parse(await this.observe(next));
+        if (options.signal?.aborted) {
+          cancelActive();
+          continue;
+        }
+        const foreignReservations = this.activeExecutions.size - active.size;
+        const refreshedSnapshot = {
+          ...snapshot,
+          limits: {
+            ...snapshot.limits,
+            activeWorkers: snapshot.limits.activeWorkers + foreignReservations
+          }
+        };
+        if (active.size === 0 && foreignReservations > 0 && snapshot.limits.maxConcurrent !== null && refreshedSnapshot.limits.activeWorkers >= snapshot.limits.maxConcurrent) {
+          await Promise.race([Promise.race(this.activeExecutions.values()), cancellationWait]);
+          continue;
+        }
+        const admission = queue.admit(refreshedSnapshot, []);
+        if (admission.status === "ready") {
+          const controller = new AbortController();
+          controllers.set(admission.request.id, controller);
+          const reservation = Symbol(admission.request.id);
+          const run = Promise.resolve().then(() => this.run(admission, snapshot, controller.signal)).then((outcome) => {
+            const handoff = queue.settle(
+              admission.request.id,
+              outcome,
+              z9.record(z9.string(), z9.json())
+            );
+            if (handoff.status === "accepted") {
+              settledOutcomes.set(admission.request.id, outcome);
+            }
+          }).catch((cause) => {
+            const outcome = workerRunProtocol.failed(
+              admission.request,
+              workerRunProtocol.executionFailure(cause, controller.signal)
+            );
+            const handoff = queue.settle(
+              admission.request.id,
+              outcome,
+              z9.record(z9.string(), z9.json())
+            );
+            if (handoff.status === "accepted") {
+              settledOutcomes.set(admission.request.id, outcome);
+            }
+          }).finally(() => {
+            controllers.delete(admission.request.id);
+            active.delete(admission.request.id);
+            this.activeExecutions.delete(reservation);
+          });
+          active.set(admission.request.id, {
+            reservation,
+            promise: run
+          });
+          this.activeExecutions.set(reservation, run);
+          continue;
+        }
+        if (admission.status === "unavailable") {
+          settledOutcomes.set(admission.outcome.dispatchId, admission.outcome);
+          continue;
+        }
+        if (admission.status === "complete") break;
+        if (active.size === 0) {
+          throw this.createError("The dispatch queue is waiting without an active graph.");
+        }
+        await Promise.race([...active.values()].map((entry) => entry.promise));
+      }
+    } finally {
+      options.signal?.removeEventListener("abort", cancelActive);
+    }
+    const outcomes = queue.results();
+    if (outcomes === void 0)
+      throw this.createError("Dispatch stopped before all requests had named outcomes.");
+    const orderedOutcomes = [];
+    for (const outcome of outcomes) {
+      if (outcome.status !== "completed") {
+        orderedOutcomes.push(outcome);
+        continue;
+      }
+      const settledOutcome = settledOutcomes.get(outcome.dispatchId);
+      if (settledOutcome === void 0) {
+        throw this.createError(
+          `Completed dispatch ${outcome.dispatchId} lost its validated report handoff.`
+        );
+      }
+      orderedOutcomes.push(settledOutcome);
+    }
+    return orderedOutcomes;
+  }
+};
+
+// src/sdk/deepagents/tool-policy.ts
+import { createFilesystemMiddleware, createSubAgentMiddleware, StateBackend } from "deepagents";
+import { createMiddleware } from "langchain";
 var flightRulesAbortSignalConfigKey = "flightRulesAbortSignal";
 var filesystemCapabilities = /* @__PURE__ */ new Map([
   ["ls", "read"],
@@ -773,17 +1025,6 @@ var filesystemCapabilities = /* @__PURE__ */ new Map([
   ["execute", "shell"],
   ["task", "spawn"]
 ]);
-var CapabilityToolDeniedError = class extends Error {
-  name = "CapabilityToolDeniedError";
-  capability;
-  constructor(props) {
-    const parsed = CapabilityToolDeniedPropsSchema.parse(props);
-    super(
-      parsed.capability === void 0 ? `The worker attempted unregistered tool ${parsed.toolName}.` : `The worker attempted ${parsed.toolName} without an effective ${parsed.capability} grant.`
-    );
-    this.capability = parsed.capability;
-  }
-};
 var InvalidDeepAgentsToolRegistrationError = class extends Error {
   name = "InvalidDeepAgentsToolRegistrationError";
 };
@@ -814,7 +1055,10 @@ var CapabilityScopedDeepAgentsToolPolicy = class {
       ...permissions.has("read") ? ["read_file", "ls", "glob", "grep"] : [],
       ...permissions.has("read") && permissions.has("edit") ? ["write_file", "edit_file", "delete"] : []
     ];
-    const filesystem = !permissions.has("read") ? createMiddleware({ name: "FilesystemMiddleware" }) : createFilesystemMiddleware({ backend: new StateBackend(), tools: filesystemTools });
+    const filesystem = !permissions.has("read") ? createMiddleware({ name: "FilesystemMiddleware" }) : createFilesystemMiddleware({
+      backend: new StateBackend(),
+      tools: filesystemTools
+    });
     const subagents = createSubAgentMiddleware({
       defaultModel: model,
       defaultTools: [],
@@ -854,7 +1098,10 @@ var CapabilityScopedDeepAgentsToolPolicy = class {
           if (capability !== void 0 && permissions.has(capability) && capability !== "shell" && capability !== "spawn") {
             return trackExecution(() => Promise.resolve(handler(request)));
           }
-          const error = new CapabilityToolDeniedError({ toolName: name, capability });
+          const error = new CapabilityToolDeniedError({
+            toolName: name,
+            capability
+          });
           onCapabilityDenied(error);
           throw error;
         }
@@ -919,18 +1166,16 @@ var DeepAgentsRuntimePropsSchema = z10.strictObject({
   ),
   maxGraphSteps: z10.int().positive().default(64)
 });
-var DeepAgentsConfigurationError = class extends Error {
+var DeepAgentsConfigurationError = class extends WorkerDispatchConfigurationError {
   name = "DeepAgentsConfigurationError";
 };
 var LangChainDeepAgentsWorkerRuntime = class {
   agents;
   models;
   toolGrants;
-  observe;
   maxGraphSteps;
   toolPolicy = new CapabilityScopedDeepAgentsToolPolicy();
-  reports = new WorkerReportCodec();
-  activeExecutions = /* @__PURE__ */ new Map();
+  dispatcher;
   constructor(props) {
     const parsed = DeepAgentsRuntimePropsSchema.safeParse(props);
     if (!parsed.success) {
@@ -939,7 +1184,6 @@ var LangChainDeepAgentsWorkerRuntime = class {
     this.agents = parsed.data.agents.map((agent) => AgentDefinitionSchema.parse(agent));
     this.models = Object.freeze({ ...parsed.data.models });
     this.toolGrants = parsed.data.toolGrants;
-    this.observe = parsed.data.observe;
     this.maxGraphSteps = parsed.data.maxGraphSteps;
     const tiers = new Set(this.agents.map((agent) => agent.frontmatter.model));
     for (const tier of tiers) {
@@ -947,155 +1191,23 @@ var LangChainDeepAgentsWorkerRuntime = class {
         throw new DeepAgentsConfigurationError(`No model instance is bound for the ${tier} tier.`);
       }
     }
-  }
-  async dispatch(request, options = {}) {
-    const [outcome] = await this.dispatchMany([request], { maxConcurrent: 1, ...options });
-    if (outcome === void 0)
-      throw new DeepAgentsConfigurationError("Single dispatch completed without an outcome.");
-    return outcome;
-  }
-  async dispatchMany(requests, options) {
-    const validatedRequests = z10.array(DispatchRequestSchema).parse(requests);
-    const queue = new BoundedDispatchQueue({
+    this.dispatcher = new QueuedWorkerDispatcher({
       agents: this.agents,
-      requests: validatedRequests,
-      maxConcurrent: options.maxConcurrent
+      observe: parsed.data.observe,
+      run: (admission, snapshot, signal) => this.runGraph(admission, snapshot, signal),
+      createError: (message) => new DeepAgentsConfigurationError(message)
     });
-    const active = /* @__PURE__ */ new Map();
-    const controllers = /* @__PURE__ */ new Map();
-    const settledOutcomes = /* @__PURE__ */ new Map();
-    let wakeCancellationWait;
-    const cancellationWait = new Promise((resolve) => {
-      wakeCancellationWait = resolve;
-    });
-    const cancelActive = () => {
-      wakeCancellationWait();
-      queue.cancel();
-      for (const controller of controllers.values()) controller.abort(options.signal?.reason);
-    };
-    options.signal?.addEventListener("abort", cancelActive, { once: true });
-    try {
-      while (queue.results() === void 0) {
-        if (options.signal?.aborted) cancelActive();
-        const next = queue.pending();
-        if (next === void 0) {
-          if (active.size === 0) break;
-          await Promise.race([...active.values()].map((entry) => entry.promise));
-          continue;
-        }
-        const snapshot = RuntimeSnapshotSchema.parse(await this.observe(next));
-        if (options.signal?.aborted) {
-          cancelActive();
-          continue;
-        }
-        const foreignReservations = this.activeExecutions.size - active.size;
-        const refreshedSnapshot = {
-          ...snapshot,
-          limits: {
-            ...snapshot.limits,
-            activeWorkers: snapshot.limits.activeWorkers + foreignReservations
-          }
-        };
-        if (active.size === 0 && foreignReservations > 0 && snapshot.limits.maxConcurrent !== null && refreshedSnapshot.limits.activeWorkers >= snapshot.limits.maxConcurrent) {
-          await Promise.race([Promise.race(this.activeExecutions.values()), cancellationWait]);
-          continue;
-        }
-        const admission = queue.admit(refreshedSnapshot, []);
-        if (admission.status === "ready") {
-          const controller = new AbortController();
-          controllers.set(admission.request.id, controller);
-          const reservation = Symbol(admission.request.id);
-          const run = Promise.resolve().then(() => this.runGraph(admission, snapshot, controller.signal)).then((outcome) => {
-            const handoff = queue.settle(
-              admission.request.id,
-              outcome,
-              z10.record(z10.string(), z10.json())
-            );
-            if (handoff.status === "accepted") {
-              settledOutcomes.set(admission.request.id, outcome);
-            }
-          }).catch((cause) => {
-            const failure = this.executionFailure(cause, controller.signal);
-            const outcome = {
-              status: "failed",
-              dispatchId: admission.request.id,
-              agent: admission.request.agent,
-              context: admission.request.context,
-              failure
-            };
-            const handoff = queue.settle(
-              admission.request.id,
-              outcome,
-              z10.record(z10.string(), z10.json())
-            );
-            if (handoff.status === "accepted") {
-              settledOutcomes.set(admission.request.id, outcome);
-            }
-          }).finally(() => {
-            controllers.delete(admission.request.id);
-            active.delete(admission.request.id);
-            this.activeExecutions.delete(reservation);
-          });
-          active.set(admission.request.id, { reservation, promise: run });
-          this.activeExecutions.set(reservation, run);
-          continue;
-        }
-        if (admission.status === "unavailable") {
-          settledOutcomes.set(admission.outcome.dispatchId, admission.outcome);
-          continue;
-        }
-        if (admission.status === "complete") break;
-        if (active.size === 0) {
-          throw new DeepAgentsConfigurationError(
-            "The dispatch queue is waiting without an active graph."
-          );
-        }
-        await Promise.race([...active.values()].map((entry) => entry.promise));
-      }
-    } finally {
-      options.signal?.removeEventListener("abort", cancelActive);
-    }
-    const outcomes = queue.results();
-    if (outcomes === void 0)
-      throw new DeepAgentsConfigurationError(
-        "Dispatch stopped before all requests had named outcomes."
-      );
-    const orderedOutcomes = [];
-    for (const outcome of outcomes) {
-      if (outcome.status !== "completed") {
-        orderedOutcomes.push(outcome);
-        continue;
-      }
-      const settledOutcome = settledOutcomes.get(outcome.dispatchId);
-      if (settledOutcome === void 0) {
-        throw new DeepAgentsConfigurationError(
-          `Completed dispatch ${outcome.dispatchId} lost its validated report handoff.`
-        );
-      }
-      orderedOutcomes.push(settledOutcome);
-    }
-    return orderedOutcomes;
+  }
+  dispatch(request, options = {}) {
+    return this.dispatcher.dispatch(request, options);
+  }
+  dispatchMany(requests, options) {
+    return this.dispatcher.dispatchMany(requests, options);
   }
   async runGraph(admission, snapshot, signal) {
     const { request, definition } = admission;
-    const parsedMode = ReportModeSchema.safeParse({
-      agent: request.agent,
-      mode: request.input.mode
-    });
-    if (!parsedMode.success) {
-      return {
-        status: "failed",
-        dispatchId: request.id,
-        agent: request.agent,
-        context: request.context,
-        failure: {
-          code: "INVALID_REPORT",
-          message: parsedMode.error.message,
-          remedy: "Choose a report mode supported by the named worker registration before dispatch."
-        }
-      };
-    }
-    const mode = parsedMode.data;
+    const prepared = workerRunProtocol.prepare(admission);
+    if (prepared.status === "rejected") return prepared.outcome;
     const model = this.models[definition.frontmatter.model];
     const hostTools = this.toolPolicy.toolsFor(definition, this.toolGrants, snapshot);
     const modelTracker = new InFlightModelTracker();
@@ -1112,7 +1224,11 @@ var LangChainDeepAgentsWorkerRuntime = class {
           };
           return modelTracker.track(() => hostTool.invoke(input, hostRuntime));
         },
-        { name: hostTool.name, description: hostTool.description, schema: hostTool.schema }
+        {
+          name: hostTool.name,
+          description: hostTool.description,
+          schema: hostTool.schema
+        }
       )
     );
     let capabilityFailure;
@@ -1131,98 +1247,33 @@ var LangChainDeepAgentsWorkerRuntime = class {
       middleware,
       name: request.agent
     });
-    const prompt = [
-      definition.body.trim(),
-      "## Dispatch context",
-      JSON.stringify(request.context),
-      "## Dispatch input",
-      JSON.stringify(request.input),
-      `Return the canonical final fenced YAML report for mode ${mode.mode}.`
-    ].join("\n\n");
     let result;
     try {
       result = await graph.invoke(
-        { messages: [new HumanMessage(prompt)] },
-        { recursionLimit: this.maxGraphSteps, signal, callbacks: [modelTracker] }
+        { messages: [new HumanMessage(prepared.prompt)] },
+        {
+          recursionLimit: this.maxGraphSteps,
+          signal,
+          callbacks: [modelTracker]
+        }
       );
     } catch (cause) {
       if (capabilityFailure !== void 0) {
-        return {
-          status: "failed",
-          dispatchId: request.id,
-          agent: request.agent,
-          context: request.context,
-          failure: this.executionFailure(capabilityFailure, signal)
-        };
+        return workerRunProtocol.failed(
+          request,
+          workerRunProtocol.executionFailure(capabilityFailure, signal)
+        );
       }
       throw cause;
     } finally {
       await modelTracker.waitForIdle();
     }
-    if (signal.aborted) {
-      return {
-        status: "failed",
-        dispatchId: request.id,
-        agent: request.agent,
-        context: request.context,
-        failure: {
-          code: "CANCELLED",
-          message: "The caller cancelled this worker and graph execution has stopped.",
-          remedy: "Start a new invocation only when the caller chooses to resume."
-        }
-      };
-    }
+    if (signal.aborted) return workerRunProtocol.cancelled(request);
     const finalMessage = result.messages.toReversed().find((message) => isAIMessage(message));
     if (finalMessage === void 0 || typeof finalMessage.content !== "string") {
       throw new DeepAgentsConfigurationError("Deep Agents returned no final text report.");
     }
-    let report;
-    try {
-      report = this.reports.parse(finalMessage.content, mode);
-    } catch (cause) {
-      const rejected = {
-        code: "INVALID_REPORT",
-        message: cause instanceof Error ? cause.message : String(cause),
-        remedy: "Obtain a final report matching the named worker mode; do not infer success from tool activity."
-      };
-      return {
-        status: "failed",
-        dispatchId: request.id,
-        agent: request.agent,
-        context: request.context,
-        failure: rejected
-      };
-    }
-    return {
-      status: "completed",
-      dispatchId: request.id,
-      agent: request.agent,
-      context: request.context,
-      report
-    };
-  }
-  executionFailure(cause, signal) {
-    if (signal.aborted) {
-      return {
-        code: "CANCELLED",
-        message: "The caller cancelled this worker and graph execution has stopped.",
-        remedy: "Start a new invocation only when the caller chooses to resume."
-      };
-    }
-    if (cause instanceof CapabilityToolDeniedError) {
-      const capability = cause.capability;
-      return {
-        code: capability === void 0 ? "CAPABILITY_UNKNOWN" : "CAPABILITY_DENIED",
-        capability,
-        message: cause.message,
-        remedy: "Refresh effective host grants and provide only tools the host can enforce."
-      };
-    }
-    return {
-      code: "EXECUTION_FAILED",
-      message: cause instanceof Error ? cause.message : String(cause),
-      remedy: "Inspect the provider or host tool failure, then retry only when the caller chooses."
-    };
+    return workerRunProtocol.finish(request, finalMessage.content, prepared.mode);
   }
 };
 

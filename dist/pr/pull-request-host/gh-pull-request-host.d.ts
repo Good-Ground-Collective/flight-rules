@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { type PullRequestBuilder, type PullRequestTemplate } from '../../git/pr-template/pr-template.js';
-import type { CreatedPullRequest, OpenPullRequest, PullRequestAttachOptions, PullRequestComment, PullRequestHost, ReviewerRequestResult } from './pull-request-host.js';
+import type { CreatedPullRequest, ListReviewThreadsOptions, OpenPullRequest, PullRequestAttachOptions, PullRequestComment, PullRequestHost, PullRequestThreads, ReviewerRequestResult, ReviewThreadReply } from './pull-request-host.js';
 type ExecFileFn = (file: string, args: readonly string[]) => Promise<{
     stdout: string;
     stderr: string;
@@ -28,6 +28,7 @@ export declare class GhOutputParseError extends Error {
 export declare class GhPullRequestHost implements PullRequestHost {
     private readonly repo;
     private readonly builder;
+    private readonly codec;
     private readonly execFile;
     constructor(props: GhPullRequestHostProps);
     createPullRequest(input: PullRequestTemplate, options?: PullRequestAttachOptions): Promise<CreatedPullRequest>;
@@ -35,6 +36,9 @@ export declare class GhPullRequestHost implements PullRequestHost {
     listOpenPullRequestsForTickets(ticketIds: readonly string[]): Promise<OpenPullRequest[]>;
     defaultBranch(): Promise<string>;
     requestReviewers(number: number, logins: readonly string[]): Promise<ReviewerRequestResult>;
+    listReviewThreads(number: number, options: ListReviewThreadsOptions): Promise<PullRequestThreads>;
+    replyToReviewThread(threadId: string, body: string): Promise<ReviewThreadReply>;
+    private toReviewThread;
     private describeFailure;
     private escapeRegExp;
     private runCreate;
