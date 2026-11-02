@@ -30,6 +30,7 @@ const hostFixture = (): PullRequestHost => ({
   defaultBranch: vi.fn().mockResolvedValue("main"),
   requestReviewers: vi.fn().mockResolvedValue({ number: 12, requested: ["alice"], failed: [{ login: "bob", error: "not found" }] }),
   listReviewThreads: vi.fn(),
+  replyToReviewThread: vi.fn(),
 });
 
 const registryFor = (cwd: string, host: PullRequestHost, allowedEffects: Array<"read" | "write" | "network" | "process"> = ["read", "write", "network", "process"]) =>
@@ -39,7 +40,7 @@ const registryFor = (cwd: string, host: PullRequestHost, allowedEffects: Array<"
   });
 
 describe("shared PR operations", () => {
-  it("exposes all five routes and uses the existing host for create, comment, and list", async () => {
+  it("exposes all six routes and uses the existing host for create, comment, and list", async () => {
     const cwd = await makeRoot();
     const host = hostFixture();
     const registry = registryFor(cwd, host);
@@ -48,6 +49,7 @@ describe("shared PR operations", () => {
       ["pr-comment", ["pr", "comment"]],
       ["pr-list", ["pr", "list"]],
       ["pr-threads", ["pr", "threads"]],
+      ["pr-thread-reply", ["pr", "thread-reply"]],
       ["pr-request-review", ["pr", "request-review"]],
     ]);
     const create = await registry.invoke("pr-create", {
@@ -80,6 +82,10 @@ describe("shared PR operations", () => {
       ["pr-request-review", { number: -1, reviewer: ["alice"] }],
       ["pr-threads", { number: 0 }],
       ["pr-threads", { number: 1, trustedAuthors: [""] }],
+      ["pr-thread-reply", { threadId: "", body: "x" }],
+      ["pr-thread-reply", { threadId: "PRRT_1", body: "" }],
+      ["pr-thread-reply", { threadId: "PRRT_1" }],
+      ["pr-thread-reply", { body: "x" }],
       ["pr-list", { ticket: [""] }],
       ["pr-list", { ticket: [] }],
       ["pr-create", { type: "invalid", scope: "x", description: "x", why: "x", what: ["x"], base: "main", head: "topic" }],
@@ -91,6 +97,7 @@ describe("shared PR operations", () => {
     expect(host.listOpenPullRequestsForTickets).not.toHaveBeenCalled();
     expect(host.requestReviewers).not.toHaveBeenCalled();
     expect(host.listReviewThreads).not.toHaveBeenCalled();
+    expect(host.replyToReviewThread).not.toHaveBeenCalled();
   });
 
   it("passes trusted authors to the host and validates the threads result", async () => {
@@ -109,6 +116,28 @@ describe("shared PR operations", () => {
     expect(host.listReviewThreads).toHaveBeenCalledWith(12, { trustedAuthors: ["bot"] });
     await registry.invoke("pr-threads", { number: 12 });
     expect(host.listReviewThreads).toHaveBeenLastCalledWith(12, { trustedAuthors: [] });
+  });
+
+  it("replies in a review thread through the host and returns the new comment", async () => {
+    const host = hostFixture();
+    vi.mocked(host.replyToReviewThread).mockResolvedValue({ id: "PRRC_1", url: "https://github.com/o/r/pull/12#discussion_r1" });
+    const registry = registryFor(await makeRoot(), host);
+    const body = "line one\r\n  keep spaces  \n";
+    expect(await registry.invoke("pr-thread-reply", { threadId: "PRRT_1", body })).toEqual({
+      status: "success", data: { id: "PRRC_1", url: "https://github.com/o/r/pull/12#discussion_r1" },
+    });
+    expect(host.replyToReviewThread).toHaveBeenCalledWith("PRRT_1", body);
+    expect(registry.list().find(({ id }) => id === "pr-thread-reply")?.effects).toEqual(["write", "network", "process"]);
+    expect(registry.list().map(({ id }) => id).filter((id) => /resolve/.test(id))).toEqual([]);
+  });
+
+  it("denies thread replies without the write grant before the host", async () => {
+    const host = hostFixture();
+    const registry = registryFor(await makeRoot(), host, ["read", "network", "process"]);
+    expect(await registry.invoke("pr-thread-reply", { threadId: "PRRT_1", body: "x" })).toMatchObject({
+      status: "error", error: { name: "OperationAccessDeniedError" },
+    });
+    expect(host.replyToReviewThread).not.toHaveBeenCalled();
   });
 
   it("denies mutations before host calls and rejects missing or symlinked-out attachments", async () => {

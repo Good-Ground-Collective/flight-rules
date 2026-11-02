@@ -63,6 +63,7 @@ const makeHost = (open: OpenPullRequest[] = []): PullRequestHost => ({
   defaultBranch: vi.fn().mockResolvedValue("main"),
   requestReviewers: vi.fn(),
   listReviewThreads: vi.fn(),
+  replyToReviewThread: vi.fn(),
 });
 
 const run = (tracker: InitiativeTracker, args: string[], host: PullRequestHost = makeHost()) =>
