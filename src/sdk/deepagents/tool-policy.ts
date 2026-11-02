@@ -2,14 +2,14 @@ import { createFilesystemMiddleware, createSubAgentMiddleware, StateBackend } fr
 import { createMiddleware, type AnyAgentMiddleware, type StructuredTool } from "langchain";
 import type { AgentDefinition } from "../../agents/agent-registry/agent-registry.js";
 import type { RuntimeSnapshot } from "../../orchestration/orchestration.schema.js";
-import { z } from "zod";
+import {
+  CapabilityToolDeniedError,
+  WorkerCapabilitySchema,
+  type WorkerCapability,
+} from "../worker-runtime-core.js";
 
-export const WorkerCapabilitySchema = z.enum(["read", "edit", "shell", "web", "spawn", "ask"]);
-const CapabilityToolDeniedPropsSchema = z.strictObject({
-  toolName: z.string().min(1),
-  capability: WorkerCapabilitySchema.optional(),
-});
-export type WorkerCapability = z.infer<typeof WorkerCapabilitySchema>;
+export { CapabilityToolDeniedError, WorkerCapabilitySchema };
+export type { WorkerCapability };
 export type WorkerToolGrants = Partial<Record<WorkerCapability, readonly StructuredTool[]>>;
 export const flightRulesAbortSignalConfigKey = "flightRulesAbortSignal";
 
@@ -24,21 +24,6 @@ const filesystemCapabilities = new Map<string, WorkerCapability>([
   ["execute", "shell"],
   ["task", "spawn"],
 ]);
-
-export class CapabilityToolDeniedError extends Error {
-  override name = "CapabilityToolDeniedError";
-  readonly capability: WorkerCapability | undefined;
-
-  constructor(props: z.input<typeof CapabilityToolDeniedPropsSchema>) {
-    const parsed = CapabilityToolDeniedPropsSchema.parse(props);
-    super(
-      parsed.capability === undefined
-        ? `The worker attempted unregistered tool ${parsed.toolName}.`
-        : `The worker attempted ${parsed.toolName} without an effective ${parsed.capability} grant.`,
-    );
-    this.capability = parsed.capability;
-  }
-}
 
 export class InvalidDeepAgentsToolRegistrationError extends Error {
   override name = "InvalidDeepAgentsToolRegistrationError";
@@ -104,7 +89,10 @@ export class CapabilityScopedDeepAgentsToolPolicy implements DeepAgentsToolPolic
     ];
     const filesystem = !permissions.has("read")
       ? createMiddleware({ name: "FilesystemMiddleware" })
-      : createFilesystemMiddleware({ backend: new StateBackend(), tools: filesystemTools });
+      : createFilesystemMiddleware({
+          backend: new StateBackend(),
+          tools: filesystemTools,
+        });
     const subagents = createSubAgentMiddleware({
       defaultModel: model,
       defaultTools: [],
@@ -150,7 +138,10 @@ export class CapabilityScopedDeepAgentsToolPolicy implements DeepAgentsToolPolic
           ) {
             return trackExecution(() => Promise.resolve(handler(request)));
           }
-          const error = new CapabilityToolDeniedError({ toolName: name, capability });
+          const error = new CapabilityToolDeniedError({
+            toolName: name,
+            capability,
+          });
           onCapabilityDenied(error);
           throw error;
         },
