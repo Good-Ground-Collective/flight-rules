@@ -430,6 +430,42 @@ describe("Deep Agents skill runtime", () => {
     });
   });
 
+  it("fails the parent with the sibling failure when a resumed sibling ends failed, and releases the pause", async () => {
+    const model = new ScriptedSkillModel({
+      firstTool: "flight_rules_sibling_skill",
+      turns: [
+        ["flight_rules_sibling_skill"],
+        ["flight_rules_ask_human"],
+        ["flight_rules_operation"],
+      ],
+    });
+    const graphRuntime = runtime(model, undefined, vi.fn(), {
+      operationFailure: new Error("sibling operation failed after resume"),
+    });
+    const paused = await graphRuntime.invoke(
+      "guided-code-review",
+      context,
+      {},
+      { allowHumanQuestions: true },
+    );
+    if (paused.status !== "paused")
+      throw new Error("Expected a sibling question to pause its parent");
+    const answer = {
+      context,
+      pauseId: paused.pauseId,
+      questionId: paused.questionId,
+      answer: "Yes, continue.",
+    };
+
+    const failed = await graphRuntime.resume(answer);
+
+    expect(failed).toMatchObject({ status: "failed", failure: { code: "TOOL_FAILED" } });
+    expect(failed.status === "failed" && failed.failure.message).toContain(
+      "sibling operation failed after resume",
+    );
+    await expect(graphRuntime.resume(answer)).rejects.toThrow();
+  });
+
   it("requires opt-in and a supported channel before interrupt, then resumes the same checkpoint with the answer", async () => {
     const operationCalls = vi.fn();
     const model = new ScriptedSkillModel({

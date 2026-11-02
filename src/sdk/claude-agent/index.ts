@@ -28,3 +28,20 @@ export type {
 } from "./tool-policy.js";
 export { FileModelTierCatalog, ModelTiersUnavailableError } from "./model-tiers.js";
 export type { ClaudeModelBindings, ModelTierCatalog } from "./model-tiers.js";
+export {
+  ClaudeAgentSkillRuntime,
+  ClaudeAgentSkillConfigurationError,
+  NestedSkillPauseError,
+  UnansweredQuestionError,
+  flightRulesServerName,
+} from "./skill-runtime.js";
+export type {
+  ClaudeAgentSkillResult,
+  ClaudeAgentSkillRuntimeContract,
+  ClaudeAgentSkillRuntimeObserver,
+  ClaudeAgentSkillRuntimeProps,
+  PausedSkillResult,
+  SkillInvocationOptions,
+  SkillResumeRequest,
+} from "./skill-runtime.js";
+export { InvalidSkillResumeError } from "../skill-runtime-core.js";
