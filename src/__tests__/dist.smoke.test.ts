@@ -154,6 +154,41 @@ describe("built library smoke test", () => {
     );
   });
 
+  it("keeps the Claude Agent SDK optional and loads it only through its isolated entry", () => {
+    const output = execFileSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `
+      import { ClaudeAgentWorkerRuntime } from '@good-ground-collective/flight-rules/sdk/claude-agent'
+      console.log(JSON.stringify({ runtime: typeof ClaudeAgentWorkerRuntime }))
+    `,
+      ],
+      { cwd: root, encoding: "utf8" },
+    );
+    expect(JSON.parse(output)).toEqual({ runtime: "function" });
+    for (const entry of [
+      "index.js",
+      "sdk.js",
+      "review.js",
+      "mcp.js",
+      "../bin/flight-rules.mjs",
+      "claude/bin/flight-rules.mjs",
+      "codex/bin/flight-rules.mjs",
+    ]) {
+      expect(readFileSync(new URL(entry, dist), "utf8")).not.toMatch(
+        /(?:from\s*|import\s*\(|require\s*\()["']@anthropic-ai\/claude-agent-sdk/,
+      );
+    }
+    const claudeBundle = readFileSync(new URL("sdk-claude-agent.js", dist), "utf8");
+    expect(claudeBundle).toMatch(/from ["']@anthropic-ai\/claude-agent-sdk["']/);
+    expect(claudeBundle).not.toMatch(/from ["'](?:deepagents|langchain|@langchain\/)/);
+    expect(readFileSync(new URL("sdk/claude-agent/index.d.ts", dist), "utf8")).toContain(
+      "ClaudeAgentWorkerRuntime",
+    );
+  });
+
   it("keeps provider runtimes out of the CLI and both native launchers", () => {
     for (const path of [
       "../bin/flight-rules.mjs",
@@ -196,6 +231,10 @@ describe("built library smoke test", () => {
       "./package.json": "./package.json",
       "./review": { types: "./dist/code-review/index.d.ts", import: "./dist/review.js" },
       "./sdk": { types: "./dist/sdk/index.d.ts", import: "./dist/sdk.js" },
+      "./sdk/claude-agent": {
+        types: "./dist/sdk/claude-agent/index.d.ts",
+        import: "./dist/sdk-claude-agent.js",
+      },
       "./sdk/deepagents": {
         types: "./dist/sdk/deepagents/index.d.ts",
         import: "./dist/sdk-deepagents.js",

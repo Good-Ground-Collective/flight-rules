@@ -35,6 +35,29 @@ export class UnsafeInstructionPathError extends Error {
   override name = "UnsafeInstructionPathError";
 }
 
+export interface PackageHomeLocator {
+  locate(props: z.input<typeof CatalogPropsSchema>): string;
+}
+
+/** Finds the installed package root from a bundled entry, a source module or its binding subdirectory. */
+export class ModulePackageHomeLocator implements PackageHomeLocator {
+  locate(props: z.input<typeof CatalogPropsSchema>): string {
+    const parsed = CatalogPropsSchema.parse({ ...props, env: { ...props.env } });
+    const override = parsed.env["FLIGHT_RULES_HOME"]?.trim();
+    if (override) return override;
+
+    const moduleDirectory = dirname(fileURLToPath(parsed.moduleUrl));
+    if (basename(moduleDirectory) === "sdk") return resolve(moduleDirectory, "../..");
+    const bindingParent = dirname(moduleDirectory);
+    if (basename(bindingParent) === "sdk" && basename(dirname(bindingParent)) === "src") {
+      return resolve(moduleDirectory, "../../..");
+    }
+    return resolve(moduleDirectory, "..");
+  }
+}
+
+export const packageHomeLocator: PackageHomeLocator = new ModulePackageHomeLocator();
+
 /** Loads canonical worker prompts and skills from the installed package, independent of cwd. */
 export class FileInstructionCatalog implements InstructionCatalog {
   private readonly skillDir: string;
@@ -43,10 +66,7 @@ export class FileInstructionCatalog implements InstructionCatalog {
 
   constructor(props: z.input<typeof CatalogPropsSchema>) {
     const parsed = CatalogPropsSchema.parse({ ...props, env: { ...props.env } });
-    const override = parsed.env["FLIGHT_RULES_HOME"]?.trim();
-    const moduleDirectory = dirname(fileURLToPath(parsed.moduleUrl));
-    const home =
-      override || resolve(moduleDirectory, basename(moduleDirectory) === "sdk" ? "../.." : "..");
+    const home = packageHomeLocator.locate(parsed);
     this.skillDir = this.findResourceDirectory(home, ["skills"]);
     this.agentDir = this.findResourceDirectory(home, [
       "bin/resources/agents",

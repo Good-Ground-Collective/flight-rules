@@ -114,6 +114,15 @@ await esbuild.build({
   outfile: fileURLToPath(new URL("../dist/sdk-deepagents.js", import.meta.url)),
 });
 
+await esbuild.build({
+  entryPoints: [fileURLToPath(new URL("../src/sdk/claude-agent/index.ts", import.meta.url))],
+  bundle: true,
+  platform: "node",
+  format: "esm",
+  packages: "external",
+  outfile: fileURLToPath(new URL("../dist/sdk-claude-agent.js", import.meta.url)),
+});
+
 const mcpBuild = await esbuild.build({
   entryPoints: [fileURLToPath(new URL("../src/mcp/index.ts", import.meta.url))],
   bundle: true,
