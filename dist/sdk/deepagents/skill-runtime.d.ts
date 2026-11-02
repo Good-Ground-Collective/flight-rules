@@ -5,7 +5,6 @@ import type { AgentDefinition } from "../../agents/agent-registry/agent-registry
 import { type CallerContext, type RuntimeSnapshot } from "../../orchestration/orchestration.schema.js";
 import type { OperationRegistry } from "../../operations/operation-registry.js";
 import type { InstructionCatalog } from "../instruction-catalog.js";
-import type { DeepAgentsWorkerRuntimeContract } from "./deepagents-runtime.js";
 import { type WorkerToolGrants } from "./tool-policy.js";
 declare const SkillRuntimePropsSchema: z.ZodObject<{
     instructions: z.ZodCustom<InstructionCatalog, InstructionCatalog>;
@@ -67,7 +66,7 @@ declare const SkillRuntimePropsSchema: z.ZodObject<{
         expert: z.ZodInstanceOf<BaseChatModel<import("@langchain/core/language_models/chat_models").BaseChatModelCallOptions, import("langchain").BaseMessageChunk<import("@langchain/core/messages").MessageStructure<import("@langchain/core/messages").MessageToolSet>, import("@langchain/core/messages").MessageType>>>;
     }, z.core.$strict>;
     operations: z.ZodCustom<OperationRegistry, OperationRegistry>;
-    workers: z.ZodCustom<DeepAgentsWorkerRuntimeContract, DeepAgentsWorkerRuntimeContract>;
+    workers: z.ZodCustom<import("../worker-runtime-core.js").WorkerRuntimeContract, import("../worker-runtime-core.js").WorkerRuntimeContract>;
     observe: z.ZodCustom<DeepAgentsSkillRuntimeObserver, DeepAgentsSkillRuntimeObserver>;
     toolGrants: z.ZodCustom<(context: CallerContext) => WorkerToolGrants, (context: CallerContext) => WorkerToolGrants>;
     checkpointer: z.ZodDefault<z.ZodCustom<BaseCheckpointSaver<number>, BaseCheckpointSaver<number>>>;

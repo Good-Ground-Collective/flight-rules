@@ -2,34 +2,11 @@ import { createSubAgentMiddleware } from "deepagents";
 import { type AnyAgentMiddleware, type StructuredTool } from "langchain";
 import type { AgentDefinition } from "../../agents/agent-registry/agent-registry.js";
 import type { RuntimeSnapshot } from "../../orchestration/orchestration.schema.js";
-import { z } from "zod";
-export declare const WorkerCapabilitySchema: z.ZodEnum<{
-    edit: "edit";
-    read: "read";
-    shell: "shell";
-    web: "web";
-    spawn: "spawn";
-    ask: "ask";
-}>;
-declare const CapabilityToolDeniedPropsSchema: z.ZodObject<{
-    toolName: z.ZodString;
-    capability: z.ZodOptional<z.ZodEnum<{
-        edit: "edit";
-        read: "read";
-        shell: "shell";
-        web: "web";
-        spawn: "spawn";
-        ask: "ask";
-    }>>;
-}, z.core.$strict>;
-export type WorkerCapability = z.infer<typeof WorkerCapabilitySchema>;
+import { CapabilityToolDeniedError, WorkerCapabilitySchema, type WorkerCapability } from "../worker-runtime-core.js";
+export { CapabilityToolDeniedError, WorkerCapabilitySchema };
+export type { WorkerCapability };
 export type WorkerToolGrants = Partial<Record<WorkerCapability, readonly StructuredTool[]>>;
 export declare const flightRulesAbortSignalConfigKey = "flightRulesAbortSignal";
-export declare class CapabilityToolDeniedError extends Error {
-    name: string;
-    readonly capability: WorkerCapability | undefined;
-    constructor(props: z.input<typeof CapabilityToolDeniedPropsSchema>);
-}
 export declare class InvalidDeepAgentsToolRegistrationError extends Error {
     name: string;
 }
@@ -42,4 +19,3 @@ export declare class CapabilityScopedDeepAgentsToolPolicy implements DeepAgentsT
     toolsFor(definition: AgentDefinition, grants: WorkerToolGrants, runtime: RuntimeSnapshot): StructuredTool[];
     middlewareFor(model: Parameters<typeof createSubAgentMiddleware>[0]["defaultModel"], definition: AgentDefinition, hostTools: readonly StructuredTool[], trackExecution: <T>(execution: () => Promise<T>) => Promise<T>, onCapabilityDenied: (error: CapabilityToolDeniedError) => void, additionalToolNames?: readonly string[]): readonly AnyAgentMiddleware[];
 }
-export {};

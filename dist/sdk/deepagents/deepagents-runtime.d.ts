@@ -1,8 +1,9 @@
 import { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { type StructuredTool } from "langchain";
 import { z } from "zod";
-import { type DispatchOutcome, type DispatchRequest, type RuntimeSnapshot } from "../../orchestration/orchestration.schema.js";
-import { type ValidatedWorkerReport } from "../report-codec.js";
+import type { DispatchOutcome, DispatchRequest, RuntimeSnapshot } from "../../orchestration/orchestration.schema.js";
+import type { ValidatedWorkerReport } from "../report-codec.js";
+import { WorkerDispatchConfigurationError, type BatchDispatchOptions, type DispatchOptions, type WorkerRuntimeContract } from "../worker-runtime-core.js";
 export interface ModelExecutionTracker {
     waitForIdle(): Promise<void>;
 }
@@ -69,33 +70,21 @@ declare const DeepAgentsRuntimePropsSchema: z.ZodObject<{
     maxGraphSteps: z.ZodDefault<z.ZodInt>;
 }, z.core.$strict>;
 export type DeepAgentsRuntimeProps = z.input<typeof DeepAgentsRuntimePropsSchema>;
-export interface DispatchOptions {
-    signal?: AbortSignal;
-}
-export interface BatchDispatchOptions extends DispatchOptions {
-    maxConcurrent: number;
-}
-export declare class DeepAgentsConfigurationError extends Error {
+export type { BatchDispatchOptions, DispatchOptions };
+export declare class DeepAgentsConfigurationError extends WorkerDispatchConfigurationError {
     name: string;
 }
-export interface DeepAgentsWorkerRuntimeContract {
-    dispatch(request: DispatchRequest, options?: DispatchOptions): Promise<DispatchOutcome<ValidatedWorkerReport>>;
-    dispatchMany(requests: DispatchRequest[], options: BatchDispatchOptions): Promise<DispatchOutcome<ValidatedWorkerReport>[]>;
-}
+export type DeepAgentsWorkerRuntimeContract = WorkerRuntimeContract;
 /** Runs canonical worker registrations as isolated Deep Agents graphs under current host evidence. */
 export declare class LangChainDeepAgentsWorkerRuntime implements DeepAgentsWorkerRuntimeContract {
     private readonly agents;
     private readonly models;
     private readonly toolGrants;
-    private readonly observe;
     private readonly maxGraphSteps;
     private readonly toolPolicy;
-    private readonly reports;
-    private readonly activeExecutions;
+    private readonly dispatcher;
     constructor(props: DeepAgentsRuntimeProps);
     dispatch(request: DispatchRequest, options?: DispatchOptions): Promise<DispatchOutcome<ValidatedWorkerReport>>;
     dispatchMany(requests: DispatchRequest[], options: BatchDispatchOptions): Promise<DispatchOutcome<ValidatedWorkerReport>[]>;
     private runGraph;
-    private executionFailure;
 }
-export {};

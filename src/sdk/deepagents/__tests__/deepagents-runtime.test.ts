@@ -689,3 +689,32 @@ class InstrumentedDelayModel extends BaseChatModel {
     }
   }
 }
+
+describe("Deep Agents dispatch invariant failures", () => {
+  it("surfaces a single dispatch without an outcome as DeepAgentsConfigurationError", async () => {
+    const model = new ScriptedModel({ response: authorReport });
+    const workers = new LangChainDeepAgentsWorkerRuntime({
+      agents,
+      models: { standard: model, escalated: model, expert: model },
+      toolGrants: {},
+      observe: async (dispatch) => runtimeSnapshot(dispatch),
+    });
+    const dispatcher = (workers as unknown as { dispatcher: object }).dispatcher;
+    const dispatchMany = vi
+      .spyOn(
+        Object.getPrototypeOf(dispatcher) as { dispatchMany: () => Promise<unknown[]> },
+        "dispatchMany",
+      )
+      .mockResolvedValue([]);
+    try {
+      const failure = await workers.dispatch(request("no-outcome", "tech-writer", "author")).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      expect(failure).toBeInstanceOf(DeepAgentsConfigurationError);
+      expect((failure as Error).name).toBe("DeepAgentsConfigurationError");
+    } finally {
+      dispatchMany.mockRestore();
+    }
+  });
+});

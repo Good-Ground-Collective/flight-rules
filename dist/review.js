@@ -494,6 +494,11 @@ var JsonReviewCodec = class {
       throw new InvalidReviewError("multiple review state markers in one summary");
     return states.length === 0 ? void 0 : reviewContract.state(states[0]);
   }
+  parseFinding(body) {
+    const markers = this.readMarkers(body, "finding");
+    if (markers.length > 1) throw new InvalidReviewError("multiple finding markers in one comment");
+    return markers.length === 0 ? null : reviewContract.record(markers[0]);
+  }
   render(record) {
     const validated = reviewContract.record(record);
     const finding = validated.finding;

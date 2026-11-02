@@ -14,10 +14,10 @@ export declare const ReviewPathSchema: z.ZodString;
 export declare const NewFindingSchema: z.ZodUnion<readonly [z.ZodObject<{
     label: z.ZodEnum<{
         chore: "chore";
-        question: "question";
         issue: "issue";
         todo: "todo";
         suggestion: "suggestion";
+        question: "question";
         nitpick: "nitpick";
         typo: "typo";
         polish: "polish";
@@ -40,10 +40,10 @@ export declare const NewFindingSchema: z.ZodUnion<readonly [z.ZodObject<{
     start_line: z.ZodOptional<z.ZodNumber>;
     category: z.ZodOptional<z.ZodEnum<{
         docs: "docs";
-        data: "data";
-        deployment: "deployment";
         security: "security";
         correctness: "correctness";
+        data: "data";
+        deployment: "deployment";
         design: "design";
         testing: "testing";
         performance: "performance";
@@ -61,10 +61,10 @@ export declare const NewFindingSchema: z.ZodUnion<readonly [z.ZodObject<{
     }, z.core.$strict>>;
     label: z.ZodEnum<{
         chore: "chore";
-        question: "question";
         issue: "issue";
         todo: "todo";
         suggestion: "suggestion";
+        question: "question";
         nitpick: "nitpick";
         typo: "typo";
         polish: "polish";
@@ -83,10 +83,10 @@ export declare const NewFindingSchema: z.ZodUnion<readonly [z.ZodObject<{
     start_line: z.ZodOptional<z.ZodNumber>;
     category: z.ZodOptional<z.ZodEnum<{
         docs: "docs";
-        data: "data";
-        deployment: "deployment";
         security: "security";
         correctness: "correctness";
+        data: "data";
+        deployment: "deployment";
         design: "design";
         testing: "testing";
         performance: "performance";
@@ -97,8 +97,8 @@ export declare const NewFindingSchema: z.ZodUnion<readonly [z.ZodObject<{
     related_finding_id: z.ZodOptional<z.ZodString>;
 }, z.core.$strict>, z.ZodObject<{
     label: z.ZodEnum<{
-        note: "note";
         praise: "praise";
+        note: "note";
         thought: "thought";
     }>;
     blocking: z.ZodLiteral<false>;
@@ -108,10 +108,10 @@ export declare const NewFindingSchema: z.ZodUnion<readonly [z.ZodObject<{
     start_line: z.ZodOptional<z.ZodNumber>;
     category: z.ZodOptional<z.ZodEnum<{
         docs: "docs";
-        data: "data";
-        deployment: "deployment";
         security: "security";
         correctness: "correctness";
+        data: "data";
+        deployment: "deployment";
         design: "design";
         testing: "testing";
         performance: "performance";
@@ -125,10 +125,10 @@ export declare const ActionableFindingSchema: z.ZodUnion<readonly [z.ZodObject<{
     id: z.ZodString;
     label: z.ZodEnum<{
         chore: "chore";
-        question: "question";
         issue: "issue";
         todo: "todo";
         suggestion: "suggestion";
+        question: "question";
         nitpick: "nitpick";
         typo: "typo";
         polish: "polish";
@@ -151,10 +151,10 @@ export declare const ActionableFindingSchema: z.ZodUnion<readonly [z.ZodObject<{
     start_line: z.ZodOptional<z.ZodNumber>;
     category: z.ZodOptional<z.ZodEnum<{
         docs: "docs";
-        data: "data";
-        deployment: "deployment";
         security: "security";
         correctness: "correctness";
+        data: "data";
+        deployment: "deployment";
         design: "design";
         testing: "testing";
         performance: "performance";
@@ -173,10 +173,10 @@ export declare const ActionableFindingSchema: z.ZodUnion<readonly [z.ZodObject<{
     }, z.core.$strict>>;
     label: z.ZodEnum<{
         chore: "chore";
-        question: "question";
         issue: "issue";
         todo: "todo";
         suggestion: "suggestion";
+        question: "question";
         nitpick: "nitpick";
         typo: "typo";
         polish: "polish";
@@ -195,10 +195,10 @@ export declare const ActionableFindingSchema: z.ZodUnion<readonly [z.ZodObject<{
     start_line: z.ZodOptional<z.ZodNumber>;
     category: z.ZodOptional<z.ZodEnum<{
         docs: "docs";
-        data: "data";
-        deployment: "deployment";
         security: "security";
         correctness: "correctness";
+        data: "data";
+        deployment: "deployment";
         design: "design";
         testing: "testing";
         performance: "performance";
@@ -212,10 +212,10 @@ export declare const StoredFindingSchema: z.ZodUnion<readonly [z.ZodObject<{
     id: z.ZodString;
     label: z.ZodEnum<{
         chore: "chore";
-        question: "question";
         issue: "issue";
         todo: "todo";
         suggestion: "suggestion";
+        question: "question";
         nitpick: "nitpick";
         typo: "typo";
         polish: "polish";
@@ -238,10 +238,10 @@ export declare const StoredFindingSchema: z.ZodUnion<readonly [z.ZodObject<{
     start_line: z.ZodOptional<z.ZodNumber>;
     category: z.ZodOptional<z.ZodEnum<{
         docs: "docs";
-        data: "data";
-        deployment: "deployment";
         security: "security";
         correctness: "correctness";
+        data: "data";
+        deployment: "deployment";
         design: "design";
         testing: "testing";
         performance: "performance";
@@ -260,10 +260,10 @@ export declare const StoredFindingSchema: z.ZodUnion<readonly [z.ZodObject<{
     }, z.core.$strict>>;
     label: z.ZodEnum<{
         chore: "chore";
-        question: "question";
         issue: "issue";
         todo: "todo";
         suggestion: "suggestion";
+        question: "question";
         nitpick: "nitpick";
         typo: "typo";
         polish: "polish";
@@ -282,10 +282,10 @@ export declare const StoredFindingSchema: z.ZodUnion<readonly [z.ZodObject<{
     start_line: z.ZodOptional<z.ZodNumber>;
     category: z.ZodOptional<z.ZodEnum<{
         docs: "docs";
-        data: "data";
-        deployment: "deployment";
         security: "security";
         correctness: "correctness";
+        data: "data";
+        deployment: "deployment";
         design: "design";
         testing: "testing";
         performance: "performance";
@@ -297,8 +297,8 @@ export declare const StoredFindingSchema: z.ZodUnion<readonly [z.ZodObject<{
 }, z.core.$strict>, z.ZodObject<{
     id: z.ZodString;
     label: z.ZodEnum<{
-        note: "note";
         praise: "praise";
+        note: "note";
         thought: "thought";
     }>;
     blocking: z.ZodLiteral<false>;
@@ -308,10 +308,10 @@ export declare const StoredFindingSchema: z.ZodUnion<readonly [z.ZodObject<{
     start_line: z.ZodOptional<z.ZodNumber>;
     category: z.ZodOptional<z.ZodEnum<{
         docs: "docs";
-        data: "data";
-        deployment: "deployment";
         security: "security";
         correctness: "correctness";
+        data: "data";
+        deployment: "deployment";
         design: "design";
         testing: "testing";
         performance: "performance";
@@ -429,9 +429,9 @@ export declare const PriorFindingSchema: z.ZodUnion<readonly [z.ZodObject<{
         author_id: z.ZodNumber;
     }, z.core.$strict>], "kind">>;
     withdrawal_basis: z.ZodEnum<{
-        dismissed: "dismissed";
         incorrect: "incorrect";
         no_longer_applicable: "no_longer_applicable";
+        dismissed: "dismissed";
     }>;
     id: z.ZodString;
     reason: z.ZodString;
@@ -477,10 +477,10 @@ export declare const PriorFindingSchema: z.ZodUnion<readonly [z.ZodObject<{
         id: z.ZodString;
         label: z.ZodEnum<{
             chore: "chore";
-            question: "question";
             issue: "issue";
             todo: "todo";
             suggestion: "suggestion";
+            question: "question";
             nitpick: "nitpick";
             typo: "typo";
             polish: "polish";
@@ -503,10 +503,10 @@ export declare const PriorFindingSchema: z.ZodUnion<readonly [z.ZodObject<{
         start_line: z.ZodOptional<z.ZodNumber>;
         category: z.ZodOptional<z.ZodEnum<{
             docs: "docs";
-            data: "data";
-            deployment: "deployment";
             security: "security";
             correctness: "correctness";
+            data: "data";
+            deployment: "deployment";
             design: "design";
             testing: "testing";
             performance: "performance";
@@ -525,10 +525,10 @@ export declare const PriorFindingSchema: z.ZodUnion<readonly [z.ZodObject<{
         }, z.core.$strict>>;
         label: z.ZodEnum<{
             chore: "chore";
-            question: "question";
             issue: "issue";
             todo: "todo";
             suggestion: "suggestion";
+            question: "question";
             nitpick: "nitpick";
             typo: "typo";
             polish: "polish";
@@ -547,10 +547,10 @@ export declare const PriorFindingSchema: z.ZodUnion<readonly [z.ZodObject<{
         start_line: z.ZodOptional<z.ZodNumber>;
         category: z.ZodOptional<z.ZodEnum<{
             docs: "docs";
-            data: "data";
-            deployment: "deployment";
             security: "security";
             correctness: "correctness";
+            data: "data";
+            deployment: "deployment";
             design: "design";
             testing: "testing";
             performance: "performance";
@@ -573,10 +573,10 @@ export declare const ReviewSchema: z.ZodObject<{
     findings: z.ZodArray<z.ZodUnion<readonly [z.ZodObject<{
         label: z.ZodEnum<{
             chore: "chore";
-            question: "question";
             issue: "issue";
             todo: "todo";
             suggestion: "suggestion";
+            question: "question";
             nitpick: "nitpick";
             typo: "typo";
             polish: "polish";
@@ -599,10 +599,10 @@ export declare const ReviewSchema: z.ZodObject<{
         start_line: z.ZodOptional<z.ZodNumber>;
         category: z.ZodOptional<z.ZodEnum<{
             docs: "docs";
-            data: "data";
-            deployment: "deployment";
             security: "security";
             correctness: "correctness";
+            data: "data";
+            deployment: "deployment";
             design: "design";
             testing: "testing";
             performance: "performance";
@@ -620,10 +620,10 @@ export declare const ReviewSchema: z.ZodObject<{
         }, z.core.$strict>>;
         label: z.ZodEnum<{
             chore: "chore";
-            question: "question";
             issue: "issue";
             todo: "todo";
             suggestion: "suggestion";
+            question: "question";
             nitpick: "nitpick";
             typo: "typo";
             polish: "polish";
@@ -642,10 +642,10 @@ export declare const ReviewSchema: z.ZodObject<{
         start_line: z.ZodOptional<z.ZodNumber>;
         category: z.ZodOptional<z.ZodEnum<{
             docs: "docs";
-            data: "data";
-            deployment: "deployment";
             security: "security";
             correctness: "correctness";
+            data: "data";
+            deployment: "deployment";
             design: "design";
             testing: "testing";
             performance: "performance";
@@ -656,8 +656,8 @@ export declare const ReviewSchema: z.ZodObject<{
         related_finding_id: z.ZodOptional<z.ZodString>;
     }, z.core.$strict>, z.ZodObject<{
         label: z.ZodEnum<{
-            note: "note";
             praise: "praise";
+            note: "note";
             thought: "thought";
         }>;
         blocking: z.ZodLiteral<false>;
@@ -667,10 +667,10 @@ export declare const ReviewSchema: z.ZodObject<{
         start_line: z.ZodOptional<z.ZodNumber>;
         category: z.ZodOptional<z.ZodEnum<{
             docs: "docs";
-            data: "data";
-            deployment: "deployment";
             security: "security";
             correctness: "correctness";
+            data: "data";
+            deployment: "deployment";
             design: "design";
             testing: "testing";
             performance: "performance";
@@ -753,9 +753,9 @@ export declare const ReviewSchema: z.ZodObject<{
             author_id: z.ZodNumber;
         }, z.core.$strict>], "kind">>;
         withdrawal_basis: z.ZodEnum<{
-            dismissed: "dismissed";
             incorrect: "incorrect";
             no_longer_applicable: "no_longer_applicable";
+            dismissed: "dismissed";
         }>;
         id: z.ZodString;
         reason: z.ZodString;
@@ -801,10 +801,10 @@ export declare const ReviewSchema: z.ZodObject<{
             id: z.ZodString;
             label: z.ZodEnum<{
                 chore: "chore";
-                question: "question";
                 issue: "issue";
                 todo: "todo";
                 suggestion: "suggestion";
+                question: "question";
                 nitpick: "nitpick";
                 typo: "typo";
                 polish: "polish";
@@ -827,10 +827,10 @@ export declare const ReviewSchema: z.ZodObject<{
             start_line: z.ZodOptional<z.ZodNumber>;
             category: z.ZodOptional<z.ZodEnum<{
                 docs: "docs";
-                data: "data";
-                deployment: "deployment";
                 security: "security";
                 correctness: "correctness";
+                data: "data";
+                deployment: "deployment";
                 design: "design";
                 testing: "testing";
                 performance: "performance";
@@ -849,10 +849,10 @@ export declare const ReviewSchema: z.ZodObject<{
             }, z.core.$strict>>;
             label: z.ZodEnum<{
                 chore: "chore";
-                question: "question";
                 issue: "issue";
                 todo: "todo";
                 suggestion: "suggestion";
+                question: "question";
                 nitpick: "nitpick";
                 typo: "typo";
                 polish: "polish";
@@ -871,10 +871,10 @@ export declare const ReviewSchema: z.ZodObject<{
             start_line: z.ZodOptional<z.ZodNumber>;
             category: z.ZodOptional<z.ZodEnum<{
                 docs: "docs";
-                data: "data";
-                deployment: "deployment";
                 security: "security";
                 correctness: "correctness";
+                data: "data";
+                deployment: "deployment";
                 design: "design";
                 testing: "testing";
                 performance: "performance";
@@ -916,10 +916,10 @@ export declare const FindingRecordSchema: z.ZodObject<{
         id: z.ZodString;
         label: z.ZodEnum<{
             chore: "chore";
-            question: "question";
             issue: "issue";
             todo: "todo";
             suggestion: "suggestion";
+            question: "question";
             nitpick: "nitpick";
             typo: "typo";
             polish: "polish";
@@ -942,10 +942,10 @@ export declare const FindingRecordSchema: z.ZodObject<{
         start_line: z.ZodOptional<z.ZodNumber>;
         category: z.ZodOptional<z.ZodEnum<{
             docs: "docs";
-            data: "data";
-            deployment: "deployment";
             security: "security";
             correctness: "correctness";
+            data: "data";
+            deployment: "deployment";
             design: "design";
             testing: "testing";
             performance: "performance";
@@ -964,10 +964,10 @@ export declare const FindingRecordSchema: z.ZodObject<{
         }, z.core.$strict>>;
         label: z.ZodEnum<{
             chore: "chore";
-            question: "question";
             issue: "issue";
             todo: "todo";
             suggestion: "suggestion";
+            question: "question";
             nitpick: "nitpick";
             typo: "typo";
             polish: "polish";
@@ -986,10 +986,10 @@ export declare const FindingRecordSchema: z.ZodObject<{
         start_line: z.ZodOptional<z.ZodNumber>;
         category: z.ZodOptional<z.ZodEnum<{
             docs: "docs";
-            data: "data";
-            deployment: "deployment";
             security: "security";
             correctness: "correctness";
+            data: "data";
+            deployment: "deployment";
             design: "design";
             testing: "testing";
             performance: "performance";
@@ -1000,9 +1000,9 @@ export declare const FindingRecordSchema: z.ZodObject<{
         related_finding_id: z.ZodOptional<z.ZodString>;
     }, z.core.$strict>]>;
     status: z.ZodEnum<{
-        open: "open";
         resolved: "resolved";
         withdrawn: "withdrawn";
+        open: "open";
     }>;
     evidence: z.ZodArray<z.ZodDiscriminatedUnion<[z.ZodObject<{
         kind: z.ZodLiteral<"github_comment">;
@@ -1053,9 +1053,9 @@ export declare const ReviewStateSchema: z.ZodObject<{
     records: z.ZodArray<z.ZodUnion<readonly [z.ZodObject<{
         id: z.ZodString;
         status: z.ZodEnum<{
-            open: "open";
             resolved: "resolved";
             withdrawn: "withdrawn";
+            open: "open";
         }>;
         location: z.ZodUnion<readonly [z.ZodObject<{
             kind: z.ZodLiteral<"review_comment">;
@@ -1071,8 +1071,8 @@ export declare const ReviewStateSchema: z.ZodObject<{
         finding: z.ZodOptional<z.ZodObject<{
             id: z.ZodString;
             label: z.ZodEnum<{
-                note: "note";
                 praise: "praise";
+                note: "note";
                 thought: "thought";
             }>;
             blocking: z.ZodLiteral<false>;
@@ -1082,10 +1082,10 @@ export declare const ReviewStateSchema: z.ZodObject<{
             start_line: z.ZodOptional<z.ZodNumber>;
             category: z.ZodOptional<z.ZodEnum<{
                 docs: "docs";
-                data: "data";
-                deployment: "deployment";
                 security: "security";
                 correctness: "correctness";
+                data: "data";
+                deployment: "deployment";
                 design: "design";
                 testing: "testing";
                 performance: "performance";
@@ -1107,15 +1107,15 @@ export declare const TransportReviewSchema: z.ZodObject<{
         }>>;
         label: z.ZodEnum<{
             chore: "chore";
-            question: "question";
             issue: "issue";
-            note: "note";
             todo: "todo";
             suggestion: "suggestion";
+            question: "question";
             nitpick: "nitpick";
             typo: "typo";
             polish: "polish";
             praise: "praise";
+            note: "note";
             thought: "thought";
         }>;
         severity: z.ZodOptional<z.ZodEnum<{
@@ -1137,10 +1137,10 @@ export declare const TransportReviewSchema: z.ZodObject<{
         start_line: z.ZodOptional<z.ZodNumber>;
         category: z.ZodOptional<z.ZodEnum<{
             docs: "docs";
-            data: "data";
-            deployment: "deployment";
             security: "security";
             correctness: "correctness";
+            data: "data";
+            deployment: "deployment";
             design: "design";
             testing: "testing";
             performance: "performance";
@@ -1187,18 +1187,18 @@ export declare const TransportReviewSchema: z.ZodObject<{
             author_id: z.ZodNumber;
         }, z.core.$strict>], "kind">>>;
         withdrawal_basis: z.ZodOptional<z.ZodEnum<{
-            dismissed: "dismissed";
             incorrect: "incorrect";
             no_longer_applicable: "no_longer_applicable";
+            dismissed: "dismissed";
         }>>;
         updated_finding: z.ZodOptional<z.ZodUnion<readonly [z.ZodObject<{
             id: z.ZodString;
             label: z.ZodEnum<{
                 chore: "chore";
-                question: "question";
                 issue: "issue";
                 todo: "todo";
                 suggestion: "suggestion";
+                question: "question";
                 nitpick: "nitpick";
                 typo: "typo";
                 polish: "polish";
@@ -1221,10 +1221,10 @@ export declare const TransportReviewSchema: z.ZodObject<{
             start_line: z.ZodOptional<z.ZodNumber>;
             category: z.ZodOptional<z.ZodEnum<{
                 docs: "docs";
-                data: "data";
-                deployment: "deployment";
                 security: "security";
                 correctness: "correctness";
+                data: "data";
+                deployment: "deployment";
                 design: "design";
                 testing: "testing";
                 performance: "performance";
@@ -1243,10 +1243,10 @@ export declare const TransportReviewSchema: z.ZodObject<{
             }, z.core.$strict>>;
             label: z.ZodEnum<{
                 chore: "chore";
-                question: "question";
                 issue: "issue";
                 todo: "todo";
                 suggestion: "suggestion";
+                question: "question";
                 nitpick: "nitpick";
                 typo: "typo";
                 polish: "polish";
@@ -1265,10 +1265,10 @@ export declare const TransportReviewSchema: z.ZodObject<{
             start_line: z.ZodOptional<z.ZodNumber>;
             category: z.ZodOptional<z.ZodEnum<{
                 docs: "docs";
-                data: "data";
-                deployment: "deployment";
                 security: "security";
                 correctness: "correctness";
+                data: "data";
+                deployment: "deployment";
                 design: "design";
                 testing: "testing";
                 performance: "performance";
@@ -1280,8 +1280,8 @@ export declare const TransportReviewSchema: z.ZodObject<{
         }, z.core.$strict>, z.ZodObject<{
             id: z.ZodString;
             label: z.ZodEnum<{
-                note: "note";
                 praise: "praise";
+                note: "note";
                 thought: "thought";
             }>;
             blocking: z.ZodLiteral<false>;
@@ -1291,10 +1291,10 @@ export declare const TransportReviewSchema: z.ZodObject<{
             start_line: z.ZodOptional<z.ZodNumber>;
             category: z.ZodOptional<z.ZodEnum<{
                 docs: "docs";
-                data: "data";
-                deployment: "deployment";
                 security: "security";
                 correctness: "correctness";
+                data: "data";
+                deployment: "deployment";
                 design: "design";
                 testing: "testing";
                 performance: "performance";

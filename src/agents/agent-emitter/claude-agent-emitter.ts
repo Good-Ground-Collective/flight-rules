@@ -1,6 +1,7 @@
 import { stringify as stringifyYaml } from "yaml";
 import { z } from "zod";
 import type { AgentFrontmatter } from "../agent-frontmatter/agent-frontmatter.schema.js";
+import { claudeBuiltInTools } from "../../sdk/claude-builtin-tools.js";
 import type { AgentDefinition } from "../agent-registry/agent-registry.js";
 import { type AgentEmitter, UnsupportedAgentSettingError } from "./agent-emitter.js";
 import { AgentDefinitionSchema, ModelBindingsSchema } from "./agent-emitter.schema.js";
@@ -34,11 +35,10 @@ export class MarkdownClaudeAgentEmitter implements AgentEmitter {
   }
 
   private tools(capability: AgentFrontmatter["capabilities"][number]): string[] {
-    if (capability === "read") return ["Glob", "Grep", "Read"];
-    if (capability === "edit") return ["Write", "Edit"];
-    if (capability === "shell") return ["Bash"];
-    if (capability === "web") return ["WebSearch", "WebFetch"];
+    if (capability === "spawn" || capability === "ask") {
+      throw new UnsupportedAgentSettingError(`Worker agent capability ${capability} needs an orchestration adapter`);
+    }
 
-    throw new UnsupportedAgentSettingError(`Worker agent capability ${capability} needs an orchestration adapter`);
+    return claudeBuiltInTools.toolsFor(capability);
   }
 }
