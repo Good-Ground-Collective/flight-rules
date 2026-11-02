@@ -9,7 +9,7 @@ This skill runs the shared review-remediation procedure against a pull request t
 
 **The hard rule: this skill never resolves a thread, never merges, and never pushes an unverified change.** Closing a thread is the reviewer's decision. The verifier is the gate on every push.
 
-**Terminal state:** every in-scope thread has a reply (fix, clarification or escalation), exactly one summary comment is posted, and any verified fixes are pushed to the PR branch. An incomplete run is reported to the caller with its unpushed work left uncommitted.
+**Terminal state:** every in-scope thread has a reply (fix, clarification or escalation), exactly one summary comment is posted, and any verified fixes are pushed to the PR branch. An incomplete run is reported to the caller: unverified work is left uncommitted and, when the PR head moved, the verified commit is left local and unpushed.
 
 ## Orchestration context
 
@@ -82,7 +82,9 @@ With no key, a ticket that cannot be read, or a ticket in neither format, or a t
 For each thread in the `pr threads` output, decide scope:
 
 - **In scope:** unresolved (`isResolved` false), non-outdated (`isOutdated` false), not `commentsTruncated`, and either carrying a trusted finding marker (`finding` not null) or coming from a human reviewer.
-- **Skipped:** resolved threads, outdated threads, and truncated threads. A thread whose finding marker has status `resolved` or `withdrawn` is also skipped. Record every skipped thread with its link and the reason for the summary.
+- **Skipped:** resolved threads, outdated threads, and truncated threads. A thread whose finding marker has status `resolved` or `withdrawn` is also skipped. A thread whose root author is a bot not named by `--trusted-author` is skipped with the reason `untrusted bot`. Record every skipped thread with its link and the reason for the summary.
+- **Awaiting reviewer:** resolve the account running the skill read-only (`gh api user --jq .login`). Skip an unresolved thread whose most recent comment was authored by that account, with the reason `awaiting reviewer`. A thread where a reviewer commented after the skill's last reply stays in scope. If the running account cannot be determined, skip nothing on this basis and say so in the summary; never guess.
+- Every unresolved, non-outdated thread is therefore either in scope or listed as skipped with a reason.
 - A thread with a `markerError` is treated as a human comment from its root author: its text is still read, its marker is not.
 
 Each in-scope thread becomes one finding. Its id is the **thread node id** (`thread.id`). Keep a private map from id to the full finding: the thread id, path and line, every comment with its author and URL, the marker's finding when present, and the source (`trusted marker` or `human`). Never copy a marker from a non-trusted commenter into a finding.
@@ -97,7 +99,7 @@ Run `flight-rules doc review-remediation` and read the full output. Follow it wi
 - **Dispatch brief.** Hand each implementer the full ticket body (or the PR description when ungrounded), the thread findings, and the pointers printed by `flight-rules charter --repo --path`, which it reads in full.
 - **Summary comment.** Exactly one summary comment is allowed and is posted in step 7.
 - **Initial loop.** There is no initial loop in this run. The bounded remediation pass in the doc is the only pass: at most three attempts, attempts 1 and 2 on `code-implementation`, attempt 3 on `code-implementation-escalated` only after two verifier FAILs.
-- **Triage stops.** A `needs_input` is escalated in its thread (step 6), never answered by this skill, and never prompts a human when questions are disabled. Other findings with `fix` or `ignore` proceed. The run reports the open question in its summary.
+- **Triage stops.** A `needs_input` is escalated in its thread (step 6), never answered by this skill, and never prompts a human when questions are disabled. Any triage `needs_input` or `openQuestions` stops the run before remediation: no remediation attempt, no commit and no push, even for findings triaged `fix` or `ignore`. The stop is reported in step 6 replies and the step 7 summary.
 
 **Commit and push only after a PASS.** Once every original criterion and every accepted review criterion passed, commit the union of paths changed across every attempt, writing a body file outside the repo first:
 
@@ -133,7 +135,7 @@ flight-rules pr thread-reply <thread-id> --body-file <path>
 - `ignore`: an evidence-backed explanation grounded in code, applicable rules or existing evidence. A clarification, not a dismissal.
 - `needs_input`: an escalation that states the open question and why the evidence could not settle it.
 
-Reply to every in-scope thread, once. When remediation stopped before a push, a `fix` thread gets no fix claim: reply that the fix was not verified and was not pushed, with the reason. Never claim an unverified fix is complete. Do not edit or answer a reviewer's state marker.
+Reply to every in-scope thread, once. When triage stopped on an open question, a `fix` thread gets no fix claim: reply that the fix was accepted but not attempted because triage stopped on an open question, and an `ignore` thread still gets its evidence-backed explanation. When remediation stopped before a push, a `fix` thread gets no fix claim: reply that the fix was not verified and was not pushed, with the reason. Never claim an unverified fix is complete. Do not edit or answer a reviewer's state marker.
 
 ### 7. Post one summary comment
 
@@ -148,7 +150,7 @@ The body lists, with a link to each thread's source URL:
 - **Fixed** threads and the pushed commit SHA.
 - **Explained** threads (`ignore`).
 - **Escalated** threads (`needs_input`) with each question.
-- **Skipped** threads and the reason (resolved, outdated, truncated, resolved or withdrawn marker).
+- **Skipped** threads and the reason (resolved, outdated, truncated, resolved or withdrawn marker, untrusted bot, awaiting reviewer), and a line when the running account could not be determined.
 - The **remediation attempt count** (0 to 3).
 - The **grounding**: the ticket key and format, or a line saying no ticket was usable and the PR description alone was the ground.
 - Any stop (unexpected head, rejected push, exhausted attempts) and the unpushed work it left.
@@ -177,6 +179,7 @@ Report to the caller, in this order: attempts used; per-criterion verdicts for e
 - **Checked-out head differs from `headRefOid`** → stop before any work.
 - **PR head moved during the run** → stop without pushing; keep the verified commit local; report the unexpected commit.
 - **Ticket unreadable, in neither format, or without a contract** → ground in the PR description alone and say so in the summary.
+- **Triage `needs_input` or `openQuestions`** → stop before remediation with no commit and no push; reply `needs_input` threads with the escalation, `fix` threads that the fix was accepted but not attempted because triage stopped on an open question, `ignore` threads with their explanation; list the questions in the summary.
 - **Verifier `UNVERIFIABLE`, `openQuestions`, malformed output or unavailable worker** → stop the pass, push nothing, reply `needs_input` in the affected threads with the question, and report. Questions reach a human only through the thread replies and summary when questions are disabled.
 - **Third consecutive FAIL** → stop, push nothing, leave the work uncommitted, reply in each `fix` thread that the fix was not verified, and summarize the itemized evidence.
 - **`git push` rejected** → stop and report; no force.
@@ -188,6 +191,8 @@ Report to the caller, in this order: attempts used; per-criterion verdicts for e
 - The PR number and trusted authors were the only inputs; no marker from an untrusted commenter was used.
 - The ticket key came from the title, then the branch, then the body, and the summary says what grounded the run.
 - Every in-scope thread got exactly one reply of the right kind, and skipped threads are listed with reasons.
+- A triage `needs_input` stopped the run before remediation; no fix or ignore finding proceeded past it, and nothing was committed or pushed.
+- A thread whose latest comment is the running account's own is skipped as awaiting reviewer, unless a reviewer commented after the skill's last reply.
 - Nothing was pushed that the verifier did not pass against every original and accepted review criterion, and the head was reconciled first.
 - Exactly one summary comment was posted, with attempt count and links.
 - No thread was resolved, no `needs_input` was answered by the skill, and no human was asked mid-run when questions were disabled.
