@@ -1278,7 +1278,7 @@ var LangChainDeepAgentsWorkerRuntime = class {
 };
 
 // src/sdk/deepagents/skill-runtime.ts
-import { randomUUID } from "node:crypto";
+import { randomUUID as randomUUID2 } from "node:crypto";
 import { Command, interrupt, isGraphInterrupt, MemorySaver } from "@langchain/langgraph";
 import {
   BaseMessage,
@@ -1289,32 +1289,18 @@ import { BaseChatModel as BaseChatModel2 } from "@langchain/core/language_models
 import { AsyncLocalStorageProviderSingleton } from "@langchain/core/singletons";
 import { createDeepAgent as createDeepAgent2 } from "deepagents";
 import { createMiddleware as createMiddleware2, tool as tool2 } from "langchain";
+import { z as z12 } from "zod";
+
+// src/sdk/skill-runtime-core.ts
+import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual as isDeepStrictEqual3 } from "node:util";
 import { z as z11 } from "zod";
-var SkillRuntimePropsSchema = z11.strictObject({
-  instructions: z11.custom(
-    (value) => typeof value === "object" && value !== null && "loadSkill" in value && typeof value.loadSkill === "function"
-  ),
-  agents: z11.array(AgentDefinitionSchema).min(1),
-  models: z11.strictObject({
-    standard: z11.instanceof(BaseChatModel2),
-    escalated: z11.instanceof(BaseChatModel2),
-    expert: z11.instanceof(BaseChatModel2)
-  }),
-  operations: z11.custom(
-    (value) => typeof value === "object" && value !== null && "invoke" in value && typeof value.invoke === "function" && "list" in value && typeof value.list === "function"
-  ),
-  workers: z11.custom(
-    (value) => typeof value === "object" && value !== null && "dispatch" in value && typeof value.dispatch === "function"
-  ),
-  observe: z11.custom((value) => typeof value === "function"),
-  toolGrants: z11.custom(
-    (value) => typeof value === "function"
-  ),
-  checkpointer: z11.custom(
-    (value) => typeof value === "object" && value !== null && "getTuple" in value && typeof value.getTuple === "function"
-  ).default(() => new MemorySaver()),
-  maxGraphSteps: z11.int().positive().default(128)
-});
+var skillToolNames = {
+  operation: "flight_rules_operation",
+  dispatch: "flight_rules_dispatch",
+  sibling: "flight_rules_sibling_skill",
+  ask: "flight_rules_ask_human"
+};
 var PartialOperationSchema = z11.strictObject({
   operationId: z11.string().min(1),
   status: z11.literal("partial"),
@@ -1333,8 +1319,110 @@ var PartialOperationFailure = class extends Error {
     this.operations = parsed.operations;
   }
 };
-var InFlightSkillToolExecutionTracker = class {
+var InvalidSkillResumeError = class extends Error {
+  name = "InvalidSkillResumeError";
+};
+var SkillConfigurationError = class extends Error {
+  name = "SkillConfigurationError";
+};
+var CodedSkillError = class extends Error {
+  name = "CodedSkillError";
+  failureCode;
+  constructor(props) {
+    super(props.message);
+    this.failureCode = props.failureCode;
+  }
+};
+var DeepCallerContextComparison = class {
+  matches(left, right) {
+    return isDeepStrictEqual3(left, right);
+  }
+};
+var callerContexts = new DeepCallerContextComparison();
+var PendingPauseRegistry = class {
+  pending = /* @__PURE__ */ new Map();
+  siblingPauses = /* @__PURE__ */ new Map();
+  register(entry) {
+    const pause = {
+      ...entry,
+      pauseId: randomUUID(),
+      state: "paused"
+    };
+    this.pending.set(pause.pauseId, pause);
+    return pause;
+  }
+  /** Validates the request against its pause and reserves it so a concurrent resume cannot share it. */
+  reserve(request) {
+    const pause = this.pending.get(request.pauseId);
+    if (pause === void 0 || pause.questionId !== request.questionId || !callerContexts.matches(pause.context, request.context) || pause.state !== "paused") {
+      throw new InvalidSkillResumeError(
+        "The pause, question or caller context is missing, stale or does not match."
+      );
+    }
+    if (request.answer.trim().length === 0) {
+      throw new InvalidSkillResumeError("A human answer is required to resume this question.");
+    }
+    pause.state = "resuming";
+    return pause;
+  }
+  release(pause) {
+    if (this.pending.get(pause.pauseId) === pause) pause.state = "paused";
+  }
+  consume(pause) {
+    this.pending.delete(pause.pauseId);
+  }
+  /** Removes a paused skill for its own caller and cancels any sibling pause it was carrying. */
+  cancel(context, pauseId) {
+    const pause = this.pending.get(pauseId);
+    if (pause === void 0 || pause.state !== "paused" || !callerContexts.matches(pause.context, context)) {
+      throw new InvalidSkillResumeError(
+        "The pause is missing or belongs to another caller context."
+      );
+    }
+    this.pending.delete(pauseId);
+    const sibling = this.siblingPauses.get(pause.runKey);
+    if (sibling !== void 0) {
+      this.siblingPauses.delete(pause.runKey);
+      this.cancel(context, sibling.pauseId);
+    }
+    return pause;
+  }
+  carrySibling(runKey, paused) {
+    this.siblingPauses.set(runKey, paused);
+  }
+  siblingOf(runKey) {
+    return this.siblingPauses.get(runKey);
+  }
+  releaseSibling(runKey) {
+    this.siblingPauses.delete(runKey);
+  }
+};
+var FreshQuestionAccess = class {
+  observe;
+  constructor(props) {
+    this.observe = props.observe;
+  }
+  async assertAvailable(caller) {
+    const snapshot = RuntimeSnapshotSchema.parse(await this.observe(caller));
+    if (!callerContexts.matches(snapshot.context, caller) || snapshot.ask.state !== "available") {
+      throw new InvalidSkillResumeError(
+        "Fresh question access is unavailable for the original caller context."
+      );
+    }
+  }
+};
+var SkillExecution = class {
+  partialOperations = [];
   active = /* @__PURE__ */ new Set();
+  recordedPartials = /* @__PURE__ */ new Set();
+  ignores;
+  firstFailure;
+  constructor(props = {}) {
+    this.ignores = props.ignores ?? (() => false);
+  }
+  get failure() {
+    return this.firstFailure;
+  }
   async track(execution) {
     const promise = Promise.resolve().then(execution);
     this.active.add(promise);
@@ -1347,11 +1435,258 @@ var InFlightSkillToolExecutionTracker = class {
   async waitForIdle() {
     while (this.active.size > 0) await Promise.allSettled([...this.active]);
   }
+  recordFailure(cause) {
+    if (this.ignores(cause)) return;
+    if (cause instanceof PartialOperationFailure && !this.recordedPartials.has(cause)) {
+      this.recordedPartials.add(cause);
+      this.partialOperations.push(...cause.operations);
+    }
+    this.firstFailure = cause instanceof Error ? cause : new Error(String(cause));
+  }
+  rejectDependentWork() {
+    if (this.firstFailure !== void 0) throw this.firstFailure;
+  }
+  /** Runs one tool call as tracked work that refuses to start after a failure and records its own. */
+  async run(execution) {
+    return this.track(async () => {
+      try {
+        this.rejectDependentWork();
+        return await execution();
+      } catch (cause) {
+        this.recordFailure(cause);
+        throw cause;
+      }
+    });
+  }
 };
-var InvalidSkillResumeError = class extends Error {
-  name = "InvalidSkillResumeError";
+var SkillFailureReporter = class {
+  failed(report) {
+    const recorded = report.execution?.failure;
+    const operations = report.execution?.partialOperations ?? [];
+    return {
+      status: "failed",
+      context: report.context,
+      invocationId: report.invocationId,
+      failure: {
+        code: this.codeFor(report.signal, recorded),
+        message: this.messageFor(recorded, report.cause),
+        ...operations.length > 0 ? { operations } : {}
+      }
+    };
+  }
+  cancelled(context, invocationId) {
+    return {
+      status: "failed",
+      context,
+      invocationId,
+      failure: {
+        code: "CANCELLED",
+        message: "The caller cancelled this paused skill."
+      }
+    };
+  }
+  codeFor(signal, recorded) {
+    if (signal?.aborted) return "CANCELLED";
+    if (recorded === void 0) return "EXECUTION_FAILED";
+    return recorded instanceof CodedSkillError ? recorded.failureCode : "TOOL_FAILED";
+  }
+  messageFor(recorded, cause) {
+    if (recorded !== void 0) return recorded.message;
+    return cause instanceof Error ? cause.message : String(cause);
+  }
 };
-var DeepAgentsSkillConfigurationError = class extends Error {
+var skillFailures = new SkillFailureReporter();
+var OperationEffectCapabilities = class {
+  capabilityFor(effect) {
+    if (effect === "read") return "read";
+    if (effect === "write") return "edit";
+    if (effect === "process") return "shell";
+    return "web";
+  }
+};
+var operationEffectCapabilities = new OperationEffectCapabilities();
+var SkillAgentDefinitions = class {
+  forSkill(instruction, observed) {
+    return {
+      frontmatter: {
+        name: "skill-runtime",
+        description: "Execute a canonical workflow skill.",
+        model: "standard",
+        capabilities: AgentFrontmatterSchema.shape.capabilities.parse(
+          ["read", "edit", "shell", "web", "spawn", "ask"].filter(
+            (capability) => observed.permissions[capability]?.state === "available"
+          )
+        )
+      },
+      body: instruction.contents
+    };
+  }
+};
+var skillAgentDefinitions = new SkillAgentDefinitions();
+var SharedSkillToolHandlers = class {
+  props;
+  constructor(props) {
+    this.props = props;
+  }
+  async operation(args) {
+    const { context, operations, observe, execution } = this.props;
+    execution.rejectDependentWork();
+    return execution.track(async () => {
+      try {
+        const descriptor = operations.list().find((entry) => entry.id === args.operationId);
+        if (descriptor === void 0) throw new Error(`Unknown operation: ${args.operationId}`);
+        const fresh = RuntimeSnapshotSchema.parse(await observe(context));
+        if (!callerContexts.matches(fresh.context, context)) {
+          throw new SkillConfigurationError(
+            "Operation evidence belongs to a different caller context."
+          );
+        }
+        for (const effect of descriptor.effects) {
+          const capability = operationEffectCapabilities.capabilityFor(effect);
+          if (fresh.permissions[capability]?.state !== "available") {
+            throw new CapabilityToolDeniedError({
+              toolName: `operation:${args.operationId}`,
+              capability
+            });
+          }
+        }
+        const result = await operations.invoke(args.operationId, args.input);
+        if (result.status === "partial") {
+          throw new PartialOperationFailure({
+            operations: [
+              {
+                operationId: args.operationId,
+                status: "partial",
+                data: result.data,
+                error: result.error
+              }
+            ]
+          });
+        }
+        if (result.status === "error") {
+          throw new Error(`${result.error.name}: ${result.error.message}`);
+        }
+        return result;
+      } catch (cause) {
+        execution.recordFailure(cause);
+        throw cause;
+      }
+    });
+  }
+  async dispatch(args) {
+    const { context, launch, agents, workers, observe, orchestration, execution, signal } = this.props;
+    execution.rejectDependentWork();
+    return execution.track(async () => {
+      try {
+        const request = DispatchRequestSchema.parse({
+          id: args.dispatchId,
+          agent: args.agent,
+          context,
+          input: args.input
+        });
+        const registration = agents.find(
+          (candidate) => candidate.frontmatter.name === request.agent
+        );
+        if (registration === void 0) {
+          const decision2 = orchestration.prepare(request, launch);
+          if (decision2.status !== "ready") {
+            throw new Error(`${decision2.failure.code}: ${decision2.failure.message}`);
+          }
+        }
+        const fresh = RuntimeSnapshotSchema.parse(await observe(context, registration));
+        if (!callerContexts.matches(fresh.context, context)) {
+          throw new SkillConfigurationError(
+            "Worker evidence belongs to a different caller context."
+          );
+        }
+        const decision = orchestration.prepare(request, fresh);
+        if (decision.status !== "ready") {
+          throw new Error(`${decision.failure.code}: ${decision.failure.message}`);
+        }
+        const outcome = signal === void 0 ? await workers.dispatch(request) : await workers.dispatch(request, { signal });
+        if (outcome.status !== "completed") {
+          throw new Error(`${outcome.failure.code}: ${outcome.failure.message}`);
+        }
+        return outcome;
+      } catch (cause) {
+        execution.recordFailure(cause);
+        throw cause;
+      }
+    });
+  }
+  /** Runs the sibling skill through the binding's `run` and returns its completed or paused result; a failed sibling throws. */
+  async sibling(args, run, shouldRecord = () => true) {
+    const { context, orchestration, execution } = this.props;
+    execution.rejectDependentWork();
+    const sibling = orchestration.sibling({
+      context,
+      skill: args.siblingSkill,
+      input: args.input
+    });
+    return execution.track(async () => {
+      try {
+        const result = await run(sibling);
+        if (result.status === "failed") throw this.siblingFailure(result);
+        return result;
+      } catch (cause) {
+        if (shouldRecord(cause)) execution.recordFailure(cause);
+        throw cause;
+      }
+    });
+  }
+  /** Re-checks the host's question policy for this caller and returns the question that must wait for a human. */
+  async ask(args) {
+    const { context, allowHumanQuestions, observe, orchestration, execution } = this.props;
+    const questionId = randomUUID();
+    const fresh = RuntimeSnapshotSchema.parse(await observe(context));
+    const decision = orchestration.ask(
+      { context, question: args.question, allowHumanQuestions },
+      fresh
+    );
+    if (decision.status !== "awaiting-answer") {
+      const failure = new Error(`${decision.failure.code}: ${decision.failure.message}`);
+      execution.recordFailure(failure);
+      throw failure;
+    }
+    return { questionId, question: args.question };
+  }
+  siblingFailure(result) {
+    if (result.failure.operations !== void 0) {
+      return new PartialOperationFailure({
+        operations: result.failure.operations
+      });
+    }
+    return new Error(result.failure.message);
+  }
+};
+
+// src/sdk/deepagents/skill-runtime.ts
+var SkillRuntimePropsSchema = z12.strictObject({
+  instructions: z12.custom(
+    (value) => typeof value === "object" && value !== null && "loadSkill" in value && typeof value.loadSkill === "function"
+  ),
+  agents: z12.array(AgentDefinitionSchema).min(1),
+  models: z12.strictObject({
+    standard: z12.instanceof(BaseChatModel2),
+    escalated: z12.instanceof(BaseChatModel2),
+    expert: z12.instanceof(BaseChatModel2)
+  }),
+  operations: z12.custom(
+    (value) => typeof value === "object" && value !== null && "invoke" in value && typeof value.invoke === "function" && "list" in value && typeof value.list === "function"
+  ),
+  workers: z12.custom(
+    (value) => typeof value === "object" && value !== null && "dispatch" in value && typeof value.dispatch === "function"
+  ),
+  observe: z12.custom((value) => typeof value === "function"),
+  toolGrants: z12.custom(
+    (value) => typeof value === "function"
+  ),
+  checkpointer: z12.custom(
+    (value) => typeof value === "object" && value !== null && "getTuple" in value && typeof value.getTuple === "function"
+  ).default(() => new MemorySaver()),
+  maxGraphSteps: z12.int().positive().default(128)
+});
+var DeepAgentsSkillConfigurationError = class extends SkillConfigurationError {
   name = "DeepAgentsSkillConfigurationError";
 };
 var LangChainDeepAgentsSkillRuntime = class {
@@ -1364,8 +1699,8 @@ var LangChainDeepAgentsSkillRuntime = class {
   toolGrants;
   checkpointer;
   maxGraphSteps;
-  pending = /* @__PURE__ */ new Map();
-  siblingPauses = /* @__PURE__ */ new Map();
+  pauses = new PendingPauseRegistry();
+  questionAccess;
   policy = new CapabilityScopedDeepAgentsToolPolicy();
   orchestration;
   constructor(props) {
@@ -1380,12 +1715,15 @@ var LangChainDeepAgentsSkillRuntime = class {
     this.toolGrants = parsed.data.toolGrants;
     this.checkpointer = parsed.data.checkpointer;
     this.maxGraphSteps = parsed.data.maxGraphSteps;
-    this.orchestration = new RegistryOrchestrationPolicy({ agents: this.agents });
+    this.orchestration = new RegistryOrchestrationPolicy({
+      agents: this.agents
+    });
+    this.questionAccess = new FreshQuestionAccess({ observe: this.observe });
   }
   async invoke(skill, context, input, options = {}) {
     const caller = CallerContextSchema.parse(context);
-    const invocationId = randomUUID();
-    const threadId = randomUUID();
+    const invocationId = randomUUID2();
+    const threadId = randomUUID2();
     let execution;
     try {
       const instruction = this.instructions.loadSkill(skill);
@@ -1415,8 +1753,8 @@ ${JSON.stringify(input)}`
           ...options.signal === void 0 ? {} : { signal: options.signal }
         }
       );
-      await execution.tools.waitForIdle();
-      if (execution.failure !== void 0) throw execution.failure;
+      await execution.run.waitForIdle();
+      if (execution.run.failure !== void 0) throw execution.run.failure;
       return this.result(
         execution.graph,
         result,
@@ -1427,128 +1765,100 @@ ${JSON.stringify(input)}`
         options.allowHumanQuestions === true
       );
     } catch (cause) {
-      await execution?.tools.waitForIdle();
-      const interruption = isGraphInterrupt(cause) ? z11.array(z11.object({ id: z11.string().optional(), value: z11.unknown() })).safeParse(cause.interrupts) : this.questionInterruptionFromError(cause);
-      const question = interruption.success ? z11.object({ questionId: z11.string(), question: z11.string() }).safeParse(interruption.data[0]?.value) : void 0;
-      if (question?.success === true && options.allowHumanQuestions === true) {
-        if (isGraphInterrupt(cause)) {
-          const pauseId = randomUUID();
-          this.pending.set(pauseId, {
-            context: caller,
-            invocationId,
-            pauseId,
-            questionId: question.data.questionId,
-            threadId,
-            skill,
-            allowHumanQuestions: true,
-            state: "paused"
-          });
-          return {
-            status: "paused",
-            context: caller,
-            invocationId,
-            pauseId,
-            questionId: question.data.questionId,
-            question: question.data.question
-          };
-        }
+      await execution?.run.waitForIdle();
+      const interruption = isGraphInterrupt(cause) ? z12.array(
+        z12.object({
+          id: z12.string().optional(),
+          value: z12.unknown()
+        })
+      ).safeParse(cause.interrupts) : this.questionInterruptionFromError(cause);
+      const question = interruption.success ? z12.object({
+        questionId: z12.string(),
+        question: z12.string()
+      }).safeParse(interruption.data[0]?.value) : void 0;
+      if (question?.success === true && options.allowHumanQuestions === true && isGraphInterrupt(cause)) {
+        const pause = this.pauses.register({
+          context: caller,
+          invocationId,
+          questionId: question.data.questionId,
+          skill,
+          allowHumanQuestions: true,
+          runKey: threadId,
+          session: threadId
+        });
+        return {
+          status: "paused",
+          context: caller,
+          invocationId,
+          pauseId: pause.pauseId,
+          questionId: question.data.questionId,
+          question: question.data.question
+        };
       }
-      return {
-        status: "failed",
+      return skillFailures.failed({
         context: caller,
         invocationId,
-        failure: {
-          code: options.signal?.aborted ? "CANCELLED" : execution?.failure === void 0 ? "EXECUTION_FAILED" : "TOOL_FAILED",
-          message: execution?.failure instanceof Error ? execution.failure.message : cause instanceof Error ? cause.message : String(cause),
-          ...execution !== void 0 && execution.partialOperations.length > 0 ? { operations: execution.partialOperations } : {}
-        }
-      };
+        signal: options.signal,
+        execution: execution?.run,
+        cause
+      });
     }
   }
   async resume(request) {
     const caller = CallerContextSchema.parse(request.context);
-    const pending = this.pending.get(request.pauseId);
-    if (pending === void 0 || pending.questionId !== request.questionId || JSON.stringify(pending.context) !== JSON.stringify(caller) || pending.state !== "paused") {
-      throw new InvalidSkillResumeError(
-        "The pause, question or caller context is missing, stale or does not match."
-      );
-    }
-    if (request.answer.trim().length === 0)
-      throw new InvalidSkillResumeError("A human answer is required to resume this question.");
-    pending.state = "resuming";
+    const pending = this.pauses.reserve({ ...request, context: caller });
     let execution;
     let continuationStarted = false;
     try {
-      const snapshot = RuntimeSnapshotSchema.parse(await this.observe(caller));
-      if (JSON.stringify(snapshot.context) !== JSON.stringify(caller) || snapshot.ask.state !== "available") {
-        throw new InvalidSkillResumeError(
-          "Fresh question access is unavailable for the original caller context."
-        );
-      }
+      await this.questionAccess.assertAvailable(caller);
       execution = await this.createGraph(
         pending.skill,
         caller,
         pending.allowHumanQuestions,
-        pending.threadId
+        pending.session
       );
-      this.pending.delete(request.pauseId);
+      this.pauses.consume(pending);
       continuationStarted = true;
       const result = await execution.graph.invoke(
-        new Command({ resume: { questionId: request.questionId, answer: request.answer } }),
+        new Command({
+          resume: {
+            questionId: request.questionId,
+            answer: request.answer
+          }
+        }),
         {
-          configurable: { thread_id: pending.threadId },
+          configurable: { thread_id: pending.session },
           recursionLimit: this.maxGraphSteps,
           ...request.signal === void 0 ? {} : { signal: request.signal }
         }
       );
-      await execution.tools.waitForIdle();
-      if (execution.failure !== void 0) throw execution.failure;
+      await execution.run.waitForIdle();
+      if (execution.run.failure !== void 0) throw execution.run.failure;
       return this.result(
         execution.graph,
         result,
         caller,
         pending.invocationId,
-        pending.threadId,
+        pending.session,
         pending.skill,
         pending.allowHumanQuestions
       );
     } catch (cause) {
-      await execution?.tools.waitForIdle();
-      if (!continuationStarted && this.pending.get(request.pauseId) === pending) {
-        pending.state = "paused";
-      }
-      return {
-        status: "failed",
+      await execution?.run.waitForIdle();
+      if (!continuationStarted) this.pauses.release(pending);
+      return skillFailures.failed({
         context: caller,
         invocationId: pending.invocationId,
-        failure: {
-          code: request.signal?.aborted ? "CANCELLED" : execution?.failure === void 0 ? "EXECUTION_FAILED" : "TOOL_FAILED",
-          message: execution?.failure instanceof Error ? execution.failure.message : cause instanceof Error ? cause.message : String(cause),
-          ...execution !== void 0 && execution.partialOperations.length > 0 ? { operations: execution.partialOperations } : {}
-        }
-      };
+        signal: request.signal,
+        execution: execution?.run,
+        cause
+      });
     }
   }
   cancel(context, pauseId) {
     const caller = CallerContextSchema.parse(context);
-    const pending = this.pending.get(pauseId);
-    if (pending === void 0 || pending.state !== "paused" || JSON.stringify(pending.context) !== JSON.stringify(caller)) {
-      throw new InvalidSkillResumeError(
-        "The pause is missing or belongs to another caller context."
-      );
-    }
-    this.pending.delete(pauseId);
-    const sibling = this.siblingPauses.get(pending.threadId);
-    if (sibling !== void 0) {
-      this.siblingPauses.delete(pending.threadId);
-      this.cancel(caller, sibling.pauseId);
-    }
-    return {
-      status: "failed",
-      context: caller,
-      invocationId: pending.invocationId,
-      failure: { code: "CANCELLED", message: "The caller cancelled this paused skill." }
-    };
+    const pending = this.pauses.cancel(caller, pauseId);
+    return skillFailures.cancelled(caller, pending.invocationId);
   }
   async createGraph(skill, context, allowHumanQuestions, threadId) {
     const instruction = this.instructions.loadSkill(skill);
@@ -1558,220 +1868,97 @@ ${JSON.stringify(input)}`
         "Runtime evidence belongs to a different caller context."
       );
     const grants = this.toolGrants(context);
-    let executionFailure;
-    const partialOperations = [];
-    const recordedPartialFailures = /* @__PURE__ */ new Set();
-    const tools = new InFlightSkillToolExecutionTracker();
+    const run = new SkillExecution({ ignores: isGraphInterrupt });
     let propagatingSiblingQuestion = false;
-    const recordExecutionFailure = (cause) => {
-      if (isGraphInterrupt(cause)) return;
-      if (cause instanceof PartialOperationFailure && !recordedPartialFailures.has(cause)) {
-        recordedPartialFailures.add(cause);
-        partialOperations.push(...cause.operations);
-      }
-      executionFailure = cause instanceof Error ? cause : new Error(String(cause));
-    };
-    const rejectDependentWork = () => {
-      if (executionFailure !== void 0) throw executionFailure;
-    };
+    const handlers = new SharedSkillToolHandlers({
+      context,
+      allowHumanQuestions,
+      launch: observed,
+      agents: this.agents,
+      operations: this.operations,
+      workers: this.workers,
+      observe: this.observe,
+      orchestration: this.orchestration,
+      execution: run
+    });
     const shared = [
+      tool2(async ({ operationId, input }) => handlers.operation({ operationId, input }), {
+        name: skillToolNames.operation,
+        description: "Run a launch-authorized shared flight-rules operation.",
+        schema: z12.object({
+          operationId: z12.string(),
+          input: z12.record(z12.string(), z12.unknown())
+        })
+      }),
       tool2(
-        async ({ operationId, input }) => {
-          rejectDependentWork();
-          return tools.track(async () => {
-            try {
-              const descriptor = this.operations.list().find((entry) => entry.id === operationId);
-              if (descriptor === void 0) throw new Error(`Unknown operation: ${operationId}`);
-              const fresh = RuntimeSnapshotSchema.parse(await this.observe(context));
-              if (JSON.stringify(fresh.context) !== JSON.stringify(context)) {
-                throw new DeepAgentsSkillConfigurationError(
-                  "Operation evidence belongs to a different caller context."
-                );
-              }
-              for (const effect of descriptor.effects) {
-                const capability = this.permissionForEffect(effect);
-                if (fresh.permissions[capability]?.state !== "available") {
-                  throw new CapabilityToolDeniedError({
-                    toolName: `operation:${operationId}`,
-                    capability
-                  });
-                }
-              }
-              const result = await this.operations.invoke(operationId, input);
-              if (result.status === "partial") {
-                throw new PartialOperationFailure({
-                  operations: [
-                    {
-                      operationId,
-                      status: "partial",
-                      data: result.data,
-                      error: result.error
-                    }
-                  ]
-                });
-              }
-              if (result.status === "error") {
-                throw new Error(`${result.error.name}: ${result.error.message}`);
-              }
-              return result;
-            } catch (cause) {
-              recordExecutionFailure(cause);
-              throw cause;
-            }
-          });
-        },
+        async ({ agent, dispatchId, input }) => handlers.dispatch({ agent, dispatchId, input }),
         {
-          name: "flight_rules_operation",
-          description: "Run a launch-authorized shared flight-rules operation.",
-          schema: z11.object({ operationId: z11.string(), input: z11.record(z11.string(), z11.unknown()) })
-        }
-      ),
-      tool2(
-        async ({ agent, dispatchId, input }) => {
-          rejectDependentWork();
-          return tools.track(async () => {
-            try {
-              const request = DispatchRequestSchema.parse({
-                id: dispatchId,
-                agent,
-                context,
-                input
-              });
-              const registration = this.agents.find(
-                (candidate) => candidate.frontmatter.name === request.agent
-              );
-              if (registration === void 0) {
-                const decision2 = this.orchestration.prepare(request, observed);
-                if (decision2.status !== "ready")
-                  throw new Error(`${decision2.failure.code}: ${decision2.failure.message}`);
-              }
-              const fresh = RuntimeSnapshotSchema.parse(await this.observe(context, registration));
-              if (JSON.stringify(fresh.context) !== JSON.stringify(context)) {
-                throw new DeepAgentsSkillConfigurationError(
-                  "Worker evidence belongs to a different caller context."
-                );
-              }
-              const decision = this.orchestration.prepare(request, fresh);
-              if (decision.status !== "ready")
-                throw new Error(`${decision.failure.code}: ${decision.failure.message}`);
-              const outcome = await this.workers.dispatch(request);
-              if (outcome.status !== "completed") {
-                throw new Error(`${outcome.failure.code}: ${outcome.failure.message}`);
-              }
-              return outcome;
-            } catch (cause) {
-              recordExecutionFailure(cause);
-              throw cause;
-            }
-          });
-        },
-        {
-          name: "flight_rules_dispatch",
+          name: skillToolNames.dispatch,
           description: "Dispatch one registered named worker under observed host grants.",
-          schema: z11.object({
-            agent: z11.string(),
-            dispatchId: z11.string(),
-            input: z11.record(z11.string(), z11.json())
+          schema: z12.object({
+            agent: z12.string(),
+            dispatchId: z12.string(),
+            input: z12.record(z12.string(), z12.json())
           })
         }
       ),
       tool2(
-        async ({ siblingSkill, input }) => {
-          rejectDependentWork();
-          const sibling = this.orchestration.sibling({ context, skill: siblingSkill, input });
-          const pausedSibling = this.siblingPauses.get(threadId);
-          if (pausedSibling !== void 0) {
-            return tools.track(() => this.resumeSibling(threadId, pausedSibling));
-          }
-          return tools.track(async () => {
-            try {
-              const result = await AsyncLocalStorageProviderSingleton.getInstance().run(
-                void 0,
-                () => this.invoke(sibling.skill, sibling.context, sibling.input, {
-                  allowHumanQuestions
-                })
-              );
-              if (result.status === "paused") {
-                this.siblingPauses.set(threadId, result);
-                propagatingSiblingQuestion = true;
-                return await this.resumeSibling(threadId, result);
-              }
-              if (result.status === "failed") {
-                if (result.failure.operations !== void 0) {
-                  throw new PartialOperationFailure({ operations: result.failure.operations });
-                }
-                throw new Error(result.failure.message);
-              }
-              return result;
-            } catch (cause) {
-              if (!propagatingSiblingQuestion && !isGraphInterrupt(cause)) {
-                recordExecutionFailure(cause);
-              }
-              throw cause;
+        async ({ siblingSkill, input }) => handlers.sibling(
+          { siblingSkill, input },
+          async (sibling) => {
+            const pausedSibling = this.pauses.siblingOf(threadId);
+            if (pausedSibling !== void 0) {
+              return this.resumeSibling(threadId, pausedSibling);
             }
+            const result = await AsyncLocalStorageProviderSingleton.getInstance().run(
+              void 0,
+              () => this.invoke(sibling.skill, sibling.context, sibling.input, {
+                allowHumanQuestions
+              })
+            );
+            if (result.status === "paused") {
+              this.pauses.carrySibling(threadId, result);
+              propagatingSiblingQuestion = true;
+              return await this.resumeSibling(threadId, result);
+            }
+            return result;
+          },
+          (cause) => !propagatingSiblingQuestion && !isGraphInterrupt(cause)
+        ),
+        {
+          name: skillToolNames.sibling,
+          description: "Invoke another canonical skill with this same caller context.",
+          schema: z12.object({
+            siblingSkill: z12.string(),
+            input: z12.record(z12.string(), z12.unknown())
+          })
+        }
+      ),
+      tool2(
+        async ({ question }) => {
+          const pending = await handlers.ask({ question });
+          return interrupt({
+            questionId: pending.questionId,
+            question: pending.question
           });
         },
         {
-          name: "flight_rules_sibling_skill",
-          description: "Invoke another canonical skill with this same caller context.",
-          schema: z11.object({ siblingSkill: z11.string(), input: z11.record(z11.string(), z11.unknown()) })
+          name: skillToolNames.ask,
+          description: "Pause this skill and wait for an actual answer from the human caller.",
+          schema: z12.object({ question: z12.string().min(1) })
         }
       )
     ];
-    shared.push(
-      tool2(
-        async ({ question }) => {
-          const questionId = randomUUID();
-          const fresh = RuntimeSnapshotSchema.parse(await this.observe(context));
-          const decision = this.orchestration.ask(
-            { context, question, allowHumanQuestions },
-            fresh
-          );
-          if (decision.status !== "awaiting-answer") {
-            executionFailure = new Error(`${decision.failure.code}: ${decision.failure.message}`);
-            throw executionFailure;
-          }
-          const answer = interrupt({ questionId, question });
-          return answer;
-        },
-        {
-          name: "flight_rules_ask_human",
-          description: "Pause this skill and wait for an actual answer from the human caller.",
-          schema: z11.object({ question: z11.string().min(1) })
-        }
-      )
-    );
     const model = this.models.standard;
-    const skillDefinition = {
-      frontmatter: {
-        name: "skill-runtime",
-        description: "Execute a canonical workflow skill.",
-        model: "standard",
-        capabilities: AgentFrontmatterSchema.shape.capabilities.parse(
-          ["read", "edit", "shell", "web", "spawn", "ask"].filter(
-            (capability) => observed.permissions[capability]?.state === "available"
-          )
-        )
-      },
-      body: instruction.contents
-    };
+    const skillDefinition = skillAgentDefinitions.forSkill(instruction, observed);
     const suppliedHostTools = this.policy.toolsFor(skillDefinition, grants, observed);
-    const trackToolExecution = async (execution) => tools.track(async () => {
-      try {
-        rejectDependentWork();
-        return await execution();
-      } catch (cause) {
-        recordExecutionFailure(cause);
-        throw cause;
-      }
-    });
     const subagents = this.policy.middlewareFor(
       model,
       skillDefinition,
       suppliedHostTools,
-      trackToolExecution,
+      (execution) => run.run(execution),
       (error) => {
-        recordExecutionFailure(error);
+        run.recordFailure(error);
       },
       shared.map((entry) => entry.name)
     );
@@ -1780,8 +1967,8 @@ ${JSON.stringify(input)}`
       wrapModelCall: async (request, handler) => {
         const response = await handler(request);
         const calls = response.tool_calls ?? [];
-        const question = calls.find((call) => call.name === "flight_rules_ask_human");
-        const boundary = question ?? calls.find((call) => call.name === "flight_rules_sibling_skill");
+        const question = calls.find((call) => call.name === skillToolNames.ask);
+        const boundary = question ?? calls.find((call) => call.name === skillToolNames.sibling);
         if (boundary !== void 0) {
           response.tool_calls = [boundary];
         }
@@ -1801,28 +1988,15 @@ ${JSON.stringify(input)}`
         checkpointer: this.checkpointer,
         middleware
       }),
-      get failure() {
-        return executionFailure;
-      },
-      partialOperations,
-      tools
+      run
     };
   }
-  permissionForEffect(effect) {
-    switch (effect) {
-      case "read":
-        return "read";
-      case "write":
-        return "edit";
-      case "process":
-        return "shell";
-      case "network":
-        return "web";
-    }
-  }
   resumeSibling(threadId, paused) {
-    const answerValue = interrupt({ questionId: paused.questionId, question: paused.question });
-    const answer = z11.object({ questionId: z11.string(), answer: z11.string() }).parse(answerValue);
+    const answerValue = interrupt({
+      questionId: paused.questionId,
+      question: paused.question
+    });
+    const answer = z12.object({ questionId: z12.string(), answer: z12.string() }).parse(answerValue);
     if (answer.questionId !== paused.questionId) {
       throw new InvalidSkillResumeError("The answer belongs to another sibling question.");
     }
@@ -1833,21 +2007,15 @@ ${JSON.stringify(input)}`
       answer: answer.answer
     }).then((result) => {
       if (result.status === "paused") {
-        this.siblingPauses.set(threadId, result);
+        this.pauses.carrySibling(threadId, result);
         return this.resumeSibling(threadId, result);
       }
-      this.siblingPauses.delete(threadId);
-      if (result.status === "failed") {
-        if (result.failure.operations !== void 0) {
-          throw new PartialOperationFailure({ operations: result.failure.operations });
-        }
-        throw new Error(result.failure.message);
-      }
+      this.pauses.releaseSibling(threadId);
       return result;
     });
   }
   questionInterruptionFromError(cause) {
-    const schema = z11.array(z11.object({ id: z11.string().optional(), value: z11.unknown() }));
+    const schema = z12.array(z12.object({ id: z12.string().optional(), value: z12.unknown() }));
     if (!(cause instanceof Error)) return schema.safeParse(null);
     try {
       return schema.safeParse(JSON.parse(cause.message));
@@ -1856,35 +2024,37 @@ ${JSON.stringify(input)}`
     }
   }
   result(graph, result, context, invocationId, threadId, skill, allowHumanQuestions) {
-    const graphResult = z11.record(z11.string(), z11.unknown()).parse(result);
-    const messages = z11.array(z11.instanceof(BaseMessage)).parse(graphResult["messages"]);
-    const interruptions = z11.array(z11.object({ value: z11.unknown() })).safeParse(graphResult["__interrupt__"]);
+    const graphResult = z12.record(z12.string(), z12.unknown()).parse(result);
+    const messages = z12.array(z12.instanceof(BaseMessage)).parse(graphResult["messages"]);
+    const interruptions = z12.array(z12.object({ value: z12.unknown() })).safeParse(graphResult["__interrupt__"]);
     const task = interruptions.success ? interruptions.data[0] : void 0;
-    const question = task === void 0 ? void 0 : z11.object({ questionId: z11.string(), question: z11.string() }).safeParse(task.value);
+    const question = task === void 0 ? void 0 : z12.object({ questionId: z12.string(), question: z12.string() }).safeParse(task.value);
     if (question?.success === true) {
-      const pauseId = randomUUID();
-      const value = question.data;
-      this.pending.set(pauseId, {
+      const pause = this.pauses.register({
         context,
         invocationId,
-        pauseId,
-        questionId: value.questionId,
-        threadId,
+        questionId: question.data.questionId,
         skill,
         allowHumanQuestions,
-        state: "paused"
+        runKey: threadId,
+        session: threadId
       });
       return {
         status: "paused",
         context,
         invocationId,
-        pauseId,
-        questionId: value.questionId,
-        question: value.question
+        pauseId: pause.pauseId,
+        questionId: question.data.questionId,
+        question: question.data.question
       };
     }
     const finalMessage = messages.toReversed().find((message) => isAIMessage2(message));
-    return { status: "completed", context, invocationId, report: finalMessage?.content ?? "" };
+    return {
+      status: "completed",
+      context,
+      invocationId,
+      report: finalMessage?.content ?? ""
+    };
   }
 };
 export {

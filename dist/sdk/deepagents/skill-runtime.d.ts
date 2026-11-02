@@ -1,10 +1,10 @@
 import type { BaseCheckpointSaver } from "@langchain/langgraph";
 import { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { z } from "zod";
-import type { AgentDefinition } from "../../agents/agent-registry/agent-registry.js";
-import { type CallerContext, type RuntimeSnapshot } from "../../orchestration/orchestration.schema.js";
+import { type CallerContext } from "../../orchestration/orchestration.schema.js";
 import type { OperationRegistry } from "../../operations/operation-registry.js";
 import type { InstructionCatalog } from "../instruction-catalog.js";
+import { InvalidSkillResumeError, SkillConfigurationError, type PausedSkillResult, type SkillInvocationOptions, type SkillResult, type SkillResumeRequest, type SkillRuntimeObserver } from "../skill-runtime-core.js";
 import { type WorkerToolGrants } from "./tool-policy.js";
 declare const SkillRuntimePropsSchema: z.ZodObject<{
     instructions: z.ZodCustom<InstructionCatalog, InstructionCatalog>;
@@ -67,64 +67,22 @@ declare const SkillRuntimePropsSchema: z.ZodObject<{
     }, z.core.$strict>;
     operations: z.ZodCustom<OperationRegistry, OperationRegistry>;
     workers: z.ZodCustom<import("../worker-runtime-core.js").WorkerRuntimeContract, import("../worker-runtime-core.js").WorkerRuntimeContract>;
-    observe: z.ZodCustom<DeepAgentsSkillRuntimeObserver, DeepAgentsSkillRuntimeObserver>;
+    observe: z.ZodCustom<SkillRuntimeObserver, SkillRuntimeObserver>;
     toolGrants: z.ZodCustom<(context: CallerContext) => WorkerToolGrants, (context: CallerContext) => WorkerToolGrants>;
     checkpointer: z.ZodDefault<z.ZodCustom<BaseCheckpointSaver<number>, BaseCheckpointSaver<number>>>;
     maxGraphSteps: z.ZodDefault<z.ZodInt>;
 }, z.core.$strict>;
 export type DeepAgentsSkillRuntimeProps = z.input<typeof SkillRuntimePropsSchema>;
-export type DeepAgentsSkillRuntimeObserver = (context: CallerContext, registration?: AgentDefinition) => Promise<RuntimeSnapshot>;
-export interface SkillInvocationOptions {
-    allowHumanQuestions?: boolean;
-    signal?: AbortSignal;
-}
-export interface SkillResumeRequest {
-    context: CallerContext;
-    pauseId: string;
-    questionId: string;
-    answer: string;
-    signal?: AbortSignal;
-}
-export type PausedSkillResult = {
-    status: "paused";
-    context: CallerContext;
-    invocationId: string;
-    pauseId: string;
-    questionId: string;
-    question: string;
-};
-export type DeepAgentsSkillResult<T = unknown> = {
-    status: "completed";
-    context: CallerContext;
-    invocationId: string;
-    report: T;
-} | PausedSkillResult | {
-    status: "failed";
-    context: CallerContext;
-    invocationId: string;
-    failure: {
-        code: string;
-        message: string;
-        operations?: {
-            operationId: string;
-            status: "partial";
-            data: unknown;
-            error: {
-                name: string;
-                message: string;
-            };
-        }[];
-    };
-};
+export type DeepAgentsSkillRuntimeObserver = SkillRuntimeObserver;
+export type DeepAgentsSkillResult<T = unknown> = SkillResult<T>;
+export type { PausedSkillResult, SkillInvocationOptions, SkillResumeRequest };
+export { InvalidSkillResumeError };
 export interface DeepAgentsSkillRuntimeContract {
     invoke(skill: string, context: CallerContext, input: Record<string, unknown>, options?: SkillInvocationOptions): Promise<DeepAgentsSkillResult>;
     resume(request: SkillResumeRequest): Promise<DeepAgentsSkillResult>;
     cancel(context: CallerContext, pauseId: string): DeepAgentsSkillResult;
 }
-export declare class InvalidSkillResumeError extends Error {
-    name: string;
-}
-export declare class DeepAgentsSkillConfigurationError extends Error {
+export declare class DeepAgentsSkillConfigurationError extends SkillConfigurationError {
     name: string;
 }
 /** Executes canonical workflow instructions with shared operations and checkpointed human decisions. */
@@ -138,8 +96,8 @@ export declare class LangChainDeepAgentsSkillRuntime implements DeepAgentsSkillR
     private readonly toolGrants;
     private readonly checkpointer;
     private readonly maxGraphSteps;
-    private readonly pending;
-    private readonly siblingPauses;
+    private readonly pauses;
+    private readonly questionAccess;
     private readonly policy;
     private readonly orchestration;
     constructor(props: DeepAgentsSkillRuntimeProps);
@@ -147,7 +105,6 @@ export declare class LangChainDeepAgentsSkillRuntime implements DeepAgentsSkillR
     resume(request: SkillResumeRequest): Promise<DeepAgentsSkillResult>;
     cancel(context: CallerContext, pauseId: string): DeepAgentsSkillResult;
     private createGraph;
-    private permissionForEffect;
     private resumeSibling;
     private questionInterruptionFromError;
     private result;
