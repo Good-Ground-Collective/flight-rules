@@ -221,6 +221,11 @@ const excludedRoutes = [
     reason: "Consumes Claude SubagentStop payloads and reports host lifecycle events.",
   },
   {
+    path: ["hook", "subagent-status"],
+    aliases: [],
+    reason: "Consumes Claude Code and Codex sub-agent lifecycle payloads and writes local status files.",
+  },
+  {
     path: ["agents", "status"],
     aliases: [],
     reason: "Inspects native Codex registration files on the local host.",

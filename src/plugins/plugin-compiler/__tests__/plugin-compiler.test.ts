@@ -123,7 +123,7 @@ describe("NativePluginCompiler", () => {
     }
   });
 
-  it("assembles a native Codex plugin plus standalone agents without advertising unsupported hooks or agent discovery", () => {
+  it("assembles a native Codex plugin plus standalone agents with only the sub-agent status hooks and no agent discovery", () => {
     const sourceDir = fixture();
     const result = new NativePluginCompiler({ sourceDir }).compile("codex");
     expect(result.directory).toBe(resolve(sourceDir, "dist/codex"));
@@ -141,7 +141,12 @@ describe("NativePluginCompiler", () => {
     expect(portable).toEqual({ $schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json", ...identity, version });
     const native = JSON.parse(readFileSync(join(result.directory, ".codex-plugin/plugin.json"), "utf8"));
     expect(native).toEqual({ ...identity, version, skills: "./skills/" });
-    expect(existsSync(join(result.directory, "hooks"))).toBe(false);
+    const hooks = readFileSync(join(result.directory, "hooks/hooks.json"), "utf8");
+    expect(hooks).toBe(readFileSync(join(sourceDir, "adapters/codex/hooks.json"), "utf8"));
+    expect(Object.keys(JSON.parse(hooks).hooks).sort()).toEqual(["PostToolUse", "SessionEnd", "SubagentStart", "SubagentStop"]);
+    const hookPaths = [...hooks.matchAll(/\$\{PLUGIN_ROOT\}(\/[^"\s\\]+)/g)].map((match) => match[1] ?? "");
+    expect(hookPaths.length).toBeGreaterThan(0);
+    for (const path of hookPaths) expect(existsSync(join(result.directory, path)), path).toBe(true);
     const definitions = new FileAgentRegistry().load(join(sourceDir, "agents"));
     expect(result.agents).toEqual(definitions.map((agent) => agent.frontmatter.name));
     expect(files(join(result.directory, ".codex/agents"))).toEqual(definitions.map((agent) => `${agent.frontmatter.name}.toml`).sort());
@@ -153,7 +158,7 @@ describe("NativePluginCompiler", () => {
     }
     expect(parseToml(readFileSync(join(result.directory, ".codex/config.toml"), "utf8"))).toEqual({ agents: { enabled: true } });
     expect(JSON.parse(readFileSync(join(result.directory, "diagnostics.json"), "utf8"))).toEqual(result.diagnostics);
-    expect(result.diagnostics).toContain("Claude commit and Ariadne hooks are omitted; this target emits no Codex hooks.");
+    expect(result.diagnostics).toContain("Claude commit and Ariadne hooks are omitted; Codex gets only the sub-agent status hooks, which run once trusted through /hooks.");
     const reasoning = "adapters/codex/reasoning-tiers.json";
     expect(readFileSync(join(result.directory, reasoning), "utf8")).toBe(readFileSync(join(sourceDir, reasoning), "utf8"));
   });

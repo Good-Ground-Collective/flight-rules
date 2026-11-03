@@ -95,7 +95,7 @@ export class NativePluginCompiler implements PluginCompiler {
         : [...new Set(definitions.flatMap((agent) => codexEmitter.diagnostics(agent)))];
     if (target === "codex")
       diagnostics.push(
-        "Claude commit and Ariadne hooks are omitted; this target emits no Codex hooks.",
+        "Claude commit and Ariadne hooks are omitted; Codex gets only the sub-agent status hooks, which run once trusted through /hooks.",
       );
     for (const executable of ["flight-rules", "flight-rules.mjs"]) {
       if (!existsSync(join(this.sourceDir, "bin", executable))) {
@@ -148,11 +148,14 @@ export class NativePluginCompiler implements PluginCompiler {
       join(this.sourceDir, "adapters", target, "model-tiers.json"),
       join(directory, "adapters", target, "model-tiers.json"),
     );
-    if (target === "codex")
+    if (target === "codex") {
       copyFileSync(
         join(this.sourceDir, "adapters/codex/reasoning-tiers.json"),
         join(directory, "adapters/codex/reasoning-tiers.json"),
       );
+      mkdirSync(join(directory, "hooks"), { recursive: true });
+      copyFileSync(join(this.sourceDir, "adapters/codex/hooks.json"), join(directory, "hooks", "hooks.json"));
+    }
     for (const executable of ["flight-rules", "flight-rules.mjs"])
       chmodSync(join(directory, "bin", executable), 0o755);
     const manifestDirectory = join(
