@@ -75,9 +75,7 @@ const ClaudeAgentSkillRuntimePropsSchema = z.strictObject({
       "invoke" in value &&
       typeof value.invoke === "function" &&
       "list" in value &&
-      typeof value.list === "function" &&
-      "admitted" in value &&
-      typeof value.admitted === "function",
+      typeof value.list === "function",
   ),
   workers: z.custom<SkillWorkerDispatcher>(
     (value) =>
@@ -215,7 +213,7 @@ export class ClaudeAgentSkillRuntime implements ClaudeAgentSkillRuntimeContract 
       const instruction = this.instructions.loadSkill(skill);
       run = await this.prepareRun({ skill, caller, allowHumanQuestions, signal: options.signal });
       const operationsSection = new SkillOperationRoutes({
-        operations: this.operations.admitted(),
+        operations: this.operations.admitted?.() ?? [],
       }).promptSection();
       const prompt = `${instruction.contents}\n\n${operationsSection === "" ? "" : `${operationsSection}\n\n`}## Invocation context\n${JSON.stringify(caller)}\n\n## Invocation input\n${JSON.stringify(input)}`;
       return await this.execute(run, prompt, {
@@ -351,7 +349,7 @@ export class ClaudeAgentSkillRuntime implements ClaudeAgentSkillRuntimeContract 
       ],
       cwd: caller.cwd,
       repositoryRoot: caller.repositoryRoot,
-      shellRedirects: new SkillOperationRoutes({ operations: this.operations.admitted() }),
+      shellRedirects: new SkillOperationRoutes({ operations: this.operations.admitted?.() ?? [] }),
       onDenied: (error) => {
         execution.recordFailure(error);
         controller.abort(error);

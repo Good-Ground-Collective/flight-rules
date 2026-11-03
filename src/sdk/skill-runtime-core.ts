@@ -383,7 +383,7 @@ export class SkillOperationRoutes implements ShellOperationRedirects {
     const { operations } = SkillOperationRoutesPropsSchema.parse(props);
     this.routes = operations
       .flatMap(({ id, cli }) =>
-        [cli.path, ...cli.aliases.map((alias) => alias.split(/\s+/))].map((words) => ({
+        [cli.path, ...cli.aliases.map((alias) => [...cli.path.slice(0, -1), alias])].map((words) => ({
           words,
           operationId: id,
         })),
@@ -398,14 +398,14 @@ export class SkillOperationRoutes implements ShellOperationRedirects {
     );
     return [
       "## Operations instead of the shell",
-      `These \`flight-rules\` commands run through the \`${skillToolNames.operation}\` tool with the operation's input, never through the shell. Call the tool with the operation id and the command's arguments as input.`,
+      `These \`flight-rules\` commands run through the \`${skillToolNames.operation}\` tool never through the shell. Call the tool with the operationId and an input object holding the fields that operation expects; an invalid input returns an error naming the expected fields.`,
       ...lines,
       "Any other `flight-rules` command runs in the shell when the shell is available.",
     ].join("\n");
   }
 
   redirectFor(command: string): ShellOperationRedirect | undefined {
-    for (const segment of command.split(/&&|\|\||[;|\n]/)) {
+    for (const segment of command.split(/&&|\|\||[;|\n`()]/)) {
       const words = this.flightRulesArguments(segment);
       if (words === undefined) continue;
       const route = this.routes.find((candidate) =>

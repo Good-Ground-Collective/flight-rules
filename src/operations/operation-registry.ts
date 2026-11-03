@@ -47,7 +47,7 @@ export interface OperationCatalog {
 }
 
 export interface OperationRegistry extends OperationCatalog {
-  admitted(): OperationSummary[];
+  admitted?(): OperationSummary[];
   invoke(id: string, input: unknown): Promise<OperationEnvelope>;
 }
 
