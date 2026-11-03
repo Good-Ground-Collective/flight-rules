@@ -171,11 +171,16 @@ export class NodeRepositoryReadiness implements RepositoryReadiness {
       ...(await input.probe.probe({
         repo: config.repo,
         qaInstructionsFound:
-          options.workflow === "break-down-work" ? false : qa.found || qaWorkflow,
+          options.workflow === "break-down-work" || options.workflow === "remediate-review"
+            ? false
+            : qa.found || qaWorkflow,
         ...(options.workflow === undefined
           ? {}
           : {
-              githubRequired: codeWorkflow || config.tracker === "github",
+              githubRequired:
+                codeWorkflow ||
+                options.workflow === "remediate-review" ||
+                config.tracker === "github",
               pushRequired: codeWorkflow,
             }),
       })),

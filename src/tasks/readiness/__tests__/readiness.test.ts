@@ -415,6 +415,47 @@ describe("workflow readiness", () => {
       pushRequired: false,
     });
   });
+  describe("remediate-review workflow", () => {
+    const appExec = (file: string, args: readonly string[]) => {
+      const done = (stdout: string) => Promise.resolve({ stdout, stderr: "" });
+      if (file === "gh" && args[0] === "--version") return done("gh version 2.99.0 (2026-09-01)\n");
+      if (file === "gh" && args[0] === "auth") return done("Logged in to github.com\n");
+      if (file === "gh" && args[0] === "api") return done("null\n");
+      return Promise.reject({ code: "ENOENT", message: "not found" });
+    };
+    const inspect = async (failTracker = false) => {
+      const cwd = checkout();
+      const request = inputs();
+      if (failTracker) request.tracker().ping = vi.fn().mockRejectedValue(new Error("unreachable"));
+      return new NodeRepositoryReadiness({ cwd, env: { GITHUB_TOKEN: "token" } }).inspect({
+        ...request,
+        probe: new NodeToolProbe({ env: {}, execFileFn: appExec }),
+        options: { workflow: "remediate-review" },
+      });
+    };
+    it("passes without push entitlement or QA tools", async () => {
+      const report = await inspect();
+      const byName = (name: string) => report.checks.find((check) => check.name === name);
+      expect(report).toMatchObject({ ok: true, scope: "workflow", workflow: "remediate-review" });
+      expect(byName("tools:gh-push")).toMatchObject({ ok: false, required: false });
+      expect(byName("tools:playwright-cli")).toMatchObject({ ok: false, required: false });
+      expect(byName("tools:ffmpeg")).toMatchObject({ ok: false, required: false });
+      expect(byName("tools:gh")).toMatchObject({ ok: true, required: true });
+      expect(byName("tools:gh-auth")).toMatchObject({ ok: true, required: true });
+    });
+    it("fails when the tracker is unreachable", async () => {
+      expect((await inspect(true)).ok).toBe(false);
+    });
+    it("fails when credentials are missing", async () => {
+      const request = inputs();
+      const report = await new NodeRepositoryReadiness({ cwd: checkout(), env: {} }).inspect({
+        ...request,
+        probe: new NodeToolProbe({ env: {}, execFileFn: appExec }),
+        options: { workflow: "remediate-review" },
+      });
+      expect(report.ok).toBe(false);
+    });
+  });
   it("returns a redacted config failure as checks/ok", async () => {
     const checker = new NodeRepositoryReadiness({
       cwd: directory(),
