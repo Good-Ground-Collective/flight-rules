@@ -123,7 +123,7 @@ describe("NativePluginCompiler", () => {
     }
   });
 
-  it("assembles a native Codex plugin plus standalone agents with only the sub-agent status hooks and no agent discovery", () => {
+  it("assembles a native Codex plugin plus standalone agents with only the sub-agent status and usage-handoff hooks and no agent discovery", () => {
     const sourceDir = fixture();
     const result = new NativePluginCompiler({ sourceDir }).compile("codex");
     expect(result.directory).toBe(resolve(sourceDir, "dist/codex"));
@@ -142,7 +142,7 @@ describe("NativePluginCompiler", () => {
     expect(native).toEqual({ ...identity, version, skills: "./skills/" });
     const hooks = readFileSync(join(result.directory, "hooks/hooks.json"), "utf8");
     expect(hooks).toBe(readFileSync(join(sourceDir, "adapters/codex/hooks.json"), "utf8"));
-    expect(Object.keys(JSON.parse(hooks).hooks).sort()).toEqual(["PostToolUse", "SessionEnd", "SubagentStart", "SubagentStop"]);
+    expect(Object.keys(JSON.parse(hooks).hooks).sort()).toEqual(["PostToolUse", "SessionEnd", "Stop", "SubagentStart", "SubagentStop"]);
     const hookPaths = [...hooks.matchAll(/\$\{PLUGIN_ROOT\}(\/[^"\s\\]+)/g)].map((match) => match[1] ?? "");
     expect(hookPaths.length).toBeGreaterThan(0);
     for (const path of hookPaths) expect(existsSync(join(result.directory, path)), path).toBe(true);
@@ -157,7 +157,7 @@ describe("NativePluginCompiler", () => {
     }
     expect(parseToml(readFileSync(join(result.directory, ".codex/config.toml"), "utf8"))).toEqual({ agents: { enabled: true } });
     expect(JSON.parse(readFileSync(join(result.directory, "diagnostics.json"), "utf8"))).toEqual(result.diagnostics);
-    expect(result.diagnostics).toContain("Claude commit hooks are omitted; Codex gets only the sub-agent status hooks, which run once trusted through /hooks.");
+    expect(result.diagnostics).toContain("Claude commit hooks are omitted; Codex gets only the sub-agent status and usage-handoff hooks, which run once trusted through /hooks.");
     const reasoning = "adapters/codex/reasoning-tiers.json";
     expect(readFileSync(join(result.directory, reasoning), "utf8")).toBe(readFileSync(join(sourceDir, reasoning), "utf8"));
   });

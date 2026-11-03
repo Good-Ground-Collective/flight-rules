@@ -20,6 +20,7 @@ import { createTicketCommand } from "../tasks/commands/ticket/command.js";
 import { createTddCommand } from "../tasks/commands/tdd/command.js";
 import { createUsersCommand } from "../tasks/commands/users/command.js";
 import { GitRepositoryPaths } from "../bundled-docs/charter-catalog/repository-paths.js";
+import { createHandoffCommand } from "../hooks/commands/handoff/command.js";
 import { createHookCommand } from "../hooks/commands/hook/command.js";
 import type { TaskTracker } from "../tasks/task-tracker/task-tracker.js";
 import { createGitCommand } from "../git/commands/commit/command.js";
@@ -72,6 +73,7 @@ export function buildProgram(
 
   program.addCommand(createAgentsCommand(() => services.installation()));
   program.addCommand(createHookCommand());
+  program.addCommand(createHandoffCommand());
   const docOperation = new DocOperation({ getResolver: () => services.docs() });
   const localOperations = new DefaultLocalDiscoveryOperations({
     cwd: launchCwd,
