@@ -1063,6 +1063,49 @@ var LaunchOperationAccessPolicy = class {
     return this.operationIds.has(operation.id) || operation.effects.every((effect) => this.effects.has(effect));
   }
 };
+var OperationInputShape = class {
+  fieldsOf(schema) {
+    let json;
+    try {
+      json = z13.toJSONSchema(schema, { io: "input", unrepresentable: "any" });
+    } catch {
+      return [];
+    }
+    const parsed = z13.object({
+      properties: z13.record(z13.string(), z13.unknown()).optional(),
+      required: z13.array(z13.string()).optional()
+    }).safeParse(json);
+    if (!parsed.success) return [];
+    const required = new Set(parsed.data.required ?? []);
+    return Object.entries(parsed.data.properties ?? {}).map(([name, property]) => ({
+      name,
+      type: this.typeOf(property),
+      required: required.has(name)
+    }));
+  }
+  render(fields) {
+    if (fields.length === 0) return "{}";
+    return `{ ${fields.map(({ name, type, required }) => `${name}${required ? "" : "?"}: ${type}`).join(", ")} }`;
+  }
+  typeOf(property) {
+    const parsed = z13.object({
+      type: z13.union([z13.string(), z13.array(z13.string())]).optional(),
+      enum: z13.array(z13.unknown()).optional(),
+      const: z13.unknown().optional(),
+      items: z13.unknown().optional(),
+      anyOf: z13.array(z13.unknown()).optional()
+    }).safeParse(property);
+    if (!parsed.success) return "unknown";
+    const { type, enum: options, items, anyOf } = parsed.data;
+    if (options !== void 0) return options.map((value) => JSON.stringify(value)).join(" | ");
+    if (parsed.data.const !== void 0) return JSON.stringify(parsed.data.const);
+    if (anyOf !== void 0) return [...new Set(anyOf.map((entry) => this.typeOf(entry)))].join(" | ");
+    if (Array.isArray(type)) return type.join(" | ");
+    if (type === "array") return `${items === void 0 ? "unknown" : this.typeOf(items)}[]`;
+    return type ?? "unknown";
+  }
+};
+var operationInputShape = new OperationInputShape();
 var OperationInputError = class extends Error {
   name = "OperationInputError";
 };
@@ -1115,7 +1158,10 @@ var MapOperationRegistry = class {
     const admitted = new Set(
       [...this.operations.values()].filter((operation) => this.policy.allows(operation)).map(({ id }) => id)
     );
-    return this.list().filter(({ id }) => admitted.has(id));
+    return this.list().filter(({ id }) => admitted.has(id)).map((summary) => {
+      const operation = this.operations.get(summary.id);
+      return operation === void 0 ? summary : { ...summary, input: operationInputShape.fieldsOf(operation.inputSchema) };
+    });
   }
   async invoke(id, input) {
     const operation = this.operations.get(id);

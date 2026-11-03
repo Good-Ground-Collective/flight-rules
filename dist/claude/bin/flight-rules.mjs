@@ -32230,7 +32230,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.98.2";
+var appVersion = false ? "0.0.0-dev" : "1.98.3";
 
 // src/shared/ariadne/review-packet.schema.ts
 var packetLimits = {
@@ -51469,6 +51469,49 @@ var LaunchOperationAccessPolicy = class {
     return this.operationIds.has(operation.id) || operation.effects.every((effect) => this.effects.has(effect));
   }
 };
+var OperationInputShape = class {
+  fieldsOf(schema) {
+    let json2;
+    try {
+      json2 = external_exports.toJSONSchema(schema, { io: "input", unrepresentable: "any" });
+    } catch {
+      return [];
+    }
+    const parsed = external_exports.object({
+      properties: external_exports.record(external_exports.string(), external_exports.unknown()).optional(),
+      required: external_exports.array(external_exports.string()).optional()
+    }).safeParse(json2);
+    if (!parsed.success) return [];
+    const required2 = new Set(parsed.data.required ?? []);
+    return Object.entries(parsed.data.properties ?? {}).map(([name, property]) => ({
+      name,
+      type: this.typeOf(property),
+      required: required2.has(name)
+    }));
+  }
+  render(fields) {
+    if (fields.length === 0) return "{}";
+    return `{ ${fields.map(({ name, type, required: required2 }) => `${name}${required2 ? "" : "?"}: ${type}`).join(", ")} }`;
+  }
+  typeOf(property) {
+    const parsed = external_exports.object({
+      type: external_exports.union([external_exports.string(), external_exports.array(external_exports.string())]).optional(),
+      enum: external_exports.array(external_exports.unknown()).optional(),
+      const: external_exports.unknown().optional(),
+      items: external_exports.unknown().optional(),
+      anyOf: external_exports.array(external_exports.unknown()).optional()
+    }).safeParse(property);
+    if (!parsed.success) return "unknown";
+    const { type, enum: options, items, anyOf } = parsed.data;
+    if (options !== void 0) return options.map((value) => JSON.stringify(value)).join(" | ");
+    if (parsed.data.const !== void 0) return JSON.stringify(parsed.data.const);
+    if (anyOf !== void 0) return [...new Set(anyOf.map((entry) => this.typeOf(entry)))].join(" | ");
+    if (Array.isArray(type)) return type.join(" | ");
+    if (type === "array") return `${items === void 0 ? "unknown" : this.typeOf(items)}[]`;
+    return type ?? "unknown";
+  }
+};
+var operationInputShape = new OperationInputShape();
 var OperationInputError = class extends Error {
   name = "OperationInputError";
 };
@@ -51533,7 +51576,10 @@ var MapOperationRegistry = class {
     const admitted = new Set(
       [...this.operations.values()].filter((operation) => this.policy.allows(operation)).map(({ id }) => id)
     );
-    return this.list().filter(({ id }) => admitted.has(id));
+    return this.list().filter(({ id }) => admitted.has(id)).map((summary) => {
+      const operation = this.operations.get(summary.id);
+      return operation === void 0 ? summary : { ...summary, input: operationInputShape.fieldsOf(operation.inputSchema) };
+    });
   }
   async invoke(id, input2) {
     const operation = this.operations.get(id);

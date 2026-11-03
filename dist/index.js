@@ -1839,7 +1839,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.98.2";
+var appVersion = false ? "0.0.0-dev" : "1.98.3";
 
 // src/shared/ariadne/review-packet.schema.ts
 import { z as z17 } from "zod";
@@ -8191,6 +8191,49 @@ var LaunchOperationAccessPolicy = class {
     return this.operationIds.has(operation.id) || operation.effects.every((effect) => this.effects.has(effect));
   }
 };
+var OperationInputShape = class {
+  fieldsOf(schema) {
+    let json;
+    try {
+      json = z47.toJSONSchema(schema, { io: "input", unrepresentable: "any" });
+    } catch {
+      return [];
+    }
+    const parsed = z47.object({
+      properties: z47.record(z47.string(), z47.unknown()).optional(),
+      required: z47.array(z47.string()).optional()
+    }).safeParse(json);
+    if (!parsed.success) return [];
+    const required = new Set(parsed.data.required ?? []);
+    return Object.entries(parsed.data.properties ?? {}).map(([name, property]) => ({
+      name,
+      type: this.typeOf(property),
+      required: required.has(name)
+    }));
+  }
+  render(fields) {
+    if (fields.length === 0) return "{}";
+    return `{ ${fields.map(({ name, type, required }) => `${name}${required ? "" : "?"}: ${type}`).join(", ")} }`;
+  }
+  typeOf(property) {
+    const parsed = z47.object({
+      type: z47.union([z47.string(), z47.array(z47.string())]).optional(),
+      enum: z47.array(z47.unknown()).optional(),
+      const: z47.unknown().optional(),
+      items: z47.unknown().optional(),
+      anyOf: z47.array(z47.unknown()).optional()
+    }).safeParse(property);
+    if (!parsed.success) return "unknown";
+    const { type, enum: options, items, anyOf } = parsed.data;
+    if (options !== void 0) return options.map((value) => JSON.stringify(value)).join(" | ");
+    if (parsed.data.const !== void 0) return JSON.stringify(parsed.data.const);
+    if (anyOf !== void 0) return [...new Set(anyOf.map((entry) => this.typeOf(entry)))].join(" | ");
+    if (Array.isArray(type)) return type.join(" | ");
+    if (type === "array") return `${items === void 0 ? "unknown" : this.typeOf(items)}[]`;
+    return type ?? "unknown";
+  }
+};
+var operationInputShape = new OperationInputShape();
 var OperationInputError = class extends Error {
   name = "OperationInputError";
 };
@@ -8243,7 +8286,10 @@ var MapOperationRegistry = class {
     const admitted = new Set(
       [...this.operations.values()].filter((operation) => this.policy.allows(operation)).map(({ id }) => id)
     );
-    return this.list().filter(({ id }) => admitted.has(id));
+    return this.list().filter(({ id }) => admitted.has(id)).map((summary) => {
+      const operation = this.operations.get(summary.id);
+      return operation === void 0 ? summary : { ...summary, input: operationInputShape.fieldsOf(operation.inputSchema) };
+    });
   }
   async invoke(id, input) {
     const operation = this.operations.get(id);

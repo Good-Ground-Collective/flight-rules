@@ -1,6 +1,6 @@
 // src/sdk/claude-agent/claude-agent-runtime.ts
 import { query as claudeAgentQuery } from "@anthropic-ai/claude-agent-sdk";
-import { z as z15 } from "zod";
+import { z as z17 } from "zod";
 
 // src/agents/agent-emitter/agent-emitter.schema.ts
 import { z as z2 } from "zod";
@@ -1136,26 +1136,120 @@ import {
   createSdkMcpServer,
   tool
 } from "@anthropic-ai/claude-agent-sdk";
-import { z as z14 } from "zod";
+import { z as z16 } from "zod";
 
 // src/sdk/skill-runtime-core.ts
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual as isDeepStrictEqual3 } from "node:util";
+import { z as z15 } from "zod";
+
+// src/operations/operation-registry.ts
+import { z as z14 } from "zod";
+
+// src/operations/operation.schema.ts
 import { z as z13 } from "zod";
+var OperationEffectSchema = z13.enum(["read", "write", "network", "process"]);
+var OperationIdSchema = z13.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
+var CliRouteSchema = z13.object({
+  path: z13.array(z13.string().min(1)).min(1),
+  aliases: z13.array(z13.string().min(1)).default([])
+});
+var OperationErrorSchema = z13.object({
+  name: z13.string().min(1),
+  message: z13.string()
+});
+var OperationEnvelopeSchema = z13.discriminatedUnion("status", [
+  z13.object({ status: z13.literal("success"), data: z13.unknown() }),
+  z13.object({ status: z13.literal("error"), error: OperationErrorSchema }),
+  z13.object({ status: z13.literal("partial"), data: z13.unknown(), error: OperationErrorSchema })
+]);
+
+// src/operations/operation-registry.ts
+var OperationDescriptorSchema = z14.object({
+  id: OperationIdSchema,
+  description: z14.string().min(1),
+  inputSchema: z14.custom((value) => value instanceof z14.ZodType),
+  outputSchema: z14.custom((value) => value instanceof z14.ZodType),
+  effects: z14.array(OperationEffectSchema),
+  cli: CliRouteSchema,
+  handler: z14.custom((value) => typeof value === "function")
+});
+var OperationRegistryPropsSchema = z14.object({
+  operations: z14.array(z14.custom()),
+  policy: z14.custom().optional()
+});
+var AccessPolicyPropsSchema = z14.object({
+  allowedOperationIds: z14.array(OperationIdSchema).default([]),
+  allowedEffects: z14.array(OperationEffectSchema).default([])
+});
+var OperationInputShape = class {
+  fieldsOf(schema) {
+    let json;
+    try {
+      json = z14.toJSONSchema(schema, { io: "input", unrepresentable: "any" });
+    } catch {
+      return [];
+    }
+    const parsed = z14.object({
+      properties: z14.record(z14.string(), z14.unknown()).optional(),
+      required: z14.array(z14.string()).optional()
+    }).safeParse(json);
+    if (!parsed.success) return [];
+    const required = new Set(parsed.data.required ?? []);
+    return Object.entries(parsed.data.properties ?? {}).map(([name, property]) => ({
+      name,
+      type: this.typeOf(property),
+      required: required.has(name)
+    }));
+  }
+  render(fields) {
+    if (fields.length === 0) return "{}";
+    return `{ ${fields.map(({ name, type, required }) => `${name}${required ? "" : "?"}: ${type}`).join(", ")} }`;
+  }
+  typeOf(property) {
+    const parsed = z14.object({
+      type: z14.union([z14.string(), z14.array(z14.string())]).optional(),
+      enum: z14.array(z14.unknown()).optional(),
+      const: z14.unknown().optional(),
+      items: z14.unknown().optional(),
+      anyOf: z14.array(z14.unknown()).optional()
+    }).safeParse(property);
+    if (!parsed.success) return "unknown";
+    const { type, enum: options, items, anyOf } = parsed.data;
+    if (options !== void 0) return options.map((value) => JSON.stringify(value)).join(" | ");
+    if (parsed.data.const !== void 0) return JSON.stringify(parsed.data.const);
+    if (anyOf !== void 0) return [...new Set(anyOf.map((entry) => this.typeOf(entry)))].join(" | ");
+    if (Array.isArray(type)) return type.join(" | ");
+    if (type === "array") return `${items === void 0 ? "unknown" : this.typeOf(items)}[]`;
+    return type ?? "unknown";
+  }
+};
+var operationInputShape = new OperationInputShape();
+var OperationInputError = class extends Error {
+  name = "OperationInputError";
+};
+var OperationAccessDeniedError = class extends Error {
+  name = "OperationAccessDeniedError";
+};
+var UnknownOperationError = class extends Error {
+  name = "UnknownOperationError";
+};
+
+// src/sdk/skill-runtime-core.ts
 var skillToolNames = {
   operation: "flight_rules_operation",
   dispatch: "flight_rules_dispatch",
   sibling: "flight_rules_sibling_skill",
   ask: "flight_rules_ask_human"
 };
-var PartialOperationSchema = z13.strictObject({
-  operationId: z13.string().min(1),
-  status: z13.literal("partial"),
-  data: z13.unknown(),
-  error: z13.strictObject({ name: z13.string().min(1), message: z13.string() })
+var PartialOperationSchema = z15.strictObject({
+  operationId: z15.string().min(1),
+  status: z15.literal("partial"),
+  data: z15.unknown(),
+  error: z15.strictObject({ name: z15.string().min(1), message: z15.string() })
 });
-var PartialOperationFailurePropsSchema = z13.strictObject({
-  operations: z13.array(PartialOperationSchema).min(1)
+var PartialOperationFailurePropsSchema = z15.strictObject({
+  operations: z15.array(PartialOperationSchema).min(1)
 });
 var PartialOperationFailure = class extends Error {
   name = "PartialOperationFailure";
@@ -1165,6 +1259,9 @@ var PartialOperationFailure = class extends Error {
     super(parsed.operations.map(({ error }) => `${error.name}: ${error.message}`).join("; "));
     this.operations = parsed.operations;
   }
+};
+var RecoverableOperationInputError = class extends Error {
+  name = "RecoverableOperationInputError";
 };
 var InvalidSkillResumeError = class extends Error {
   name = "InvalidSkillResumeError";
@@ -1352,28 +1449,29 @@ var OperationEffectCapabilities = class {
   }
 };
 var operationEffectCapabilities = new OperationEffectCapabilities();
-var SkillOperationRoutesPropsSchema = z13.strictObject({
-  operations: z13.array(z13.custom())
+var SkillOperationRoutesPropsSchema = z15.strictObject({
+  operations: z15.array(z15.custom())
 });
 var SkillOperationRoutes = class {
   routes;
   constructor(props) {
     const { operations } = SkillOperationRoutesPropsSchema.parse(props);
     this.routes = operations.flatMap(
-      ({ id, cli }) => [cli.path, ...cli.aliases.map((alias) => [...cli.path.slice(0, -1), alias])].map((words) => ({
+      ({ id, cli, input }) => [cli.path, ...cli.aliases.map((alias) => [...cli.path.slice(0, -1), alias])].map((words) => ({
         words,
-        operationId: id
+        operationId: id,
+        shape: input === void 0 || input.length === 0 ? "" : operationInputShape.render(input)
       }))
     ).sort((left, right) => right.words.length - left.words.length);
   }
   promptSection() {
     if (this.routes.length === 0) return "";
     const lines = this.routes.map(
-      ({ words, operationId }) => `- \`flight-rules ${words.join(" ")}\` -> \`${operationId}\``
+      ({ words, operationId, shape }) => `- \`flight-rules ${words.join(" ")}\` -> \`${operationId}\`${shape === "" ? "" : ` \`${shape}\``}`
     );
     return [
       "## Operations instead of the shell",
-      `These \`flight-rules\` commands run through the \`${skillToolNames.operation}\` tool never through the shell. Call the tool with the operationId and an input object holding the fields that operation expects; an invalid input returns an error naming the expected fields.`,
+      `These \`flight-rules\` commands run through the \`${skillToolNames.operation}\` tool never through the shell. Call the tool with the operationId and an input object holding the fields that operation expects; the input shape follows each route (\`?\` marks an optional field), and an invalid input returns an error naming the expected fields that you can correct and retry.`,
       ...lines,
       "Any other `flight-rules` command runs in the shell when the shell is available."
     ].join("\n");
@@ -1434,7 +1532,7 @@ var SharedSkillToolHandlers = class {
     return execution.track(async () => {
       try {
         const descriptor = operations.list().find((entry) => entry.id === args.operationId);
-        if (descriptor === void 0) throw new Error(`Unknown operation: ${args.operationId}`);
+        if (descriptor === void 0) throw this.unknownOperation(args.operationId);
         const fresh = RuntimeSnapshotSchema.parse(await observe(context));
         if (!callerContexts.matches(fresh.context, context)) {
           throw new SkillConfigurationError(
@@ -1450,7 +1548,7 @@ var SharedSkillToolHandlers = class {
             });
           }
         }
-        const result = await operations.invoke(args.operationId, args.input);
+        const result = await this.invokeOperation(args);
         if (result.status === "partial") {
           throw new PartialOperationFailure({
             operations: [
@@ -1468,7 +1566,7 @@ var SharedSkillToolHandlers = class {
         }
         return result;
       } catch (cause) {
-        execution.recordFailure(cause);
+        if (!(cause instanceof RecoverableOperationInputError)) execution.recordFailure(cause);
         throw cause;
       }
     });
@@ -1558,6 +1656,32 @@ var SharedSkillToolHandlers = class {
     }
     return new Error(result.failure.message);
   }
+  async invokeOperation(args) {
+    const { operations } = this.props;
+    try {
+      return await operations.invoke(args.operationId, args.input);
+    } catch (cause) {
+      if (cause instanceof UnknownOperationError) throw this.unknownOperation(args.operationId);
+      if (!(cause instanceof OperationInputError)) throw cause;
+      const admittedOperations = operations.admitted?.();
+      if (admittedOperations === void 0) throw cause;
+      const admitted = admittedOperations.find((entry) => entry.id === args.operationId);
+      if (admitted === void 0)
+        throw new OperationAccessDeniedError(`Access denied for operation: ${args.operationId}`);
+      const fields = admitted.input ?? [];
+      throw new RecoverableOperationInputError(
+        `${cause.message}
+Expected input for ${args.operationId}: ${operationInputShape.render(fields)}`
+      );
+    }
+  }
+  unknownOperation(operationId) {
+    const { operations } = this.props;
+    const valid = (operations.admitted?.() ?? operations.list()).map(({ id }) => id);
+    return new RecoverableOperationInputError(
+      `Unknown operation: ${operationId}. Valid operation ids: ${valid.join(", ")}`
+    );
+  }
 };
 
 // src/sdk/claude-builtin-tools.ts
@@ -1587,25 +1711,25 @@ var globInputKeys = /* @__PURE__ */ new Map([
   ["Grep", "glob"]
 ]);
 var globMagic = /[*?[{]/;
-var HostToolSchema = z14.object({
-  name: z14.string().regex(hostToolNamePattern),
-  description: z14.string().min(1),
-  inputSchema: z14.record(
-    z14.string(),
-    z14.custom((value) => value instanceof z14.core.$ZodType)
+var HostToolSchema = z16.object({
+  name: z16.string().regex(hostToolNamePattern),
+  description: z16.string().min(1),
+  inputSchema: z16.record(
+    z16.string(),
+    z16.custom((value) => value instanceof z16.core.$ZodType)
   ),
-  annotations: z14.strictObject({
-    title: z14.string().optional(),
-    readOnlyHint: z14.boolean().optional(),
-    destructiveHint: z14.boolean().optional(),
-    idempotentHint: z14.boolean().optional(),
-    openWorldHint: z14.boolean().optional()
+  annotations: z16.strictObject({
+    title: z16.string().optional(),
+    readOnlyHint: z16.boolean().optional(),
+    destructiveHint: z16.boolean().optional(),
+    idempotentHint: z16.boolean().optional(),
+    openWorldHint: z16.boolean().optional()
   }).optional(),
-  handler: z14.custom((value) => typeof value === "function")
+  handler: z16.custom((value) => typeof value === "function")
 });
-var WorkerToolGrantsSchema = z14.partialRecord(
+var WorkerToolGrantsSchema = z16.partialRecord(
   WorkerCapabilitySchema,
-  z14.array(HostToolSchema)
+  z16.array(HostToolSchema)
 );
 var InvalidClaudeHostToolError = class extends WorkerDispatchConfigurationError {
   name = "InvalidClaudeHostToolError";
@@ -1643,13 +1767,13 @@ var HostToolExecutionTracker = class {
     }
   }
 };
-var ClaudeToolGuardPropsSchema = z14.strictObject({
-  allowedTools: z14.array(z14.string().min(1)),
-  capabilities: z14.custom((value) => value instanceof Map),
-  cwd: z14.string().min(1),
-  repositoryRoot: z14.string().min(1),
-  shellRedirects: z14.custom((value) => typeof value === "object").optional(),
-  onDenied: z14.custom(
+var ClaudeToolGuardPropsSchema = z16.strictObject({
+  allowedTools: z16.array(z16.string().min(1)),
+  capabilities: z16.custom((value) => value instanceof Map),
+  cwd: z16.string().min(1),
+  repositoryRoot: z16.string().min(1),
+  shellRedirects: z16.custom((value) => typeof value === "object").optional(),
+  onDenied: z16.custom(
     (value) => typeof value === "function"
   )
 });
@@ -1729,7 +1853,7 @@ var RepositoryConfinedToolGuard = class {
     });
   }
   inputRecord(value) {
-    const parsed = z14.record(z14.string(), z14.unknown()).safeParse(value);
+    const parsed = z16.record(z16.string(), z16.unknown()).safeParse(value);
     return parsed.success ? parsed.data : {};
   }
   escapingPath(toolName, input) {
@@ -1867,15 +1991,15 @@ var CapabilityScopedClaudeToolPolicy = class {
 
 // src/sdk/claude-agent/claude-agent-runtime.ts
 var PartialModelBindingsSchema = ModelBindingsSchema.partial();
-var ClaudeAgentRuntimePropsSchema = z15.strictObject({
-  agents: z15.array(AgentDefinitionSchema).min(1),
+var ClaudeAgentRuntimePropsSchema = z17.strictObject({
+  agents: z17.array(AgentDefinitionSchema).min(1),
   models: PartialModelBindingsSchema.optional(),
   toolGrants: WorkerToolGrantsSchema,
-  observe: z15.custom(
+  observe: z17.custom(
     (value) => typeof value === "function"
   ),
-  maxTurns: z15.int().positive().default(64),
-  query: z15.custom((value) => typeof value === "function").optional()
+  maxTurns: z17.int().positive().default(64),
+  query: z17.custom((value) => typeof value === "function").optional()
 });
 var ClaudeAgentConfigurationError = class extends WorkerDispatchConfigurationError {
   name = "ClaudeAgentConfigurationError";
@@ -2039,21 +2163,21 @@ import {
   query as claudeAgentQuery2,
   tool as tool2
 } from "@anthropic-ai/claude-agent-sdk";
-import { z as z17 } from "zod";
+import { z as z19 } from "zod";
 
 // src/sdk/claude-agent/skill-boundary.ts
-import { z as z16 } from "zod";
-var AssistantToolUsesSchema = z16.looseObject({
-  type: z16.literal("assistant"),
-  parent_tool_use_id: z16.string().nullish(),
-  message: z16.looseObject({
-    id: z16.string(),
-    content: z16.array(
-      z16.looseObject({ type: z16.string(), id: z16.string().optional(), name: z16.string().optional() })
+import { z as z18 } from "zod";
+var AssistantToolUsesSchema = z18.looseObject({
+  type: z18.literal("assistant"),
+  parent_tool_use_id: z18.string().nullish(),
+  message: z18.looseObject({
+    id: z18.string(),
+    content: z18.array(
+      z18.looseObject({ type: z18.string(), id: z18.string().optional(), name: z18.string().optional() })
     )
   })
 });
-var AskInputSchema = z16.looseObject({ question: z16.string().min(1) });
+var AskInputSchema = z18.looseObject({ question: z18.string().min(1) });
 var ToolTurnObserver = class {
   turns = /* @__PURE__ */ new Map();
   turnByCall = /* @__PURE__ */ new Map();
@@ -2166,24 +2290,24 @@ var QuestionBoundary = class {
 // src/sdk/claude-agent/skill-runtime.ts
 var flightRulesServerName = "flight-rules";
 var PartialModelBindingsSchema2 = ModelBindingsSchema.partial();
-var ClaudeAgentSkillRuntimePropsSchema = z17.strictObject({
-  instructions: z17.custom(
+var ClaudeAgentSkillRuntimePropsSchema = z19.strictObject({
+  instructions: z19.custom(
     (value) => typeof value === "object" && value !== null && "loadSkill" in value && typeof value.loadSkill === "function"
   ),
-  agents: z17.array(AgentDefinitionSchema).min(1),
+  agents: z19.array(AgentDefinitionSchema).min(1),
   models: PartialModelBindingsSchema2.optional(),
-  operations: z17.custom(
+  operations: z19.custom(
     (value) => typeof value === "object" && value !== null && "invoke" in value && typeof value.invoke === "function" && "list" in value && typeof value.list === "function"
   ),
-  workers: z17.custom(
+  workers: z19.custom(
     (value) => typeof value === "object" && value !== null && "dispatch" in value && typeof value.dispatch === "function"
   ),
-  observe: z17.custom((value) => typeof value === "function"),
-  toolGrants: z17.custom(
+  observe: z19.custom((value) => typeof value === "function"),
+  toolGrants: z19.custom(
     (value) => typeof value === "function"
   ),
-  maxTurns: z17.int().positive().default(64),
-  query: z17.custom((value) => typeof value === "function").optional()
+  maxTurns: z19.int().positive().default(64),
+  query: z19.custom((value) => typeof value === "function").optional()
 });
 var ClaudeAgentSkillConfigurationError = class extends SkillConfigurationError {
   name = "ClaudeAgentSkillConfigurationError";
@@ -2541,21 +2665,21 @@ ${JSON.stringify(input)}`;
       tool2(
         skillToolNames.operation,
         "Run a launch-authorized shared flight-rules operation.",
-        { operationId: z17.string(), input: z17.record(z17.string(), z17.unknown()) },
+        { operationId: z19.string(), input: z19.record(z19.string(), z19.unknown()) },
         async (args) => handlers.operation(args).then(text, failed),
         { alwaysLoad: true }
       ),
       tool2(
         skillToolNames.dispatch,
         "Dispatch one registered named worker under observed host grants.",
-        { agent: z17.string(), dispatchId: z17.string(), input: z17.record(z17.string(), z17.json()) },
+        { agent: z19.string(), dispatchId: z19.string(), input: z19.record(z19.string(), z19.json()) },
         async (args) => handlers.dispatch(args).then(text, failed),
         { alwaysLoad: true }
       ),
       tool2(
         skillToolNames.sibling,
         "Invoke another canonical skill with this same caller context. Call it alone in its turn.",
-        { siblingSkill: z17.string(), input: z17.record(z17.string(), z17.json()) },
+        { siblingSkill: z19.string(), input: z19.record(z19.string(), z19.json()) },
         async (args) => handlers.sibling(
           args,
           (sibling) => this.runSibling(sibling.skill, sibling.context, sibling.input, props)
@@ -2567,7 +2691,7 @@ ${JSON.stringify(input)}`;
       tool2(
         skillToolNames.ask,
         "Pause this skill and wait for an actual answer from the human caller. Call it alone in its turn and never supply the answer field.",
-        { question: z17.string().min(1), answer: z17.string().optional() },
+        { question: z19.string().min(1), answer: z19.string().optional() },
         async () => {
           const answer = boundary.takeAnswer();
           if (answer === void 0) {

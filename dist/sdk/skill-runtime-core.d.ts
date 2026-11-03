@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { AgentDefinition } from "../agents/agent-registry/agent-registry.js";
-import type { OperationRegistry, OperationSummary } from "../operations/operation-registry.js";
+import { type OperationRegistry, type OperationSummary } from "../operations/operation-registry.js";
 import type { OperationEffect } from "../operations/operation.schema.js";
 import type { OrchestrationPolicy } from "../orchestration/orchestration-policy.js";
 import { DispatchRequestSchema, type CallerContext, type DispatchOutcome, type SiblingSkillRequest, type RuntimeSnapshot } from "../orchestration/orchestration.schema.js";
@@ -74,6 +74,10 @@ export declare class PartialOperationFailure extends Error {
     name: string;
     readonly operations: PartialOperation[];
     constructor(props: z.input<typeof PartialOperationFailurePropsSchema>);
+}
+/** An operation call the model formatted wrongly; it is returned to the model to correct and never ends the run. */
+export declare class RecoverableOperationInputError extends Error {
+    name: string;
 }
 export declare class InvalidSkillResumeError extends Error {
     name: string;
@@ -252,5 +256,7 @@ export declare class SharedSkillToolHandlers {
     siblingFailure(result: Extract<SkillResult, {
         status: "failed";
     }>): Error;
+    private invokeOperation;
+    private unknownOperation;
 }
 export {};

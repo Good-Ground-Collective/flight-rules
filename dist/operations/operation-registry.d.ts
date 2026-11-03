@@ -13,11 +13,17 @@ export interface OperationDescriptor<TInput = unknown, TOutput = unknown> {
     cli: CliRoute;
     handler(input: TInput): OperationHandlerResult<TOutput> | Promise<OperationHandlerResult<TOutput>>;
 }
+export interface OperationInputField {
+    name: string;
+    type: string;
+    required: boolean;
+}
 export interface OperationSummary {
     id: string;
     description: string;
     effects: OperationEffect[];
     cli: CliRoute;
+    input?: OperationInputField[];
 }
 export interface OperationCatalog {
     list(): OperationSummary[];
@@ -53,6 +59,13 @@ export declare class LaunchOperationAccessPolicy implements OperationAccessPolic
     constructor(props?: z.input<typeof AccessPolicyPropsSchema>);
     allows(operation: Pick<OperationDescriptor, "id" | "effects">): boolean;
 }
+/** Describes the object fields an operation's input schema accepts, in the compact form a model can read. */
+export declare class OperationInputShape {
+    fieldsOf(schema: z.ZodType): OperationInputField[];
+    render(fields: readonly OperationInputField[]): string;
+    private typeOf;
+}
+export declare const operationInputShape: OperationInputShape;
 export declare class OperationInputError extends Error {
     name: string;
 }

@@ -1289,26 +1289,120 @@ import { BaseChatModel as BaseChatModel2 } from "@langchain/core/language_models
 import { AsyncLocalStorageProviderSingleton } from "@langchain/core/singletons";
 import { createDeepAgent as createDeepAgent2 } from "deepagents";
 import { createMiddleware as createMiddleware2, tool as tool2 } from "langchain";
-import { z as z12 } from "zod";
+import { z as z14 } from "zod";
 
 // src/sdk/skill-runtime-core.ts
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual as isDeepStrictEqual3 } from "node:util";
+import { z as z13 } from "zod";
+
+// src/operations/operation-registry.ts
+import { z as z12 } from "zod";
+
+// src/operations/operation.schema.ts
 import { z as z11 } from "zod";
+var OperationEffectSchema = z11.enum(["read", "write", "network", "process"]);
+var OperationIdSchema = z11.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
+var CliRouteSchema = z11.object({
+  path: z11.array(z11.string().min(1)).min(1),
+  aliases: z11.array(z11.string().min(1)).default([])
+});
+var OperationErrorSchema = z11.object({
+  name: z11.string().min(1),
+  message: z11.string()
+});
+var OperationEnvelopeSchema = z11.discriminatedUnion("status", [
+  z11.object({ status: z11.literal("success"), data: z11.unknown() }),
+  z11.object({ status: z11.literal("error"), error: OperationErrorSchema }),
+  z11.object({ status: z11.literal("partial"), data: z11.unknown(), error: OperationErrorSchema })
+]);
+
+// src/operations/operation-registry.ts
+var OperationDescriptorSchema = z12.object({
+  id: OperationIdSchema,
+  description: z12.string().min(1),
+  inputSchema: z12.custom((value) => value instanceof z12.ZodType),
+  outputSchema: z12.custom((value) => value instanceof z12.ZodType),
+  effects: z12.array(OperationEffectSchema),
+  cli: CliRouteSchema,
+  handler: z12.custom((value) => typeof value === "function")
+});
+var OperationRegistryPropsSchema = z12.object({
+  operations: z12.array(z12.custom()),
+  policy: z12.custom().optional()
+});
+var AccessPolicyPropsSchema = z12.object({
+  allowedOperationIds: z12.array(OperationIdSchema).default([]),
+  allowedEffects: z12.array(OperationEffectSchema).default([])
+});
+var OperationInputShape = class {
+  fieldsOf(schema) {
+    let json;
+    try {
+      json = z12.toJSONSchema(schema, { io: "input", unrepresentable: "any" });
+    } catch {
+      return [];
+    }
+    const parsed = z12.object({
+      properties: z12.record(z12.string(), z12.unknown()).optional(),
+      required: z12.array(z12.string()).optional()
+    }).safeParse(json);
+    if (!parsed.success) return [];
+    const required = new Set(parsed.data.required ?? []);
+    return Object.entries(parsed.data.properties ?? {}).map(([name, property]) => ({
+      name,
+      type: this.typeOf(property),
+      required: required.has(name)
+    }));
+  }
+  render(fields) {
+    if (fields.length === 0) return "{}";
+    return `{ ${fields.map(({ name, type, required }) => `${name}${required ? "" : "?"}: ${type}`).join(", ")} }`;
+  }
+  typeOf(property) {
+    const parsed = z12.object({
+      type: z12.union([z12.string(), z12.array(z12.string())]).optional(),
+      enum: z12.array(z12.unknown()).optional(),
+      const: z12.unknown().optional(),
+      items: z12.unknown().optional(),
+      anyOf: z12.array(z12.unknown()).optional()
+    }).safeParse(property);
+    if (!parsed.success) return "unknown";
+    const { type, enum: options, items, anyOf } = parsed.data;
+    if (options !== void 0) return options.map((value) => JSON.stringify(value)).join(" | ");
+    if (parsed.data.const !== void 0) return JSON.stringify(parsed.data.const);
+    if (anyOf !== void 0) return [...new Set(anyOf.map((entry) => this.typeOf(entry)))].join(" | ");
+    if (Array.isArray(type)) return type.join(" | ");
+    if (type === "array") return `${items === void 0 ? "unknown" : this.typeOf(items)}[]`;
+    return type ?? "unknown";
+  }
+};
+var operationInputShape = new OperationInputShape();
+var OperationInputError = class extends Error {
+  name = "OperationInputError";
+};
+var OperationAccessDeniedError = class extends Error {
+  name = "OperationAccessDeniedError";
+};
+var UnknownOperationError = class extends Error {
+  name = "UnknownOperationError";
+};
+
+// src/sdk/skill-runtime-core.ts
 var skillToolNames = {
   operation: "flight_rules_operation",
   dispatch: "flight_rules_dispatch",
   sibling: "flight_rules_sibling_skill",
   ask: "flight_rules_ask_human"
 };
-var PartialOperationSchema = z11.strictObject({
-  operationId: z11.string().min(1),
-  status: z11.literal("partial"),
-  data: z11.unknown(),
-  error: z11.strictObject({ name: z11.string().min(1), message: z11.string() })
+var PartialOperationSchema = z13.strictObject({
+  operationId: z13.string().min(1),
+  status: z13.literal("partial"),
+  data: z13.unknown(),
+  error: z13.strictObject({ name: z13.string().min(1), message: z13.string() })
 });
-var PartialOperationFailurePropsSchema = z11.strictObject({
-  operations: z11.array(PartialOperationSchema).min(1)
+var PartialOperationFailurePropsSchema = z13.strictObject({
+  operations: z13.array(PartialOperationSchema).min(1)
 });
 var PartialOperationFailure = class extends Error {
   name = "PartialOperationFailure";
@@ -1318,6 +1412,9 @@ var PartialOperationFailure = class extends Error {
     super(parsed.operations.map(({ error }) => `${error.name}: ${error.message}`).join("; "));
     this.operations = parsed.operations;
   }
+};
+var RecoverableOperationInputError = class extends Error {
+  name = "RecoverableOperationInputError";
 };
 var InvalidSkillResumeError = class extends Error {
   name = "InvalidSkillResumeError";
@@ -1505,8 +1602,8 @@ var OperationEffectCapabilities = class {
   }
 };
 var operationEffectCapabilities = new OperationEffectCapabilities();
-var SkillOperationRoutesPropsSchema = z11.strictObject({
-  operations: z11.array(z11.custom())
+var SkillOperationRoutesPropsSchema = z13.strictObject({
+  operations: z13.array(z13.custom())
 });
 var SkillAgentDefinitions = class {
   forSkill(instruction, observed) {
@@ -1537,7 +1634,7 @@ var SharedSkillToolHandlers = class {
     return execution.track(async () => {
       try {
         const descriptor = operations.list().find((entry) => entry.id === args.operationId);
-        if (descriptor === void 0) throw new Error(`Unknown operation: ${args.operationId}`);
+        if (descriptor === void 0) throw this.unknownOperation(args.operationId);
         const fresh = RuntimeSnapshotSchema.parse(await observe(context));
         if (!callerContexts.matches(fresh.context, context)) {
           throw new SkillConfigurationError(
@@ -1553,7 +1650,7 @@ var SharedSkillToolHandlers = class {
             });
           }
         }
-        const result = await operations.invoke(args.operationId, args.input);
+        const result = await this.invokeOperation(args);
         if (result.status === "partial") {
           throw new PartialOperationFailure({
             operations: [
@@ -1571,7 +1668,7 @@ var SharedSkillToolHandlers = class {
         }
         return result;
       } catch (cause) {
-        execution.recordFailure(cause);
+        if (!(cause instanceof RecoverableOperationInputError)) execution.recordFailure(cause);
         throw cause;
       }
     });
@@ -1661,33 +1758,59 @@ var SharedSkillToolHandlers = class {
     }
     return new Error(result.failure.message);
   }
+  async invokeOperation(args) {
+    const { operations } = this.props;
+    try {
+      return await operations.invoke(args.operationId, args.input);
+    } catch (cause) {
+      if (cause instanceof UnknownOperationError) throw this.unknownOperation(args.operationId);
+      if (!(cause instanceof OperationInputError)) throw cause;
+      const admittedOperations = operations.admitted?.();
+      if (admittedOperations === void 0) throw cause;
+      const admitted = admittedOperations.find((entry) => entry.id === args.operationId);
+      if (admitted === void 0)
+        throw new OperationAccessDeniedError(`Access denied for operation: ${args.operationId}`);
+      const fields = admitted.input ?? [];
+      throw new RecoverableOperationInputError(
+        `${cause.message}
+Expected input for ${args.operationId}: ${operationInputShape.render(fields)}`
+      );
+    }
+  }
+  unknownOperation(operationId) {
+    const { operations } = this.props;
+    const valid = (operations.admitted?.() ?? operations.list()).map(({ id }) => id);
+    return new RecoverableOperationInputError(
+      `Unknown operation: ${operationId}. Valid operation ids: ${valid.join(", ")}`
+    );
+  }
 };
 
 // src/sdk/deepagents/skill-runtime.ts
-var SkillRuntimePropsSchema = z12.strictObject({
-  instructions: z12.custom(
+var SkillRuntimePropsSchema = z14.strictObject({
+  instructions: z14.custom(
     (value) => typeof value === "object" && value !== null && "loadSkill" in value && typeof value.loadSkill === "function"
   ),
-  agents: z12.array(AgentDefinitionSchema).min(1),
-  models: z12.strictObject({
-    standard: z12.instanceof(BaseChatModel2),
-    escalated: z12.instanceof(BaseChatModel2),
-    expert: z12.instanceof(BaseChatModel2)
+  agents: z14.array(AgentDefinitionSchema).min(1),
+  models: z14.strictObject({
+    standard: z14.instanceof(BaseChatModel2),
+    escalated: z14.instanceof(BaseChatModel2),
+    expert: z14.instanceof(BaseChatModel2)
   }),
-  operations: z12.custom(
+  operations: z14.custom(
     (value) => typeof value === "object" && value !== null && "invoke" in value && typeof value.invoke === "function" && "list" in value && typeof value.list === "function"
   ),
-  workers: z12.custom(
+  workers: z14.custom(
     (value) => typeof value === "object" && value !== null && "dispatch" in value && typeof value.dispatch === "function"
   ),
-  observe: z12.custom((value) => typeof value === "function"),
-  toolGrants: z12.custom(
+  observe: z14.custom((value) => typeof value === "function"),
+  toolGrants: z14.custom(
     (value) => typeof value === "function"
   ),
-  checkpointer: z12.custom(
+  checkpointer: z14.custom(
     (value) => typeof value === "object" && value !== null && "getTuple" in value && typeof value.getTuple === "function"
   ).default(() => new MemorySaver()),
-  maxGraphSteps: z12.int().positive().default(128)
+  maxGraphSteps: z14.int().positive().default(128)
 });
 var DeepAgentsSkillConfigurationError = class extends SkillConfigurationError {
   name = "DeepAgentsSkillConfigurationError";
@@ -1769,15 +1892,15 @@ ${JSON.stringify(input)}`
       );
     } catch (cause) {
       await execution?.run.waitForIdle();
-      const interruption = isGraphInterrupt(cause) ? z12.array(
-        z12.object({
-          id: z12.string().optional(),
-          value: z12.unknown()
+      const interruption = isGraphInterrupt(cause) ? z14.array(
+        z14.object({
+          id: z14.string().optional(),
+          value: z14.unknown()
         })
       ).safeParse(cause.interrupts) : this.questionInterruptionFromError(cause);
-      const question = interruption.success ? z12.object({
-        questionId: z12.string(),
-        question: z12.string()
+      const question = interruption.success ? z14.object({
+        questionId: z14.string(),
+        question: z14.string()
       }).safeParse(interruption.data[0]?.value) : void 0;
       if (question?.success === true && options.allowHumanQuestions === true && isGraphInterrupt(cause)) {
         const pause = this.pauses.register({
@@ -1888,9 +2011,9 @@ ${JSON.stringify(input)}`
       tool2(async ({ operationId, input }) => handlers.operation({ operationId, input }), {
         name: skillToolNames.operation,
         description: "Run a launch-authorized shared flight-rules operation.",
-        schema: z12.object({
-          operationId: z12.string(),
-          input: z12.record(z12.string(), z12.unknown())
+        schema: z14.object({
+          operationId: z14.string(),
+          input: z14.record(z14.string(), z14.unknown())
         })
       }),
       tool2(
@@ -1898,10 +2021,10 @@ ${JSON.stringify(input)}`
         {
           name: skillToolNames.dispatch,
           description: "Dispatch one registered named worker under observed host grants.",
-          schema: z12.object({
-            agent: z12.string(),
-            dispatchId: z12.string(),
-            input: z12.record(z12.string(), z12.json())
+          schema: z14.object({
+            agent: z14.string(),
+            dispatchId: z14.string(),
+            input: z14.record(z14.string(), z14.json())
           })
         }
       ),
@@ -1931,9 +2054,9 @@ ${JSON.stringify(input)}`
         {
           name: skillToolNames.sibling,
           description: "Invoke another canonical skill with this same caller context.",
-          schema: z12.object({
-            siblingSkill: z12.string(),
-            input: z12.record(z12.string(), z12.unknown())
+          schema: z14.object({
+            siblingSkill: z14.string(),
+            input: z14.record(z14.string(), z14.unknown())
           })
         }
       ),
@@ -1948,7 +2071,7 @@ ${JSON.stringify(input)}`
         {
           name: skillToolNames.ask,
           description: "Pause this skill and wait for an actual answer from the human caller.",
-          schema: z12.object({ question: z12.string().min(1) })
+          schema: z14.object({ question: z14.string().min(1) })
         }
       )
     ];
@@ -1999,7 +2122,7 @@ ${JSON.stringify(input)}`
       questionId: paused.questionId,
       question: paused.question
     });
-    const answer = z12.object({ questionId: z12.string(), answer: z12.string() }).parse(answerValue);
+    const answer = z14.object({ questionId: z14.string(), answer: z14.string() }).parse(answerValue);
     if (answer.questionId !== paused.questionId) {
       throw new InvalidSkillResumeError("The answer belongs to another sibling question.");
     }
@@ -2018,7 +2141,7 @@ ${JSON.stringify(input)}`
     });
   }
   questionInterruptionFromError(cause) {
-    const schema = z12.array(z12.object({ id: z12.string().optional(), value: z12.unknown() }));
+    const schema = z14.array(z14.object({ id: z14.string().optional(), value: z14.unknown() }));
     if (!(cause instanceof Error)) return schema.safeParse(null);
     try {
       return schema.safeParse(JSON.parse(cause.message));
@@ -2027,11 +2150,11 @@ ${JSON.stringify(input)}`
     }
   }
   result(graph, result, context, invocationId, threadId, skill, allowHumanQuestions) {
-    const graphResult = z12.record(z12.string(), z12.unknown()).parse(result);
-    const messages = z12.array(z12.instanceof(BaseMessage)).parse(graphResult["messages"]);
-    const interruptions = z12.array(z12.object({ value: z12.unknown() })).safeParse(graphResult["__interrupt__"]);
+    const graphResult = z14.record(z14.string(), z14.unknown()).parse(result);
+    const messages = z14.array(z14.instanceof(BaseMessage)).parse(graphResult["messages"]);
+    const interruptions = z14.array(z14.object({ value: z14.unknown() })).safeParse(graphResult["__interrupt__"]);
     const task = interruptions.success ? interruptions.data[0] : void 0;
-    const question = task === void 0 ? void 0 : z12.object({ questionId: z12.string(), question: z12.string() }).safeParse(task.value);
+    const question = task === void 0 ? void 0 : z14.object({ questionId: z14.string(), question: z14.string() }).safeParse(task.value);
     if (question?.success === true) {
       const pause = this.pauses.register({
         context,
