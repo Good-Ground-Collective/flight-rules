@@ -2,11 +2,14 @@ import { text } from "node:stream/consumers";
 import { Command } from "commander";
 import { PreBashHook } from "../../pre-bash/pre-bash.js";
 import { SubagentHarnessSchema, SubagentStatusRecorder } from "../../subagent-status/subagent-status.js";
+import { UsageHandoffHook } from "../../usage-handoff/usage-handoff.js";
+import { UsageHarnessSchema } from "../../usage-handoff/usage-snapshot.js";
 
 export function createHookCommand(
   getHandler: () => PreBashHook = () => new PreBashHook(),
   readStdin: () => Promise<string> = () => text(process.stdin),
   getStatusRecorder: () => SubagentStatusRecorder = () => new SubagentStatusRecorder(),
+  getUsageHandoff: () => UsageHandoffHook = () => new UsageHandoffHook(),
 ): Command {
   const hook = new Command("hook").description("handlers for the plugin's Claude Code hooks");
 
@@ -41,6 +44,25 @@ export function createHookCommand(
         getStatusRecorder().handle(harness.data, JSON.parse(await readStdin()));
       } catch {
         // A status file is never worth slowing or breaking the agent.
+        return;
+      }
+    });
+
+  hook
+    .command("usage-handoff")
+    .description(
+      "Stop: when this harness's session or weekly usage nears its limit, hand the unfinished work to the other harness over hc and take it back at the reset; Claude Code and Codex; never fails the session",
+    )
+    .option("--harness <harness>", "the host running the hook: claude-code or codex", "claude-code")
+    .exitOverride()
+    .action(async (opts: { harness: string }) => {
+      try {
+        const harness = UsageHarnessSchema.safeParse(opts.harness);
+        if (!harness.success) return;
+        const output = await getUsageHandoff().handle(harness.data, JSON.parse(await readStdin()));
+        if (output !== undefined) process.stdout.write(JSON.stringify(output) + "\n");
+      } catch {
+        // A usage handoff is never worth failing the session over, so any error lets Stop proceed.
         return;
       }
     });

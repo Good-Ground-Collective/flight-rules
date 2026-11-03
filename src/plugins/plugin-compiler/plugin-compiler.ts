@@ -95,7 +95,7 @@ export class NativePluginCompiler implements PluginCompiler {
         : [...new Set(definitions.flatMap((agent) => codexEmitter.diagnostics(agent)))];
     if (target === "codex")
       diagnostics.push(
-        "Claude commit hooks are omitted; Codex gets only the sub-agent status hooks, which run once trusted through /hooks.",
+        "Claude commit hooks are omitted; Codex gets only the sub-agent status and usage-handoff hooks, which run once trusted through /hooks.",
       );
     for (const executable of ["flight-rules", "flight-rules.mjs"]) {
       if (!existsSync(join(this.sourceDir, "bin", executable))) {

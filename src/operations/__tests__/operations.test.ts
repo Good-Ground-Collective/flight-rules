@@ -237,7 +237,7 @@ describe("shared operations", () => {
       policy: new LaunchOperationAccessPolicy({ allowedEffects: ["read", "process", "network"] }),
     });
     const routes = cliRouteCoverage.check(program, registry);
-    expect(routes).toHaveLength(58);
+    expect(routes).toHaveLength(60);
     expect(cliRouteCoverage.list().filter((item) => item.status === "supported")).toHaveLength(53);
     expect(
       cliRouteCoverage.list().filter((item) => item.status === "pending-migration"),
@@ -246,13 +246,15 @@ describe("shared operations", () => {
       { path: ["hook", "pre-bash"], aliases: ["guard-commit"] },
     ]);
     const excluded = cliRouteCoverage.list().filter((item) => item.status === "excluded");
-    expect(excluded).toHaveLength(5);
+    expect(excluded).toHaveLength(7);
     expect(excluded.map((item) => item.route.path.join(" ")).sort()).toEqual(
       [
         "agents install",
         "agents status",
+        "handoff wait",
         "hook pre-bash",
         "hook subagent-status",
+        "hook usage-handoff",
         "mcp",
       ].sort(),
     );

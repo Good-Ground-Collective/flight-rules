@@ -199,6 +199,16 @@ const excludedRoutes = [
     reason: "Consumes Claude Code and Codex sub-agent lifecycle payloads and writes local status files.",
   },
   {
+    path: ["hook", "usage-handoff"],
+    aliases: [],
+    reason: "Consumes Claude Code and Codex Stop payloads and drives local hc terminals.",
+  },
+  {
+    path: ["handoff", "wait"],
+    aliases: [],
+    reason: "Runs a long-lived waiter in an hc terminal that talks to local agent terminals.",
+  },
+  {
     path: ["agents", "status"],
     aliases: [],
     reason: "Inspects native Codex registration files on the local host.",

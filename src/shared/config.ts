@@ -18,6 +18,17 @@ export const seedCompetencies = [
   "auth-check",
 ] as const;
 
+export const usageHandoffThresholdSchema = z.coerce
+  .number()
+  .min(1)
+  .max(100)
+  .describe("Percent of a session or weekly usage window at which the usage-handoff hook hands the work to the other harness; defaults to 95");
+
+export const usageHandoffMinResetMinutesSchema = z.coerce
+  .number()
+  .min(0)
+  .describe("Minutes left in a usage window below which the usage-handoff hook skips the handoff and just waits for the reset; defaults to 10");
+
 export const ConfigSchema = z
   .object({
     tracker: z.enum(["github", "jira"]),
@@ -66,6 +77,8 @@ export const ConfigSchema = z
         "Deprecated: path to a legacy QA recipe, read only when no QA.md or AGENTS.md QA section exists; relative paths resolve against the directory holding this config file; defaults to flight-rules.qa.md beside it",
       ),
     competencies: z.array(z.string()).default([...seedCompetencies]),
+    usageHandoffThreshold: usageHandoffThresholdSchema.optional(),
+    usageHandoffMinResetMinutes: usageHandoffMinResetMinutesSchema.optional(),
   })
   .superRefine((cfg, ctx) => {
     if (cfg.tracker === "github" && cfg.repo === undefined) {
