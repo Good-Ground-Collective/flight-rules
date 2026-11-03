@@ -27,7 +27,7 @@ Human questions require invocation-level `allowHumanQuestions: true` and support
 
 - Run each repository-specific command from the target **repo root**.
 - Read and write config only through the CLI (`flight-rules config show`, `flight-rules config set`); never hand-edit config files.
-- Before the first repository or tracker mutation, run `flight-rules check --workflow execute-work` and require `"ok": true` for the environment checks.
+- Before the first repository or tracker mutation, run `flight-rules check --workflow remediate-review` and require `"ok": true` for the environment checks.
 - The **working tree is clean**. A dirty tree stops the run before any mutation.
 - You are not merging, approving or requesting changes. The only PR writes are the thread replies, the single summary comment and the push of verified fixes.
 
@@ -37,7 +37,7 @@ You MUST create a todo per step and complete them in order.
 
 ### 1. Preflight
 
-Run `flight-rules check --workflow execute-work` and `git status --porcelain`. A failed required check or any output stops the run, per Preconditions.
+Run `flight-rules check --workflow remediate-review` and `git status --porcelain`. A failed required check or any output stops the run, per Preconditions.
 
 ### 2. Read the threads and check out the PR branch
 

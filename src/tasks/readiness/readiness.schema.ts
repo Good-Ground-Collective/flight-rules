@@ -12,6 +12,7 @@ export const WorkflowSchema = z.enum([
   "break-down-work",
   "reproduce-bug",
   "verify-ticket",
+  "remediate-review",
 ]);
 /** Optional programmatic host diagnostics; native skills do not need a runtime manifest. */
 export const WorkflowEvidenceSchema = z.strictObject({

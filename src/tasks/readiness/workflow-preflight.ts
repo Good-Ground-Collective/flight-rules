@@ -63,9 +63,11 @@ export class NodeWorkflowPreflight implements WorkflowPreflight {
     const codeWorkflow = selected === "execute-work" || selected === "execute-wave";
     const requiredAgents = codeWorkflow
       ? ["code-implementation", "code-implementation-escalated", "code-verifier", "tech-writer"]
-      : selected === "break-down-work"
-        ? ["research-agent"]
-        : [selected === "reproduce-bug" ? "qa-engineer" : "qa-engineer-verify"];
+      : selected === "remediate-review"
+        ? []
+        : selected === "break-down-work"
+          ? ["research-agent"]
+          : [selected === "reproduce-bug" ? "qa-engineer" : "qa-engineer-verify"];
     const checks: ReadinessCheck[] = [];
     const contextMatches = resolve(parsed.context.cwd) === resolve(this.cwd);
     checks.push({
