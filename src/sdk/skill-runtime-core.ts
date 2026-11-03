@@ -3,7 +3,13 @@ import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import { AgentFrontmatterSchema } from "../agents/agent-frontmatter/agent-frontmatter.schema.js";
 import type { AgentDefinition } from "../agents/agent-registry/agent-registry.js";
-import type { OperationRegistry, OperationSummary } from "../operations/operation-registry.js";
+import {
+  OperationInputError,
+  UnknownOperationError,
+  operationInputShape,
+  type OperationRegistry,
+  type OperationSummary,
+} from "../operations/operation-registry.js";
 import type { OperationEffect } from "../operations/operation.schema.js";
 import type { OrchestrationPolicy } from "../orchestration/orchestration-policy.js";
 import {
@@ -93,6 +99,11 @@ export class PartialOperationFailure extends Error {
     super(parsed.operations.map(({ error }) => `${error.name}: ${error.message}`).join("; "));
     this.operations = parsed.operations;
   }
+}
+
+/** An operation call the model formatted wrongly; it is returned to the model to correct and never ends the run. */
+export class RecoverableOperationInputError extends Error {
+  override name = "RecoverableOperationInputError";
 }
 
 export class InvalidSkillResumeError extends Error {
@@ -377,15 +388,16 @@ const SkillOperationRoutesPropsSchema = z.strictObject({
 
 /** Maps the operations a launch admits to the `flight-rules <route>` commands skills write, for the prompt that names them and the guard that redirects shell calls to them. */
 export class SkillOperationRoutes implements ShellOperationRedirects {
-  private readonly routes: { words: string[]; operationId: string }[];
+  private readonly routes: { words: string[]; operationId: string; shape: string }[];
 
   constructor(props: z.input<typeof SkillOperationRoutesPropsSchema>) {
     const { operations } = SkillOperationRoutesPropsSchema.parse(props);
     this.routes = operations
-      .flatMap(({ id, cli }) =>
+      .flatMap(({ id, cli, input }) =>
         [cli.path, ...cli.aliases.map((alias) => [...cli.path.slice(0, -1), alias])].map((words) => ({
           words,
           operationId: id,
+          shape: input === undefined || input.length === 0 ? "" : operationInputShape.render(input),
         })),
       )
       .sort((left, right) => right.words.length - left.words.length);
@@ -394,11 +406,12 @@ export class SkillOperationRoutes implements ShellOperationRedirects {
   promptSection(): string {
     if (this.routes.length === 0) return "";
     const lines = this.routes.map(
-      ({ words, operationId }) => `- \`flight-rules ${words.join(" ")}\` -> \`${operationId}\``,
+      ({ words, operationId, shape }) =>
+        `- \`flight-rules ${words.join(" ")}\` -> \`${operationId}\`${shape === "" ? "" : ` \`${shape}\``}`,
     );
     return [
       "## Operations instead of the shell",
-      `These \`flight-rules\` commands run through the \`${skillToolNames.operation}\` tool never through the shell. Call the tool with the operationId and an input object holding the fields that operation expects; an invalid input returns an error naming the expected fields.`,
+      `These \`flight-rules\` commands run through the \`${skillToolNames.operation}\` tool never through the shell. Call the tool with the operationId and an input object holding the fields that operation expects; the input shape follows each route (\`?\` marks an optional field), and an invalid input returns an error naming the expected fields that you can correct and retry.`,
       ...lines,
       "Any other `flight-rules` command runs in the shell when the shell is available.",
     ].join("\n");
@@ -502,7 +515,7 @@ export class SharedSkillToolHandlers {
     return execution.track(async () => {
       try {
         const descriptor = operations.list().find((entry) => entry.id === args.operationId);
-        if (descriptor === undefined) throw new Error(`Unknown operation: ${args.operationId}`);
+        if (descriptor === undefined) throw this.unknownOperation(args.operationId);
 
         const fresh = RuntimeSnapshotSchema.parse(await observe(context));
         if (!callerContexts.matches(fresh.context, context)) {
@@ -520,7 +533,7 @@ export class SharedSkillToolHandlers {
           }
         }
 
-        const result = await operations.invoke(args.operationId, args.input);
+        const result = await this.invokeOperation(args);
         if (result.status === "partial") {
           throw new PartialOperationFailure({
             operations: [
@@ -538,7 +551,7 @@ export class SharedSkillToolHandlers {
         }
         return result;
       } catch (cause) {
-        execution.recordFailure(cause);
+        if (!(cause instanceof RecoverableOperationInputError)) execution.recordFailure(cause);
         throw cause;
       }
     });
@@ -641,5 +654,28 @@ export class SharedSkillToolHandlers {
       });
     }
     return new Error(result.failure.message);
+  }
+
+  private async invokeOperation(args: { operationId: string; input: Record<string, unknown> }) {
+    const { operations } = this.props;
+    try {
+      return await operations.invoke(args.operationId, args.input);
+    } catch (cause) {
+      if (cause instanceof UnknownOperationError) throw this.unknownOperation(args.operationId);
+      if (!(cause instanceof OperationInputError)) throw cause;
+      const fields =
+        (operations.admitted?.() ?? []).find((entry) => entry.id === args.operationId)?.input ?? [];
+      throw new RecoverableOperationInputError(
+        `${cause.message}\nExpected input for ${args.operationId}: ${operationInputShape.render(fields)}`,
+      );
+    }
+  }
+
+  private unknownOperation(operationId: string): RecoverableOperationInputError {
+    const { operations } = this.props;
+    const valid = (operations.admitted?.() ?? operations.list()).map(({ id }) => id);
+    return new RecoverableOperationInputError(
+      `Unknown operation: ${operationId}. Valid operation ids: ${valid.join(", ")}`,
+    );
   }
 }

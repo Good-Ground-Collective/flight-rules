@@ -333,4 +333,127 @@ describe('skill operation routes', () => {
 		])
 		expect(scripted.denials).toEqual([])
 	})
+
+	describe('input shapes and recoverable input errors', () => {
+		const docRuntime = (script: QueryScript, failExecution = false) => {
+			const scripted = new ScriptedClaudeQuery({
+				response: 'done',
+				...script,
+			})
+			const handled = vi.fn()
+			const operations = new MapOperationRegistry({
+				operations: [
+					{
+						id: 'doc',
+						description: 'doc',
+						inputSchema: z.object({
+							id: z.string(),
+							limit: z.number().optional(),
+							kind: z.enum(['a', 'b']).optional(),
+							tags: z.array(z.string()).optional(),
+						}),
+						outputSchema: z.object({}).passthrough(),
+						effects: ['read'] as OperationEffect[],
+						cli: { path: ['doc'], aliases: [] },
+						handler: async (input: { id: string }) => {
+							handled(input.id)
+							if (failExecution) throw new Error('boom')
+							return {}
+						},
+					},
+					{
+						id: 'check',
+						description: 'check',
+						inputSchema: z.object({}),
+						outputSchema: z.object({}).passthrough(),
+						effects: ['read'] as OperationEffect[],
+						cli: { path: ['check'], aliases: [] },
+						handler: async () => ({}),
+					},
+					{
+						id: 'hidden',
+						description: 'hidden',
+						inputSchema: z.object({ secret: z.string() }),
+						outputSchema: z.object({}).passthrough(),
+						effects: ['write'] as OperationEffect[],
+						cli: { path: ['hidden'], aliases: [] },
+						handler: async () => ({}),
+					},
+				],
+				policy: new LaunchOperationAccessPolicy({
+					allowedOperationIds: ['doc', 'check'],
+				}),
+			})
+			const skills = new ClaudeAgentSkillRuntime({
+				instructions: instructionCatalog,
+				agents,
+				models: { standard: 's', escalated: 'e', expert: 'x' },
+				operations,
+				workers,
+				observe: async () => snapshot(),
+				toolGrants: () => ({}),
+				query: scripted.query as never,
+			})
+			return { skills, scripted, handled }
+		}
+		const call = (operationId: string, input: Record<string, unknown>) => ({
+			name: operationTool,
+			input: { operationId, input },
+		})
+
+		it('shows each admitted operation input fields with types and required markers', async () => {
+			const { skills, scripted } = docRuntime({})
+
+			await skills.invoke('remediate-review', context, {})
+
+			const prompt = scripted.invocations[0]?.prompt ?? ''
+			expect(prompt).toContain(
+				'`flight-rules doc` -> `doc` `{ id: string, limit?: number, kind?: "a" | "b", tags?: string[] }`',
+			)
+			expect(prompt).toContain('`flight-rules check` -> `check`\n')
+			expect(prompt).not.toContain('secret')
+		})
+
+		it('returns a recoverable error for invalid input and completes after a corrected call', async () => {
+			const { skills, scripted, handled } = docRuntime({
+				turns: [[call('doc', {})], [call('doc', { id: 'x' })]],
+			})
+
+			const result = await skills.invoke('remediate-review', context, {})
+
+			expect(result).toMatchObject({ status: 'completed', report: 'done' })
+			expect(scripted.outputs[0]).toMatchObject({ isError: true })
+			expect(scripted.outputs[0]?.text).toContain('id')
+			expect(scripted.outputs[0]?.text).toContain('Expected input for doc')
+			expect(scripted.outputs[1]?.isError).toBe(false)
+			expect(handled.mock.calls).toEqual([['x']])
+		})
+
+		it('returns a recoverable error listing admitted ids for an unknown operation', async () => {
+			const { skills, scripted } = docRuntime({
+				turns: [[call('nope', {})], [call('check', {})]],
+			})
+
+			const result = await skills.invoke('remediate-review', context, {})
+
+			expect(result.status).toBe('completed')
+			expect(scripted.outputs[0]).toMatchObject({ isError: true })
+			expect(scripted.outputs[0]?.text).toContain('Valid operation ids: doc, check')
+			expect(scripted.outputs[0]?.text).not.toContain('hidden')
+		})
+
+		it('still ends the run when an operation fails while executing', async () => {
+			const { skills } = docRuntime(
+				{ turns: [[call('doc', { id: 'x' })]] },
+				true,
+			)
+
+			const result = await skills.invoke('remediate-review', context, {})
+
+			expect(result).toMatchObject({
+				status: 'failed',
+				failure: { code: 'TOOL_FAILED' },
+			})
+		})
+	})
 })

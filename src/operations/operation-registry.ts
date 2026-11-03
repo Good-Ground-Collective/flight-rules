@@ -35,11 +35,18 @@ export interface OperationDescriptor<TInput = unknown, TOutput = unknown> {
   ): OperationHandlerResult<TOutput> | Promise<OperationHandlerResult<TOutput>>;
 }
 
+export interface OperationInputField {
+  name: string;
+  type: string;
+  required: boolean;
+}
+
 export interface OperationSummary {
   id: string;
   description: string;
   effects: OperationEffect[];
   cli: CliRoute;
+  input?: OperationInputField[];
 }
 
 export interface OperationCatalog {
@@ -82,6 +89,57 @@ export class LaunchOperationAccessPolicy implements OperationAccessPolicy {
     );
   }
 }
+
+/** Describes the object fields an operation's input schema accepts, in the compact form a model can read. */
+export class OperationInputShape {
+  fieldsOf(schema: z.ZodType): OperationInputField[] {
+    let json: unknown;
+    try {
+      json = z.toJSONSchema(schema, { io: "input", unrepresentable: "any" });
+    } catch {
+      return [];
+    }
+    const parsed = z
+      .object({
+        properties: z.record(z.string(), z.unknown()).optional(),
+        required: z.array(z.string()).optional(),
+      })
+      .safeParse(json);
+    if (!parsed.success) return [];
+    const required = new Set(parsed.data.required ?? []);
+    return Object.entries(parsed.data.properties ?? {}).map(([name, property]) => ({
+      name,
+      type: this.typeOf(property),
+      required: required.has(name),
+    }));
+  }
+
+  render(fields: readonly OperationInputField[]): string {
+    return `{ ${fields.map(({ name, type, required }) => `${name}${required ? "" : "?"}: ${type}`).join(", ")} }`;
+  }
+
+  private typeOf(property: unknown): string {
+    const parsed = z
+      .object({
+        type: z.union([z.string(), z.array(z.string())]).optional(),
+        enum: z.array(z.unknown()).optional(),
+        const: z.unknown().optional(),
+        items: z.unknown().optional(),
+        anyOf: z.array(z.unknown()).optional(),
+      })
+      .safeParse(property);
+    if (!parsed.success) return "unknown";
+    const { type, enum: options, items, anyOf } = parsed.data;
+    if (options !== undefined) return options.map((value) => JSON.stringify(value)).join(" | ");
+    if (parsed.data.const !== undefined) return JSON.stringify(parsed.data.const);
+    if (anyOf !== undefined) return [...new Set(anyOf.map((entry) => this.typeOf(entry)))].join(" | ");
+    if (Array.isArray(type)) return type.join(" | ");
+    if (type === "array") return `${items === undefined ? "unknown" : this.typeOf(items)}[]`;
+    return type ?? "unknown";
+  }
+}
+
+export const operationInputShape = new OperationInputShape();
 
 export class OperationInputError extends Error {
   override name = "OperationInputError";
@@ -170,7 +228,14 @@ export class MapOperationRegistry implements OperationRegistry {
         .filter((operation) => this.policy.allows(operation))
         .map(({ id }) => id),
     );
-    return this.list().filter(({ id }) => admitted.has(id));
+    return this.list()
+      .filter(({ id }) => admitted.has(id))
+      .map((summary) => {
+        const operation = this.operations.get(summary.id);
+        return operation === undefined
+          ? summary
+          : { ...summary, input: operationInputShape.fieldsOf(operation.inputSchema) };
+      });
   }
 
   async invoke(id: string, input: unknown): Promise<OperationEnvelope> {
