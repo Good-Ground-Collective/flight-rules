@@ -11,6 +11,7 @@ import {
 import { z } from "zod";
 import type { AgentDefinition } from "../../agents/agent-registry/agent-registry.js";
 import type { RuntimeSnapshot } from "../../orchestration/orchestration.schema.js";
+import { skillToolNames, type ShellOperationRedirects } from "../skill-runtime-core.js";
 import { claudeBuiltInTools } from "../claude-builtin-tools.js";
 import {
   CapabilityToolDeniedError,
@@ -133,6 +134,9 @@ const ClaudeToolGuardPropsSchema = z.strictObject({
   capabilities: z.custom<ReadonlyMap<string, WorkerCapability>>((value) => value instanceof Map),
   cwd: z.string().min(1),
   repositoryRoot: z.string().min(1),
+  shellRedirects: z
+    .custom<ShellOperationRedirects>((value) => typeof value === "object")
+    .optional(),
   onDenied: z.custom<(error: CapabilityToolDeniedError) => void>(
     (value) => typeof value === "function",
   ),
@@ -152,6 +156,7 @@ export class RepositoryConfinedToolGuard implements ClaudeToolGuardContract {
   private readonly cwd: string;
   private readonly repositoryRoot: string;
   private readonly realRepositoryRoot: string;
+  private readonly shellRedirects: ShellOperationRedirects | undefined;
   private readonly onDenied: (error: CapabilityToolDeniedError) => void;
 
   constructor(props: ClaudeToolGuardProps) {
@@ -161,14 +166,26 @@ export class RepositoryConfinedToolGuard implements ClaudeToolGuardContract {
     this.cwd = parsed.cwd;
     this.repositoryRoot = parsed.repositoryRoot;
     this.realRepositoryRoot = this.realPath(resolve(parsed.repositoryRoot));
+    this.shellRedirects = parsed.shellRedirects;
     this.onDenied = parsed.onDenied;
   }
 
   async preToolUse(input: HookInput): Promise<HookJSONOutput> {
     if (input.hook_event_name !== "PreToolUse") return {};
 
-    const denial = this.evaluate(input.tool_name, this.inputRecord(input.tool_input));
-    if (denial === undefined) return {};
+    const record = this.inputRecord(input.tool_input);
+    const denial = this.evaluate(input.tool_name, record);
+    if (denial === undefined) {
+      const redirect = this.shellRedirect(input.tool_name, record);
+      if (redirect === undefined) return {};
+      return {
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          permissionDecision: "deny",
+          permissionDecisionReason: redirect,
+        },
+      };
+    }
 
     this.onDenied(denial);
     return {
@@ -182,10 +199,23 @@ export class RepositoryConfinedToolGuard implements ClaudeToolGuardContract {
 
   async canUseTool(toolName: string, input: Record<string, unknown>): Promise<PermissionResult> {
     const denial = this.evaluate(toolName, input);
-    if (denial === undefined) return { behavior: "allow", updatedInput: input };
+    if (denial === undefined) {
+      const redirect = this.shellRedirect(toolName, input);
+      return redirect === undefined
+        ? { behavior: "allow", updatedInput: input }
+        : { behavior: "deny", message: redirect };
+    }
 
     this.onDenied(denial);
     return { behavior: "deny", message: denial.message, interrupt: true };
+  }
+
+  private shellRedirect(toolName: string, input: Record<string, unknown>): string | undefined {
+    const command = input.command;
+    if (toolName !== "Bash" || typeof command !== "string") return undefined;
+    const redirect = this.shellRedirects?.redirectFor(command);
+    if (redirect === undefined) return undefined;
+    return `Use ${skillToolNames.operation} with operationId "${redirect.operationId}" instead of running "flight-rules ${redirect.route}" in the shell.`;
   }
 
   private evaluate(

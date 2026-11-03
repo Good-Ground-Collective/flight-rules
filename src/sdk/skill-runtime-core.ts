@@ -3,7 +3,7 @@ import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import { AgentFrontmatterSchema } from "../agents/agent-frontmatter/agent-frontmatter.schema.js";
 import type { AgentDefinition } from "../agents/agent-registry/agent-registry.js";
-import type { OperationRegistry } from "../operations/operation-registry.js";
+import type { OperationRegistry, OperationSummary } from "../operations/operation-registry.js";
 import type { OperationEffect } from "../operations/operation.schema.js";
 import type { OrchestrationPolicy } from "../orchestration/orchestration-policy.js";
 import {
@@ -361,6 +361,84 @@ export class OperationEffectCapabilities {
 }
 
 export const operationEffectCapabilities = new OperationEffectCapabilities();
+
+export interface ShellOperationRedirect {
+  route: string;
+  operationId: string;
+}
+
+export interface ShellOperationRedirects {
+  redirectFor(command: string): ShellOperationRedirect | undefined;
+}
+
+const SkillOperationRoutesPropsSchema = z.strictObject({
+  operations: z.array(z.custom<OperationSummary>()),
+});
+
+/** Maps the operations a launch admits to the `flight-rules <route>` commands skills write, for the prompt that names them and the guard that redirects shell calls to them. */
+export class SkillOperationRoutes implements ShellOperationRedirects {
+  private readonly routes: { words: string[]; operationId: string }[];
+
+  constructor(props: z.input<typeof SkillOperationRoutesPropsSchema>) {
+    const { operations } = SkillOperationRoutesPropsSchema.parse(props);
+    this.routes = operations
+      .flatMap(({ id, cli }) =>
+        [cli.path, ...cli.aliases.map((alias) => [...cli.path.slice(0, -1), alias])].map((words) => ({
+          words,
+          operationId: id,
+        })),
+      )
+      .sort((left, right) => right.words.length - left.words.length);
+  }
+
+  promptSection(): string {
+    if (this.routes.length === 0) return "";
+    const lines = this.routes.map(
+      ({ words, operationId }) => `- \`flight-rules ${words.join(" ")}\` -> \`${operationId}\``,
+    );
+    return [
+      "## Operations instead of the shell",
+      `These \`flight-rules\` commands run through the \`${skillToolNames.operation}\` tool never through the shell. Call the tool with the operationId and an input object holding the fields that operation expects; an invalid input returns an error naming the expected fields.`,
+      ...lines,
+      "Any other `flight-rules` command runs in the shell when the shell is available.",
+    ].join("\n");
+  }
+
+  redirectFor(command: string): ShellOperationRedirect | undefined {
+    for (const segment of command.split(/&&|\|\||[;|\n`()]/)) {
+      const words = this.flightRulesArguments(segment);
+      if (words === undefined) continue;
+      const route = this.routes.find((candidate) =>
+        candidate.words.every((word, index) => words[index] === word),
+      );
+      if (route !== undefined)
+        return { route: route.words.join(" "), operationId: route.operationId };
+    }
+    return undefined;
+  }
+
+  private flightRulesArguments(segment: string): string[] | undefined {
+    const words = segment
+      .trim()
+      .split(/\s+/)
+      .map((word) => word.replace(/^["']|["']$/g, ""))
+      .filter((word) => word !== "");
+    let index = 0;
+    while (index < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[index] ?? "")) index += 1;
+    if (words[index] === "node") index += 1;
+    if (words[index] === "npx") {
+      index += 1;
+      while ((words[index] ?? "").startsWith("-")) index += 1;
+    }
+    const entry = words[index];
+    if (entry === undefined) return undefined;
+    const isEntry =
+      entry === "flight-rules" ||
+      entry === "flight-rules.mjs" ||
+      entry.endsWith("/flight-rules.mjs");
+    return isEntry ? words.slice(index + 1) : undefined;
+  }
+}
 
 /** Describes the skill run itself to the capability policy as one registration holding every capability the host observed. */
 export class SkillAgentDefinitions {
