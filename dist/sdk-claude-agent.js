@@ -1263,6 +1263,9 @@ var PartialOperationFailure = class extends Error {
 var RecoverableOperationInputError = class extends Error {
   name = "RecoverableOperationInputError";
 };
+var RecoverableDispatchInputError = class extends Error {
+  name = "RecoverableDispatchInputError";
+};
 var InvalidSkillResumeError = class extends Error {
   name = "InvalidSkillResumeError";
 };
@@ -1503,6 +1506,35 @@ var SkillOperationRoutes = class {
     return isEntry ? words.slice(index + 1) : void 0;
   }
 };
+var SkillWorkerModes = class {
+  modes = /* @__PURE__ */ new Map();
+  constructor() {
+    for (const option of ReportModeSchema.options) {
+      const { agent, mode } = option.shape;
+      const values = "options" in mode ? mode.options : [mode.value];
+      this.modes.set(agent.value, [...this.modes.get(agent.value) ?? [], ...values]);
+    }
+  }
+  modesFor(agent) {
+    return this.modes.get(agent) ?? [];
+  }
+  dispatchable(agents) {
+    return agents.map(({ frontmatter }) => frontmatter.name).filter((name) => this.modesFor(name).length > 0);
+  }
+  render(agent) {
+    return this.modesFor(agent).join(" | ");
+  }
+  promptSection(agents) {
+    const names = this.dispatchable(agents);
+    if (names.length === 0) return "";
+    return [
+      "## Workers",
+      `Each \`${skillToolNames.dispatch}\` call needs an input object whose \`mode\` is one the worker accepts; a rejected dispatch returns an error naming the valid modes that you can correct and retry.`,
+      ...names.map((name) => `- \`${name}\` -> \`${this.render(name)}\``)
+    ].join("\n");
+  }
+};
+var skillWorkerModes = new SkillWorkerModes();
 var SkillAgentDefinitions = class {
   forSkill(instruction, observed) {
     return {
@@ -1588,6 +1620,7 @@ var SharedSkillToolHandlers = class {
         if (registration === void 0) {
           const decision2 = orchestration.prepare(request, launch);
           if (decision2.status !== "ready") {
+            if (decision2.failure.code === "UNKNOWN_AGENT") throw this.unknownWorker(request.agent);
             throw new Error(`${decision2.failure.code}: ${decision2.failure.message}`);
           }
         }
@@ -1603,11 +1636,14 @@ var SharedSkillToolHandlers = class {
         }
         const outcome = signal === void 0 ? await workers.dispatch(request) : await workers.dispatch(request, { signal });
         if (outcome.status !== "completed") {
+          if (outcome.failure.code === "INVALID_REPORT" && this.modeRejected(request)) {
+            throw this.invalidMode(request.agent);
+          }
           throw new Error(`${outcome.failure.code}: ${outcome.failure.message}`);
         }
         return outcome;
       } catch (cause) {
-        execution.recordFailure(cause);
+        if (!(cause instanceof RecoverableDispatchInputError)) execution.recordFailure(cause);
         throw cause;
       }
     });
@@ -1674,6 +1710,20 @@ var SharedSkillToolHandlers = class {
 Expected input for ${args.operationId}: ${operationInputShape.render(fields)}`
       );
     }
+  }
+  modeRejected(request) {
+    return !ReportModeSchema.safeParse({ agent: request.agent, mode: request.input.mode }).success;
+  }
+  invalidMode(agent) {
+    return new RecoverableDispatchInputError(
+      `Invalid mode for worker ${agent}. Valid modes: ${skillWorkerModes.render(agent)}`
+    );
+  }
+  unknownWorker(agent) {
+    const valid = skillWorkerModes.dispatchable(this.props.agents);
+    return new RecoverableDispatchInputError(
+      `Unknown worker: ${agent}. Dispatchable workers: ${valid.join(", ")}`
+    );
   }
   unknownOperation(operationId) {
     const { operations } = this.props;
@@ -2370,11 +2420,13 @@ var ClaudeAgentSkillRuntime = class {
       const operationsSection = new SkillOperationRoutes({
         operations: this.operations.admitted?.() ?? []
       }).promptSection();
+      const workersSection = skillWorkerModes.promptSection(this.agents);
+      const sections = [operationsSection, workersSection].filter((section) => section !== "");
       const prompt = `${instruction.contents}
 
-${operationsSection === "" ? "" : `${operationsSection}
+${sections.map((section) => `${section}
 
-`}## Invocation context
+`).join("")}## Invocation context
 ${JSON.stringify(caller)}
 
 ## Invocation input

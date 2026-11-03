@@ -5,7 +5,7 @@ import type { OperationEffect } from "../operations/operation.schema.js";
 import type { OrchestrationPolicy } from "../orchestration/orchestration-policy.js";
 import { DispatchRequestSchema, type CallerContext, type DispatchOutcome, type SiblingSkillRequest, type RuntimeSnapshot } from "../orchestration/orchestration.schema.js";
 import type { CanonicalInstruction } from "./instruction-catalog-core.js";
-import type { ValidatedWorkerReport } from "./report-codec.js";
+import { type ValidatedWorkerReport } from "./report-codec.js";
 import { type DispatchOptions } from "./worker-runtime-core.js";
 export declare const skillToolNames: {
     readonly operation: "flight_rules_operation";
@@ -77,6 +77,10 @@ export declare class PartialOperationFailure extends Error {
 }
 /** An operation call the model formatted wrongly; it is returned to the model to correct and never ends the run. */
 export declare class RecoverableOperationInputError extends Error {
+    name: string;
+}
+/** A dispatch the model shaped wrongly before any worker ran; it is returned to the model to correct and never ends the run. */
+export declare class RecoverableDispatchInputError extends Error {
     name: string;
 }
 export declare class InvalidSkillResumeError extends Error {
@@ -197,6 +201,16 @@ export declare class SkillOperationRoutes implements ShellOperationRedirects {
     redirectFor(command: string): ShellOperationRedirect | undefined;
     private flightRulesArguments;
 }
+/** The `mode` values each dispatchable worker accepts, read from the report-mode schema. */
+export declare class SkillWorkerModes {
+    private readonly modes;
+    constructor();
+    modesFor(agent: string): string[];
+    dispatchable(agents: readonly AgentDefinition[]): string[];
+    render(agent: string): string;
+    promptSection(agents: readonly AgentDefinition[]): string;
+}
+export declare const skillWorkerModes: SkillWorkerModes;
 /** Describes the skill run itself to the capability policy as one registration holding every capability the host observed. */
 export declare class SkillAgentDefinitions {
     forSkill(instruction: CanonicalInstruction, observed: RuntimeSnapshot): AgentDefinition;
@@ -257,6 +271,9 @@ export declare class SharedSkillToolHandlers {
         status: "failed";
     }>): Error;
     private invokeOperation;
+    private modeRejected;
+    private invalidMode;
+    private unknownWorker;
     private unknownOperation;
 }
 export {};

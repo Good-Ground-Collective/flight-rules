@@ -4,7 +4,7 @@ import { BaseCallbackHandler } from "@langchain/core/callbacks/base";
 import { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { HumanMessage, isAIMessage } from "@langchain/core/messages";
 import { tool } from "langchain";
-import { z as z10 } from "zod";
+import { z as z13 } from "zod";
 
 // src/agents/agent-emitter/agent-emitter.schema.ts
 import { z as z2 } from "zod";
@@ -1011,341 +1011,65 @@ var QueuedWorkerDispatcher = class {
 };
 
 // src/sdk/deepagents/tool-policy.ts
+import { ToolMessage } from "@langchain/core/messages";
 import { createFilesystemMiddleware, createSubAgentMiddleware, StateBackend } from "deepagents";
 import { createMiddleware } from "langchain";
-var flightRulesAbortSignalConfigKey = "flightRulesAbortSignal";
-var filesystemCapabilities = /* @__PURE__ */ new Map([
-  ["ls", "read"],
-  ["read_file", "read"],
-  ["glob", "read"],
-  ["grep", "read"],
-  ["write_file", "edit"],
-  ["edit_file", "edit"],
-  ["delete", "edit"],
-  ["execute", "shell"],
-  ["task", "spawn"]
-]);
-var InvalidDeepAgentsToolRegistrationError = class extends Error {
-  name = "InvalidDeepAgentsToolRegistrationError";
-};
-var CapabilityScopedDeepAgentsToolPolicy = class {
-  toolsFor(definition, grants, runtime) {
-    const capabilities = new Set(definition.frontmatter.capabilities);
-    const tools = [...WorkerCapabilitySchema.options].flatMap((capability) => {
-      if (!capabilities.has(capability)) return [];
-      if (runtime.permissions[capability]?.state !== "available") return [];
-      return [...grants[capability] ?? []];
-    });
-    const names = /* @__PURE__ */ new Set();
-    for (const tool3 of tools) {
-      if (names.has(tool3.name))
-        throw new InvalidDeepAgentsToolRegistrationError(`Duplicate host tool name: ${tool3.name}`);
-      if (filesystemCapabilities.has(tool3.name)) {
-        throw new InvalidDeepAgentsToolRegistrationError(
-          `Host tools cannot replace reserved Deep Agents tool ${tool3.name}.`
-        );
-      }
-      names.add(tool3.name);
-    }
-    return tools;
-  }
-  middlewareFor(model, definition, hostTools, trackExecution, onCapabilityDenied, additionalToolNames = []) {
-    const permissions = new Set(definition.frontmatter.capabilities);
-    const filesystemTools = [
-      ...permissions.has("read") ? ["read_file", "ls", "glob", "grep"] : [],
-      ...permissions.has("read") && permissions.has("edit") ? ["write_file", "edit_file", "delete"] : []
-    ];
-    const filesystem = !permissions.has("read") ? createMiddleware({ name: "FilesystemMiddleware" }) : createFilesystemMiddleware({
-      backend: new StateBackend(),
-      tools: filesystemTools
-    });
-    const subagents = createSubAgentMiddleware({
-      defaultModel: model,
-      defaultTools: [],
-      subagents: [],
-      generalPurposeAgent: false
-    });
-    const allowedToolNames = /* @__PURE__ */ new Set([
-      ...hostTools.map((tool3) => tool3.name),
-      ...additionalToolNames,
-      ...filesystemTools
-    ]);
-    return [
-      filesystem,
-      createMiddleware({ name: subagents.name }),
-      createMiddleware({
-        name: "FlightRulesCapabilityGuard",
-        wrapModelCall: async (request, handler) => {
-          const response = await handler(request);
-          for (const call of response.tool_calls ?? []) {
-            if (!allowedToolNames.has(call.name)) {
-              const error = new CapabilityToolDeniedError({
-                toolName: call.name,
-                capability: filesystemCapabilities.get(call.name)
-              });
-              onCapabilityDenied(error);
-              throw error;
-            }
-          }
-          return response;
-        },
-        wrapToolCall: async (request, handler) => {
-          const name = request.toolCall.name;
-          const capability = filesystemCapabilities.get(name);
-          if (allowedToolNames.has(name) && capability === void 0) {
-            return trackExecution(() => Promise.resolve(handler(request)));
-          }
-          if (capability !== void 0 && permissions.has(capability) && capability !== "shell" && capability !== "spawn") {
-            return trackExecution(() => Promise.resolve(handler(request)));
-          }
-          const error = new CapabilityToolDeniedError({
-            toolName: name,
-            capability
-          });
-          onCapabilityDenied(error);
-          throw error;
-        }
-      })
-    ];
-  }
-};
-
-// src/sdk/deepagents/deepagents-runtime.ts
-var InFlightModelTracker = class extends BaseCallbackHandler {
-  name = "FlightRulesModelExecutionTracker";
-  activeRuns = /* @__PURE__ */ new Set();
-  nextExecution = 0;
-  idleWaiters = [];
-  handleChatModelStart(_model, _messages, runId) {
-    this.activeRuns.add(runId);
-  }
-  handleLLMEnd(_result, runId) {
-    this.finishRun(runId);
-  }
-  handleLLMError(_error, runId) {
-    this.finishRun(runId);
-  }
-  async track(execution) {
-    const executionId = /* @__PURE__ */ Symbol(`tool-${this.nextExecution++}`);
-    this.activeRuns.add(executionId);
-    try {
-      return await execution();
-    } finally {
-      this.finishRun(executionId);
-    }
-  }
-  waitForIdle() {
-    if (this.activeRuns.size === 0) return Promise.resolve();
-    return new Promise((resolve) => this.idleWaiters.push(resolve));
-  }
-  finishRun(runId) {
-    this.activeRuns.delete(runId);
-    if (this.activeRuns.size === 0) {
-      for (const resolve of this.idleWaiters.splice(0)) resolve();
-    }
-  }
-};
-var ModelInstancesSchema = z10.strictObject({
-  standard: z10.instanceof(BaseChatModel),
-  escalated: z10.instanceof(BaseChatModel),
-  expert: z10.instanceof(BaseChatModel)
-});
-var DeepAgentsRuntimePropsSchema = z10.strictObject({
-  agents: z10.array(AgentDefinitionSchema).min(1),
-  models: ModelInstancesSchema,
-  toolGrants: z10.record(
-    z10.string(),
-    z10.array(
-      z10.custom(
-        (value) => typeof value === "object" && value !== null && "name" in value && typeof value.name === "string" && "invoke" in value && typeof value.invoke === "function"
-      )
-    )
-  ),
-  observe: z10.custom(
-    (value) => typeof value === "function"
-  ),
-  maxGraphSteps: z10.int().positive().default(64)
-});
-var DeepAgentsConfigurationError = class extends WorkerDispatchConfigurationError {
-  name = "DeepAgentsConfigurationError";
-};
-var LangChainDeepAgentsWorkerRuntime = class {
-  agents;
-  models;
-  toolGrants;
-  maxGraphSteps;
-  toolPolicy = new CapabilityScopedDeepAgentsToolPolicy();
-  dispatcher;
-  constructor(props) {
-    const parsed = DeepAgentsRuntimePropsSchema.safeParse(props);
-    if (!parsed.success) {
-      throw new DeepAgentsConfigurationError(parsed.error.message);
-    }
-    this.agents = parsed.data.agents.map((agent) => AgentDefinitionSchema.parse(agent));
-    this.models = Object.freeze({ ...parsed.data.models });
-    this.toolGrants = parsed.data.toolGrants;
-    this.maxGraphSteps = parsed.data.maxGraphSteps;
-    const tiers = new Set(this.agents.map((agent) => agent.frontmatter.model));
-    for (const tier of tiers) {
-      if (this.models[tier] === void 0) {
-        throw new DeepAgentsConfigurationError(`No model instance is bound for the ${tier} tier.`);
-      }
-    }
-    this.dispatcher = new QueuedWorkerDispatcher({
-      agents: this.agents,
-      observe: parsed.data.observe,
-      run: (admission, snapshot, signal) => this.runGraph(admission, snapshot, signal),
-      createError: (message) => new DeepAgentsConfigurationError(message)
-    });
-  }
-  dispatch(request, options = {}) {
-    return this.dispatcher.dispatch(request, options);
-  }
-  dispatchMany(requests, options) {
-    return this.dispatcher.dispatchMany(requests, options);
-  }
-  async runGraph(admission, snapshot, signal) {
-    const { request, definition } = admission;
-    const prepared = workerRunProtocol.prepare(admission);
-    if (prepared.status === "rejected") return prepared.outcome;
-    const model = this.models[definition.frontmatter.model];
-    const hostTools = this.toolPolicy.toolsFor(definition, this.toolGrants, snapshot);
-    const modelTracker = new InFlightModelTracker();
-    const trackedTools = hostTools.map(
-      (hostTool) => tool(
-        (input, runtime) => {
-          const hostRuntime = {
-            ...runtime,
-            signal: new AbortController().signal,
-            configurable: {
-              ...runtime.configurable,
-              [flightRulesAbortSignalConfigKey]: signal
-            }
-          };
-          return modelTracker.track(() => hostTool.invoke(input, hostRuntime));
-        },
-        {
-          name: hostTool.name,
-          description: hostTool.description,
-          schema: hostTool.schema
-        }
-      )
-    );
-    let capabilityFailure;
-    const middleware = this.toolPolicy.middlewareFor(
-      model,
-      definition,
-      hostTools,
-      (execution) => modelTracker.track(execution),
-      (error) => {
-        capabilityFailure = error;
-      }
-    );
-    const graph = createDeepAgent({
-      model,
-      tools: trackedTools,
-      middleware,
-      name: request.agent
-    });
-    let result;
-    try {
-      result = await graph.invoke(
-        { messages: [new HumanMessage(prepared.prompt)] },
-        {
-          recursionLimit: this.maxGraphSteps,
-          signal,
-          callbacks: [modelTracker]
-        }
-      );
-    } catch (cause) {
-      if (capabilityFailure !== void 0) {
-        return workerRunProtocol.failed(
-          request,
-          workerRunProtocol.executionFailure(capabilityFailure, signal)
-        );
-      }
-      throw cause;
-    } finally {
-      await modelTracker.waitForIdle();
-    }
-    if (signal.aborted) return workerRunProtocol.cancelled(request);
-    const finalMessage = result.messages.toReversed().find((message) => isAIMessage(message));
-    if (finalMessage === void 0 || typeof finalMessage.content !== "string") {
-      throw new DeepAgentsConfigurationError("Deep Agents returned no final text report.");
-    }
-    return workerRunProtocol.finish(request, finalMessage.content, prepared.mode);
-  }
-};
-
-// src/sdk/deepagents/skill-runtime.ts
-import { randomUUID as randomUUID2 } from "node:crypto";
-import { Command, interrupt, isGraphInterrupt, MemorySaver } from "@langchain/langgraph";
-import {
-  BaseMessage,
-  HumanMessage as HumanMessage2,
-  isAIMessage as isAIMessage2
-} from "@langchain/core/messages";
-import { BaseChatModel as BaseChatModel2 } from "@langchain/core/language_models/chat_models";
-import { AsyncLocalStorageProviderSingleton } from "@langchain/core/singletons";
-import { createDeepAgent as createDeepAgent2 } from "deepagents";
-import { createMiddleware as createMiddleware2, tool as tool2 } from "langchain";
-import { z as z14 } from "zod";
 
 // src/sdk/skill-runtime-core.ts
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual as isDeepStrictEqual3 } from "node:util";
-import { z as z13 } from "zod";
-
-// src/operations/operation-registry.ts
 import { z as z12 } from "zod";
 
-// src/operations/operation.schema.ts
+// src/operations/operation-registry.ts
 import { z as z11 } from "zod";
-var OperationEffectSchema = z11.enum(["read", "write", "network", "process"]);
-var OperationIdSchema = z11.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
-var CliRouteSchema = z11.object({
-  path: z11.array(z11.string().min(1)).min(1),
-  aliases: z11.array(z11.string().min(1)).default([])
+
+// src/operations/operation.schema.ts
+import { z as z10 } from "zod";
+var OperationEffectSchema = z10.enum(["read", "write", "network", "process"]);
+var OperationIdSchema = z10.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
+var CliRouteSchema = z10.object({
+  path: z10.array(z10.string().min(1)).min(1),
+  aliases: z10.array(z10.string().min(1)).default([])
 });
-var OperationErrorSchema = z11.object({
-  name: z11.string().min(1),
-  message: z11.string()
+var OperationErrorSchema = z10.object({
+  name: z10.string().min(1),
+  message: z10.string()
 });
-var OperationEnvelopeSchema = z11.discriminatedUnion("status", [
-  z11.object({ status: z11.literal("success"), data: z11.unknown() }),
-  z11.object({ status: z11.literal("error"), error: OperationErrorSchema }),
-  z11.object({ status: z11.literal("partial"), data: z11.unknown(), error: OperationErrorSchema })
+var OperationEnvelopeSchema = z10.discriminatedUnion("status", [
+  z10.object({ status: z10.literal("success"), data: z10.unknown() }),
+  z10.object({ status: z10.literal("error"), error: OperationErrorSchema }),
+  z10.object({ status: z10.literal("partial"), data: z10.unknown(), error: OperationErrorSchema })
 ]);
 
 // src/operations/operation-registry.ts
-var OperationDescriptorSchema = z12.object({
+var OperationDescriptorSchema = z11.object({
   id: OperationIdSchema,
-  description: z12.string().min(1),
-  inputSchema: z12.custom((value) => value instanceof z12.ZodType),
-  outputSchema: z12.custom((value) => value instanceof z12.ZodType),
-  effects: z12.array(OperationEffectSchema),
+  description: z11.string().min(1),
+  inputSchema: z11.custom((value) => value instanceof z11.ZodType),
+  outputSchema: z11.custom((value) => value instanceof z11.ZodType),
+  effects: z11.array(OperationEffectSchema),
   cli: CliRouteSchema,
-  handler: z12.custom((value) => typeof value === "function")
+  handler: z11.custom((value) => typeof value === "function")
 });
-var OperationRegistryPropsSchema = z12.object({
-  operations: z12.array(z12.custom()),
-  policy: z12.custom().optional()
+var OperationRegistryPropsSchema = z11.object({
+  operations: z11.array(z11.custom()),
+  policy: z11.custom().optional()
 });
-var AccessPolicyPropsSchema = z12.object({
-  allowedOperationIds: z12.array(OperationIdSchema).default([]),
-  allowedEffects: z12.array(OperationEffectSchema).default([])
+var AccessPolicyPropsSchema = z11.object({
+  allowedOperationIds: z11.array(OperationIdSchema).default([]),
+  allowedEffects: z11.array(OperationEffectSchema).default([])
 });
 var OperationInputShape = class {
   fieldsOf(schema) {
     let json;
     try {
-      json = z12.toJSONSchema(schema, { io: "input", unrepresentable: "any" });
+      json = z11.toJSONSchema(schema, { io: "input", unrepresentable: "any" });
     } catch {
       return [];
     }
-    const parsed = z12.object({
-      properties: z12.record(z12.string(), z12.unknown()).optional(),
-      required: z12.array(z12.string()).optional()
+    const parsed = z11.object({
+      properties: z11.record(z11.string(), z11.unknown()).optional(),
+      required: z11.array(z11.string()).optional()
     }).safeParse(json);
     if (!parsed.success) return [];
     const required = new Set(parsed.data.required ?? []);
@@ -1360,12 +1084,12 @@ var OperationInputShape = class {
     return `{ ${fields.map(({ name, type, required }) => `${name}${required ? "" : "?"}: ${type}`).join(", ")} }`;
   }
   typeOf(property) {
-    const parsed = z12.object({
-      type: z12.union([z12.string(), z12.array(z12.string())]).optional(),
-      enum: z12.array(z12.unknown()).optional(),
-      const: z12.unknown().optional(),
-      items: z12.unknown().optional(),
-      anyOf: z12.array(z12.unknown()).optional()
+    const parsed = z11.object({
+      type: z11.union([z11.string(), z11.array(z11.string())]).optional(),
+      enum: z11.array(z11.unknown()).optional(),
+      const: z11.unknown().optional(),
+      items: z11.unknown().optional(),
+      anyOf: z11.array(z11.unknown()).optional()
     }).safeParse(property);
     if (!parsed.success) return "unknown";
     const { type, enum: options, items, anyOf } = parsed.data;
@@ -1395,14 +1119,14 @@ var skillToolNames = {
   sibling: "flight_rules_sibling_skill",
   ask: "flight_rules_ask_human"
 };
-var PartialOperationSchema = z13.strictObject({
-  operationId: z13.string().min(1),
-  status: z13.literal("partial"),
-  data: z13.unknown(),
-  error: z13.strictObject({ name: z13.string().min(1), message: z13.string() })
+var PartialOperationSchema = z12.strictObject({
+  operationId: z12.string().min(1),
+  status: z12.literal("partial"),
+  data: z12.unknown(),
+  error: z12.strictObject({ name: z12.string().min(1), message: z12.string() })
 });
-var PartialOperationFailurePropsSchema = z13.strictObject({
-  operations: z13.array(PartialOperationSchema).min(1)
+var PartialOperationFailurePropsSchema = z12.strictObject({
+  operations: z12.array(PartialOperationSchema).min(1)
 });
 var PartialOperationFailure = class extends Error {
   name = "PartialOperationFailure";
@@ -1415,6 +1139,9 @@ var PartialOperationFailure = class extends Error {
 };
 var RecoverableOperationInputError = class extends Error {
   name = "RecoverableOperationInputError";
+};
+var RecoverableDispatchInputError = class extends Error {
+  name = "RecoverableDispatchInputError";
 };
 var InvalidSkillResumeError = class extends Error {
   name = "InvalidSkillResumeError";
@@ -1602,9 +1329,38 @@ var OperationEffectCapabilities = class {
   }
 };
 var operationEffectCapabilities = new OperationEffectCapabilities();
-var SkillOperationRoutesPropsSchema = z13.strictObject({
-  operations: z13.array(z13.custom())
+var SkillOperationRoutesPropsSchema = z12.strictObject({
+  operations: z12.array(z12.custom())
 });
+var SkillWorkerModes = class {
+  modes = /* @__PURE__ */ new Map();
+  constructor() {
+    for (const option of ReportModeSchema.options) {
+      const { agent, mode } = option.shape;
+      const values = "options" in mode ? mode.options : [mode.value];
+      this.modes.set(agent.value, [...this.modes.get(agent.value) ?? [], ...values]);
+    }
+  }
+  modesFor(agent) {
+    return this.modes.get(agent) ?? [];
+  }
+  dispatchable(agents) {
+    return agents.map(({ frontmatter }) => frontmatter.name).filter((name) => this.modesFor(name).length > 0);
+  }
+  render(agent) {
+    return this.modesFor(agent).join(" | ");
+  }
+  promptSection(agents) {
+    const names = this.dispatchable(agents);
+    if (names.length === 0) return "";
+    return [
+      "## Workers",
+      `Each \`${skillToolNames.dispatch}\` call needs an input object whose \`mode\` is one the worker accepts; a rejected dispatch returns an error naming the valid modes that you can correct and retry.`,
+      ...names.map((name) => `- \`${name}\` -> \`${this.render(name)}\``)
+    ].join("\n");
+  }
+};
+var skillWorkerModes = new SkillWorkerModes();
 var SkillAgentDefinitions = class {
   forSkill(instruction, observed) {
     return {
@@ -1690,6 +1446,7 @@ var SharedSkillToolHandlers = class {
         if (registration === void 0) {
           const decision2 = orchestration.prepare(request, launch);
           if (decision2.status !== "ready") {
+            if (decision2.failure.code === "UNKNOWN_AGENT") throw this.unknownWorker(request.agent);
             throw new Error(`${decision2.failure.code}: ${decision2.failure.message}`);
           }
         }
@@ -1705,11 +1462,14 @@ var SharedSkillToolHandlers = class {
         }
         const outcome = signal === void 0 ? await workers.dispatch(request) : await workers.dispatch(request, { signal });
         if (outcome.status !== "completed") {
+          if (outcome.failure.code === "INVALID_REPORT" && this.modeRejected(request)) {
+            throw this.invalidMode(request.agent);
+          }
           throw new Error(`${outcome.failure.code}: ${outcome.failure.message}`);
         }
         return outcome;
       } catch (cause) {
-        execution.recordFailure(cause);
+        if (!(cause instanceof RecoverableDispatchInputError)) execution.recordFailure(cause);
         throw cause;
       }
     });
@@ -1777,6 +1537,20 @@ Expected input for ${args.operationId}: ${operationInputShape.render(fields)}`
       );
     }
   }
+  modeRejected(request) {
+    return !ReportModeSchema.safeParse({ agent: request.agent, mode: request.input.mode }).success;
+  }
+  invalidMode(agent) {
+    return new RecoverableDispatchInputError(
+      `Invalid mode for worker ${agent}. Valid modes: ${skillWorkerModes.render(agent)}`
+    );
+  }
+  unknownWorker(agent) {
+    const valid = skillWorkerModes.dispatchable(this.props.agents);
+    return new RecoverableDispatchInputError(
+      `Unknown worker: ${agent}. Dispatchable workers: ${valid.join(", ")}`
+    );
+  }
   unknownOperation(operationId) {
     const { operations } = this.props;
     const valid = (operations.admitted?.() ?? operations.list()).map(({ id }) => id);
@@ -1786,7 +1560,305 @@ Expected input for ${args.operationId}: ${operationInputShape.render(fields)}`
   }
 };
 
+// src/sdk/deepagents/tool-policy.ts
+var flightRulesAbortSignalConfigKey = "flightRulesAbortSignal";
+var filesystemCapabilities = /* @__PURE__ */ new Map([
+  ["ls", "read"],
+  ["read_file", "read"],
+  ["glob", "read"],
+  ["grep", "read"],
+  ["write_file", "edit"],
+  ["edit_file", "edit"],
+  ["delete", "edit"],
+  ["execute", "shell"],
+  ["task", "spawn"]
+]);
+var RecoverableDispatchGuard = class {
+  static async run(call, execution) {
+    try {
+      return await execution();
+    } catch (cause) {
+      if (!(cause instanceof RecoverableDispatchInputError)) throw cause;
+      return new ToolMessage({
+        content: cause.message,
+        name: call.name,
+        status: "error",
+        tool_call_id: call.id ?? call.name
+      });
+    }
+  }
+};
+var InvalidDeepAgentsToolRegistrationError = class extends Error {
+  name = "InvalidDeepAgentsToolRegistrationError";
+};
+var CapabilityScopedDeepAgentsToolPolicy = class {
+  toolsFor(definition, grants, runtime) {
+    const capabilities = new Set(definition.frontmatter.capabilities);
+    const tools = [...WorkerCapabilitySchema.options].flatMap((capability) => {
+      if (!capabilities.has(capability)) return [];
+      if (runtime.permissions[capability]?.state !== "available") return [];
+      return [...grants[capability] ?? []];
+    });
+    const names = /* @__PURE__ */ new Set();
+    for (const tool3 of tools) {
+      if (names.has(tool3.name))
+        throw new InvalidDeepAgentsToolRegistrationError(`Duplicate host tool name: ${tool3.name}`);
+      if (filesystemCapabilities.has(tool3.name)) {
+        throw new InvalidDeepAgentsToolRegistrationError(
+          `Host tools cannot replace reserved Deep Agents tool ${tool3.name}.`
+        );
+      }
+      names.add(tool3.name);
+    }
+    return tools;
+  }
+  middlewareFor(model, definition, hostTools, trackExecution, onCapabilityDenied, additionalToolNames = []) {
+    const permissions = new Set(definition.frontmatter.capabilities);
+    const filesystemTools = [
+      ...permissions.has("read") ? ["read_file", "ls", "glob", "grep"] : [],
+      ...permissions.has("read") && permissions.has("edit") ? ["write_file", "edit_file", "delete"] : []
+    ];
+    const filesystem = !permissions.has("read") ? createMiddleware({ name: "FilesystemMiddleware" }) : createFilesystemMiddleware({
+      backend: new StateBackend(),
+      tools: filesystemTools
+    });
+    const subagents = createSubAgentMiddleware({
+      defaultModel: model,
+      defaultTools: [],
+      subagents: [],
+      generalPurposeAgent: false
+    });
+    const allowedToolNames = /* @__PURE__ */ new Set([
+      ...hostTools.map((tool3) => tool3.name),
+      ...additionalToolNames,
+      ...filesystemTools
+    ]);
+    return [
+      filesystem,
+      createMiddleware({ name: subagents.name }),
+      createMiddleware({
+        name: "FlightRulesCapabilityGuard",
+        wrapModelCall: async (request, handler) => {
+          const response = await handler(request);
+          for (const call of response.tool_calls ?? []) {
+            if (!allowedToolNames.has(call.name)) {
+              const error = new CapabilityToolDeniedError({
+                toolName: call.name,
+                capability: filesystemCapabilities.get(call.name)
+              });
+              onCapabilityDenied(error);
+              throw error;
+            }
+          }
+          return response;
+        },
+        wrapToolCall: async (request, handler) => {
+          const name = request.toolCall.name;
+          const capability = filesystemCapabilities.get(name);
+          if (allowedToolNames.has(name) && capability === void 0) {
+            return RecoverableDispatchGuard.run(
+              request.toolCall,
+              () => trackExecution(() => Promise.resolve(handler(request)))
+            );
+          }
+          if (capability !== void 0 && permissions.has(capability) && capability !== "shell" && capability !== "spawn") {
+            return RecoverableDispatchGuard.run(
+              request.toolCall,
+              () => trackExecution(() => Promise.resolve(handler(request)))
+            );
+          }
+          const error = new CapabilityToolDeniedError({
+            toolName: name,
+            capability
+          });
+          onCapabilityDenied(error);
+          throw error;
+        }
+      })
+    ];
+  }
+};
+
+// src/sdk/deepagents/deepagents-runtime.ts
+var InFlightModelTracker = class extends BaseCallbackHandler {
+  name = "FlightRulesModelExecutionTracker";
+  activeRuns = /* @__PURE__ */ new Set();
+  nextExecution = 0;
+  idleWaiters = [];
+  handleChatModelStart(_model, _messages, runId) {
+    this.activeRuns.add(runId);
+  }
+  handleLLMEnd(_result, runId) {
+    this.finishRun(runId);
+  }
+  handleLLMError(_error, runId) {
+    this.finishRun(runId);
+  }
+  async track(execution) {
+    const executionId = /* @__PURE__ */ Symbol(`tool-${this.nextExecution++}`);
+    this.activeRuns.add(executionId);
+    try {
+      return await execution();
+    } finally {
+      this.finishRun(executionId);
+    }
+  }
+  waitForIdle() {
+    if (this.activeRuns.size === 0) return Promise.resolve();
+    return new Promise((resolve) => this.idleWaiters.push(resolve));
+  }
+  finishRun(runId) {
+    this.activeRuns.delete(runId);
+    if (this.activeRuns.size === 0) {
+      for (const resolve of this.idleWaiters.splice(0)) resolve();
+    }
+  }
+};
+var ModelInstancesSchema = z13.strictObject({
+  standard: z13.instanceof(BaseChatModel),
+  escalated: z13.instanceof(BaseChatModel),
+  expert: z13.instanceof(BaseChatModel)
+});
+var DeepAgentsRuntimePropsSchema = z13.strictObject({
+  agents: z13.array(AgentDefinitionSchema).min(1),
+  models: ModelInstancesSchema,
+  toolGrants: z13.record(
+    z13.string(),
+    z13.array(
+      z13.custom(
+        (value) => typeof value === "object" && value !== null && "name" in value && typeof value.name === "string" && "invoke" in value && typeof value.invoke === "function"
+      )
+    )
+  ),
+  observe: z13.custom(
+    (value) => typeof value === "function"
+  ),
+  maxGraphSteps: z13.int().positive().default(64)
+});
+var DeepAgentsConfigurationError = class extends WorkerDispatchConfigurationError {
+  name = "DeepAgentsConfigurationError";
+};
+var LangChainDeepAgentsWorkerRuntime = class {
+  agents;
+  models;
+  toolGrants;
+  maxGraphSteps;
+  toolPolicy = new CapabilityScopedDeepAgentsToolPolicy();
+  dispatcher;
+  constructor(props) {
+    const parsed = DeepAgentsRuntimePropsSchema.safeParse(props);
+    if (!parsed.success) {
+      throw new DeepAgentsConfigurationError(parsed.error.message);
+    }
+    this.agents = parsed.data.agents.map((agent) => AgentDefinitionSchema.parse(agent));
+    this.models = Object.freeze({ ...parsed.data.models });
+    this.toolGrants = parsed.data.toolGrants;
+    this.maxGraphSteps = parsed.data.maxGraphSteps;
+    const tiers = new Set(this.agents.map((agent) => agent.frontmatter.model));
+    for (const tier of tiers) {
+      if (this.models[tier] === void 0) {
+        throw new DeepAgentsConfigurationError(`No model instance is bound for the ${tier} tier.`);
+      }
+    }
+    this.dispatcher = new QueuedWorkerDispatcher({
+      agents: this.agents,
+      observe: parsed.data.observe,
+      run: (admission, snapshot, signal) => this.runGraph(admission, snapshot, signal),
+      createError: (message) => new DeepAgentsConfigurationError(message)
+    });
+  }
+  dispatch(request, options = {}) {
+    return this.dispatcher.dispatch(request, options);
+  }
+  dispatchMany(requests, options) {
+    return this.dispatcher.dispatchMany(requests, options);
+  }
+  async runGraph(admission, snapshot, signal) {
+    const { request, definition } = admission;
+    const prepared = workerRunProtocol.prepare(admission);
+    if (prepared.status === "rejected") return prepared.outcome;
+    const model = this.models[definition.frontmatter.model];
+    const hostTools = this.toolPolicy.toolsFor(definition, this.toolGrants, snapshot);
+    const modelTracker = new InFlightModelTracker();
+    const trackedTools = hostTools.map(
+      (hostTool) => tool(
+        (input, runtime) => {
+          const hostRuntime = {
+            ...runtime,
+            signal: new AbortController().signal,
+            configurable: {
+              ...runtime.configurable,
+              [flightRulesAbortSignalConfigKey]: signal
+            }
+          };
+          return modelTracker.track(() => hostTool.invoke(input, hostRuntime));
+        },
+        {
+          name: hostTool.name,
+          description: hostTool.description,
+          schema: hostTool.schema
+        }
+      )
+    );
+    let capabilityFailure;
+    const middleware = this.toolPolicy.middlewareFor(
+      model,
+      definition,
+      hostTools,
+      (execution) => modelTracker.track(execution),
+      (error) => {
+        capabilityFailure = error;
+      }
+    );
+    const graph = createDeepAgent({
+      model,
+      tools: trackedTools,
+      middleware,
+      name: request.agent
+    });
+    let result;
+    try {
+      result = await graph.invoke(
+        { messages: [new HumanMessage(prepared.prompt)] },
+        {
+          recursionLimit: this.maxGraphSteps,
+          signal,
+          callbacks: [modelTracker]
+        }
+      );
+    } catch (cause) {
+      if (capabilityFailure !== void 0) {
+        return workerRunProtocol.failed(
+          request,
+          workerRunProtocol.executionFailure(capabilityFailure, signal)
+        );
+      }
+      throw cause;
+    } finally {
+      await modelTracker.waitForIdle();
+    }
+    if (signal.aborted) return workerRunProtocol.cancelled(request);
+    const finalMessage = result.messages.toReversed().find((message) => isAIMessage(message));
+    if (finalMessage === void 0 || typeof finalMessage.content !== "string") {
+      throw new DeepAgentsConfigurationError("Deep Agents returned no final text report.");
+    }
+    return workerRunProtocol.finish(request, finalMessage.content, prepared.mode);
+  }
+};
+
 // src/sdk/deepagents/skill-runtime.ts
+import { randomUUID as randomUUID2 } from "node:crypto";
+import { Command, interrupt, isGraphInterrupt, MemorySaver } from "@langchain/langgraph";
+import {
+  BaseMessage,
+  HumanMessage as HumanMessage2,
+  isAIMessage as isAIMessage2
+} from "@langchain/core/messages";
+import { BaseChatModel as BaseChatModel2 } from "@langchain/core/language_models/chat_models";
+import { AsyncLocalStorageProviderSingleton } from "@langchain/core/singletons";
+import { createDeepAgent as createDeepAgent2 } from "deepagents";
+import { createMiddleware as createMiddleware2, tool as tool2 } from "langchain";
+import { z as z14 } from "zod";
 var SkillRuntimePropsSchema = z14.strictObject({
   instructions: z14.custom(
     (value) => typeof value === "object" && value !== null && "loadSkill" in value && typeof value.loadSkill === "function"
@@ -1994,7 +2066,9 @@ ${JSON.stringify(input)}`
         "Runtime evidence belongs to a different caller context."
       );
     const grants = this.toolGrants(context);
-    const run = new SkillExecution({ ignores: isGraphInterrupt });
+    const run = new SkillExecution({
+      ignores: (cause) => isGraphInterrupt(cause) || cause instanceof RecoverableDispatchInputError
+    });
     let propagatingSiblingQuestion = false;
     const handlers = new SharedSkillToolHandlers({
       context,
