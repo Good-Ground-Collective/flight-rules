@@ -7,6 +7,7 @@ import { DetachedHeartbeatSender } from "../../board-heartbeat/board-heartbeat.j
 import type { BoardHeartbeatHook, FinishedReport } from "../../board-heartbeat/board-heartbeat.js";
 import { BoardHookKit, GitBranchReader } from "../../board-heartbeat/board-hook-kit.js";
 import { PreBashHook } from "../../pre-bash/pre-bash.js";
+import { SubagentHarnessSchema, SubagentStatusRecorder } from "../../subagent-status/subagent-status.js";
 
 /** Hands work to a detached child process, so a hook never waits on the network. */
 export interface BoardHookSender {
@@ -67,6 +68,7 @@ export function createHookCommand(
   getHandler: () => PreBashHook = () => new PreBashHook(),
   readStdin: () => Promise<string> = () => text(process.stdin),
   boardServices: BoardHookServices = defaultBoardServices,
+  getStatusRecorder: () => SubagentStatusRecorder = () => new SubagentStatusRecorder(),
 ): Command {
   const hook = new Command("hook").description("handlers for the plugin's Claude Code hooks");
 
@@ -151,6 +153,24 @@ export function createHookCommand(
         if (report !== undefined) boardServices.sender().sendFinished(report);
       } catch {
         // Reporting must never slow or break a sub-agent's stop.
+        return;
+      }
+    });
+
+  hook
+    .command("subagent-status")
+    .description(
+      "SubagentStart, SubagentStop, StopFailure, PostToolUse and SessionEnd: keep a status file per sub-agent under $XDG_STATE_HOME/flight-rules/agents for terminal multiplexers; Claude Code and Codex; local only, no output, never blocks",
+    )
+    .option("--harness <harness>", "the host running the hook: claude-code or codex", "claude-code")
+    .exitOverride()
+    .action(async (opts: { harness: string }) => {
+      try {
+        const harness = SubagentHarnessSchema.safeParse(opts.harness);
+        if (!harness.success) return;
+        getStatusRecorder().handle(harness.data, JSON.parse(await readStdin()));
+      } catch {
+        // A status file is never worth slowing or breaking the agent.
         return;
       }
     });
