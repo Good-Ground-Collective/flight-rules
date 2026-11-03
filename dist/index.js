@@ -8627,7 +8627,7 @@ function createFlightRules(props = {}) {
 var settingsScopes = ["user", "project", "local"];
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "2.0.2";
+var appVersion = false ? "0.0.0-dev" : "2.0.3";
 
 // src/agents/agent-frontmatter/agent-frontmatter.ts
 import { parse as parseYaml4 } from "yaml";
@@ -8940,18 +8940,6 @@ var NativePluginCompiler = class {
     } : { ...identity, version, skills: "./skills/" };
     writeFileSync5(join13(manifestDirectory, "plugin.json"), JSON.stringify(manifest, null, 2) + "\n");
     if (target === "codex") {
-      writeFileSync5(
-        join13(directory, "plugin.json"),
-        JSON.stringify(
-          {
-            $schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
-            ...identity,
-            version
-          },
-          null,
-          2
-        ) + "\n"
-      );
       writeFileSync5(join13(directory, ".codex", "config.toml"), "[agents]\nenabled = true\n");
       writeFileSync5(
         join13(directory, "diagnostics.json"),
