@@ -107,6 +107,8 @@ The `flight-rules` MCP server is always built. The `flight-rules-host` server is
 
 Every operation call re-observes the host and requires `permissionForEffect` evidence for each of the operation's effects (`read`, `write` as edit, `process` as shell, `network` as web) before the handler runs. Worker dispatch goes through the supplied worker runtime after the orchestration evidence check, with the observed registration identity validated against the requested one.
 
+A dispatch the model shaped wrongly before any worker ran (an unknown worker name, or a `mode` the admitted worker's registration does not support) comes back as a tool error naming the dispatchable workers or the worker's valid modes. It is not recorded as a failure and the run continues. A worker that ran and returned an invalid report, an execution failure, a cancellation and any capability or admission denial stay terminal; a denied worker's modes are never revealed. The prompt's `## Workers` section lists each dispatchable worker with its accepted modes, for example `code-verifier` -> `verify | triage`.
+
 The run uses the same isolation as a worker dispatch: `settingSources: []`, `plugins: []`, `strictMcpConfig: true`, the catch-all `PreToolUse` guard and the `canUseTool` backstop. The only difference is `persistSession: true`, because a paused skill resumes from its saved session. Sessions use the SDK's default storage; a host that needs the session to survive its own process owns that durability.
 
 ### Routing `flight-rules` commands to operations

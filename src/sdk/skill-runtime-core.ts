@@ -18,11 +18,12 @@ import {
   RuntimeSnapshotSchema,
   type CallerContext,
   type DispatchOutcome,
+  type DispatchRequest,
   type SiblingSkillRequest,
   type RuntimeSnapshot,
 } from "../orchestration/orchestration.schema.js";
 import type { CanonicalInstruction } from "./instruction-catalog-core.js";
-import type { ValidatedWorkerReport } from "./report-codec.js";
+import { ReportModeSchema, type ValidatedWorkerReport } from "./report-codec.js";
 import { CapabilityToolDeniedError, type DispatchOptions } from "./worker-runtime-core.js";
 
 export const skillToolNames = {
@@ -105,6 +106,11 @@ export class PartialOperationFailure extends Error {
 /** An operation call the model formatted wrongly; it is returned to the model to correct and never ends the run. */
 export class RecoverableOperationInputError extends Error {
   override name = "RecoverableOperationInputError";
+}
+
+/** A dispatch the model shaped wrongly before any worker ran; it is returned to the model to correct and never ends the run. */
+export class RecoverableDispatchInputError extends Error {
+  override name = "RecoverableDispatchInputError";
 }
 
 export class InvalidSkillResumeError extends Error {
@@ -454,6 +460,45 @@ export class SkillOperationRoutes implements ShellOperationRedirects {
   }
 }
 
+/** The `mode` values each dispatchable worker accepts, read from the report-mode schema. */
+export class SkillWorkerModes {
+  private readonly modes = new Map<string, string[]>();
+
+  constructor() {
+    for (const option of ReportModeSchema.options) {
+      const { agent, mode } = option.shape;
+      const values = "options" in mode ? mode.options : [mode.value];
+      this.modes.set(agent.value, [...(this.modes.get(agent.value) ?? []), ...values]);
+    }
+  }
+
+  modesFor(agent: string): string[] {
+    return this.modes.get(agent) ?? [];
+  }
+
+  dispatchable(agents: readonly AgentDefinition[]): string[] {
+    return agents
+      .map(({ frontmatter }) => frontmatter.name)
+      .filter((name) => this.modesFor(name).length > 0);
+  }
+
+  render(agent: string): string {
+    return this.modesFor(agent).join(" | ");
+  }
+
+  promptSection(agents: readonly AgentDefinition[]): string {
+    const names = this.dispatchable(agents);
+    if (names.length === 0) return "";
+    return [
+      "## Workers",
+      `Each \`${skillToolNames.dispatch}\` call needs an input object whose \`mode\` is one the worker accepts; a rejected dispatch returns an error naming the valid modes that you can correct and retry.`,
+      ...names.map((name) => `- \`${name}\` -> \`${this.render(name)}\``),
+    ].join("\n");
+  }
+}
+
+export const skillWorkerModes = new SkillWorkerModes();
+
 /** Describes the skill run itself to the capability policy as one registration holding every capability the host observed. */
 export class SkillAgentDefinitions {
   forSkill(instruction: CanonicalInstruction, observed: RuntimeSnapshot): AgentDefinition {
@@ -576,6 +621,7 @@ export class SharedSkillToolHandlers {
         if (registration === undefined) {
           const decision = orchestration.prepare(request, launch);
           if (decision.status !== "ready") {
+            if (decision.failure.code === "UNKNOWN_AGENT") throw this.unknownWorker(request.agent);
             throw new Error(`${decision.failure.code}: ${decision.failure.message}`);
           }
         }
@@ -596,11 +642,14 @@ export class SharedSkillToolHandlers {
             ? await workers.dispatch(request)
             : await workers.dispatch(request, { signal });
         if (outcome.status !== "completed") {
+          if (outcome.failure.code === "INVALID_REPORT" && this.modeRejected(request)) {
+            throw this.invalidMode(request.agent);
+          }
           throw new Error(`${outcome.failure.code}: ${outcome.failure.message}`);
         }
         return outcome;
       } catch (cause) {
-        execution.recordFailure(cause);
+        if (!(cause instanceof RecoverableDispatchInputError)) execution.recordFailure(cause);
         throw cause;
       }
     });
@@ -674,6 +723,23 @@ export class SharedSkillToolHandlers {
         `${cause.message}\nExpected input for ${args.operationId}: ${operationInputShape.render(fields)}`,
       );
     }
+  }
+
+  private modeRejected(request: DispatchRequest): boolean {
+    return !ReportModeSchema.safeParse({ agent: request.agent, mode: request.input.mode }).success;
+  }
+
+  private invalidMode(agent: string): RecoverableDispatchInputError {
+    return new RecoverableDispatchInputError(
+      `Invalid mode for worker ${agent}. Valid modes: ${skillWorkerModes.render(agent)}`,
+    );
+  }
+
+  private unknownWorker(agent: string): RecoverableDispatchInputError {
+    const valid = skillWorkerModes.dispatchable(this.props.agents);
+    return new RecoverableDispatchInputError(
+      `Unknown worker: ${agent}. Dispatchable workers: ${valid.join(", ")}`,
+    );
   }
 
   private unknownOperation(operationId: string): RecoverableOperationInputError {
