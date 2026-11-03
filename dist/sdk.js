@@ -1399,7 +1399,8 @@ var WorkflowSchema = z15.enum([
   "execute-wave",
   "break-down-work",
   "reproduce-bug",
-  "verify-ticket"
+  "verify-ticket",
+  "remediate-review"
 ]);
 var WorkflowEvidenceSchema = z15.strictObject({
   context: CallerContextSchema,

@@ -5,6 +5,7 @@ export declare const WorkflowSchema: z.ZodEnum<{
     "break-down-work": "break-down-work";
     "reproduce-bug": "reproduce-bug";
     "verify-ticket": "verify-ticket";
+    "remediate-review": "remediate-review";
 }>;
 /** Optional programmatic host diagnostics; native skills do not need a runtime manifest. */
 export declare const WorkflowEvidenceSchema: z.ZodObject<{
@@ -144,6 +145,7 @@ export declare const ReadinessOptionsSchema: z.ZodObject<{
         "break-down-work": "break-down-work";
         "reproduce-bug": "reproduce-bug";
         "verify-ticket": "verify-ticket";
+        "remediate-review": "remediate-review";
     }>>;
     evidence: z.ZodOptional<z.ZodObject<{
         context: z.ZodObject<{

@@ -1839,7 +1839,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.98.1";
+var appVersion = false ? "0.0.0-dev" : "1.98.2";
 
 // src/shared/ariadne/review-packet.schema.ts
 import { z as z17 } from "zod";
@@ -6060,7 +6060,8 @@ var WorkflowSchema = z32.enum([
   "execute-wave",
   "break-down-work",
   "reproduce-bug",
-  "verify-ticket"
+  "verify-ticket",
+  "remediate-review"
 ]);
 var WorkflowEvidenceSchema = z32.strictObject({
   context: CallerContextSchema,
@@ -6116,7 +6117,7 @@ var NodeWorkflowPreflight = class {
   }
   hostChecks(selected, parsed, diagnostics) {
     const codeWorkflow = selected === "execute-work" || selected === "execute-wave";
-    const requiredAgents = codeWorkflow ? ["code-implementation", "code-implementation-escalated", "code-verifier", "tech-writer"] : selected === "break-down-work" ? ["research-agent"] : [selected === "reproduce-bug" ? "qa-engineer" : "qa-engineer-verify"];
+    const requiredAgents = codeWorkflow ? ["code-implementation", "code-implementation-escalated", "code-verifier", "tech-writer"] : selected === "remediate-review" ? [] : selected === "break-down-work" ? ["research-agent"] : [selected === "reproduce-bug" ? "qa-engineer" : "qa-engineer-verify"];
     const checks = [];
     const contextMatches = resolve4(parsed.context.cwd) === resolve4(this.cwd);
     checks.push({
@@ -6424,9 +6425,9 @@ var NodeRepositoryReadiness = class {
     checks.push(
       ...await input.probe.probe({
         repo: config.repo,
-        qaInstructionsFound: options.workflow === "break-down-work" ? false : qa.found || qaWorkflow,
+        qaInstructionsFound: options.workflow === "break-down-work" || options.workflow === "remediate-review" ? false : qa.found || qaWorkflow,
         ...options.workflow === void 0 ? {} : {
-          githubRequired: codeWorkflow || config.tracker === "github",
+          githubRequired: codeWorkflow || options.workflow === "remediate-review" || config.tracker === "github",
           pushRequired: codeWorkflow
         }
       })

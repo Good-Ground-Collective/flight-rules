@@ -5,11 +5,12 @@ Run the environment checks before a workflow changes repository files, git state
 ```bash
 flight-rules check
 flight-rules check --workflow execute-work
+flight-rules check --workflow remediate-review
 ```
 
 No runtime evidence file is required. The native harness owns permissions and worker scheduling. The check reports what its probes observe; it does not grant access or guarantee that later writes or dispatches will succeed.
 
-The first command reports `scope: "environment"`. Selecting `execute-work`, `execute-wave`, `break-down-work`, `reproduce-bug` or `verify-ticket` adds the relevant environment requirements and reports `scope: "workflow"` and the selected workflow. Both preserve the public `checks`/`ok` shape. Each check retains `name`, `ok`, `detail` and optional `required`; failures can also carry `code` and `remedy`. A check with `required: false` never makes the overall result fail.
+The first command reports `scope: "environment"`. Selecting `execute-work`, `execute-wave`, `break-down-work`, `reproduce-bug`, `verify-ticket` or `remediate-review` adds the relevant environment requirements and reports `scope: "workflow"` and the selected workflow. Both preserve the public `checks`/`ok` shape. Each check retains `name`, `ok`, `detail` and optional `required`; failures can also carry `code` and `remedy`. A check with `required: false` never makes the overall result fail.
 
 ## Select the target repository
 
@@ -34,7 +35,7 @@ The tool’s working-directory option is equivalent. The check uses the command�
 | Local write access | Filesystem access checks on the working directory and Git/worktree common metadata; no file or ref is written and harness restrictions still apply |
 | QA tools/instructions | Required for QA workflows; existing optional/general-check behavior remains available |
 
-Code workflows are `execute-work` and `execute-wave`. They require GitHub login and push entitlement even with a Jira tracker. Other workflows do not require push entitlement. QA instruction discovery is optional in a general check and required in QA workflows.
+Code workflows are `execute-work` and `execute-wave`. They require GitHub login and push entitlement even with a Jira tracker. `remediate-review` requires config, tracker credentials and reachability, `gh` and GitHub login. It reports push entitlement as advisory (`required: false`) because GitHub omits repository permissions for App installation tokens, and it does not require the QA capture tools (`playwright-cli`, `ffmpeg`). Other workflows do not require push entitlement. QA instruction discovery is optional in a general check and required in QA workflows.
 
 Native subprocess probes have a 10-second timeout and a bounded output buffer; tracker ping receives a cancellation signal and the same deadline. Library constructors accept a positive timeout up to 60 seconds. Jira’s bounded ping does not enter rate-limit retry backoff. No probe pushes, creates remote resources, writes a test file or modifies permissions. Services use the invocation’s working directory and environment without changing global process state.
 

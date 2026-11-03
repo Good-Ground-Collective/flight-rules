@@ -724,7 +724,8 @@ var WorkflowSchema = z10.enum([
   "execute-wave",
   "break-down-work",
   "reproduce-bug",
-  "verify-ticket"
+  "verify-ticket",
+  "remediate-review"
 ]);
 var WorkflowEvidenceSchema = z10.strictObject({
   context: CallerContextSchema,
@@ -9171,7 +9172,7 @@ var NodeWorkflowPreflight = class {
   }
   hostChecks(selected, parsed, diagnostics) {
     const codeWorkflow = selected === "execute-work" || selected === "execute-wave";
-    const requiredAgents = codeWorkflow ? ["code-implementation", "code-implementation-escalated", "code-verifier", "tech-writer"] : selected === "break-down-work" ? ["research-agent"] : [selected === "reproduce-bug" ? "qa-engineer" : "qa-engineer-verify"];
+    const requiredAgents = codeWorkflow ? ["code-implementation", "code-implementation-escalated", "code-verifier", "tech-writer"] : selected === "remediate-review" ? [] : selected === "break-down-work" ? ["research-agent"] : [selected === "reproduce-bug" ? "qa-engineer" : "qa-engineer-verify"];
     const checks = [];
     const contextMatches = resolve9(parsed.context.cwd) === resolve9(this.cwd);
     checks.push({
@@ -9479,9 +9480,9 @@ var NodeRepositoryReadiness = class {
     checks.push(
       ...await input.probe.probe({
         repo: config.repo,
-        qaInstructionsFound: options.workflow === "break-down-work" ? false : qa.found || qaWorkflow,
+        qaInstructionsFound: options.workflow === "break-down-work" || options.workflow === "remediate-review" ? false : qa.found || qaWorkflow,
         ...options.workflow === void 0 ? {} : {
-          githubRequired: codeWorkflow || config.tracker === "github",
+          githubRequired: codeWorkflow || options.workflow === "remediate-review" || config.tracker === "github",
           pushRequired: codeWorkflow
         }
       })
