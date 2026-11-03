@@ -305,6 +305,99 @@ describe("SubagentStatusRecorder", () => {
   });
 });
 
+describe("SubagentStatusRecorder across hook processes", () => {
+  const racing = (env: Record<string, string | undefined> = {}, branch?: string) => {
+    const state = temporary();
+    const work = temporary();
+    const clock = { now: start };
+    let interleave: (() => void) | undefined;
+    const recorder = new SubagentStatusRecorder({
+      env: { XDG_STATE_HOME: state, ...env },
+      now: () => clock.now,
+      readBranch: () => branch,
+      clock: () => {
+        const step = interleave;
+        interleave = undefined;
+        step?.();
+        return Date.now();
+      },
+    });
+    const other = new SubagentStatusRecorder({ env: { XDG_STATE_HOME: state, ...env }, now: () => clock.now, readBranch: () => branch });
+    const folder = join(state, "flight-rules", "agents");
+    return { recorder, other, clock, folder, work, race: (step: () => void) => (interleave = step) };
+  };
+
+  it("drops a tool-call refresh when a stop lands between its first look and its write", () => {
+    const { recorder, other, clock, work, race } = racing();
+    other.handle("claude-code", { ...base(work), hook_event_name: "SubagentStart" });
+    clock.now += 60_000;
+    race(() => other.handle("claude-code", { ...base(work), hook_event_name: "SubagentStop" }));
+    recorder.handle("claude-code", { ...base(work), hook_event_name: "PostToolUse" });
+
+    expect(other.read("claude-code", "session-1", "agent-a")).toMatchObject({ status: "done", ended_at: "2026-11-03T14:01:00Z" });
+  });
+
+  it("keeps an error that lands while SessionEnd is closing the session", () => {
+    const { recorder, other, work, race } = racing();
+    other.handle("claude-code", { ...base(work), hook_event_name: "SubagentStart" });
+    race(() => other.handle("claude-code", { ...base(work), hook_event_name: "StopFailure", error: "server_error" }));
+    recorder.handle("claude-code", { session_id: "session-1", hook_event_name: "SessionEnd" });
+
+    expect(other.read("claude-code", "session-1", "agent-a")?.status).toBe("error");
+  });
+
+  it("keeps a stale record that another hook refreshes just before pruning deletes it", () => {
+    const { recorder, other, clock, work, race } = racing();
+    other.handle("claude-code", { ...base(work), hook_event_name: "SubagentStart" });
+    clock.now = start + subagentStatusMaxAgeMs + 60_000;
+    race(() => other.handle("claude-code", { ...base(work), hook_event_name: "SubagentStop" }));
+    recorder.prune();
+
+    expect(other.read("claude-code", "session-1", "agent-a")).toMatchObject({ status: "done" });
+  });
+
+  it("skips a refresh while another hook holds the record, but still records a stop", () => {
+    const { recorder, clock, folder, work } = racing();
+    recorder.handle("claude-code", { ...base(work), hook_event_name: "SubagentStart" });
+    writeFileSync(join(folder, ".claude-code-session-1-agent-a.json.lock"), "someone-else");
+    clock.now += 60_000;
+    recorder.handle("claude-code", { ...base(work), hook_event_name: "PostToolUse" });
+    expect(recorder.read("claude-code", "session-1", "agent-a")?.updated_at).toBe("2026-11-03T14:00:00Z");
+
+    recorder.handle("claude-code", { ...base(work), hook_event_name: "SubagentStop" });
+    expect(recorder.read("claude-code", "session-1", "agent-a")?.status).toBe("done");
+    expect(readFileSync(join(folder, ".claude-code-session-1-agent-a.json.lock"), "utf-8")).toBe("someone-else");
+  });
+
+  it("takes over a lock left behind by a crashed hook", () => {
+    const { recorder, clock, folder, work } = racing();
+    recorder.handle("claude-code", { ...base(work), hook_event_name: "SubagentStart" });
+    const lock = join(folder, ".claude-code-session-1-agent-a.json.lock");
+    writeFileSync(lock, "crashed");
+    const old = (Date.now() - 10_000) / 1000;
+    utimesSync(lock, old, old);
+    clock.now += 60_000;
+    recorder.handle("claude-code", { ...base(work), hook_event_name: "PostToolUse" });
+
+    expect(recorder.read("claude-code", "session-1", "agent-a")?.updated_at).toBe("2026-11-03T14:01:00Z");
+    expect(readdirSync(folder)).toEqual(["claude-code-session-1-agent-a.json"]);
+  });
+
+  it("lets a prompt ticket replace a branch ticket once the prompt is written", () => {
+    const { recorder, clock, work } = racing({}, "feat/BR-1-work");
+    const { subagents } = claudeSession(work);
+    writeFileSync(join(subagents, "agent-agent-a.meta.json"), JSON.stringify({ description: "verify the change" }));
+    recorder.handle("claude-code", { ...base(work), hook_event_name: "SubagentStart" });
+    expect(recorder.read("claude-code", "session-1", "agent-a")?.ticket).toBe("BR-1");
+
+    writeFileSync(join(subagents, "agent-agent-a.jsonl"), JSON.stringify({ type: "user", message: { role: "user", content: "Work on TASK-2." } }) + "\n");
+    clock.now += 1000;
+    recorder.handle("claude-code", { ...base(work), hook_event_name: "PostToolUse" });
+
+    expect(recorder.read("claude-code", "session-1", "agent-a")?.ticket).toBe("TASK-2");
+  });
+});
+
 describe("GitHeadReader", () => {
   it("reads a checkout's branch and follows a worktree's gitdir pointer", () => {
     const repo = temporary();
