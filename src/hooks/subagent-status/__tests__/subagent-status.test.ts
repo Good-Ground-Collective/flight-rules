@@ -257,6 +257,7 @@ describe("SubagentStatusRecorder", () => {
     recorder.handle("claude-code", { hook_event_name: "Notification" });
 
     expect(readdirSync(folder).sort()).toEqual([
+      ".claude-code-session-1-finished-new.json.done",
       ".fresh.tmp",
       "claude-code-session-1-finished-new.json",
       "claude-code-session-1-working-new.json",
@@ -306,28 +307,25 @@ describe("SubagentStatusRecorder", () => {
 });
 
 describe("SubagentStatusRecorder across hook processes", () => {
-  const racing = (env: Record<string, string | undefined> = {}, branch?: string) => {
+  const racing = (branch?: string) => {
     const state = temporary();
     const work = temporary();
     const clock = { now: start };
     let interleave: (() => void) | undefined;
-    const recorder = new SubagentStatusRecorder({
-      env: { XDG_STATE_HOME: state, ...env },
-      now: () => clock.now,
-      readBranch: () => branch,
-      clock: () => {
-        const step = interleave;
-        interleave = undefined;
-        step?.();
-        return Date.now();
-      },
-    });
-    const other = new SubagentStatusRecorder({ env: { XDG_STATE_HOME: state, ...env }, now: () => clock.now, readBranch: () => branch });
+    const now = () => {
+      const step = interleave;
+      interleave = undefined;
+      step?.();
+      return clock.now;
+    };
+    const recorder = new SubagentStatusRecorder({ env: { XDG_STATE_HOME: state }, now, readBranch: () => branch });
+    const other = new SubagentStatusRecorder({ env: { XDG_STATE_HOME: state }, now: () => clock.now, readBranch: () => branch });
     const folder = join(state, "flight-rules", "agents");
-    return { recorder, other, clock, folder, work, race: (step: () => void) => (interleave = step) };
+    const marker = (status: "done" | "error", at: string) => writeFileSync(join(folder, `.claude-code-session-1-agent-a.json.${status}`), at);
+    return { recorder, other, clock, folder, work, marker, race: (step: () => void) => (interleave = step) };
   };
 
-  it("drops a tool-call refresh when a stop lands between its first look and its write", () => {
+  it("repairs a tool-call refresh that renames over a stop which landed after its first look", () => {
     const { recorder, other, clock, work, race } = racing();
     other.handle("claude-code", { ...base(work), hook_event_name: "SubagentStart" });
     clock.now += 60_000;
@@ -337,54 +335,68 @@ describe("SubagentStatusRecorder across hook processes", () => {
     expect(other.read("claude-code", "session-1", "agent-a")).toMatchObject({ status: "done", ended_at: "2026-11-03T14:01:00Z" });
   });
 
-  it("keeps an error that lands while SessionEnd is closing the session", () => {
-    const { recorder, other, work, race } = racing();
-    other.handle("claude-code", { ...base(work), hook_event_name: "SubagentStart" });
-    race(() => other.handle("claude-code", { ...base(work), hook_event_name: "StopFailure", error: "server_error" }));
+  it("leaves a record alone once a stop has marked it, even before the stop writes", () => {
+    const { recorder, clock, work, marker } = racing();
+    recorder.handle("claude-code", { ...base(work), hook_event_name: "SubagentStart" });
+    marker("done", "2026-11-03T14:00:30Z");
+    clock.now += 60_000;
+    recorder.handle("claude-code", { ...base(work), hook_event_name: "PostToolUse" });
+
+    expect(recorder.read("claude-code", "session-1", "agent-a")).toMatchObject({ status: "working", updated_at: "2026-11-03T14:00:00Z" });
+  });
+
+  it("keeps an error whose marker landed while SessionEnd was closing the session", () => {
+    const { recorder, work, marker } = racing();
+    recorder.handle("claude-code", { ...base(work), hook_event_name: "SubagentStart" });
+    marker("error", "2026-11-03T14:00:00Z");
     recorder.handle("claude-code", { session_id: "session-1", hook_event_name: "SessionEnd" });
 
-    expect(other.read("claude-code", "session-1", "agent-a")?.status).toBe("error");
+    expect(recorder.read("claude-code", "session-1", "agent-a")).toMatchObject({ status: "error", ended_at: "2026-11-03T14:00:00Z" });
   });
 
-  it("keeps a stale record that another hook refreshes just before pruning deletes it", () => {
-    const { recorder, other, clock, work, race } = racing();
-    other.handle("claude-code", { ...base(work), hook_event_name: "SubagentStart" });
+  it("lets an error replace a done that SessionEnd already wrote", () => {
+    const { recorder, clock, work } = racing();
+    recorder.handle("claude-code", { ...base(work), hook_event_name: "SubagentStart" });
+    recorder.handle("claude-code", { session_id: "session-1", hook_event_name: "SessionEnd" });
+    clock.now += 1000;
+    recorder.handle("claude-code", { ...base(work), hook_event_name: "StopFailure" });
+
+    expect(recorder.read("claude-code", "session-1", "agent-a")).toMatchObject({ status: "error", ended_at: "2026-11-03T14:00:01Z" });
+  });
+
+  it("does not prune a stale record that a stop has just marked", () => {
+    const { recorder, clock, folder, work, marker } = racing();
+    recorder.handle("claude-code", { ...base(work), hook_event_name: "SubagentStart" });
     clock.now = start + subagentStatusMaxAgeMs + 60_000;
-    race(() => other.handle("claude-code", { ...base(work), hook_event_name: "SubagentStop" }));
+    marker("done", new Date(clock.now).toISOString());
     recorder.prune();
 
-    expect(other.read("claude-code", "session-1", "agent-a")).toMatchObject({ status: "done" });
+    expect(readdirSync(folder).sort()).toEqual([".claude-code-session-1-agent-a.json.done", "claude-code-session-1-agent-a.json"]);
   });
 
-  it("skips a refresh while another hook holds the record, but still records a stop", () => {
+  it("clears the end markers when a sub-agent starts again", () => {
     const { recorder, clock, folder, work } = racing();
-    recorder.handle("claude-code", { ...base(work), hook_event_name: "SubagentStart" });
-    writeFileSync(join(folder, ".claude-code-session-1-agent-a.json.lock"), "someone-else");
-    clock.now += 60_000;
-    recorder.handle("claude-code", { ...base(work), hook_event_name: "PostToolUse" });
-    expect(recorder.read("claude-code", "session-1", "agent-a")?.updated_at).toBe("2026-11-03T14:00:00Z");
-
     recorder.handle("claude-code", { ...base(work), hook_event_name: "SubagentStop" });
-    expect(recorder.read("claude-code", "session-1", "agent-a")?.status).toBe("done");
-    expect(readFileSync(join(folder, ".claude-code-session-1-agent-a.json.lock"), "utf-8")).toBe("someone-else");
-  });
-
-  it("takes over a lock left behind by a crashed hook", () => {
-    const { recorder, clock, folder, work } = racing();
+    clock.now += 60_000;
     recorder.handle("claude-code", { ...base(work), hook_event_name: "SubagentStart" });
-    const lock = join(folder, ".claude-code-session-1-agent-a.json.lock");
-    writeFileSync(lock, "crashed");
-    const old = (Date.now() - 10_000) / 1000;
-    utimesSync(lock, old, old);
     clock.now += 60_000;
     recorder.handle("claude-code", { ...base(work), hook_event_name: "PostToolUse" });
 
-    expect(recorder.read("claude-code", "session-1", "agent-a")?.updated_at).toBe("2026-11-03T14:01:00Z");
+    expect(recorder.read("claude-code", "session-1", "agent-a")).toMatchObject({ status: "working", ended_at: null, updated_at: "2026-11-03T14:02:00Z" });
     expect(readdirSync(folder)).toEqual(["claude-code-session-1-agent-a.json"]);
   });
 
+  it("prunes a finished record together with its markers", () => {
+    const { recorder, clock, folder, work } = racing();
+    recorder.handle("claude-code", { ...base(work), hook_event_name: "SubagentStop" });
+    clock.now = start + subagentStatusMaxAgeMs + 60_000;
+    recorder.prune();
+
+    expect(readdirSync(folder)).toEqual([]);
+  });
+
   it("lets a prompt ticket replace a branch ticket once the prompt is written", () => {
-    const { recorder, clock, work } = racing({}, "feat/BR-1-work");
+    const { recorder, clock, work } = racing("feat/BR-1-work");
     const { subagents } = claudeSession(work);
     writeFileSync(join(subagents, "agent-agent-a.meta.json"), JSON.stringify({ description: "verify the change" }));
     recorder.handle("claude-code", { ...base(work), hook_event_name: "SubagentStart" });

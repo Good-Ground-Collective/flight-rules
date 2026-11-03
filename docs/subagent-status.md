@@ -1,10 +1,12 @@
 # Sub-agent status files
 
-Terminal multiplexers see terminals, not the sub-agents a session runs inside one. The plugin's hooks keep one JSON file per sub-agent run so a pane can list them under the terminal that started them. The hooks need no setup beyond installing the plugin. Everything stays local: no network, no output, and a failure never affects the agent.
+Terminal multiplexers see terminals, not the sub-agents a session runs inside one. The plugin's hooks keep one JSON file per sub-agent run so a pane can list them under the terminal that started them. In Claude Code the hooks need no setup beyond installing the plugin. Codex also needs you to trust them once (see [Hosts](#hosts)). Everything stays local: no network, no output, and a failure never affects the agent.
 
 ## Where the files are
 
-`$XDG_STATE_HOME/flight-rules/agents/` (default `~/.local/state/flight-rules/agents/`), one file per run named `<harness>-<session_id>-<agent_id>.json`, with every character outside `[A-Za-z0-9._-]` replaced by `_`. Each write goes to a temp file in the same folder and is renamed into place.
+`$XDG_STATE_HOME/flight-rules/agents/` (default `~/.local/state/flight-rules/agents/`), one file per run named `<harness>-<session_id>-<agent_id>.json`, with every character outside `[A-Za-z0-9._-]` replaced by `_`. Each write goes to a temp file in the same folder and is renamed into place. The folder also holds dotfiles that are not records: temp files, and `.<record>.done` / `.<record>.error` markers. Readers should only read names that end in `.json` and don't start with a dot.
+
+Hook processes can run at the same time, for example a sub-agent's last tool call next to its stop, or SessionEnd next to a failure. So a finished state doesn't depend on which rename lands last. An end creates its marker with an exclusive create before it writes the record. Every writer re-reads the markers after its rename and rewrites the record if they disagree. An error outranks done.
 
 ```json
 {

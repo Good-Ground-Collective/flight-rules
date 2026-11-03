@@ -36,12 +36,6 @@ export const subagentTouchIntervalMs = 30_000;
 
 const maxDescriptionLength = 120;
 
-/** Lock timing is real wall-clock time, independent of the injected `now`. */
-const requiredLockWaitMs = 250;
-const optionalLockWaitMs = 25;
-const lockPollMs = 5;
-const lockStaleMs = 2000;
-const lockSleeper = new Int32Array(new SharedArrayBuffer(4));
 const transcriptHeadBytes = 64 * 1024;
 const failedTaskStatuses: ReadonlySet<string> = new Set(["failed", "error", "errored"]);
 
@@ -74,8 +68,6 @@ export interface SubagentStatusRecorderProps {
   now?: () => number;
   extractor?: TicketKeyExtractor;
   readBranch?: (cwd: string) => string | undefined;
-  /** Wall-clock milliseconds for lock waits; defaults to `Date.now`. */
-  clock?: () => number;
 }
 
 /** Ids become one file name each, limited to `[A-Za-z0-9._-]`. */
@@ -95,7 +87,6 @@ export class SubagentStatusRecorder {
   private readonly now: () => number;
   private readonly extractor: TicketKeyExtractor;
   private readonly readBranch: (cwd: string) => string | undefined;
-  private readonly clock: () => number;
 
   constructor(props: SubagentStatusRecorderProps = {}) {
     this.env = props.env ?? process.env;
@@ -103,7 +94,6 @@ export class SubagentStatusRecorder {
     this.now = props.now ?? Date.now;
     this.extractor = props.extractor ?? new TicketKeyExtractor();
     this.readBranch = props.readBranch ?? ((cwd) => new GitHeadReader().branch(cwd));
-    this.clock = props.clock ?? Date.now;
   }
 
   folder(): string {
@@ -159,10 +149,8 @@ export class SubagentStatusRecorder {
       const path = join(this.folder(), name);
       if (this.isRecordName(name)) {
         if (!this.expired(path, cutoff)) continue;
-        // Re-checked under the lock: a writer may have replaced the record since the first look.
-        this.locked(path, false, () => {
-          if (this.expired(path, cutoff)) rmSync(path, { force: true });
-        });
+        for (const marker of this.markers(path)) rmSync(marker, { force: true });
+        rmSync(path, { force: true });
       } else if (this.mtime(path) < cutoff) {
         rmSync(path, { force: true });
       }
@@ -173,62 +161,107 @@ export class SubagentStatusRecorder {
     const agent = input.agent_id;
     if (agent === undefined) return;
     const path = this.pathFor(harness, input.session_id, agent);
-    this.locked(path, true, () => {
-      const at = this.timestamp();
-      const base = this.readPath(path) ?? this.fresh(harness, input, agent, at);
-      this.write(path, this.enrich({ ...base, status: "working", updated_at: at, ended_at: null }, input));
-    });
+    for (const marker of this.markers(path)) rmSync(marker, { force: true });
+    const at = this.timestamp();
+    const base = this.readPath(path) ?? this.fresh(harness, input, agent, at);
+    this.commit(path, this.enrich({ ...base, status: "working", updated_at: at, ended_at: null }, input));
   }
 
-  private stop(harness: SubagentHarness, input: HookPayload, status: SubagentStatus): void {
+  private stop(harness: SubagentHarness, input: HookPayload, status: Exclude<SubagentStatus, "working">): void {
     const agent = input.agent_id;
     if (agent === undefined) return;
     const path = this.pathFor(harness, input.session_id, agent);
-    this.locked(path, true, () => {
-      const existing = this.readPath(path);
-      if (existing !== undefined && existing.status === "error") return;
-      const at = this.timestamp();
-      const base = existing ?? this.fresh(harness, input, agent, at);
-      this.write(path, this.enrich({ ...base, status, updated_at: at, ended_at: at }, input));
-    });
+    const at = this.timestamp();
+    const ended = this.end(path, status, at);
+    const base = this.readPath(path) ?? this.fresh(harness, input, agent, at);
+    this.commit(path, this.enrich({ ...base, ...ended, updated_at: at }, input));
   }
 
   private touch(harness: SubagentHarness, input: HookPayload): void {
     const agent = input.agent_id;
     if (agent === undefined) return;
     const path = this.pathFor(harness, input.session_id, agent);
-    const peek = this.readPath(path);
-    if (peek !== undefined && (peek.status !== "working" || (this.recent(peek) && this.resolved(peek)))) return;
-    // A refresh is the one write worth dropping when another hook holds the record.
-    this.locked(path, false, () => {
-      const existing = this.readPath(path);
-      if (existing !== undefined && existing.status !== "working") return;
-      const at = this.timestamp();
-      const next = this.enrich({ ...(existing ?? this.fresh(harness, input, agent, at)), updated_at: at }, input);
-      if (existing !== undefined && this.recent(existing) && next.description === existing.description && next.ticket === existing.ticket) return;
-      this.write(path, next);
-    });
+    if (this.terminal(path) !== undefined) return;
+    const existing = this.readPath(path);
+    if (existing !== undefined && (existing.status !== "working" || (this.recent(existing) && this.resolved(existing)))) return;
+    const at = this.timestamp();
+    const next = this.enrich({ ...(existing ?? this.fresh(harness, input, agent, at)), updated_at: at }, input);
+    if (existing !== undefined && this.recent(existing) && next.description === existing.description && next.ticket === existing.ticket) return;
+    this.commit(path, next);
   }
 
   private endSession(harness: SubagentHarness, session: string): void {
+    const at = this.timestamp();
     for (const name of this.entries()) {
       if (!this.isRecordName(name)) continue;
       const path = join(this.folder(), name);
-      const peek = this.readPath(path);
-      if (peek === undefined || peek.harness !== harness || peek.session_id !== session || peek.status !== "working") continue;
-      this.locked(path, true, () => {
-        const record = this.readPath(path);
-        if (record === undefined || record.status !== "working") return;
-        const at = this.timestamp();
-        this.write(path, { ...record, status: "done", updated_at: at, ended_at: at });
-      });
+      const record = this.readPath(path);
+      if (record === undefined || record.harness !== harness || record.session_id !== session || record.status !== "working") continue;
+      this.commit(path, { ...record, ...this.end(path, "done", at), updated_at: at });
     }
+  }
+
+  /**
+   * Hook processes can run at once (a sub-agent's last tool call beside its
+   * stop, SessionEnd beside a failure), so a finished state is never left to
+   * the last rename. Each end creates `.<record>.done` or `.<record>.error`
+   * with an exclusive create before it writes, and every writer re-reads the
+   * markers after its rename and rewrites the record if they disagree. Error
+   * outranks done, and the first marker of each kind keeps its time.
+   */
+  private end(path: string, status: Exclude<SubagentStatus, "working">, at: string): { status: SubagentStatus; ended_at: string } {
+    try {
+      mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+      writeFileSync(this.markerPath(path, status), at, { flag: "wx", mode: 0o600 });
+    } catch {
+      // The marker already exists, and its first time stands.
+    }
+    return this.terminal(path) ?? { status, ended_at: at };
+  }
+
+  private terminal(path: string): { status: SubagentStatus; ended_at: string } | undefined {
+    for (const status of ["error", "done"] as const) {
+      try {
+        const ended = readFileSync(this.markerPath(path, status), "utf-8").trim();
+        if (ended !== "") return { status, ended_at: ended };
+      } catch {
+        continue;
+      }
+    }
+    return undefined;
+  }
+
+  private commit(path: string, record: SubagentStatusRecord): void {
+    let next = record;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      this.write(path, next);
+      const ended = this.terminal(path);
+      if (ended === undefined || (next.status === ended.status && next.ended_at === ended.ended_at)) return;
+      next = { ...(this.readPath(path) ?? next), ...ended, updated_at: ended.ended_at > next.updated_at ? ended.ended_at : next.updated_at };
+    }
+  }
+
+  private markerPath(path: string, status: Exclude<SubagentStatus, "working">): string {
+    return join(dirname(path), `.${basename(path)}.${status}`);
+  }
+
+  private markers(path: string): string[] {
+    return [this.markerPath(path, "done"), this.markerPath(path, "error")];
   }
 
   private expired(path: string, cutoff: number): boolean {
     const record = this.readPath(path);
     const last = record === undefined ? this.mtime(path) : Date.parse(record.ended_at ?? record.updated_at);
-    return !Number.isFinite(last) || last < cutoff;
+    const marked = Math.max(...this.markers(path).map((marker) => Date.parse(this.readText(marker) ?? "")).filter(Number.isFinite), -Infinity);
+    return (!Number.isFinite(last) || last < cutoff) && marked < cutoff;
+  }
+
+  private readText(path: string): string | undefined {
+    try {
+      return readFileSync(path, "utf-8").trim();
+    } catch {
+      return undefined;
+    }
   }
 
   private recent(record: SubagentStatusRecord): boolean {
@@ -351,55 +384,15 @@ export class SubagentStatusRecorder {
     }
   }
 
-  /**
-   * Runs `fn` holding `<folder>/.<record>.lock`, so read-modify-write steps
-   * from concurrent hook processes never interleave. A lock older than
-   * `lockStaleMs` is taken over. When the wait runs out, a required step runs
-   * anyway, since a lost stop is worse than a race, and an optional one is
-   * skipped.
-   */
-  private locked(path: string, required: boolean, fn: () => void): void {
-    const lock = join(dirname(path), `.${basename(path)}.lock`);
-    const token = randomBytes(6).toString("hex");
-    const deadline = this.clock() + (required ? requiredLockWaitMs : optionalLockWaitMs);
-    let held = false;
-    for (;;) {
-      try {
-        mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-        writeFileSync(lock, token, { flag: "wx", mode: 0o600 });
-        held = true;
-        break;
-      } catch {
-        if (this.clock() - this.mtime(lock, this.clock()) > lockStaleMs) rmSync(lock, { force: true });
-        else if (this.clock() >= deadline) break;
-        else Atomics.wait(lockSleeper, 0, 0, lockPollMs);
-      }
-    }
-    if (!held && !required) return;
-    try {
-      fn();
-    } finally {
-      if (held) this.release(lock, token);
-    }
-  }
-
-  private release(lock: string, token: string): void {
-    try {
-      if (readFileSync(lock, "utf-8") === token) rmSync(lock, { force: true });
-    } catch {
-      return;
-    }
-  }
-
   private isRecordName(name: string): boolean {
     return name.endsWith(".json") && !name.startsWith(".");
   }
 
-  private mtime(path: string, missing = Number.NaN): number {
+  private mtime(path: string): number {
     try {
       return statSync(path).mtimeMs;
     } catch {
-      return missing;
+      return Number.NaN;
     }
   }
 
