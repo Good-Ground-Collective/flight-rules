@@ -11,7 +11,7 @@ if (!version || !/^\d+\.\d+\.\d+(?:-[\w.-]+)?(?:\+[\w.-]+)?$/.test(version)) {
 const targets = [
   "package.json", "package-lock.json",
   "dist/claude/.claude-plugin/plugin.json",
-  "dist/codex/.codex-plugin/plugin.json", "dist/codex/plugin.json",
+  "dist/codex/.codex-plugin/plugin.json",
 ];
 for (const target of targets) {
   const path = new URL(`../${target}`, import.meta.url);

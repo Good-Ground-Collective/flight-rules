@@ -63,7 +63,7 @@ describe("canonical agent and skill sources", () => {
       for (const path of ["agents/variants.json", "adapters/claude/model-tiers.json", "adapters/codex/model-tiers.json", "dist/review.js"]) {
         expect(paths.has(path)).toBe(true);
       }
-      for (const path of ["dist/claude/.claude-plugin/plugin.json", "dist/codex/.codex-plugin/plugin.json", "dist/codex/plugin.json", ".agents/plugins/marketplace.json"]) {
+      for (const path of ["dist/claude/.claude-plugin/plugin.json", "dist/codex/.codex-plugin/plugin.json", ".agents/plugins/marketplace.json"]) {
         expect(paths.has(path)).toBe(true);
       }
 

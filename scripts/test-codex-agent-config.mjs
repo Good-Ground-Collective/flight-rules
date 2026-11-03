@@ -70,7 +70,7 @@ try {
         const inspected = await send(3, "plugin/read", { marketplacePath: join(scratch, ".agents/plugins/marketplace.json"), pluginName: "flight-rules" });
         assert.ok(inspected.result, JSON.stringify(inspected.error));
         writeFileSync(join(scratch, "plugin.json"), JSON.stringify(inspected.result, null, 2));
-        const version = JSON.parse(readFileSync(join(plugin, "plugin.json"), "utf8")).version;
+        const version = JSON.parse(readFileSync(join(plugin, ".codex-plugin", "plugin.json"), "utf8")).version;
         assert.equal(inspected.result.plugin.summary.localVersion, version);
         const skills = readdirSync(join(plugin, "skills")).filter((name) => existsSync(join(plugin, "skills", name, "SKILL.md"))).map((name) => `flight-rules:${name}`).sort();
         assert.deepEqual(inspected.result.plugin.skills.map((skill) => skill.name).sort(), skills);
