@@ -423,7 +423,7 @@ describe('skill operation routes', () => {
 
 			expect(result).toMatchObject({ status: 'completed', report: 'done' })
 			expect(scripted.outputs[0]).toMatchObject({ isError: true })
-			expect(scripted.outputs[0]?.text).toContain('id')
+			expect(scripted.outputs[0]?.text).toMatch(/"id"/)
 			expect(scripted.outputs[0]?.text).toContain('Expected input for doc')
 			expect(scripted.outputs[1]?.isError).toBe(false)
 			expect(handled.mock.calls).toEqual([['x']])
@@ -440,6 +440,18 @@ describe('skill operation routes', () => {
 			expect(scripted.outputs[0]).toMatchObject({ isError: true })
 			expect(scripted.outputs[0]?.text).toContain('Valid operation ids: doc, check')
 			expect(scripted.outputs[0]?.text).not.toContain('hidden')
+		})
+
+		it('keeps a denied operation terminal and does not leak its input fields', async () => {
+			const { skills, scripted } = docRuntime({ turns: [[call('hidden', {})]] })
+
+			const result = await skills.invoke('remediate-review', context, {})
+
+			expect(result).toMatchObject({
+				status: 'failed',
+				failure: { code: 'TOOL_FAILED' },
+			})
+			for (const output of scripted.outputs) expect(output.text).not.toContain('secret')
 		})
 
 		it('still ends the run when an operation fails while executing', async () => {

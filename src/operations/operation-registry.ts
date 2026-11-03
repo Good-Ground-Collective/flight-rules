@@ -115,6 +115,7 @@ export class OperationInputShape {
   }
 
   render(fields: readonly OperationInputField[]): string {
+    if (fields.length === 0) return "{}";
     return `{ ${fields.map(({ name, type, required }) => `${name}${required ? "" : "?"}: ${type}`).join(", ")} }`;
   }
 

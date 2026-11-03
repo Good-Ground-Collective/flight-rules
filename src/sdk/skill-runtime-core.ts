@@ -4,6 +4,7 @@ import { z } from "zod";
 import { AgentFrontmatterSchema } from "../agents/agent-frontmatter/agent-frontmatter.schema.js";
 import type { AgentDefinition } from "../agents/agent-registry/agent-registry.js";
 import {
+  OperationAccessDeniedError,
   OperationInputError,
   UnknownOperationError,
   operationInputShape,
@@ -663,8 +664,12 @@ export class SharedSkillToolHandlers {
     } catch (cause) {
       if (cause instanceof UnknownOperationError) throw this.unknownOperation(args.operationId);
       if (!(cause instanceof OperationInputError)) throw cause;
-      const fields =
-        (operations.admitted?.() ?? []).find((entry) => entry.id === args.operationId)?.input ?? [];
+      const admittedOperations = operations.admitted?.();
+      if (admittedOperations === undefined) throw cause;
+      const admitted = admittedOperations.find((entry) => entry.id === args.operationId);
+      if (admitted === undefined)
+        throw new OperationAccessDeniedError(`Access denied for operation: ${args.operationId}`);
+      const fields = admitted.input ?? [];
       throw new RecoverableOperationInputError(
         `${cause.message}\nExpected input for ${args.operationId}: ${operationInputShape.render(fields)}`,
       );
