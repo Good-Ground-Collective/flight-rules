@@ -1054,6 +1054,8 @@ var seedCompetencies = [
   "async-coordination",
   "auth-check"
 ];
+var usageHandoffThresholdSchema = z10.coerce.number().min(1).max(100).describe("Percent of a session or weekly usage window at which the usage-handoff hook hands the work to the other harness; defaults to 95");
+var usageHandoffMinResetMinutesSchema = z10.coerce.number().min(0).describe("Minutes left in a usage window below which the usage-handoff hook skips the handoff and just waits for the reset; defaults to 10");
 var ConfigSchema = z10.object({
   tracker: z10.enum(["github", "jira"]),
   repo: z10.string().optional().describe("GitHub owner/repo; required when tracker is github"),
@@ -1076,7 +1078,9 @@ var ConfigSchema = z10.object({
   qaRecipe: z10.string().optional().describe(
     "Deprecated: path to a legacy QA recipe, read only when no QA.md or AGENTS.md QA section exists; relative paths resolve against the directory holding this config file; defaults to flight-rules.qa.md beside it"
   ),
-  competencies: z10.array(z10.string()).default([...seedCompetencies])
+  competencies: z10.array(z10.string()).default([...seedCompetencies]),
+  usageHandoffThreshold: usageHandoffThresholdSchema.optional(),
+  usageHandoffMinResetMinutes: usageHandoffMinResetMinutesSchema.optional()
 }).superRefine((cfg, ctx) => {
   if (cfg.tracker === "github" && cfg.repo === void 0) {
     ctx.addIssue({
@@ -8627,7 +8631,7 @@ function createFlightRules(props = {}) {
 var settingsScopes = ["user", "project", "local"];
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "2.0.3";
+var appVersion = false ? "0.0.0-dev" : "2.1.0";
 
 // src/agents/agent-frontmatter/agent-frontmatter.ts
 import { parse as parseYaml4 } from "yaml";
@@ -8870,7 +8874,7 @@ var NativePluginCompiler = class {
     const diagnostics = codexEmitter === void 0 ? [] : [...new Set(definitions.flatMap((agent) => codexEmitter.diagnostics(agent)))];
     if (target === "codex")
       diagnostics.push(
-        "Claude commit hooks are omitted; Codex gets only the sub-agent status hooks, which run once trusted through /hooks."
+        "Claude commit hooks are omitted; Codex gets only the sub-agent status and usage-handoff hooks, which run once trusted through /hooks."
       );
     for (const executable of ["flight-rules", "flight-rules.mjs"]) {
       if (!existsSync11(join13(this.sourceDir, "bin", executable))) {

@@ -1,5 +1,5 @@
 {
-  "description": "Keep a status file per sub-agent under $XDG_STATE_HOME/flight-rules/agents so terminal multiplexers can show in-process sub-agents",
+  "description": "Keep a status file per sub-agent under $XDG_STATE_HOME/flight-rules/agents so terminal multiplexers can show in-process sub-agents, and hand work to Claude Code over hc when the session or weekly usage limit is nearly used up",
   "hooks": {
     "SubagentStart": [
       {
@@ -8,6 +8,17 @@
             "type": "command",
             "command": "node \"${PLUGIN_ROOT}/bin/flight-rules.mjs\" hook subagent-status --harness codex",
             "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/bin/flight-rules.mjs\" hook usage-handoff --harness codex",
+            "timeout": 30
           }
         ]
       }

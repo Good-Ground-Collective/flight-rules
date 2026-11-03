@@ -1163,6 +1163,8 @@ var seedCompetencies = [
   "async-coordination",
   "auth-check"
 ];
+var usageHandoffThresholdSchema = z13.coerce.number().min(1).max(100).describe("Percent of a session or weekly usage window at which the usage-handoff hook hands the work to the other harness; defaults to 95");
+var usageHandoffMinResetMinutesSchema = z13.coerce.number().min(0).describe("Minutes left in a usage window below which the usage-handoff hook skips the handoff and just waits for the reset; defaults to 10");
 var ConfigSchema = z13.object({
   tracker: z13.enum(["github", "jira"]),
   repo: z13.string().optional().describe("GitHub owner/repo; required when tracker is github"),
@@ -1185,7 +1187,9 @@ var ConfigSchema = z13.object({
   qaRecipe: z13.string().optional().describe(
     "Deprecated: path to a legacy QA recipe, read only when no QA.md or AGENTS.md QA section exists; relative paths resolve against the directory holding this config file; defaults to flight-rules.qa.md beside it"
   ),
-  competencies: z13.array(z13.string()).default([...seedCompetencies])
+  competencies: z13.array(z13.string()).default([...seedCompetencies]),
+  usageHandoffThreshold: usageHandoffThresholdSchema.optional(),
+  usageHandoffMinResetMinutes: usageHandoffMinResetMinutesSchema.optional()
 }).superRefine((cfg, ctx) => {
   if (cfg.tracker === "github" && cfg.repo === void 0) {
     ctx.addIssue({
@@ -2079,6 +2083,16 @@ var excludedRoutes = [
     path: ["hook", "subagent-status"],
     aliases: [],
     reason: "Consumes Claude Code and Codex sub-agent lifecycle payloads and writes local status files."
+  },
+  {
+    path: ["hook", "usage-handoff"],
+    aliases: [],
+    reason: "Consumes Claude Code and Codex Stop payloads and drives local hc terminals."
+  },
+  {
+    path: ["handoff", "wait"],
+    aliases: [],
+    reason: "Runs a long-lived waiter in an hc terminal that talks to local agent terminals."
   },
   {
     path: ["agents", "status"],

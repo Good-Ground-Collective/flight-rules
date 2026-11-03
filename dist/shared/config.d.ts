@@ -1,5 +1,7 @@
 import { z } from "zod";
 export declare const seedCompetencies: readonly ["define-a-schema", "wire-an-endpoint", "write-a-migration", "pure-transform", "write-a-query", "mapper-adapter", "harden-edge-cases", "business-rule", "external-api-client", "reducer-state", "async-coordination", "auth-check"];
+export declare const usageHandoffThresholdSchema: z.ZodCoercedNumber<unknown>;
+export declare const usageHandoffMinResetMinutesSchema: z.ZodCoercedNumber<unknown>;
 export declare const ConfigSchema: z.ZodObject<{
     tracker: z.ZodEnum<{
         github: "github";
@@ -21,6 +23,8 @@ export declare const ConfigSchema: z.ZodObject<{
     rfcStoragePath: z.ZodOptional<z.ZodString>;
     qaRecipe: z.ZodOptional<z.ZodString>;
     competencies: z.ZodDefault<z.ZodArray<z.ZodString>>;
+    usageHandoffThreshold: z.ZodOptional<z.ZodCoercedNumber<unknown>>;
+    usageHandoffMinResetMinutes: z.ZodOptional<z.ZodCoercedNumber<unknown>>;
 }, z.core.$strip>;
 export type Config = z.infer<typeof ConfigSchema>;
 export declare function parseFrontmatter(contents: string): Record<string, unknown>;

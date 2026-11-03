@@ -31456,6 +31456,8 @@ var seedCompetencies = [
   "async-coordination",
   "auth-check"
 ];
+var usageHandoffThresholdSchema = external_exports.coerce.number().min(1).max(100).describe("Percent of a session or weekly usage window at which the usage-handoff hook hands the work to the other harness; defaults to 95");
+var usageHandoffMinResetMinutesSchema = external_exports.coerce.number().min(0).describe("Minutes left in a usage window below which the usage-handoff hook skips the handoff and just waits for the reset; defaults to 10");
 var ConfigSchema = external_exports.object({
   tracker: external_exports.enum(["github", "jira"]),
   repo: external_exports.string().optional().describe("GitHub owner/repo; required when tracker is github"),
@@ -31478,7 +31480,9 @@ var ConfigSchema = external_exports.object({
   qaRecipe: external_exports.string().optional().describe(
     "Deprecated: path to a legacy QA recipe, read only when no QA.md or AGENTS.md QA section exists; relative paths resolve against the directory holding this config file; defaults to flight-rules.qa.md beside it"
   ),
-  competencies: external_exports.array(external_exports.string()).default([...seedCompetencies])
+  competencies: external_exports.array(external_exports.string()).default([...seedCompetencies]),
+  usageHandoffThreshold: usageHandoffThresholdSchema.optional(),
+  usageHandoffMinResetMinutes: usageHandoffMinResetMinutesSchema.optional()
 }).superRefine((cfg, ctx) => {
   if (cfg.tracker === "github" && cfg.repo === void 0) {
     ctx.addIssue({
@@ -46195,8 +46199,8 @@ var LayeredBodyAdfConverter = class {
   }
   /** Looks up a target's basename as an OWN entry, so inherited names (`constructor`, `__proto__`) never resolve. */
   mediaByName(target, media) {
-    const basename7 = target.slice(target.lastIndexOf("/") + 1);
-    return Object.hasOwn(media, basename7) ? media[basename7] : void 0;
+    const basename8 = target.slice(target.lastIndexOf("/") + 1);
+    return Object.hasOwn(media, basename8) ? media[basename8] : void 0;
   }
   /** The ADF block type an mdast node maps to, or `''` when it only degrades to literal text. */
   adfType(node3) {
@@ -52671,6 +52675,215 @@ function createUsersCommand(getTracker, registry2) {
   return users;
 }
 
+// src/hooks/usage-handoff/agent-transport.ts
+import { execFile as execFile7 } from "node:child_process";
+import { promisify as promisify7 } from "node:util";
+var execFileAsync = promisify7(execFile7);
+var HcTerminalSchema = external_exports.looseObject({ address: external_exports.string().min(1) });
+var HcLabelsSchema = external_exports.looseObject({ labels: external_exports.record(external_exports.string(), external_exports.string()).optional() });
+var HcListSchema = external_exports.looseObject({
+  terminals: external_exports.array(
+    external_exports.looseObject({
+      address: external_exports.string().min(1),
+      agent: external_exports.string().optional(),
+      state: external_exports.string().optional(),
+      status: external_exports.string().optional()
+    })
+  )
+});
+var agentCommands = { "claude-code": "claude", codex: "codex" };
+var idleStatuses = /* @__PURE__ */ new Set(["idle", "done"]);
+var HcAgentTransport = class {
+  flightRulesCommand;
+  hcBinary;
+  constructor(props = {}) {
+    this.flightRulesCommand = props.flightRulesCommand ?? [process.execPath, process.argv[1] ?? "flight-rules"];
+    this.hcBinary = props.hcBinary ?? "hc";
+  }
+  async spaceOf(terminal) {
+    const parsed = HcLabelsSchema.parse(JSON.parse(await this.hc(["get", terminal, "--json"])));
+    return parsed.labels?.["herdr.space"];
+  }
+  async findIdleAgent(space, harness, except) {
+    const output2 = await this.hc(["ls", "--json", "--label", `herdr.space=${space}`]);
+    return HcListSchema.parse(JSON.parse(output2)).terminals.find(
+      (terminal) => terminal.address !== except && terminal.agent === harness && terminal.state === "live" && terminal.status !== void 0 && idleStatuses.has(terminal.status)
+    )?.address;
+  }
+  async send(terminal, text6) {
+    await this.hc(["send", terminal, text6]);
+  }
+  async startAgent(agent) {
+    return this.run(agent.space, agent.cwd, [agentCommands[agent.harness], agent.prompt]);
+  }
+  async startWaiter(space, cwd, args) {
+    return this.run(space, cwd, [...this.flightRulesCommand, ...args]);
+  }
+  async waitUntilIdle(terminal, timeoutSeconds) {
+    await this.hc(["wait", terminal, "--timeout", String(timeoutSeconds)], (timeoutSeconds + 15) * 1e3);
+  }
+  async run(space, cwd, command) {
+    const labels = space === void 0 ? [] : ["--label", `herdr.space=${space}`];
+    const output2 = await this.hc([
+      "run",
+      "--bg",
+      "--json",
+      "--no-notify",
+      "--outlive-parent",
+      "--cwd",
+      cwd,
+      ...labels,
+      "--",
+      ...command
+    ]);
+    return HcTerminalSchema.parse(JSON.parse(output2)).address;
+  }
+  async hc(args, timeoutMs = 2e4) {
+    const { stdout } = await execFileAsync(this.hcBinary, [...args], { timeout: timeoutMs, encoding: "utf-8" });
+    return stdout;
+  }
+};
+
+// src/hooks/usage-handoff/handoff-waiter.ts
+import { existsSync as existsSync11, rmSync } from "node:fs";
+
+// src/hooks/usage-handoff/usage-snapshot.ts
+var UsageHarnessSchema = external_exports.enum(["claude-code", "codex"]);
+var otherHarness = { "claude-code": "codex", codex: "claude-code" };
+var harnessLabel = { "claude-code": "Claude Code", codex: "Codex" };
+var UsageWindowSchema = external_exports.object({
+  kind: external_exports.enum(["session", "weekly"]),
+  percent: external_exports.number().min(0),
+  resetsAt: external_exports.number().describe("Epoch milliseconds")
+});
+var UsageSnapshot = class {
+  constructor(windows) {
+    this.windows = windows;
+  }
+  windows;
+  /**
+   * The window closest to its limit among those still open at `now`: that is
+   * the one that will stop the agent, and its reset is when work can resume.
+   */
+  busiest(now) {
+    const open2 = this.windows.filter((window) => window.resetsAt > now);
+    return open2.reduce(
+      (best, window) => best === void 0 || window.percent > best.percent ? window : best,
+      void 0
+    );
+  }
+};
+
+// src/hooks/usage-handoff/handoff-waiter.ts
+var HandoffWaiterPropsSchema = external_exports.object({
+  transport: external_exports.custom(),
+  resetSlackMs: external_exports.number().min(0).default(3e4),
+  sleepChunkMs: external_exports.number().positive().default(6e4),
+  handbackPollMs: external_exports.number().positive().default(5e3),
+  maxHandbackWaits: external_exports.number().int().positive().default(60)
+});
+var HandoffWaitRequestSchema = external_exports.object({
+  origin: external_exports.string().min(1),
+  standIn: external_exports.string().min(1).optional(),
+  resetsAt: external_exports.number(),
+  handback: external_exports.string().min(1).optional(),
+  harness: UsageHarnessSchema
+});
+var resumeMessage = "Usage has reset. Continue the work you were doing before you stopped.";
+var HandoffWaiter = class {
+  transport;
+  resetSlackMs;
+  sleepChunkMs;
+  handbackPollMs;
+  maxHandbackWaits;
+  constructor(props) {
+    const valid = HandoffWaiterPropsSchema.parse(props);
+    this.transport = valid.transport;
+    this.resetSlackMs = valid.resetSlackMs;
+    this.sleepChunkMs = valid.sleepChunkMs;
+    this.handbackPollMs = valid.handbackPollMs;
+    this.maxHandbackWaits = valid.maxHandbackWaits;
+  }
+  async run(request2) {
+    const target = request2.resetsAt + this.resetSlackMs;
+    while (Date.now() < target) {
+      await this.sleep(Math.min(this.sleepChunkMs, target - Date.now()));
+    }
+    if (request2.standIn === void 0 || request2.handback === void 0) {
+      await this.transport.send(request2.origin, resumeMessage);
+      return;
+    }
+    const handedBack = await this.collectHandback(request2.standIn, request2.handback);
+    const standInName = harnessLabel[otherHarness[request2.harness]];
+    if (handedBack) {
+      await this.transport.send(
+        request2.origin,
+        `Usage has reset. A ${standInName} agent carried on from your handoff; read its handback at ${request2.handback} and continue.`
+      );
+    } else {
+      await this.transport.send(
+        request2.origin,
+        `Usage has reset. The ${standInName} agent in ${request2.standIn} did not write a handback, so check what it did before continuing.`
+      );
+    }
+  }
+  async collectHandback(standIn, handback) {
+    rmSync(handback, { force: true });
+    try {
+      await this.transport.send(
+        standIn,
+        `The original agent's usage has reset. Stop at a safe point and write a handback to ${handback}: what you finished, what is left, the state of the branch or PR, and anything the original agent needs to know. Then stop.`
+      );
+    } catch {
+      return false;
+    }
+    for (let attempt = 0; attempt < this.maxHandbackWaits; attempt++) {
+      await this.sleep(this.handbackPollMs);
+      try {
+        await this.transport.waitUntilIdle(standIn, 600);
+      } catch {
+        return existsSync11(handback);
+      }
+      if (existsSync11(handback)) return true;
+    }
+    return false;
+  }
+  sleep(ms) {
+    return new Promise((resolve16) => setTimeout(resolve16, Math.max(0, ms)));
+  }
+};
+
+// src/hooks/commands/handoff/command.ts
+var WaitOptionsSchema = external_exports.object({
+  origin: external_exports.string(),
+  standIn: external_exports.string().optional(),
+  at: external_exports.coerce.number(),
+  handback: external_exports.string().optional(),
+  harness: external_exports.string()
+}).transform(
+  (options) => HandoffWaitRequestSchema.parse({
+    origin: options.origin,
+    standIn: options.standIn,
+    resetsAt: options.at,
+    handback: options.handback,
+    harness: options.harness
+  })
+);
+function createHandoffCommand(getTransport = () => new HcAgentTransport()) {
+  const handoff2 = new Command("handoff").description("finish a usage handoff between Claude Code and Codex");
+  handoff2.command("wait").description(
+    "wait for a usage window to reset, then collect the stand-in agent's handback and send it to the original terminal, or tell the original agent to continue; runs in an hc terminal started by `hook usage-handoff`"
+  ).requiredOption("--origin <terminal>", "the hc terminal of the agent that ran out of usage").option("--stand-in <terminal>", "the hc terminal of the agent that took the work over").requiredOption("--at <epoch-ms>", "when the usage window resets, in epoch milliseconds").option("--handback <path>", "where the stand-in writes its handback").option("--harness <harness>", "the harness that ran out of usage: claude-code or codex", "claude-code").exitOverride().action(async (opts) => {
+    try {
+      const request2 = WaitOptionsSchema.parse(opts);
+      await new HandoffWaiter({ transport: getTransport() }).run(request2);
+    } catch {
+      return;
+    }
+  });
+  return handoff2;
+}
+
 // src/hooks/commands/hook/command.ts
 import { text as text5 } from "node:stream/consumers";
 
@@ -52805,7 +53018,7 @@ var PreBashHook = class {
 
 // src/hooks/subagent-status/subagent-status.ts
 import { randomBytes as randomBytes2 } from "node:crypto";
-import { closeSync, mkdirSync as mkdirSync5, openSync, readFileSync as readFileSync14, readSync, readdirSync as readdirSync3, renameSync, rmSync, statSync as statSync6, writeFileSync as writeFileSync5 } from "node:fs";
+import { closeSync, mkdirSync as mkdirSync5, openSync, readFileSync as readFileSync14, readSync, readdirSync as readdirSync3, renameSync, rmSync as rmSync2, statSync as statSync6, writeFileSync as writeFileSync5 } from "node:fs";
 import { homedir as homedir4 } from "node:os";
 import { basename as basename4, dirname as dirname13, isAbsolute as isAbsolute7, join as join12, resolve as resolve12 } from "node:path";
 
@@ -52975,10 +53188,10 @@ var SubagentStatusRecorder = class {
       const path3 = join12(this.folder(), name);
       if (this.isRecordName(name)) {
         if (!this.expired(path3, cutoff)) continue;
-        for (const marker of this.markers(path3)) rmSync(marker, { force: true });
-        rmSync(path3, { force: true });
+        for (const marker of this.markers(path3)) rmSync2(marker, { force: true });
+        rmSync2(path3, { force: true });
       } else if (this.mtime(path3) < cutoff) {
-        rmSync(path3, { force: true });
+        rmSync2(path3, { force: true });
       }
     }
   }
@@ -52986,7 +53199,7 @@ var SubagentStatusRecorder = class {
     const agent = input2.agent_id;
     if (agent === void 0) return;
     const path3 = this.pathFor(harness, input2.session_id, agent);
-    for (const marker of this.markers(path3)) rmSync(marker, { force: true });
+    for (const marker of this.markers(path3)) rmSync2(marker, { force: true });
     const at = this.timestamp();
     const base = this.readPath(path3) ?? this.fresh(harness, input2, agent, at);
     this.commit(path3, this.enrich({ ...base, status: "working", updated_at: at, ended_at: null }, input2));
@@ -53182,7 +53395,7 @@ var SubagentStatusRecorder = class {
       writeFileSync5(temp, JSON.stringify(record2, null, 2) + "\n", { mode: 384 });
       renameSync(temp, path3);
     } catch (error62) {
-      rmSync(temp, { force: true });
+      rmSync2(temp, { force: true });
       throw error62;
     }
   }
@@ -53264,8 +53477,438 @@ var GitHeadReader = class {
   }
 };
 
+// src/hooks/usage-handoff/usage-handoff.ts
+import { existsSync as existsSync13, rmSync as rmSync3 } from "node:fs";
+
+// src/hooks/usage-handoff/handoff-store.ts
+import { mkdirSync as mkdirSync6, readFileSync as readFileSync15, renameSync as renameSync2, writeFileSync as writeFileSync6 } from "node:fs";
+import { homedir as homedir5 } from "node:os";
+import { join as join13 } from "node:path";
+var HandoffPhaseSchema = external_exports.enum(["requested", "delivering", "delivered", "written", "waiting", "declined"]);
+var HandoffRecordSchema = external_exports.object({
+  harness: UsageHarnessSchema,
+  sessionId: external_exports.string(),
+  resetsAt: external_exports.number(),
+  phase: HandoffPhaseSchema,
+  cwd: external_exports.string(),
+  standIn: external_exports.string().nullable().default(null),
+  waiter: external_exports.string().nullable().default(null)
+});
+var HandoffStore = class {
+  root;
+  constructor(props = {}) {
+    const env = props.env ?? process.env;
+    const stateHome = env["XDG_STATE_HOME"];
+    const base = stateHome !== void 0 && stateHome !== "" ? stateHome : join13(props.home ?? homedir5(), ".local", "state");
+    this.root = join13(base, "flight-rules");
+  }
+  usageFolder() {
+    return join13(this.root, "usage");
+  }
+  handoffsFolder() {
+    return join13(this.root, "handoffs");
+  }
+  handoffPath(harness, sessionId) {
+    return join13(this.handoffsFolder(), `${this.stem(harness, sessionId)}.md`);
+  }
+  handbackPath(harness, sessionId) {
+    return join13(this.handoffsFolder(), `${this.stem(harness, sessionId)}.handback.md`);
+  }
+  read(harness, sessionId) {
+    try {
+      return HandoffRecordSchema.parse(JSON.parse(readFileSync15(this.recordPath(harness, sessionId), "utf-8")));
+    } catch {
+      return void 0;
+    }
+  }
+  write(record2) {
+    mkdirSync6(this.handoffsFolder(), { recursive: true });
+    const path3 = this.recordPath(record2.harness, record2.sessionId);
+    const temporary = `${path3}.${process.pid}.tmp`;
+    writeFileSync6(temporary, JSON.stringify(record2, null, 2) + "\n");
+    renameSync2(temporary, path3);
+  }
+  recordPath(harness, sessionId) {
+    return join13(this.handoffsFolder(), `${this.stem(harness, sessionId)}.json`);
+  }
+  stem(harness, sessionId) {
+    return `${harness}-${sessionId.replaceAll(/[^A-Za-z0-9._-]/g, "_")}`;
+  }
+};
+
+// src/hooks/usage-handoff/usage-reader.ts
+import { execFileSync as execFileSync4 } from "node:child_process";
+import { closeSync as closeSync2, existsSync as existsSync12, mkdirSync as mkdirSync7, openSync as openSync2, readFileSync as readFileSync16, readSync as readSync2, readdirSync as readdirSync4, renameSync as renameSync3, statSync as statSync7, writeFileSync as writeFileSync7 } from "node:fs";
+import { homedir as homedir6 } from "node:os";
+import { basename as basename5, join as join14 } from "node:path";
+var requestTimeoutMs = 4e3;
+var codexSessionWindowCutoffSeconds = 24 * 60 * 60;
+var rolloutTailBytes = 512 * 1024;
+var rolloutFilesTried = 5;
+var ClaudeWindowSchema = external_exports.object({
+  utilization: external_exports.number(),
+  resets_at: external_exports.string().transform((value) => Date.parse(value)).pipe(external_exports.number().finite())
+}).transform((window) => ({ percent: window.utilization, resetsAt: window.resets_at }));
+var ClaudeUsageSchema = external_exports.looseObject({ five_hour: ClaudeWindowSchema.nullish(), seven_day: ClaudeWindowSchema.nullish() }).transform((usage) => [
+  ...usage.five_hour ? [{ kind: "session", ...usage.five_hour }] : [],
+  ...usage.seven_day ? [{ kind: "weekly", ...usage.seven_day }] : []
+]);
+var ClaudeCredentialsSchema = external_exports.looseObject({ claudeAiOauth: external_exports.looseObject({ accessToken: external_exports.string().min(1) }) });
+var ClaudeCodeUsageReader = class {
+  home;
+  platform;
+  constructor(props = {}) {
+    this.home = props.home ?? homedir6();
+    this.platform = props.platform ?? process.platform;
+  }
+  async read() {
+    try {
+      const token = ClaudeCredentialsSchema.parse(JSON.parse(this.credentialsJson())).claudeAiOauth.accessToken;
+      const response = await fetch("https://api.anthropic.com/api/oauth/usage", {
+        headers: { Authorization: `Bearer ${token}`, "anthropic-beta": "oauth-2025-04-20" },
+        signal: AbortSignal.timeout(requestTimeoutMs)
+      });
+      if (!response.ok) return void 0;
+      return new UsageSnapshot(ClaudeUsageSchema.parse(await response.json()));
+    } catch {
+      return void 0;
+    }
+  }
+  credentialsJson() {
+    if (this.platform === "darwin") {
+      return execFileSync4("security", ["find-generic-password", "-s", "Claude Code-credentials", "-w"], {
+        encoding: "utf-8",
+        timeout: requestTimeoutMs,
+        stdio: ["ignore", "pipe", "ignore"]
+      });
+    }
+    return readFileSync16(join14(this.home, ".claude", ".credentials.json"), "utf-8");
+  }
+};
+var CodexAuthSchema = external_exports.looseObject({
+  tokens: external_exports.looseObject({ access_token: external_exports.string().min(1), account_id: external_exports.string().min(1) })
+}).transform((auth2) => ({ tokens: { accessToken: auth2.tokens.access_token, accountId: auth2.tokens.account_id } }));
+var CodexWindowSchema = external_exports.object({
+  used_percent: external_exports.number(),
+  limit_window_seconds: external_exports.number().positive(),
+  reset_at: external_exports.number()
+}).transform((window) => ({
+  kind: window.limit_window_seconds < codexSessionWindowCutoffSeconds ? "session" : "weekly",
+  percent: window.used_percent,
+  resetsAt: window.reset_at * 1e3
+}));
+var CodexUsageSchema = external_exports.looseObject({
+  rate_limit: external_exports.looseObject({
+    primary_window: CodexWindowSchema.nullish(),
+    secondary_window: CodexWindowSchema.nullish()
+  })
+}).transform(
+  (usage) => [usage.rate_limit.primary_window, usage.rate_limit.secondary_window].filter((window) => window != null)
+);
+var RolloutWindowSchema = external_exports.object({
+  used_percent: external_exports.number(),
+  window_minutes: external_exports.number().positive(),
+  resets_at: external_exports.number()
+}).transform((window) => ({
+  kind: window.window_minutes * 60 < codexSessionWindowCutoffSeconds ? "session" : "weekly",
+  percent: window.used_percent,
+  resetsAt: window.resets_at * 1e3
+}));
+var RolloutLineSchema = external_exports.looseObject({
+  payload: external_exports.looseObject({
+    rate_limits: external_exports.looseObject({ primary: RolloutWindowSchema.nullish(), secondary: RolloutWindowSchema.nullish() })
+  })
+}).transform(
+  (line) => [line.payload.rate_limits.primary, line.payload.rate_limits.secondary].filter((window) => window != null)
+);
+var CodexUsageReader = class {
+  codexHome;
+  constructor(props = {}) {
+    const env = props.env ?? process.env;
+    const configured = env["CODEX_HOME"];
+    this.codexHome = configured !== void 0 && configured !== "" ? configured : join14(props.home ?? homedir6(), ".codex");
+  }
+  async read() {
+    const live = await this.readLive();
+    if (live !== void 0) return live;
+    return this.readLatestRollout();
+  }
+  async readLive() {
+    try {
+      const { tokens } = CodexAuthSchema.parse(JSON.parse(readFileSync16(join14(this.codexHome, "auth.json"), "utf-8")));
+      const response = await fetch("https://chatgpt.com/backend-api/wham/usage", {
+        headers: {
+          Authorization: `Bearer ${tokens.accessToken}`,
+          "ChatGPT-Account-Id": tokens.accountId,
+          "User-Agent": "codex-cli"
+        },
+        signal: AbortSignal.timeout(requestTimeoutMs)
+      });
+      if (!response.ok) return void 0;
+      return new UsageSnapshot(CodexUsageSchema.parse(await response.json()));
+    } catch {
+      return void 0;
+    }
+  }
+  readLatestRollout() {
+    try {
+      const newestFirst = this.rolloutFiles().sort((a, b) => basename5(b).localeCompare(basename5(a)));
+      for (const file2 of newestFirst.slice(0, rolloutFilesTried)) {
+        const line = this.lastRateLimitLine(file2);
+        if (line !== void 0) return new UsageSnapshot(RolloutLineSchema.parse(JSON.parse(line)));
+      }
+    } catch {
+      return void 0;
+    }
+    return void 0;
+  }
+  rolloutFiles() {
+    const files = [];
+    const visit2 = (directory) => {
+      for (const entry of readdirSync4(directory, { withFileTypes: true })) {
+        const path3 = join14(directory, entry.name);
+        if (entry.isDirectory()) visit2(path3);
+        else if (/^rollout-.*\.jsonl$/.test(entry.name)) files.push(path3);
+      }
+    };
+    const sessions = join14(this.codexHome, "sessions");
+    if (existsSync12(sessions)) visit2(sessions);
+    return files;
+  }
+  lastRateLimitLine(file2) {
+    const size = statSync7(file2).size;
+    const length = Math.min(size, rolloutTailBytes);
+    const buffer = Buffer.alloc(length);
+    const fd = openSync2(file2, "r");
+    try {
+      readSync2(fd, buffer, 0, length, size - length);
+    } finally {
+      closeSync2(fd);
+    }
+    return buffer.toString("utf-8").split("\n").reverse().find((line) => line.includes('"rate_limits":{'));
+  }
+};
+var CachedUsageSchema = external_exports.object({ fetchedAt: external_exports.number(), windows: external_exports.array(UsageWindowSchema) });
+var CachedUsageReader = class {
+  path;
+  reader;
+  ttlMs;
+  constructor(props) {
+    this.path = join14(props.folder, `usage-${props.harness}.json`);
+    this.reader = props.reader;
+    this.ttlMs = props.ttlMs ?? 6e4;
+  }
+  async read() {
+    const cached2 = this.readCache();
+    if (cached2 !== void 0) return cached2;
+    const fresh = await this.reader.read();
+    if (fresh !== void 0) this.writeCache(fresh);
+    return fresh;
+  }
+  readCache() {
+    try {
+      const parsed = CachedUsageSchema.parse(JSON.parse(readFileSync16(this.path, "utf-8")));
+      if (Date.now() - parsed.fetchedAt > this.ttlMs) return void 0;
+      return new UsageSnapshot(parsed.windows);
+    } catch {
+      return void 0;
+    }
+  }
+  writeCache(snapshot) {
+    try {
+      mkdirSync7(join14(this.path, ".."), { recursive: true });
+      const temporary = `${this.path}.${process.pid}.tmp`;
+      writeFileSync7(temporary, JSON.stringify({ fetchedAt: Date.now(), windows: snapshot.windows }));
+      renameSync3(temporary, this.path);
+    } catch {
+      return;
+    }
+  }
+};
+
+// src/hooks/usage-handoff/usage-handoff.ts
+var UsageHandoffSettingsSchema = external_exports.object({
+  usageHandoffThreshold: usageHandoffThresholdSchema.default(95),
+  usageHandoffMinResetMinutes: usageHandoffMinResetMinutesSchema.default(10)
+});
+var StopPayloadSchema = external_exports.looseObject({ session_id: external_exports.string().min(1), cwd: external_exports.string().optional() }).transform((payload) => ({ sessionId: payload.session_id, cwd: payload.cwd }));
+var UsageHandoffHookPropsSchema = external_exports.object({
+  readers: external_exports.custom().optional(),
+  transport: external_exports.custom().optional(),
+  store: external_exports.instanceof(HandoffStore).optional(),
+  settings: UsageHandoffSettingsSchema.optional(),
+  env: external_exports.record(external_exports.string(), external_exports.string().optional()).optional()
+});
+var UsageHandoffHook = class {
+  readers;
+  transport;
+  store;
+  settings;
+  env;
+  constructor(props = {}) {
+    const valid = UsageHandoffHookPropsSchema.parse(props);
+    this.env = valid.env ?? process.env;
+    this.store = valid.store ?? new HandoffStore({ env: this.env });
+    this.transport = valid.transport ?? new HcAgentTransport();
+    this.settings = valid.settings;
+    this.readers = valid.readers ?? {
+      "claude-code": new CachedUsageReader({
+        harness: "claude-code",
+        reader: new ClaudeCodeUsageReader(),
+        folder: this.store.usageFolder()
+      }),
+      codex: new CachedUsageReader({
+        harness: "codex",
+        reader: new CodexUsageReader(),
+        folder: this.store.usageFolder()
+      })
+    };
+  }
+  /** Handles one Stop payload; resolves to the hook's reply, or nothing to let Stop proceed. */
+  async handle(harness, payload) {
+    const parsed = StopPayloadSchema.safeParse(payload);
+    if (!parsed.success) return void 0;
+    const sessionId = parsed.data.sessionId;
+    const cwd = parsed.data.cwd ?? process.cwd();
+    const record2 = this.store.read(harness, sessionId);
+    if (record2 !== void 0 && record2.resetsAt > Date.now()) {
+      return record2.phase === "requested" ? this.deliver(record2) : void 0;
+    }
+    const settings = this.settings ?? this.loadSettings(harness, cwd);
+    const snapshot = await this.readers[harness].read();
+    const busiest = snapshot?.busiest(Date.now());
+    if (busiest === void 0 || busiest.percent < settings.usageHandoffThreshold) return void 0;
+    const minutesLeft = (busiest.resetsAt - Date.now()) / 6e4;
+    if (minutesLeft < settings.usageHandoffMinResetMinutes) return this.waitForReset({ harness, sessionId, cwd }, busiest);
+    return this.requestHandoff({ harness, sessionId, cwd }, busiest, settings);
+  }
+  async requestHandoff(session, window, settings) {
+    const other = otherHarness[session.harness];
+    const otherBusiest = (await this.readers[other].read())?.busiest(Date.now());
+    if (otherBusiest !== void 0 && otherBusiest.percent >= settings.usageHandoffThreshold) {
+      this.store.write({ ...session, resetsAt: window.resetsAt, phase: "declined", standIn: null, waiter: null });
+      return {
+        systemMessage: `${harnessLabel[session.harness]} is at ${Math.round(window.percent)}% of its ${window.kind} usage and ${harnessLabel[other]} is at ${Math.round(otherBusiest.percent)}% of its ${otherBusiest.kind} usage, so the work was not handed off. ${harnessLabel[session.harness]} resets at ${this.clock(window.resetsAt)}.`
+      };
+    }
+    const path3 = this.store.handoffPath(session.harness, session.sessionId);
+    rmSync3(path3, { force: true });
+    rmSync3(this.store.handbackPath(session.harness, session.sessionId), { force: true });
+    this.store.write({ ...session, resetsAt: window.resetsAt, phase: "requested", standIn: null, waiter: null });
+    return {
+      decision: "block",
+      reason: `${harnessLabel[session.harness]} is at ${Math.round(window.percent)}% of its ${window.kind} usage, which resets at ${this.iso(window.resetsAt)}. Before you stop, write a handoff note to ${path3} so another agent can carry on from it: the remaining tasks, the branch, the ticket or PR, the current state of the work (what is done, what is half-done, what to run next), the working directory ${session.cwd}, and the reset time ${this.iso(window.resetsAt)}. Then stop without starting anything else.`
+    };
+  }
+  async deliver(record2) {
+    const path3 = this.store.handoffPath(record2.harness, record2.sessionId);
+    const terminal = this.env["HC_TERMINAL_ID"];
+    if (!existsSync13(path3)) {
+      this.store.write({ ...record2, phase: "declined" });
+      return void 0;
+    }
+    if (terminal === void 0 || terminal === "") {
+      this.store.write({ ...record2, phase: "written" });
+      return { systemMessage: `Usage is nearly used up and not inside hc, so the handoff was not delivered. The handoff note is at ${path3}.` };
+    }
+    try {
+      return await this.deliverThroughHc(record2, terminal, path3);
+    } catch {
+      this.store.write({ ...record2, phase: "written" });
+      return { systemMessage: `The handoff could not be delivered through hc. The handoff note is at ${path3}.` };
+    }
+  }
+  async deliverThroughHc(record2, terminal, path3) {
+    const other = otherHarness[record2.harness];
+    const handback = this.store.handbackPath(record2.harness, record2.sessionId);
+    rmSync3(handback, { force: true });
+    this.store.write({ ...record2, phase: "delivering" });
+    const space = await this.transport.spaceOf(terminal);
+    const prompt = `A ${harnessLabel[record2.harness]} session ran out of usage. Read ${path3} and continue its remaining work in ${record2.cwd}. When asked for a handback, write it to ${handback}.`;
+    const idle = space === void 0 ? void 0 : await this.transport.findIdleAgent(space, other, terminal);
+    let standIn;
+    if (idle !== void 0) {
+      await this.transport.send(idle, prompt);
+      standIn = idle;
+    } else if (space !== void 0) {
+      standIn = await this.transport.startAgent({ harness: other, space, cwd: record2.cwd, prompt });
+    } else {
+      throw new Error("The terminal is not in a Herdr space");
+    }
+    const delivered = { ...record2, phase: "delivered", standIn };
+    this.store.write(delivered);
+    let waiter;
+    try {
+      waiter = await this.transport.startWaiter(space, record2.cwd, [
+        "handoff",
+        "wait",
+        "--origin",
+        terminal,
+        "--stand-in",
+        standIn,
+        "--at",
+        String(record2.resetsAt),
+        "--handback",
+        handback,
+        "--harness",
+        record2.harness
+      ]);
+    } catch {
+      return {
+        systemMessage: `Handed the work to ${harnessLabel[other]} in ${standIn}, but the waiter could not be started, so no handback will return here automatically. Handoff note: ${path3}.`
+      };
+    }
+    this.store.write({ ...delivered, waiter });
+    return {
+      systemMessage: `Handed the work to ${harnessLabel[other]} in ${standIn}. The handback returns here when usage resets at ${this.clock(record2.resetsAt)}. Handoff note: ${path3}.`
+    };
+  }
+  async waitForReset(session, window) {
+    const terminal = this.env["HC_TERMINAL_ID"];
+    const record2 = { ...session, resetsAt: window.resetsAt, standIn: null, waiter: null };
+    if (terminal === void 0 || terminal === "") {
+      this.store.write({ ...record2, phase: "declined" });
+      return void 0;
+    }
+    try {
+      const space = await this.transport.spaceOf(terminal);
+      const waiter = await this.transport.startWaiter(space, session.cwd, [
+        "handoff",
+        "wait",
+        "--origin",
+        terminal,
+        "--at",
+        String(window.resetsAt),
+        "--harness",
+        session.harness
+      ]);
+      this.store.write({ ...record2, phase: "waiting", waiter });
+      return { systemMessage: `Usage resets at ${this.clock(window.resetsAt)}; the agent will be told to continue then.` };
+    } catch {
+      this.store.write({ ...record2, phase: "declined" });
+      return void 0;
+    }
+  }
+  loadSettings(harness, cwd) {
+    try {
+      const store = new ConfigStore({ cwd, env: this.env, host: harness === "codex" ? "codex" : "claude" });
+      const parsed = UsageHandoffSettingsSchema.safeParse(store.inspect().values);
+      if (parsed.success) return parsed.data;
+    } catch {
+      return UsageHandoffSettingsSchema.parse({});
+    }
+    return UsageHandoffSettingsSchema.parse({});
+  }
+  iso(epochMs) {
+    return new Date(epochMs).toISOString();
+  }
+  clock(epochMs) {
+    return new Date(epochMs).toLocaleString();
+  }
+};
+
 // src/hooks/commands/hook/command.ts
-function createHookCommand(getHandler = () => new PreBashHook(), readStdin = () => text5(process.stdin), getStatusRecorder = () => new SubagentStatusRecorder()) {
+function createHookCommand(getHandler = () => new PreBashHook(), readStdin = () => text5(process.stdin), getStatusRecorder = () => new SubagentStatusRecorder(), getUsageHandoff = () => new UsageHandoffHook()) {
   const hook2 = new Command("hook").description("handlers for the plugin's Claude Code hooks");
   hook2.command("pre-bash").alias("guard-commit").description(
     "PreToolUse(Bash): block a hand-written `git commit` in a flight-rules repo, and strip Claude's attribution trailers from commit and PR commands"
@@ -53288,11 +53931,23 @@ function createHookCommand(getHandler = () => new PreBashHook(), readStdin = () 
       return;
     }
   });
+  hook2.command("usage-handoff").description(
+    "Stop: when this harness's session or weekly usage nears its limit, hand the unfinished work to the other harness over hc and take it back at the reset; Claude Code and Codex; never fails the session"
+  ).option("--harness <harness>", "the host running the hook: claude-code or codex", "claude-code").exitOverride().action(async (opts) => {
+    try {
+      const harness = UsageHarnessSchema.safeParse(opts.harness);
+      if (!harness.success) return;
+      const output2 = await getUsageHandoff().handle(harness.data, JSON.parse(await readStdin()));
+      if (output2 !== void 0) process.stdout.write(JSON.stringify(output2) + "\n");
+    } catch {
+      return;
+    }
+  });
   return hook2;
 }
 
 // src/git/commands/commit/command.ts
-import { readFileSync as readFileSync15 } from "node:fs";
+import { readFileSync as readFileSync17 } from "node:fs";
 function collect2(value, previous3) {
   return [...previous3, value];
 }
@@ -53311,7 +53966,7 @@ function createGitCommand(registry2) {
         type: opts.type,
         scope: opts.scope,
         description: opts.description,
-        body: opts.bodyFile !== void 0 ? readFileSync15(opts.bodyFile, "utf8") : opts.body,
+        body: opts.bodyFile !== void 0 ? readFileSync17(opts.bodyFile, "utf8") : opts.body,
         footers: opts.footer,
         model: opts.model,
         files: opts.file
@@ -53349,9 +54004,9 @@ function createGitCommand(registry2) {
 }
 
 // src/git/commands/message/command.ts
-import { mkdtempSync, readFileSync as readFileSync16, writeFileSync as writeFileSync6 } from "node:fs";
+import { mkdtempSync, readFileSync as readFileSync18, writeFileSync as writeFileSync8 } from "node:fs";
 import { tmpdir as tmpdir2 } from "node:os";
-import { join as join13 } from "node:path";
+import { join as join15 } from "node:path";
 function createCommitMessageCommand(registry2) {
   const operations = new RegistryCommandOperationClient({ registry: registry2 });
   return new Command("commit-message").description(
@@ -53371,14 +54026,14 @@ function createCommitMessageCommand(registry2) {
         type: opts.type,
         scope: opts.scope,
         description: opts.description,
-        body: opts.bodyFile !== void 0 ? readFileSync16(opts.bodyFile, "utf8") : opts.body,
+        body: opts.bodyFile !== void 0 ? readFileSync18(opts.bodyFile, "utf8") : opts.body,
         footers: opts.footer,
         model: opts.model
       },
       external_exports.object({ message: external_exports.string() })
     );
-    const path3 = opts.out ?? join13(mkdtempSync(join13(tmpdir2(), "flight-rules-commit-")), "message.txt");
-    writeFileSync6(path3, `${message}
+    const path3 = opts.out ?? join15(mkdtempSync(join15(tmpdir2(), "flight-rules-commit-")), "message.txt");
+    writeFileSync8(path3, `${message}
 `);
     process.stdout.write(JSON.stringify({ path: path3, message }) + "\n");
   });
@@ -53500,7 +54155,7 @@ function createPrCommand(registry2) {
 }
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "2.0.3";
+var appVersion = false ? "0.0.0-dev" : "2.1.0";
 
 // src/plugins/commands/agents/command.ts
 function createAgentsCommand(getInstallation) {
@@ -53664,6 +54319,16 @@ var excludedRoutes = [
     reason: "Consumes Claude Code and Codex sub-agent lifecycle payloads and writes local status files."
   },
   {
+    path: ["hook", "usage-handoff"],
+    aliases: [],
+    reason: "Consumes Claude Code and Codex Stop payloads and drives local hc terminals."
+  },
+  {
+    path: ["handoff", "wait"],
+    aliases: [],
+    reason: "Runs a long-lived waiter in an hc terminal that talks to local agent terminals."
+  },
+  {
     path: ["agents", "status"],
     aliases: [],
     reason: "Inspects native Codex registration files on the local host."
@@ -53744,7 +54409,7 @@ var cliRouteCoverage = new ManifestCliRouteCoverage({
 });
 
 // src/mcp/command.ts
-import { readFileSync as readFileSync20 } from "node:fs";
+import { readFileSync as readFileSync22 } from "node:fs";
 
 // node_modules/@modelcontextprotocol/server/dist/chunk-Br0eD_fh.mjs
 var __create2 = Object.create;
@@ -68513,14 +69178,14 @@ function toError(value) {
 }
 
 // src/mcp/mcp-server.ts
-import { existsSync as existsSync12, readFileSync as readFileSync19, realpathSync as realpathSync10, statSync as statSync9 } from "node:fs";
+import { existsSync as existsSync15, readFileSync as readFileSync21, realpathSync as realpathSync10, statSync as statSync10 } from "node:fs";
 import { dirname as dirname15, isAbsolute as isAbsolute10, relative as relative8, resolve as resolve15, sep as sep6 } from "node:path";
 
 // node_modules/@modelcontextprotocol/server/dist/index.mjs
 var DEFAULT_MAX_REQUEST_BODY_SIZE = 4 * 1024 * 1024;
 
 // src/operations/pr-operations.ts
-import { realpathSync as realpathSync8, statSync as statSync7 } from "node:fs";
+import { realpathSync as realpathSync8, statSync as statSync8 } from "node:fs";
 import { isAbsolute as isAbsolute8, relative as relative6, resolve as resolve13 } from "node:path";
 var propsSchema5 = external_exports.strictObject({
   cwd: external_exports.string().min(1),
@@ -68621,7 +69286,7 @@ var DefaultPrOperations = class {
     const parsed = propsSchema5.parse(props);
     this.cwd = resolve13(parsed.cwd);
     this.launchRoot = realpathSync8(this.cwd);
-    const launchStat = statSync7(this.launchRoot);
+    const launchStat = statSync8(this.launchRoot);
     this.launchDevice = launchStat.dev;
     this.launchInode = launchStat.ino;
     this.getHost = parsed.getHost;
@@ -68685,7 +69350,7 @@ var DefaultPrOperations = class {
       let canonical;
       try {
         canonical = realpathSync8(candidate);
-        if (!statSync7(canonical).isFile()) throw new Error("not a file");
+        if (!statSync8(canonical).isFile()) throw new Error("not a file");
       } catch {
         throw new PullRequestAttachmentPathError(`Attachment is not a readable file: ${pathname}`);
       }
@@ -68697,7 +69362,7 @@ var DefaultPrOperations = class {
   }
   requireOriginalLaunchDirectory() {
     try {
-      const directory = statSync7(this.cwd);
+      const directory = statSync8(this.cwd);
       if (realpathSync8(this.cwd) !== this.launchRoot || directory.dev !== this.launchDevice || directory.ino !== this.launchInode) {
         throw new Error("replaced");
       }
@@ -68710,13 +69375,13 @@ var DefaultPrOperations = class {
 };
 
 // src/sdk/instruction-catalog-core.ts
-import { existsSync as existsSync11, readFileSync as readFileSync18, readdirSync as readdirSync5, realpathSync as realpathSync9, statSync as statSync8 } from "node:fs";
-import { basename as basename6, dirname as dirname14, isAbsolute as isAbsolute9, join as join15, relative as relative7, resolve as resolve14, sep as sep5 } from "node:path";
+import { existsSync as existsSync14, readFileSync as readFileSync20, readdirSync as readdirSync6, realpathSync as realpathSync9, statSync as statSync9 } from "node:fs";
+import { basename as basename7, dirname as dirname14, isAbsolute as isAbsolute9, join as join17, relative as relative7, resolve as resolve14, sep as sep5 } from "node:path";
 import { fileURLToPath as fileURLToPath4 } from "node:url";
 
 // src/agents/agent-registry/agent-registry.ts
-import { readFileSync as readFileSync17, readdirSync as readdirSync4 } from "node:fs";
-import { basename as basename5, join as join14 } from "node:path";
+import { readFileSync as readFileSync19, readdirSync as readdirSync5 } from "node:fs";
+import { basename as basename6, join as join16 } from "node:path";
 
 // src/agents/agent-frontmatter/agent-frontmatter.ts
 var import_yaml4 = __toESM(require_dist(), 1);
@@ -68753,18 +69418,18 @@ var InvalidAgentDefinitionError = class extends Error {
 };
 var FileAgentRegistry = class {
   load(directory) {
-    const agents = readdirSync4(directory, { withFileTypes: true }).filter((entry) => entry.isFile() && entry.name.endsWith(".md")).sort((a, b) => a.name.localeCompare(b.name)).map((entry) => {
-      const markdown = readFileSync17(join14(directory, entry.name), "utf8");
+    const agents = readdirSync5(directory, { withFileTypes: true }).filter((entry) => entry.isFile() && entry.name.endsWith(".md")).sort((a, b) => a.name.localeCompare(b.name)).map((entry) => {
+      const markdown = readFileSync19(join16(directory, entry.name), "utf8");
       const frontmatter = AgentRegistrationSchema.parse(agentFrontmatterParser.parse(markdown));
       const body = markdown.replace(/^---\r?\n[\s\S]*?^---(?:\r?\n|$)/m, "");
-      if (frontmatter.name !== basename5(entry.name, ".md") || body.trim() === "") {
+      if (frontmatter.name !== basename6(entry.name, ".md") || body.trim() === "") {
         throw new InvalidAgentDefinitionError(`Agent ${entry.name} needs a matching name and a nonempty prompt`);
       }
       return { frontmatter, body };
     });
     const canonical = new Map(agents.map((agent) => [agent.frontmatter.name, agent]));
     const names = new Set(canonical.keys());
-    const variants = AgentVariantsSchema.parse(JSON.parse(readFileSync17(join14(directory, "variants.json"), "utf8")));
+    const variants = AgentVariantsSchema.parse(JSON.parse(readFileSync19(join16(directory, "variants.json"), "utf8")));
     for (const variant of variants) {
       const base = canonical.get(variant.extends);
       if (base === void 0 || names.has(variant.name)) {
@@ -68806,9 +69471,9 @@ var ModulePackageHomeLocator = class {
     const override = parsed.env["FLIGHT_RULES_HOME"]?.trim();
     if (override) return override;
     const moduleDirectory = dirname14(fileURLToPath4(parsed.moduleUrl));
-    if (basename6(moduleDirectory) === "sdk") return resolve14(moduleDirectory, "../..");
+    if (basename7(moduleDirectory) === "sdk") return resolve14(moduleDirectory, "../..");
     const bindingParent = dirname14(moduleDirectory);
-    if (basename6(bindingParent) === "sdk" && basename6(dirname14(bindingParent)) === "src") {
+    if (basename7(bindingParent) === "sdk" && basename7(dirname14(bindingParent)) === "src") {
       return resolve14(moduleDirectory, "../../..");
     }
     return resolve14(moduleDirectory, "..");
@@ -68828,22 +69493,22 @@ var FileInstructionCatalog = class {
       "agents",
       "resources/agents"
     ]);
-    this.safePath(join15(this.agentDir, "variants.json"), this.agentDir);
+    this.safePath(join17(this.agentDir, "variants.json"), this.agentDir);
     this.agents = new Map(
       new FileAgentRegistry().load(this.agentDir).map((agent) => [agent.frontmatter.name, agent])
     );
   }
   listSkills() {
-    return readdirSync5(this.skillDir, { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile() && entry.name === "SKILL.md").map((entry) => relative7(this.skillDir, join15(entry.parentPath, entry.name)).split(sep5)[0]).filter((name) => name !== void 0).sort();
+    return readdirSync6(this.skillDir, { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile() && entry.name === "SKILL.md").map((entry) => relative7(this.skillDir, join17(entry.parentPath, entry.name)).split(sep5)[0]).filter((name) => name !== void 0).sort();
   }
   loadSkill(name) {
     const parsed = ResourceNameSchema.safeParse(name);
     if (!parsed.success) throw new UnsafeInstructionPathError(`Invalid skill name: ${name}`);
-    const path3 = join15(this.skillDir, parsed.data, "SKILL.md");
+    const path3 = join17(this.skillDir, parsed.data, "SKILL.md");
     return {
       name: parsed.data,
       path: this.safePath(path3, this.skillDir),
-      contents: readFileSync18(this.safePath(path3, this.skillDir), "utf8")
+      contents: readFileSync20(this.safePath(path3, this.skillDir), "utf8")
     };
   }
   listAgents() {
@@ -68857,7 +69522,7 @@ var FileInstructionCatalog = class {
     return agent;
   }
   findResourceDirectory(home, candidates) {
-    if (!existsSync11(home) || !statSync8(home).isDirectory()) {
+    if (!existsSync14(home) || !statSync9(home).isDirectory()) {
       throw new InstructionsUnavailableError(
         `The flight-rules installation directory is unavailable: ${home}`
       );
@@ -68865,7 +69530,7 @@ var FileInstructionCatalog = class {
     const installationRoot = realpathSync9(home);
     for (const candidate of candidates) {
       const path3 = resolve14(installationRoot, candidate);
-      if (!existsSync11(path3) || !statSync8(path3).isDirectory()) continue;
+      if (!existsSync14(path3) || !statSync9(path3).isDirectory()) continue;
       const realPath = realpathSync9(path3);
       const relativePath = relative7(installationRoot, realPath);
       if (relativePath === ".." || relativePath.startsWith(`..${sep5}`) || isAbsolute9(relativePath)) {
@@ -68878,7 +69543,7 @@ var FileInstructionCatalog = class {
     throw new InstructionsUnavailableError(`Canonical resources are unavailable under ${home}`);
   }
   safePath(path3, root) {
-    if (!isAbsolute9(path3) || !existsSync11(path3) || !statSync8(path3).isFile())
+    if (!isAbsolute9(path3) || !existsSync14(path3) || !statSync9(path3).isFile())
       throw new UnknownInstructionError(`Unknown instruction resource: ${path3}`);
     const realPath = realpathSync9(path3);
     const relativePath = relative7(root, realPath);
@@ -68920,20 +69585,20 @@ var LaunchBoundQaFileSystem = class {
   }
   exists(path3) {
     if (!this.isInsideLaunch(path3)) return false;
-    return existsSync12(path3);
+    return existsSync15(path3);
   }
   isFile(path3) {
     this.requireInsideLaunch(path3);
-    return existsSync12(path3) && statSync9(path3).isFile();
+    return existsSync15(path3) && statSync10(path3).isFile();
   }
   readFile(path3) {
     this.requireInsideLaunch(path3);
-    return readFileSync19(path3, "utf8");
+    return readFileSync21(path3, "utf8");
   }
   isInsideLaunch(path3) {
     const absolute = resolve15(path3);
     let existing = absolute;
-    while (!existsSync12(existing)) {
+    while (!existsSync15(existing)) {
       const parent = dirname15(existing);
       if (parent === existing) return false;
       existing = parent;
@@ -68962,7 +69627,7 @@ var FlightRulesMcpServer = class {
   constructor(props) {
     this.props = McpLaunchPropsSchema.parse(props);
     this.cwd = realpathSync10(this.props.cwd);
-    const directory = statSync9(this.cwd);
+    const directory = statSync10(this.cwd);
     this.launchDevice = directory.dev;
     this.launchInode = directory.ino;
     this.qaFileSystem = new LaunchBoundQaFileSystem({ root: this.cwd });
@@ -69124,7 +69789,7 @@ var FlightRulesMcpServer = class {
   }
   /** Pathnames can be reused after a rename; the launch grant belongs to the original directory. */
   requireOriginalLaunchCheckout() {
-    const directory = existsSync12(this.cwd) ? statSync9(this.cwd) : void 0;
+    const directory = existsSync15(this.cwd) ? statSync10(this.cwd) : void 0;
     if (directory === void 0 || realpathSync10(this.cwd) !== this.cwd || directory.dev !== this.launchDevice || directory.ino !== this.launchInode) {
       throw new LaunchCheckoutChangedError(
         `The launch checkout was moved or replaced: ${this.cwd}`
@@ -69138,7 +69803,7 @@ var FlightRulesMcpServer = class {
     const from = parsedInput.data.from;
     if (typeof from !== "string") return;
     const candidate = isAbsolute10(from) ? from : resolve15(this.cwd, from);
-    if (!existsSync12(candidate)) throw new Error(`QA instructions path does not exist: ${from}`);
+    if (!existsSync15(candidate)) throw new Error(`QA instructions path does not exist: ${from}`);
     const realPath = realpathSync10(candidate);
     const relativePath = relative8(this.cwd, realPath);
     if (relativePath === ".." || relativePath.startsWith(`..${sep6}`) || isAbsolute10(relativePath)) {
@@ -69185,7 +69850,7 @@ function createMcpCommand() {
   ).action(async (options) => {
     const parsed = CommandOptionsSchema.parse(options);
     const owners = parsed.reviewOwnersFile === void 0 ? {} : ReviewOperationsLaunchPropsSchema.shape.owners.parse(
-      JSON.parse(readFileSync20(parsed.reviewOwnersFile, "utf8"))
+      JSON.parse(readFileSync22(parsed.reviewOwnersFile, "utf8"))
     );
     await new StdioFlightRulesMcpTransport({
       cwd: process.cwd(),
@@ -69219,6 +69884,7 @@ function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = () => cr
   const prHost = () => getPrHost(overrideTracker);
   program2.addCommand(createAgentsCommand(() => services.installation()));
   program2.addCommand(createHookCommand());
+  program2.addCommand(createHandoffCommand());
   const docOperation = new DocOperation({ getResolver: () => services.docs() });
   const localOperations = new DefaultLocalDiscoveryOperations({
     cwd: launchCwd,
