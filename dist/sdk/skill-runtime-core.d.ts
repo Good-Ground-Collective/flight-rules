@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { AgentDefinition } from "../agents/agent-registry/agent-registry.js";
-import type { OperationRegistry } from "../operations/operation-registry.js";
+import type { OperationRegistry, OperationSummary } from "../operations/operation-registry.js";
 import type { OperationEffect } from "../operations/operation.schema.js";
 import type { OrchestrationPolicy } from "../orchestration/orchestration-policy.js";
 import { DispatchRequestSchema, type CallerContext, type DispatchOutcome, type SiblingSkillRequest, type RuntimeSnapshot } from "../orchestration/orchestration.schema.js";
@@ -175,6 +175,24 @@ export declare class OperationEffectCapabilities {
     capabilityFor(effect: OperationEffect): "read" | "edit" | "shell" | "web";
 }
 export declare const operationEffectCapabilities: OperationEffectCapabilities;
+export interface ShellOperationRedirect {
+    route: string;
+    operationId: string;
+}
+export interface ShellOperationRedirects {
+    redirectFor(command: string): ShellOperationRedirect | undefined;
+}
+declare const SkillOperationRoutesPropsSchema: z.ZodObject<{
+    operations: z.ZodArray<z.ZodCustom<OperationSummary, OperationSummary>>;
+}, z.core.$strict>;
+/** Maps the operations a launch admits to the `flight-rules <route>` commands skills write, for the prompt that names them and the guard that redirects shell calls to them. */
+export declare class SkillOperationRoutes implements ShellOperationRedirects {
+    private readonly routes;
+    constructor(props: z.input<typeof SkillOperationRoutesPropsSchema>);
+    promptSection(): string;
+    redirectFor(command: string): ShellOperationRedirect | undefined;
+    private flightRulesArguments;
+}
 /** Describes the skill run itself to the capability policy as one registration holding every capability the host observed. */
 export declare class SkillAgentDefinitions {
     forSkill(instruction: CanonicalInstruction, observed: RuntimeSnapshot): AgentDefinition;

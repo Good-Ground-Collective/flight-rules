@@ -1505,6 +1505,9 @@ var OperationEffectCapabilities = class {
   }
 };
 var operationEffectCapabilities = new OperationEffectCapabilities();
+var SkillOperationRoutesPropsSchema = z11.strictObject({
+  operations: z11.array(z11.custom())
+});
 var SkillAgentDefinitions = class {
   forSkill(instruction, observed) {
     return {

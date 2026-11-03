@@ -2,6 +2,7 @@ import { type HookInput, type HookJSONOutput, type McpSdkServerConfigWithInstanc
 import { z } from "zod";
 import type { AgentDefinition } from "../../agents/agent-registry/agent-registry.js";
 import type { RuntimeSnapshot } from "../../orchestration/orchestration.schema.js";
+import { type ShellOperationRedirects } from "../skill-runtime-core.js";
 import { CapabilityToolDeniedError, WorkerCapabilitySchema, WorkerDispatchConfigurationError, type WorkerCapability } from "../worker-runtime-core.js";
 export { CapabilityToolDeniedError, WorkerCapabilitySchema };
 export type { WorkerCapability };
@@ -76,6 +77,7 @@ declare const ClaudeToolGuardPropsSchema: z.ZodObject<{
     capabilities: z.ZodCustom<ReadonlyMap<string, "edit" | "read" | "shell" | "web" | "spawn" | "ask">, ReadonlyMap<string, "edit" | "read" | "shell" | "web" | "spawn" | "ask">>;
     cwd: z.ZodString;
     repositoryRoot: z.ZodString;
+    shellRedirects: z.ZodOptional<z.ZodCustom<ShellOperationRedirects, ShellOperationRedirects>>;
     onDenied: z.ZodCustom<(error: CapabilityToolDeniedError) => void, (error: CapabilityToolDeniedError) => void>;
 }, z.core.$strict>;
 export type ClaudeToolGuardProps = z.input<typeof ClaudeToolGuardPropsSchema>;
@@ -90,10 +92,12 @@ export declare class RepositoryConfinedToolGuard implements ClaudeToolGuardContr
     private readonly cwd;
     private readonly repositoryRoot;
     private readonly realRepositoryRoot;
+    private readonly shellRedirects;
     private readonly onDenied;
     constructor(props: ClaudeToolGuardProps);
     preToolUse(input: HookInput): Promise<HookJSONOutput>;
     canUseTool(toolName: string, input: Record<string, unknown>): Promise<PermissionResult>;
+    private shellRedirect;
     private evaluate;
     private inputRecord;
     private escapingPath;

@@ -1,6 +1,6 @@
 // src/sdk/claude-agent/claude-agent-runtime.ts
 import { query as claudeAgentQuery } from "@anthropic-ai/claude-agent-sdk";
-import { z as z14 } from "zod";
+import { z as z15 } from "zod";
 
 // src/agents/agent-emitter/agent-emitter.schema.ts
 import { z as z2 } from "zod";
@@ -1136,483 +1136,26 @@ import {
   createSdkMcpServer,
   tool
 } from "@anthropic-ai/claude-agent-sdk";
-import { z as z13 } from "zod";
-
-// src/sdk/claude-builtin-tools.ts
-var StandardClaudeBuiltInToolCatalog = class {
-  toolsFor(capability) {
-    if (capability === "read") return ["Glob", "Grep", "Read"];
-    if (capability === "edit") return ["Write", "Edit"];
-    if (capability === "shell") return ["Bash"];
-    if (capability === "web") return ["WebSearch", "WebFetch"];
-    return [];
-  }
-};
-var claudeBuiltInTools = new StandardClaudeBuiltInToolCatalog();
-
-// src/sdk/claude-agent/tool-policy.ts
-var flightRulesHostServerName = "flight-rules-host";
-var hostToolNamePattern = /^[A-Za-z0-9_-]{1,64}$/;
-var disallowedBuiltInTools = ["Agent", "AskUserQuestion", "Skill", "ToolSearch"];
-var unmappedBuiltInCapabilities = /* @__PURE__ */ new Map([
-  ["Agent", "spawn"],
-  ["Task", "spawn"],
-  ["AskUserQuestion", "ask"]
-]);
-var pathInputKeys = ["file_path", "path", "notebook_path"];
-var globInputKeys = /* @__PURE__ */ new Map([
-  ["Glob", "pattern"],
-  ["Grep", "glob"]
-]);
-var globMagic = /[*?[{]/;
-var HostToolSchema = z13.object({
-  name: z13.string().regex(hostToolNamePattern),
-  description: z13.string().min(1),
-  inputSchema: z13.record(
-    z13.string(),
-    z13.custom((value) => value instanceof z13.core.$ZodType)
-  ),
-  annotations: z13.strictObject({
-    title: z13.string().optional(),
-    readOnlyHint: z13.boolean().optional(),
-    destructiveHint: z13.boolean().optional(),
-    idempotentHint: z13.boolean().optional(),
-    openWorldHint: z13.boolean().optional()
-  }).optional(),
-  handler: z13.custom((value) => typeof value === "function")
-});
-var WorkerToolGrantsSchema = z13.partialRecord(
-  WorkerCapabilitySchema,
-  z13.array(HostToolSchema)
-);
-var InvalidClaudeHostToolError = class extends WorkerDispatchConfigurationError {
-  name = "InvalidClaudeHostToolError";
-};
-var RepositoryPathDeniedError = class extends CapabilityToolDeniedError {
-  name = "RepositoryPathDeniedError";
-  constructor(props) {
-    super(
-      props.capability === void 0 ? { toolName: props.toolName } : { toolName: props.toolName, capability: props.capability }
-    );
-    this.message = `The worker attempted ${props.toolName} on ${props.path}, outside the repository root ${props.repositoryRoot}.`;
-  }
-};
-var HostToolExecutionTracker = class {
-  pending = /* @__PURE__ */ new Set();
-  firstFailure;
-  track(execution) {
-    const promise = execution();
-    this.pending.add(promise);
-    const forget = () => {
-      this.pending.delete(promise);
-    };
-    promise.then(forget, forget);
-    return promise;
-  }
-  recordFailure(cause) {
-    this.firstFailure ??= { cause };
-  }
-  failure() {
-    return this.firstFailure;
-  }
-  async waitForIdle() {
-    while (this.pending.size > 0) {
-      await Promise.allSettled([...this.pending]);
-    }
-  }
-};
-var ClaudeToolGuardPropsSchema = z13.strictObject({
-  allowedTools: z13.array(z13.string().min(1)),
-  capabilities: z13.custom((value) => value instanceof Map),
-  cwd: z13.string().min(1),
-  repositoryRoot: z13.string().min(1),
-  onDenied: z13.custom(
-    (value) => typeof value === "function"
-  )
-});
-var RepositoryConfinedToolGuard = class {
-  allowedTools;
-  capabilities;
-  cwd;
-  repositoryRoot;
-  realRepositoryRoot;
-  onDenied;
-  constructor(props) {
-    const parsed = ClaudeToolGuardPropsSchema.parse(props);
-    this.allowedTools = new Set(parsed.allowedTools);
-    this.capabilities = parsed.capabilities;
-    this.cwd = parsed.cwd;
-    this.repositoryRoot = parsed.repositoryRoot;
-    this.realRepositoryRoot = this.realPath(resolve2(parsed.repositoryRoot));
-    this.onDenied = parsed.onDenied;
-  }
-  async preToolUse(input) {
-    if (input.hook_event_name !== "PreToolUse") return {};
-    const denial = this.evaluate(input.tool_name, this.inputRecord(input.tool_input));
-    if (denial === void 0) return {};
-    this.onDenied(denial);
-    return {
-      hookSpecificOutput: {
-        hookEventName: "PreToolUse",
-        permissionDecision: "deny",
-        permissionDecisionReason: denial.message
-      }
-    };
-  }
-  async canUseTool(toolName, input) {
-    const denial = this.evaluate(toolName, input);
-    if (denial === void 0) return { behavior: "allow", updatedInput: input };
-    this.onDenied(denial);
-    return { behavior: "deny", message: denial.message, interrupt: true };
-  }
-  evaluate(toolName, input) {
-    const capability = this.capabilities.get(toolName);
-    if (!this.allowedTools.has(toolName)) {
-      return new CapabilityToolDeniedError(
-        capability === void 0 ? { toolName } : { toolName, capability }
-      );
-    }
-    if (toolName.startsWith("mcp__")) return void 0;
-    const escaped = this.escapingPath(toolName, input);
-    if (escaped === void 0) return void 0;
-    return new RepositoryPathDeniedError({
-      toolName,
-      capability,
-      path: escaped,
-      repositoryRoot: this.repositoryRoot
-    });
-  }
-  inputRecord(value) {
-    const parsed = z13.record(z13.string(), z13.unknown()).safeParse(value);
-    return parsed.success ? parsed.data : {};
-  }
-  escapingPath(toolName, input) {
-    for (const key of pathInputKeys) {
-      const value = input[key];
-      if (typeof value === "string" && this.isOutside(value)) return value;
-    }
-    const globKey = globInputKeys.get(toolName);
-    const glob = globKey === void 0 ? void 0 : input[globKey];
-    if (typeof glob === "string" && this.globEscapes(glob)) return glob;
-    return void 0;
-  }
-  globEscapes(pattern) {
-    if (pattern.split(/[\\/]/).includes("..")) return true;
-    const magic = pattern.search(globMagic);
-    const literalPrefix = magic === -1 ? pattern : pattern.slice(0, magic);
-    return isAbsolute3(literalPrefix) && this.isOutside(literalPrefix);
-  }
-  isOutside(path) {
-    if (path.startsWith("~")) return true;
-    const location = relative3(this.realRepositoryRoot, this.realPath(resolve2(this.cwd, path)));
-    return location === ".." || location.startsWith(`..${sep3}`) || isAbsolute3(location);
-  }
-  realPath(path) {
-    let existing = path;
-    const missing = [];
-    while (!existsSync(existing)) {
-      const parent = dirname2(existing);
-      if (parent === existing) break;
-      missing.unshift(basename2(existing));
-      existing = parent;
-    }
-    return join3(existsSync(existing) ? realpathSync(existing) : existing, ...missing);
-  }
-};
-var CapabilityScopedClaudeToolPolicy = class {
-  capabilities;
-  constructor() {
-    const capabilities = new Map(unmappedBuiltInCapabilities);
-    for (const capability of WorkerCapabilitySchema.options) {
-      for (const name of claudeBuiltInTools.toolsFor(capability))
-        capabilities.set(name, capability);
-    }
-    this.capabilities = capabilities;
-  }
-  validateGrants(grants) {
-    this.assertValid(Object.values(grants).flat());
-  }
-  builtInToolsFor(definition, runtime) {
-    const names = /* @__PURE__ */ new Set();
-    for (const capability of this.effectiveCapabilities(definition, runtime)) {
-      for (const name of claudeBuiltInTools.toolsFor(capability)) names.add(name);
-    }
-    return [...names];
-  }
-  hostToolsFor(definition, grants, runtime) {
-    const tools = this.effectiveCapabilities(definition, runtime).flatMap((capability) => [
-      ...grants[capability] ?? []
-    ]);
-    this.assertValid(tools);
-    return tools;
-  }
-  allowlistFor(builtInTools, hostTools) {
-    return [
-      ...builtInTools,
-      ...hostTools.map((hostTool) => `mcp__${flightRulesHostServerName}__${hostTool.name}`)
-    ];
-  }
-  disallowedTools() {
-    return [...disallowedBuiltInTools];
-  }
-  guardFor(props) {
-    return new RepositoryConfinedToolGuard({ ...props, capabilities: this.capabilities });
-  }
-  serverFor(hostTools, run) {
-    return createSdkMcpServer({
-      name: flightRulesHostServerName,
-      alwaysLoad: true,
-      tools: hostTools.map(
-        (hostTool) => tool(
-          hostTool.name,
-          hostTool.description,
-          hostTool.inputSchema,
-          (args) => run.tracker.track(() => this.invoke(hostTool, args, run)),
-          hostTool.annotations === void 0 ? { alwaysLoad: true } : { annotations: hostTool.annotations, alwaysLoad: true }
-        )
-      )
-    });
-  }
-  assertValid(tools) {
-    const names = /* @__PURE__ */ new Set();
-    for (const hostTool of tools) {
-      if (!hostToolNamePattern.test(hostTool.name)) {
-        throw new InvalidClaudeHostToolError(
-          `Host tool name ${hostTool.name} must use letters, digits, underscores or hyphens (1-64 characters).`
-        );
-      }
-      if (names.has(hostTool.name)) {
-        throw new InvalidClaudeHostToolError(`Duplicate host tool name: ${hostTool.name}`);
-      }
-      names.add(hostTool.name);
-    }
-  }
-  effectiveCapabilities(definition, runtime) {
-    const registered = new Set(definition.frontmatter.capabilities);
-    return WorkerCapabilitySchema.options.filter(
-      (capability) => registered.has(capability) && runtime.permissions[capability]?.state === "available"
-    );
-  }
-  async invoke(hostTool, args, run) {
-    try {
-      const result = await hostTool.handler(args, { signal: run.signal });
-      return {
-        content: [
-          {
-            type: "text",
-            text: typeof result === "string" ? result : JSON.stringify(result)
-          }
-        ]
-      };
-    } catch (cause) {
-      run.tracker.recordFailure(cause);
-      return {
-        isError: true,
-        content: [
-          {
-            type: "text",
-            text: cause instanceof Error ? cause.message : String(cause)
-          }
-        ]
-      };
-    }
-  }
-};
-
-// src/sdk/claude-agent/claude-agent-runtime.ts
-var PartialModelBindingsSchema = ModelBindingsSchema.partial();
-var ClaudeAgentRuntimePropsSchema = z14.strictObject({
-  agents: z14.array(AgentDefinitionSchema).min(1),
-  models: PartialModelBindingsSchema.optional(),
-  toolGrants: WorkerToolGrantsSchema,
-  observe: z14.custom(
-    (value) => typeof value === "function"
-  ),
-  maxTurns: z14.int().positive().default(64),
-  query: z14.custom((value) => typeof value === "function").optional()
-});
-var ClaudeAgentConfigurationError = class extends WorkerDispatchConfigurationError {
-  name = "ClaudeAgentConfigurationError";
-};
-var ClaudeAgentExecutionError = class extends Error {
-  name = "ClaudeAgentExecutionError";
-};
-var ClaudeAgentWorkerRuntime = class {
-  models;
-  toolGrants;
-  maxTurns;
-  query;
-  toolPolicy = new CapabilityScopedClaudeToolPolicy();
-  dispatcher;
-  constructor(props) {
-    const parsed = ClaudeAgentRuntimePropsSchema.safeParse(props);
-    if (!parsed.success) {
-      throw new ClaudeAgentConfigurationError(parsed.error.message);
-    }
-    const agents = parsed.data.agents.map((agent) => AgentDefinitionSchema.parse(agent));
-    this.toolGrants = parsed.data.toolGrants;
-    this.maxTurns = parsed.data.maxTurns;
-    this.query = parsed.data.query ?? claudeAgentQuery;
-    this.toolPolicy.validateGrants(this.toolGrants);
-    this.models = this.bindModels(
-      agents,
-      parsed.data.models ?? this.defaultModels(claudeModelTiers)
-    );
-    this.dispatcher = new QueuedWorkerDispatcher({
-      agents,
-      observe: parsed.data.observe,
-      run: (admission, snapshot, signal) => this.runQuery(admission, snapshot, signal),
-      createError: (message) => new ClaudeAgentConfigurationError(message)
-    });
-  }
-  dispatch(request, options = {}) {
-    return this.dispatcher.dispatch(request, options);
-  }
-  dispatchMany(requests, options) {
-    return this.dispatcher.dispatchMany(requests, options);
-  }
-  defaultModels(catalog) {
-    try {
-      return catalog.load();
-    } catch (cause) {
-      throw new ClaudeAgentConfigurationError(
-        cause instanceof Error ? cause.message : String(cause),
-        { cause }
-      );
-    }
-  }
-  bindModels(agents, bindings) {
-    const models = /* @__PURE__ */ new Map();
-    for (const agent of agents) {
-      const tier = agent.frontmatter.model;
-      const model = bindings[tier];
-      if (model === void 0) {
-        throw new ClaudeAgentConfigurationError(`No model is bound for the ${tier} tier.`);
-      }
-      models.set(agent.frontmatter.name, model);
-    }
-    return models;
-  }
-  async runQuery(admission, snapshot, signal) {
-    const { request, definition } = admission;
-    const prepared = workerRunProtocol.prepare(admission);
-    if (prepared.status === "rejected") return prepared.outcome;
-    const model = this.models.get(definition.frontmatter.name);
-    if (model === void 0) {
-      throw new ClaudeAgentConfigurationError(
-        `No model is bound for the ${request.agent} registration.`
-      );
-    }
-    const builtInTools = this.toolPolicy.builtInToolsFor(definition, snapshot);
-    const hostTools = this.toolPolicy.hostToolsFor(definition, this.toolGrants, snapshot);
-    const controller = new AbortController();
-    const relayCancellation = () => controller.abort(signal.reason);
-    if (signal.aborted) relayCancellation();
-    signal.addEventListener("abort", relayCancellation, { once: true });
-    const tracker = new HostToolExecutionTracker();
-    let denial;
-    const guard = this.toolPolicy.guardFor({
-      allowedTools: this.toolPolicy.allowlistFor(builtInTools, hostTools),
-      cwd: request.context.cwd,
-      repositoryRoot: request.context.repositoryRoot,
-      onDenied: (error) => {
-        denial ??= error;
-        controller.abort(error);
-      }
-    });
-    const options = guardedQueryOptions.build({
-      cwd: request.context.cwd,
-      model,
-      systemPrompt: definition.body,
-      builtInTools,
-      disallowedTools: this.toolPolicy.disallowedTools(),
-      mcpServers: hostTools.length === 0 ? {} : {
-        [flightRulesHostServerName]: this.toolPolicy.serverFor(hostTools, {
-          signal: controller.signal,
-          tracker
-        })
-      },
-      guard,
-      maxTurns: this.maxTurns,
-      controller,
-      persistSession: false
-    });
-    let result;
-    let queryFailure;
-    try {
-      for await (const message of this.query({ prompt: prepared.task, options })) {
-        if (message.type === "result") result = message;
-      }
-    } catch (cause) {
-      queryFailure = { cause };
-    } finally {
-      signal.removeEventListener("abort", relayCancellation);
-      await tracker.waitForIdle();
-    }
-    if (signal.aborted) return workerRunProtocol.cancelled(request);
-    if (denial !== void 0) {
-      return workerRunProtocol.failed(request, workerRunProtocol.executionFailure(denial, signal));
-    }
-    const hostFailure = tracker.failure();
-    if (hostFailure !== void 0) {
-      return workerRunProtocol.failed(
-        request,
-        workerRunProtocol.executionFailure(hostFailure.cause, signal)
-      );
-    }
-    if (result === void 0) {
-      if (queryFailure === void 0) {
-        throw new ClaudeAgentExecutionError("The Claude Agent SDK ended without a result message.");
-      }
-      throw queryFailure.cause instanceof Error ? queryFailure.cause : new ClaudeAgentExecutionError(String(queryFailure.cause), { cause: queryFailure.cause });
-    }
-    if (result.subtype === "success" && !result.is_error) {
-      return workerRunProtocol.finish(request, result.result, prepared.mode);
-    }
-    return workerRunProtocol.failed(
-      request,
-      workerRunProtocol.executionFailure(
-        new ClaudeAgentExecutionError(this.describeFailure(result)),
-        signal
-      )
-    );
-  }
-  describeFailure(result) {
-    if (result.subtype === "success") return result.result;
-    if (result.subtype === "error_max_turns") {
-      return `The worker stopped after reaching maxTurns (${this.maxTurns}) without a final report.`;
-    }
-    return `The Claude Agent SDK ended with ${result.subtype}: ${result.errors.join("; ")}`;
-  }
-};
-
-// src/sdk/claude-agent/skill-runtime.ts
-import { randomUUID as randomUUID2 } from "node:crypto";
-import {
-  createSdkMcpServer as createSdkMcpServer2,
-  query as claudeAgentQuery2,
-  tool as tool2
-} from "@anthropic-ai/claude-agent-sdk";
-import { z as z17 } from "zod";
+import { z as z14 } from "zod";
 
 // src/sdk/skill-runtime-core.ts
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual as isDeepStrictEqual3 } from "node:util";
-import { z as z15 } from "zod";
+import { z as z13 } from "zod";
 var skillToolNames = {
   operation: "flight_rules_operation",
   dispatch: "flight_rules_dispatch",
   sibling: "flight_rules_sibling_skill",
   ask: "flight_rules_ask_human"
 };
-var PartialOperationSchema = z15.strictObject({
-  operationId: z15.string().min(1),
-  status: z15.literal("partial"),
-  data: z15.unknown(),
-  error: z15.strictObject({ name: z15.string().min(1), message: z15.string() })
+var PartialOperationSchema = z13.strictObject({
+  operationId: z13.string().min(1),
+  status: z13.literal("partial"),
+  data: z13.unknown(),
+  error: z13.strictObject({ name: z13.string().min(1), message: z13.string() })
 });
-var PartialOperationFailurePropsSchema = z15.strictObject({
-  operations: z15.array(PartialOperationSchema).min(1)
+var PartialOperationFailurePropsSchema = z13.strictObject({
+  operations: z13.array(PartialOperationSchema).min(1)
 });
 var PartialOperationFailure = class extends Error {
   name = "PartialOperationFailure";
@@ -1809,6 +1352,59 @@ var OperationEffectCapabilities = class {
   }
 };
 var operationEffectCapabilities = new OperationEffectCapabilities();
+var SkillOperationRoutesPropsSchema = z13.strictObject({
+  operations: z13.array(z13.custom())
+});
+var SkillOperationRoutes = class {
+  routes;
+  constructor(props) {
+    const { operations } = SkillOperationRoutesPropsSchema.parse(props);
+    this.routes = operations.flatMap(
+      ({ id, cli }) => [cli.path, ...cli.aliases.map((alias) => [...cli.path.slice(0, -1), alias])].map((words) => ({
+        words,
+        operationId: id
+      }))
+    ).sort((left, right) => right.words.length - left.words.length);
+  }
+  promptSection() {
+    if (this.routes.length === 0) return "";
+    const lines = this.routes.map(
+      ({ words, operationId }) => `- \`flight-rules ${words.join(" ")}\` -> \`${operationId}\``
+    );
+    return [
+      "## Operations instead of the shell",
+      `These \`flight-rules\` commands run through the \`${skillToolNames.operation}\` tool never through the shell. Call the tool with the operationId and an input object holding the fields that operation expects; an invalid input returns an error naming the expected fields.`,
+      ...lines,
+      "Any other `flight-rules` command runs in the shell when the shell is available."
+    ].join("\n");
+  }
+  redirectFor(command) {
+    for (const segment of command.split(/&&|\|\||[;|\n`()]/)) {
+      const words = this.flightRulesArguments(segment);
+      if (words === void 0) continue;
+      const route = this.routes.find(
+        (candidate) => candidate.words.every((word, index) => words[index] === word)
+      );
+      if (route !== void 0)
+        return { route: route.words.join(" "), operationId: route.operationId };
+    }
+    return void 0;
+  }
+  flightRulesArguments(segment) {
+    const words = segment.trim().split(/\s+/).map((word) => word.replace(/^["']|["']$/g, "")).filter((word) => word !== "");
+    let index = 0;
+    while (index < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[index] ?? "")) index += 1;
+    if (words[index] === "node") index += 1;
+    if (words[index] === "npx") {
+      index += 1;
+      while ((words[index] ?? "").startsWith("-")) index += 1;
+    }
+    const entry = words[index];
+    if (entry === void 0) return void 0;
+    const isEntry = entry === "flight-rules" || entry === "flight-rules.mjs" || entry.endsWith("/flight-rules.mjs");
+    return isEntry ? words.slice(index + 1) : void 0;
+  }
+};
 var SkillAgentDefinitions = class {
   forSkill(instruction, observed) {
     return {
@@ -1963,6 +1559,487 @@ var SharedSkillToolHandlers = class {
     return new Error(result.failure.message);
   }
 };
+
+// src/sdk/claude-builtin-tools.ts
+var StandardClaudeBuiltInToolCatalog = class {
+  toolsFor(capability) {
+    if (capability === "read") return ["Glob", "Grep", "Read"];
+    if (capability === "edit") return ["Write", "Edit"];
+    if (capability === "shell") return ["Bash"];
+    if (capability === "web") return ["WebSearch", "WebFetch"];
+    return [];
+  }
+};
+var claudeBuiltInTools = new StandardClaudeBuiltInToolCatalog();
+
+// src/sdk/claude-agent/tool-policy.ts
+var flightRulesHostServerName = "flight-rules-host";
+var hostToolNamePattern = /^[A-Za-z0-9_-]{1,64}$/;
+var disallowedBuiltInTools = ["Agent", "AskUserQuestion", "Skill", "ToolSearch"];
+var unmappedBuiltInCapabilities = /* @__PURE__ */ new Map([
+  ["Agent", "spawn"],
+  ["Task", "spawn"],
+  ["AskUserQuestion", "ask"]
+]);
+var pathInputKeys = ["file_path", "path", "notebook_path"];
+var globInputKeys = /* @__PURE__ */ new Map([
+  ["Glob", "pattern"],
+  ["Grep", "glob"]
+]);
+var globMagic = /[*?[{]/;
+var HostToolSchema = z14.object({
+  name: z14.string().regex(hostToolNamePattern),
+  description: z14.string().min(1),
+  inputSchema: z14.record(
+    z14.string(),
+    z14.custom((value) => value instanceof z14.core.$ZodType)
+  ),
+  annotations: z14.strictObject({
+    title: z14.string().optional(),
+    readOnlyHint: z14.boolean().optional(),
+    destructiveHint: z14.boolean().optional(),
+    idempotentHint: z14.boolean().optional(),
+    openWorldHint: z14.boolean().optional()
+  }).optional(),
+  handler: z14.custom((value) => typeof value === "function")
+});
+var WorkerToolGrantsSchema = z14.partialRecord(
+  WorkerCapabilitySchema,
+  z14.array(HostToolSchema)
+);
+var InvalidClaudeHostToolError = class extends WorkerDispatchConfigurationError {
+  name = "InvalidClaudeHostToolError";
+};
+var RepositoryPathDeniedError = class extends CapabilityToolDeniedError {
+  name = "RepositoryPathDeniedError";
+  constructor(props) {
+    super(
+      props.capability === void 0 ? { toolName: props.toolName } : { toolName: props.toolName, capability: props.capability }
+    );
+    this.message = `The worker attempted ${props.toolName} on ${props.path}, outside the repository root ${props.repositoryRoot}.`;
+  }
+};
+var HostToolExecutionTracker = class {
+  pending = /* @__PURE__ */ new Set();
+  firstFailure;
+  track(execution) {
+    const promise = execution();
+    this.pending.add(promise);
+    const forget = () => {
+      this.pending.delete(promise);
+    };
+    promise.then(forget, forget);
+    return promise;
+  }
+  recordFailure(cause) {
+    this.firstFailure ??= { cause };
+  }
+  failure() {
+    return this.firstFailure;
+  }
+  async waitForIdle() {
+    while (this.pending.size > 0) {
+      await Promise.allSettled([...this.pending]);
+    }
+  }
+};
+var ClaudeToolGuardPropsSchema = z14.strictObject({
+  allowedTools: z14.array(z14.string().min(1)),
+  capabilities: z14.custom((value) => value instanceof Map),
+  cwd: z14.string().min(1),
+  repositoryRoot: z14.string().min(1),
+  shellRedirects: z14.custom((value) => typeof value === "object").optional(),
+  onDenied: z14.custom(
+    (value) => typeof value === "function"
+  )
+});
+var RepositoryConfinedToolGuard = class {
+  allowedTools;
+  capabilities;
+  cwd;
+  repositoryRoot;
+  realRepositoryRoot;
+  shellRedirects;
+  onDenied;
+  constructor(props) {
+    const parsed = ClaudeToolGuardPropsSchema.parse(props);
+    this.allowedTools = new Set(parsed.allowedTools);
+    this.capabilities = parsed.capabilities;
+    this.cwd = parsed.cwd;
+    this.repositoryRoot = parsed.repositoryRoot;
+    this.realRepositoryRoot = this.realPath(resolve2(parsed.repositoryRoot));
+    this.shellRedirects = parsed.shellRedirects;
+    this.onDenied = parsed.onDenied;
+  }
+  async preToolUse(input) {
+    if (input.hook_event_name !== "PreToolUse") return {};
+    const record = this.inputRecord(input.tool_input);
+    const denial = this.evaluate(input.tool_name, record);
+    if (denial === void 0) {
+      const redirect = this.shellRedirect(input.tool_name, record);
+      if (redirect === void 0) return {};
+      return {
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          permissionDecision: "deny",
+          permissionDecisionReason: redirect
+        }
+      };
+    }
+    this.onDenied(denial);
+    return {
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: denial.message
+      }
+    };
+  }
+  async canUseTool(toolName, input) {
+    const denial = this.evaluate(toolName, input);
+    if (denial === void 0) {
+      const redirect = this.shellRedirect(toolName, input);
+      return redirect === void 0 ? { behavior: "allow", updatedInput: input } : { behavior: "deny", message: redirect };
+    }
+    this.onDenied(denial);
+    return { behavior: "deny", message: denial.message, interrupt: true };
+  }
+  shellRedirect(toolName, input) {
+    const command = input.command;
+    if (toolName !== "Bash" || typeof command !== "string") return void 0;
+    const redirect = this.shellRedirects?.redirectFor(command);
+    if (redirect === void 0) return void 0;
+    return `Use ${skillToolNames.operation} with operationId "${redirect.operationId}" instead of running "flight-rules ${redirect.route}" in the shell.`;
+  }
+  evaluate(toolName, input) {
+    const capability = this.capabilities.get(toolName);
+    if (!this.allowedTools.has(toolName)) {
+      return new CapabilityToolDeniedError(
+        capability === void 0 ? { toolName } : { toolName, capability }
+      );
+    }
+    if (toolName.startsWith("mcp__")) return void 0;
+    const escaped = this.escapingPath(toolName, input);
+    if (escaped === void 0) return void 0;
+    return new RepositoryPathDeniedError({
+      toolName,
+      capability,
+      path: escaped,
+      repositoryRoot: this.repositoryRoot
+    });
+  }
+  inputRecord(value) {
+    const parsed = z14.record(z14.string(), z14.unknown()).safeParse(value);
+    return parsed.success ? parsed.data : {};
+  }
+  escapingPath(toolName, input) {
+    for (const key of pathInputKeys) {
+      const value = input[key];
+      if (typeof value === "string" && this.isOutside(value)) return value;
+    }
+    const globKey = globInputKeys.get(toolName);
+    const glob = globKey === void 0 ? void 0 : input[globKey];
+    if (typeof glob === "string" && this.globEscapes(glob)) return glob;
+    return void 0;
+  }
+  globEscapes(pattern) {
+    if (pattern.split(/[\\/]/).includes("..")) return true;
+    const magic = pattern.search(globMagic);
+    const literalPrefix = magic === -1 ? pattern : pattern.slice(0, magic);
+    return isAbsolute3(literalPrefix) && this.isOutside(literalPrefix);
+  }
+  isOutside(path) {
+    if (path.startsWith("~")) return true;
+    const location = relative3(this.realRepositoryRoot, this.realPath(resolve2(this.cwd, path)));
+    return location === ".." || location.startsWith(`..${sep3}`) || isAbsolute3(location);
+  }
+  realPath(path) {
+    let existing = path;
+    const missing = [];
+    while (!existsSync(existing)) {
+      const parent = dirname2(existing);
+      if (parent === existing) break;
+      missing.unshift(basename2(existing));
+      existing = parent;
+    }
+    return join3(existsSync(existing) ? realpathSync(existing) : existing, ...missing);
+  }
+};
+var CapabilityScopedClaudeToolPolicy = class {
+  capabilities;
+  constructor() {
+    const capabilities = new Map(unmappedBuiltInCapabilities);
+    for (const capability of WorkerCapabilitySchema.options) {
+      for (const name of claudeBuiltInTools.toolsFor(capability))
+        capabilities.set(name, capability);
+    }
+    this.capabilities = capabilities;
+  }
+  validateGrants(grants) {
+    this.assertValid(Object.values(grants).flat());
+  }
+  builtInToolsFor(definition, runtime) {
+    const names = /* @__PURE__ */ new Set();
+    for (const capability of this.effectiveCapabilities(definition, runtime)) {
+      for (const name of claudeBuiltInTools.toolsFor(capability)) names.add(name);
+    }
+    return [...names];
+  }
+  hostToolsFor(definition, grants, runtime) {
+    const tools = this.effectiveCapabilities(definition, runtime).flatMap((capability) => [
+      ...grants[capability] ?? []
+    ]);
+    this.assertValid(tools);
+    return tools;
+  }
+  allowlistFor(builtInTools, hostTools) {
+    return [
+      ...builtInTools,
+      ...hostTools.map((hostTool) => `mcp__${flightRulesHostServerName}__${hostTool.name}`)
+    ];
+  }
+  disallowedTools() {
+    return [...disallowedBuiltInTools];
+  }
+  guardFor(props) {
+    return new RepositoryConfinedToolGuard({ ...props, capabilities: this.capabilities });
+  }
+  serverFor(hostTools, run) {
+    return createSdkMcpServer({
+      name: flightRulesHostServerName,
+      alwaysLoad: true,
+      tools: hostTools.map(
+        (hostTool) => tool(
+          hostTool.name,
+          hostTool.description,
+          hostTool.inputSchema,
+          (args) => run.tracker.track(() => this.invoke(hostTool, args, run)),
+          hostTool.annotations === void 0 ? { alwaysLoad: true } : { annotations: hostTool.annotations, alwaysLoad: true }
+        )
+      )
+    });
+  }
+  assertValid(tools) {
+    const names = /* @__PURE__ */ new Set();
+    for (const hostTool of tools) {
+      if (!hostToolNamePattern.test(hostTool.name)) {
+        throw new InvalidClaudeHostToolError(
+          `Host tool name ${hostTool.name} must use letters, digits, underscores or hyphens (1-64 characters).`
+        );
+      }
+      if (names.has(hostTool.name)) {
+        throw new InvalidClaudeHostToolError(`Duplicate host tool name: ${hostTool.name}`);
+      }
+      names.add(hostTool.name);
+    }
+  }
+  effectiveCapabilities(definition, runtime) {
+    const registered = new Set(definition.frontmatter.capabilities);
+    return WorkerCapabilitySchema.options.filter(
+      (capability) => registered.has(capability) && runtime.permissions[capability]?.state === "available"
+    );
+  }
+  async invoke(hostTool, args, run) {
+    try {
+      const result = await hostTool.handler(args, { signal: run.signal });
+      return {
+        content: [
+          {
+            type: "text",
+            text: typeof result === "string" ? result : JSON.stringify(result)
+          }
+        ]
+      };
+    } catch (cause) {
+      run.tracker.recordFailure(cause);
+      return {
+        isError: true,
+        content: [
+          {
+            type: "text",
+            text: cause instanceof Error ? cause.message : String(cause)
+          }
+        ]
+      };
+    }
+  }
+};
+
+// src/sdk/claude-agent/claude-agent-runtime.ts
+var PartialModelBindingsSchema = ModelBindingsSchema.partial();
+var ClaudeAgentRuntimePropsSchema = z15.strictObject({
+  agents: z15.array(AgentDefinitionSchema).min(1),
+  models: PartialModelBindingsSchema.optional(),
+  toolGrants: WorkerToolGrantsSchema,
+  observe: z15.custom(
+    (value) => typeof value === "function"
+  ),
+  maxTurns: z15.int().positive().default(64),
+  query: z15.custom((value) => typeof value === "function").optional()
+});
+var ClaudeAgentConfigurationError = class extends WorkerDispatchConfigurationError {
+  name = "ClaudeAgentConfigurationError";
+};
+var ClaudeAgentExecutionError = class extends Error {
+  name = "ClaudeAgentExecutionError";
+};
+var ClaudeAgentWorkerRuntime = class {
+  models;
+  toolGrants;
+  maxTurns;
+  query;
+  toolPolicy = new CapabilityScopedClaudeToolPolicy();
+  dispatcher;
+  constructor(props) {
+    const parsed = ClaudeAgentRuntimePropsSchema.safeParse(props);
+    if (!parsed.success) {
+      throw new ClaudeAgentConfigurationError(parsed.error.message);
+    }
+    const agents = parsed.data.agents.map((agent) => AgentDefinitionSchema.parse(agent));
+    this.toolGrants = parsed.data.toolGrants;
+    this.maxTurns = parsed.data.maxTurns;
+    this.query = parsed.data.query ?? claudeAgentQuery;
+    this.toolPolicy.validateGrants(this.toolGrants);
+    this.models = this.bindModels(
+      agents,
+      parsed.data.models ?? this.defaultModels(claudeModelTiers)
+    );
+    this.dispatcher = new QueuedWorkerDispatcher({
+      agents,
+      observe: parsed.data.observe,
+      run: (admission, snapshot, signal) => this.runQuery(admission, snapshot, signal),
+      createError: (message) => new ClaudeAgentConfigurationError(message)
+    });
+  }
+  dispatch(request, options = {}) {
+    return this.dispatcher.dispatch(request, options);
+  }
+  dispatchMany(requests, options) {
+    return this.dispatcher.dispatchMany(requests, options);
+  }
+  defaultModels(catalog) {
+    try {
+      return catalog.load();
+    } catch (cause) {
+      throw new ClaudeAgentConfigurationError(
+        cause instanceof Error ? cause.message : String(cause),
+        { cause }
+      );
+    }
+  }
+  bindModels(agents, bindings) {
+    const models = /* @__PURE__ */ new Map();
+    for (const agent of agents) {
+      const tier = agent.frontmatter.model;
+      const model = bindings[tier];
+      if (model === void 0) {
+        throw new ClaudeAgentConfigurationError(`No model is bound for the ${tier} tier.`);
+      }
+      models.set(agent.frontmatter.name, model);
+    }
+    return models;
+  }
+  async runQuery(admission, snapshot, signal) {
+    const { request, definition } = admission;
+    const prepared = workerRunProtocol.prepare(admission);
+    if (prepared.status === "rejected") return prepared.outcome;
+    const model = this.models.get(definition.frontmatter.name);
+    if (model === void 0) {
+      throw new ClaudeAgentConfigurationError(
+        `No model is bound for the ${request.agent} registration.`
+      );
+    }
+    const builtInTools = this.toolPolicy.builtInToolsFor(definition, snapshot);
+    const hostTools = this.toolPolicy.hostToolsFor(definition, this.toolGrants, snapshot);
+    const controller = new AbortController();
+    const relayCancellation = () => controller.abort(signal.reason);
+    if (signal.aborted) relayCancellation();
+    signal.addEventListener("abort", relayCancellation, { once: true });
+    const tracker = new HostToolExecutionTracker();
+    let denial;
+    const guard = this.toolPolicy.guardFor({
+      allowedTools: this.toolPolicy.allowlistFor(builtInTools, hostTools),
+      cwd: request.context.cwd,
+      repositoryRoot: request.context.repositoryRoot,
+      onDenied: (error) => {
+        denial ??= error;
+        controller.abort(error);
+      }
+    });
+    const options = guardedQueryOptions.build({
+      cwd: request.context.cwd,
+      model,
+      systemPrompt: definition.body,
+      builtInTools,
+      disallowedTools: this.toolPolicy.disallowedTools(),
+      mcpServers: hostTools.length === 0 ? {} : {
+        [flightRulesHostServerName]: this.toolPolicy.serverFor(hostTools, {
+          signal: controller.signal,
+          tracker
+        })
+      },
+      guard,
+      maxTurns: this.maxTurns,
+      controller,
+      persistSession: false
+    });
+    let result;
+    let queryFailure;
+    try {
+      for await (const message of this.query({ prompt: prepared.task, options })) {
+        if (message.type === "result") result = message;
+      }
+    } catch (cause) {
+      queryFailure = { cause };
+    } finally {
+      signal.removeEventListener("abort", relayCancellation);
+      await tracker.waitForIdle();
+    }
+    if (signal.aborted) return workerRunProtocol.cancelled(request);
+    if (denial !== void 0) {
+      return workerRunProtocol.failed(request, workerRunProtocol.executionFailure(denial, signal));
+    }
+    const hostFailure = tracker.failure();
+    if (hostFailure !== void 0) {
+      return workerRunProtocol.failed(
+        request,
+        workerRunProtocol.executionFailure(hostFailure.cause, signal)
+      );
+    }
+    if (result === void 0) {
+      if (queryFailure === void 0) {
+        throw new ClaudeAgentExecutionError("The Claude Agent SDK ended without a result message.");
+      }
+      throw queryFailure.cause instanceof Error ? queryFailure.cause : new ClaudeAgentExecutionError(String(queryFailure.cause), { cause: queryFailure.cause });
+    }
+    if (result.subtype === "success" && !result.is_error) {
+      return workerRunProtocol.finish(request, result.result, prepared.mode);
+    }
+    return workerRunProtocol.failed(
+      request,
+      workerRunProtocol.executionFailure(
+        new ClaudeAgentExecutionError(this.describeFailure(result)),
+        signal
+      )
+    );
+  }
+  describeFailure(result) {
+    if (result.subtype === "success") return result.result;
+    if (result.subtype === "error_max_turns") {
+      return `The worker stopped after reaching maxTurns (${this.maxTurns}) without a final report.`;
+    }
+    return `The Claude Agent SDK ended with ${result.subtype}: ${result.errors.join("; ")}`;
+  }
+};
+
+// src/sdk/claude-agent/skill-runtime.ts
+import { randomUUID as randomUUID2 } from "node:crypto";
+import {
+  createSdkMcpServer as createSdkMcpServer2,
+  query as claudeAgentQuery2,
+  tool as tool2
+} from "@anthropic-ai/claude-agent-sdk";
+import { z as z17 } from "zod";
 
 // src/sdk/claude-agent/skill-boundary.ts
 import { z as z16 } from "zod";
@@ -2166,9 +2243,14 @@ var ClaudeAgentSkillRuntime = class {
     try {
       const instruction = this.instructions.loadSkill(skill);
       run = await this.prepareRun({ skill, caller, allowHumanQuestions, signal: options.signal });
+      const operationsSection = new SkillOperationRoutes({
+        operations: this.operations.admitted?.() ?? []
+      }).promptSection();
       const prompt = `${instruction.contents}
 
-## Invocation context
+${operationsSection === "" ? "" : `${operationsSection}
+
+`}## Invocation context
 ${JSON.stringify(caller)}
 
 ## Invocation input
@@ -2295,6 +2377,7 @@ ${JSON.stringify(input)}`;
       ],
       cwd: caller.cwd,
       repositoryRoot: caller.repositoryRoot,
+      shellRedirects: new SkillOperationRoutes({ operations: this.operations.admitted?.() ?? [] }),
       onDenied: (error) => {
         execution.recordFailure(error);
         controller.abort(error);

@@ -32230,7 +32230,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.98.0";
+var appVersion = false ? "0.0.0-dev" : "1.98.1";
 
 // src/shared/ariadne/review-packet.schema.ts
 var packetLimits = {
@@ -51527,6 +51527,12 @@ var MapOperationRegistry = class {
       effects: [...effects],
       cli: { path: [...cli.path], aliases: [...cli.aliases] }
     }));
+  }
+  admitted() {
+    const admitted = new Set(
+      [...this.operations.values()].filter((operation) => this.policy.allows(operation)).map(({ id }) => id)
+    );
+    return this.list().filter(({ id }) => admitted.has(id));
   }
   async invoke(id, input2) {
     const operation = this.operations.get(id);

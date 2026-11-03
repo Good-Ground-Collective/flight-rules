@@ -23,6 +23,7 @@ export interface OperationCatalog {
     list(): OperationSummary[];
 }
 export interface OperationRegistry extends OperationCatalog {
+    admitted?(): OperationSummary[];
     invoke(id: string, input: unknown): Promise<OperationEnvelope>;
 }
 export type OperationHandlerResult<TOutput> = TOutput | {
@@ -86,6 +87,7 @@ export declare class MapOperationRegistry implements OperationRegistry {
     private readonly policy;
     constructor(props: z.input<typeof OperationRegistryPropsSchema>);
     list(): OperationSummary[];
+    admitted(): OperationSummary[];
     invoke(id: string, input: unknown): Promise<OperationEnvelope>;
 }
 export {};

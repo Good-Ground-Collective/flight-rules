@@ -1110,6 +1110,12 @@ var MapOperationRegistry = class {
       cli: { path: [...cli.path], aliases: [...cli.aliases] }
     }));
   }
+  admitted() {
+    const admitted = new Set(
+      [...this.operations.values()].filter((operation) => this.policy.allows(operation)).map(({ id }) => id)
+    );
+    return this.list().filter(({ id }) => admitted.has(id));
+  }
   async invoke(id, input) {
     const operation = this.operations.get(id);
     if (operation === void 0) throw new UnknownOperationError(`Unknown operation: ${id}`);
