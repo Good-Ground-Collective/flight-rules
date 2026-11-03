@@ -1137,127 +1137,16 @@ var DocOperation = class {
 // src/operations/local-discovery-operations.ts
 import { readdirSync as readdirSync4 } from "node:fs";
 import { resolve as resolve5 } from "node:path";
-import { z as z16 } from "zod";
+import { z as z15 } from "zod";
 
 // src/shared/config.ts
 import { existsSync as existsSync3, readFileSync as readFileSync4, statSync as statSync3 } from "node:fs";
 import { dirname as dirname3, isAbsolute as isAbsolute3, join as join4, resolve as resolve3 } from "node:path";
-import { z as z14 } from "zod";
+import { z as z13 } from "zod";
 
 // src/tasks/jira-task-tracker/jira-host.ts
 import { z as z12 } from "zod";
 var JiraHostSchema = z12.string().transform((host) => host.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, ""));
-
-// src/shared/ariadne/ariadne.schema.ts
-import { z as z13 } from "zod";
-var loopbackHosts = /* @__PURE__ */ new Set(["localhost", "127.0.0.1"]);
-var AriadneUrlSchema = z13.url().refine((value) => {
-  if (!URL.canParse(value)) return false;
-  const url = new URL(value);
-  return url.protocol === "https:" || url.protocol === "http:" && loopbackHosts.has(url.hostname);
-}, "must be https (http only for localhost or 127.0.0.1)");
-var agentStates = ["nominal", "caution", "abort", "hold"];
-var agentItemKinds = ["question", "blocker", "testable", "wave-gate"];
-var agentActivityLevels = ["info", "success", "caution", "abort"];
-var agentLimits = {
-  step: 60,
-  heartbeatDetail: 500,
-  title: 200,
-  itemDetail: 2e3,
-  option: 60,
-  options: 6,
-  text: 500,
-  branch: 255
-};
-var AgentTextNormalizer = class {
-  /** Whitespace runs collapse to a space and control characters go. */
-  oneLine(value, max) {
-    return this.cut(value.replace(/[\x00-\x08\x0e-\x1f\x7f]/g, "").replace(/\s+/g, " ").trim(), max);
-  }
-  /** Line feeds stay; tabs become spaces and other control characters go. */
-  multiLine(value, max) {
-    const normalized = value.replace(/\r\n?/g, "\n").replace(/\t/g, " ").replace(/[\x00-\x09\x0b-\x1f\x7f]/g, "").trim();
-    return this.cut(normalized, max);
-  }
-  /** Overlong text ends in an ellipsis, never in half a surrogate pair. */
-  cut(value, max) {
-    if (value.length <= max) return value;
-    const head = value.slice(0, max - 1).replace(/[\uD800-\uDBFF]$/, "");
-    return `${head.trimEnd()}\u2026`;
-  }
-};
-var normalizer = new AgentTextNormalizer();
-var oneLineSchema = (max) => z13.string().transform((value) => normalizer.oneLine(value, max)).pipe(z13.string().min(1, "must not be blank"));
-var multiLineSchema = (max) => z13.string().transform((value) => normalizer.multiLine(value, max)).pipe(z13.string().min(1, "must not be blank"));
-var optionalSchema = (schema) => z13.preprocess((value) => value === "" || value === null ? void 0 : value, schema.optional());
-var AgentSessionIdSchema = z13.string().regex(/^[A-Za-z0-9_-]{1,80}$/, "must be 1\u201380 letters, digits, underscores or hyphens");
-var AgentRecordIdSchema = AgentSessionIdSchema;
-var TicketKeySchema = z13.string().transform((value) => value.trim().toUpperCase()).pipe(z13.string().regex(/^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,8}$/, "must be a Jira issue key: project key, hyphen, number"));
-var RepoSchema = z13.string().regex(/^(?:[A-Za-z0-9][A-Za-z0-9-]{0,38}\/)?[A-Za-z0-9_.-]{1,100}$/, "must be owner/name or name").refine((value) => !value.includes(".."), "must not contain ..");
-var BranchSchema = z13.string().regex(/^[A-Za-z0-9_+@][A-Za-z0-9._/+@-]{0,254}$/, "must be a branch name as git prints it").refine((value) => !value.includes(".."), "must not contain ..");
-var SkillSchema = z13.string().regex(/^[A-Za-z0-9:._-]{1,80}$/, "must be up to 80 of A-Z a-z 0-9 : . _ -");
-var HeartbeatInputSchema = z13.strictObject({
-  session: AgentSessionIdSchema,
-  step: oneLineSchema(agentLimits.step),
-  state: z13.enum(agentStates),
-  ticket: optionalSchema(TicketKeySchema),
-  repo: optionalSchema(RepoSchema),
-  branch: optionalSchema(BranchSchema),
-  skill: optionalSchema(SkillSchema),
-  detail: optionalSchema(oneLineSchema(agentLimits.heartbeatDetail))
-});
-var ItemInputSchema = z13.strictObject({
-  session: AgentSessionIdSchema,
-  kind: z13.enum(agentItemKinds),
-  title: oneLineSchema(agentLimits.title),
-  ticket: optionalSchema(TicketKeySchema),
-  detail: optionalSchema(multiLineSchema(agentLimits.itemDetail)),
-  options: z13.array(oneLineSchema(agentLimits.option)).max(agentLimits.options, `up to ${agentLimits.options} options`).refine((labels) => new Set(labels).size === labels.length, "options must be distinct").optional(),
-  id: optionalSchema(AgentRecordIdSchema)
-});
-var ActivityInputSchema = z13.strictObject({
-  session: AgentSessionIdSchema,
-  text: oneLineSchema(agentLimits.text),
-  level: optionalSchema(z13.enum(agentActivityLevels)),
-  ticket: optionalSchema(TicketKeySchema),
-  id: optionalSchema(AgentRecordIdSchema)
-});
-var AgentSessionSchema = z13.looseObject({
-  id: z13.string(),
-  ownerId: z13.string(),
-  ticket: z13.string().nullable(),
-  step: z13.string(),
-  state: z13.string(),
-  lastHeartbeat: z13.string(),
-  running: z13.boolean()
-});
-var AgentItemSchema = z13.looseObject({
-  id: z13.string(),
-  session: z13.string(),
-  kind: z13.string(),
-  ticket: z13.string().nullable(),
-  title: z13.string(),
-  detail: z13.string().nullable(),
-  options: z13.array(z13.string()),
-  status: z13.string(),
-  chosenOption: z13.string().nullable(),
-  createdAt: z13.string(),
-  resolvedAt: z13.string().nullable(),
-  resolvedBy: z13.string().nullable()
-});
-var AgentActivitySchema = z13.looseObject({
-  id: z13.string(),
-  at: z13.string(),
-  session: z13.string(),
-  ticket: z13.string().nullable(),
-  level: z13.string(),
-  text: z13.string()
-});
-var HeartbeatResponseSchema = z13.looseObject({ session: AgentSessionSchema });
-var ItemResponseSchema = z13.looseObject({ item: AgentItemSchema, created: z13.boolean() });
-var ActivityResponseSchema = z13.looseObject({ activity: AgentActivitySchema, created: z13.boolean() });
-var ItemListResponseSchema = z13.looseObject({ items: z13.array(AgentItemSchema) });
-var AgentErrorBodySchema = z13.looseObject({ error: z13.string(), message: z13.string().optional() });
 
 // src/shared/config.ts
 var seedCompetencies = [
@@ -1274,35 +1163,29 @@ var seedCompetencies = [
   "async-coordination",
   "auth-check"
 ];
-var ConfigSchema = z14.object({
-  tracker: z14.enum(["github", "jira"]),
-  repo: z14.string().optional().describe("GitHub owner/repo; required when tracker is github"),
+var ConfigSchema = z13.object({
+  tracker: z13.enum(["github", "jira"]),
+  repo: z13.string().optional().describe("GitHub owner/repo; required when tracker is github"),
   jiraHost: JiraHostSchema.optional().describe(
     "Atlassian Cloud host, e.g. acme.atlassian.net"
   ),
-  jiraEmail: z14.string().optional().describe("Atlassian account email for Basic auth"),
-  jiraProject: z14.string().optional().describe("Jira project key holding epics and tickets"),
-  jpdProject: z14.string().optional().describe("Jira Product Discovery project key holding initiatives"),
-  confluenceSpaceKey: z14.string().optional().describe("Confluence space key holding technical design docs"),
-  inProgressStatus: z14.string().optional().describe(
+  jiraEmail: z13.string().optional().describe("Atlassian account email for Basic auth"),
+  jiraProject: z13.string().optional().describe("Jira project key holding epics and tickets"),
+  jpdProject: z13.string().optional().describe("Jira Product Discovery project key holding initiatives"),
+  confluenceSpaceKey: z13.string().optional().describe("Confluence space key holding technical design docs"),
+  inProgressStatus: z13.string().optional().describe(
     "Tracker status meaning work has started; discovered and stored on first run"
   ),
-  inReviewStatus: z14.string().optional().describe(
+  inReviewStatus: z13.string().optional().describe(
     "Tracker status meaning a PR is open; discovered and stored on first run"
   ),
-  defaultLabels: z14.array(z14.string()).default([]),
-  rfcStorage: z14.enum(["local", "global"]).default("local"),
-  rfcStoragePath: z14.string().optional(),
-  qaRecipe: z14.string().optional().describe(
+  defaultLabels: z13.array(z13.string()).default([]),
+  rfcStorage: z13.enum(["local", "global"]).default("local"),
+  rfcStoragePath: z13.string().optional(),
+  qaRecipe: z13.string().optional().describe(
     "Deprecated: path to a legacy QA recipe, read only when no QA.md or AGENTS.md QA section exists; relative paths resolve against the directory holding this config file; defaults to flight-rules.qa.md beside it"
   ),
-  competencies: z14.array(z14.string()).default([...seedCompetencies]),
-  "ariadne.url": AriadneUrlSchema.optional().describe(
-    "Ariadne API base URL for `flight-rules board`; https only (http for localhost); read only from user or local scope; defaults to the production Ariadne API"
-  ),
-  "ariadne.enabled": z14.boolean().optional().describe(
-    "Set false to stop `flight-rules board` reporting even when an Ariadne token is set; read only from user or local scope; defaults to true"
-  )
+  competencies: z13.array(z13.string()).default([...seedCompetencies])
 }).superRefine((cfg, ctx) => {
   if (cfg.tracker === "github" && cfg.repo === void 0) {
     ctx.addIssue({
@@ -1439,8 +1322,8 @@ var QaInstructionsFinder = class {
 };
 
 // src/tasks/readiness/readiness.schema.ts
-import { z as z15 } from "zod";
-var WorkflowSchema = z15.enum([
+import { z as z14 } from "zod";
+var WorkflowSchema = z14.enum([
   "execute-work",
   "execute-wave",
   "break-down-work",
@@ -1448,17 +1331,17 @@ var WorkflowSchema = z15.enum([
   "verify-ticket",
   "remediate-review"
 ]);
-var WorkflowEvidenceSchema = z15.strictObject({
+var WorkflowEvidenceSchema = z14.strictObject({
   context: CallerContextSchema,
-  callerCapabilities: z15.record(z15.string(), CapabilityEvidenceSchema),
-  workers: z15.array(
-    z15.strictObject({ registration: AgentRegistrationSchema, runtime: RuntimeSnapshotSchema })
+  callerCapabilities: z14.record(z14.string(), CapabilityEvidenceSchema),
+  workers: z14.array(
+    z14.strictObject({ registration: AgentRegistrationSchema, runtime: RuntimeSnapshotSchema })
   ).refine(
     (workers) => new Set(workers.map((worker) => worker.registration.name)).size === workers.length,
     "duplicate worker evidence"
   )
 });
-var ReadinessOptionsSchema = z15.strictObject({
+var ReadinessOptionsSchema = z14.strictObject({
   workflow: WorkflowSchema.optional(),
   /** Supplying evidence opts into host checks in addition to environment probes. */
   evidence: WorkflowEvidenceSchema.optional()
@@ -1468,81 +1351,81 @@ var ReadinessOptionsSchema = z15.strictObject({
 );
 
 // src/operations/local-discovery-operations.ts
-var QaSourceSchema = z16.object({
-  path: z16.string(),
-  kind: z16.enum(["agents-md-section", "qa-md", "agents-dir-qa-md", "legacy-recipe"]),
-  dir: z16.string(),
-  content: z16.string(),
-  legacy: z16.literal(true).optional(),
-  hint: z16.string().optional()
+var QaSourceSchema = z15.object({
+  path: z15.string(),
+  kind: z15.enum(["agents-md-section", "qa-md", "agents-dir-qa-md", "legacy-recipe"]),
+  dir: z15.string(),
+  content: z15.string(),
+  legacy: z15.literal(true).optional(),
+  hint: z15.string().optional()
 });
-var QaInstructionsSchema = z16.object({ found: z16.boolean(), sources: z16.array(QaSourceSchema) });
-var ReadinessCheckSchema = z16.object({
-  name: z16.string(),
-  ok: z16.boolean(),
-  detail: z16.string(),
-  required: z16.boolean().optional(),
-  code: z16.string().optional(),
-  remedy: z16.string().optional()
+var QaInstructionsSchema = z15.object({ found: z15.boolean(), sources: z15.array(QaSourceSchema) });
+var ReadinessCheckSchema = z15.object({
+  name: z15.string(),
+  ok: z15.boolean(),
+  detail: z15.string(),
+  required: z15.boolean().optional(),
+  code: z15.string().optional(),
+  remedy: z15.string().optional()
 });
-var ReadinessReportSchema = z16.object({
-  tracker: z16.string().nullable(),
-  repo: z16.string().nullable().optional(),
-  checks: z16.array(ReadinessCheckSchema),
-  ok: z16.boolean(),
+var ReadinessReportSchema = z15.object({
+  tracker: z15.string().nullable(),
+  repo: z15.string().nullable().optional(),
+  checks: z15.array(ReadinessCheckSchema),
+  ok: z15.boolean(),
   workflow: WorkflowSchema.optional(),
-  scope: z16.enum(["environment", "workflow"])
+  scope: z15.enum(["environment", "workflow"])
 });
-var ConfigInspectionSchema = z16.object({
-  host: z16.string(),
-  valid: z16.boolean(),
-  error: z16.string().optional(),
-  values: z16.record(z16.string(), z16.unknown()),
-  sources: z16.record(
-    z16.string(),
-    z16.object({ scope: z16.enum(["user", "project", "local", "file"]), path: z16.string() })
+var ConfigInspectionSchema = z15.object({
+  host: z15.string(),
+  valid: z15.boolean(),
+  error: z15.string().optional(),
+  values: z15.record(z15.string(), z15.unknown()),
+  sources: z15.record(
+    z15.string(),
+    z15.object({ scope: z15.enum(["user", "project", "local", "file"]), path: z15.string() })
   ),
-  layers: z16.array(
-    z16.object({
-      scope: z16.enum(["user", "project", "local", "file"]),
-      path: z16.string(),
-      present: z16.boolean()
+  layers: z15.array(
+    z15.object({
+      scope: z15.enum(["user", "project", "local", "file"]),
+      path: z15.string(),
+      present: z15.boolean()
     })
   )
 });
-var CharterInputSchema = z16.object({
-  paths: z16.array(z16.string()).optional(),
-  diff: z16.string().optional(),
-  repository: z16.boolean().default(false),
-  pathOutput: z16.boolean().default(false)
+var CharterInputSchema = z15.object({
+  paths: z15.array(z15.string()).optional(),
+  diff: z15.string().optional(),
+  repository: z15.boolean().default(false),
+  pathOutput: z15.boolean().default(false)
 }).strict().refine(
   (input) => Number(input.paths !== void 0 && input.paths.length > 0) + Number(input.diff !== void 0) + Number(input.repository) <= 1,
   "Choose one charter selection source"
 );
-var QaInstructionsInputSchema = z16.object({ from: z16.string().optional() }).strict();
-var RfcDirectoryOutputSchema = z16.object({ path: z16.string() });
-var RfcNextIdOutputSchema = z16.object({
-  id: z16.string().regex(/^RFC-\d+$/),
-  directory: z16.string()
+var QaInstructionsInputSchema = z15.object({ from: z15.string().optional() }).strict();
+var RfcDirectoryOutputSchema = z15.object({ path: z15.string() });
+var RfcNextIdOutputSchema = z15.object({
+  id: z15.string().regex(/^RFC-\d+$/),
+  directory: z15.string()
 });
-var QaRecipeOutputSchema = z16.object({ path: z16.string() });
-var EvidenceDirectoryOutputSchema = z16.object({
-  path: z16.string(),
-  gitignored: z16.boolean().nullable()
+var QaRecipeOutputSchema = z15.object({ path: z15.string() });
+var EvidenceDirectoryOutputSchema = z15.object({
+  path: z15.string(),
+  gitignored: z15.boolean().nullable()
 });
 var rfcIdPattern = /^RFC-(\d+)\.md$/;
-var LocalDiscoveryPropsSchema = z16.object({
-  cwd: z16.string().min(1),
-  getConfig: z16.custom((value) => typeof value === "function"),
-  getConfigStore: z16.custom((value) => typeof value === "function"),
-  getCharters: z16.custom((value) => typeof value === "function"),
-  getRepositoryPaths: z16.custom((value) => typeof value === "function"),
-  getEvidence: z16.custom((value) => typeof value === "function"),
-  getReadiness: z16.custom((value) => typeof value === "function"),
-  getProbe: z16.custom((value) => typeof value === "function"),
-  getTracker: z16.custom((value) => typeof value === "function"),
-  getConfigPath: z16.custom((value) => typeof value === "function"),
-  getQaFinder: z16.custom((value) => typeof value === "function").optional()
+var LocalDiscoveryPropsSchema = z15.object({
+  cwd: z15.string().min(1),
+  getConfig: z15.custom((value) => typeof value === "function"),
+  getConfigStore: z15.custom((value) => typeof value === "function"),
+  getCharters: z15.custom((value) => typeof value === "function"),
+  getRepositoryPaths: z15.custom((value) => typeof value === "function"),
+  getEvidence: z15.custom((value) => typeof value === "function"),
+  getReadiness: z15.custom((value) => typeof value === "function"),
+  getProbe: z15.custom((value) => typeof value === "function"),
+  getTracker: z15.custom((value) => typeof value === "function"),
+  getConfigPath: z15.custom((value) => typeof value === "function"),
+  getQaFinder: z15.custom((value) => typeof value === "function").optional()
 });
 var DefaultLocalDiscoveryOperations = class {
   props;
@@ -1557,11 +1440,11 @@ var DefaultLocalDiscoveryOperations = class {
         ["read", "process"],
         ["charter"],
         CharterInputSchema,
-        z16.object({
-          charters: z16.array(
-            z16.object({ path: z16.string(), contents: z16.string(), language: z16.string().nullable() })
+        z15.object({
+          charters: z15.array(
+            z15.object({ path: z15.string(), contents: z15.string(), language: z15.string().nullable() })
           ),
-          unmatched: z16.boolean()
+          unmatched: z15.boolean()
         }),
         (input) => this.charter(input)
       ),
@@ -1570,8 +1453,8 @@ var DefaultLocalDiscoveryOperations = class {
         "Read the configured worker competencies.",
         ["read", "process"],
         ["competencies"],
-        z16.object({}),
-        z16.array(z16.string()),
+        z15.object({}),
+        z15.array(z15.string()),
         () => this.props.getConfig().competencies
       ),
       this.descriptor(
@@ -1579,7 +1462,7 @@ var DefaultLocalDiscoveryOperations = class {
         "Resolve the RFC directory for this checkout.",
         ["read", "process"],
         ["rfc", "dir"],
-        z16.object({}),
+        z15.object({}),
         RfcDirectoryOutputSchema,
         () => ({ path: getRfcDir(this.props.getConfig(), this.props.cwd) })
       ),
@@ -1588,7 +1471,7 @@ var DefaultLocalDiscoveryOperations = class {
         "Find the next RFC number in the configured RFC directory.",
         ["read", "process"],
         ["rfc", "next-id"],
-        z16.object({}),
+        z15.object({}),
         RfcNextIdOutputSchema,
         () => this.nextRfcId()
       ),
@@ -1606,7 +1489,7 @@ var DefaultLocalDiscoveryOperations = class {
         "Resolve the persistent evidence directory for a ticket.",
         ["read", "process"],
         ["qa", "evidence-dir"],
-        z16.object({ ticket: z16.string().min(1) }),
+        z15.object({ ticket: z15.string().min(1) }),
         EvidenceDirectoryOutputSchema,
         (input) => this.props.getEvidence().dirFor(input.ticket)
       ),
@@ -1615,7 +1498,7 @@ var DefaultLocalDiscoveryOperations = class {
         "Resolve the nearest QA instruction path (deprecated CLI route).",
         ["read", "process"],
         ["qa", "recipe"],
-        z16.object({}),
+        z15.object({}),
         QaRecipeOutputSchema,
         () => this.qaRecipe()
       ),
@@ -1624,8 +1507,8 @@ var DefaultLocalDiscoveryOperations = class {
         "Resolve the config file path for this checkout.",
         ["read", "process"],
         ["config", "path"],
-        z16.object({}),
-        z16.object({ path: z16.string() }),
+        z15.object({}),
+        z15.object({ path: z15.string() }),
         () => ({ path: this.props.getConfigStore().filePath() })
       ),
       this.descriptor(
@@ -1633,7 +1516,7 @@ var DefaultLocalDiscoveryOperations = class {
         "Inspect merged configuration and its sources.",
         ["read", "process"],
         ["config", "show"],
-        z16.object({}),
+        z15.object({}),
         ConfigInspectionSchema,
         () => this.props.getConfigStore().inspect()
       ),
@@ -1736,42 +1619,42 @@ var BlankQaRecipeError = class extends Error {
 // src/operations/local-discovery-cli.ts
 import { text } from "node:stream/consumers";
 import { Option as Option2 } from "commander";
-import { z as z26 } from "zod";
+import { z as z25 } from "zod";
 
 // src/shared/host-settings/claude-settings-source.ts
-import { z as z17 } from "zod";
-var SettingsSchema = z17.looseObject({
-  pluginConfigs: z17.record(z17.string(), z17.looseObject({ options: z17.record(z17.string(), z17.unknown()).optional() })).optional()
+import { z as z16 } from "zod";
+var SettingsSchema = z16.looseObject({
+  pluginConfigs: z16.record(z16.string(), z16.looseObject({ options: z16.record(z16.string(), z16.unknown()).optional() })).optional()
 });
 
 // src/shared/host-settings/neutral-settings-source.ts
 import { homedir } from "node:os";
-import { z as z18 } from "zod";
-var PropsSchema = z18.object({
-  cwd: z18.string().min(1),
-  home: z18.string().min(1).default(homedir),
-  untrackedCwd: z18.string().min(1).optional()
+import { z as z17 } from "zod";
+var PropsSchema = z17.object({
+  cwd: z17.string().min(1),
+  home: z17.string().min(1).default(homedir),
+  untrackedCwd: z17.string().min(1).optional()
 });
-var SettingsSchema2 = z18.record(z18.string(), z18.unknown());
+var SettingsSchema2 = z17.record(z17.string(), z17.unknown());
 
 // src/plugins/native-installation/native-installation.ts
 import { homedir as homedir2 } from "node:os";
-import { z as z19 } from "zod";
-var NativeHostSchema = z19.enum(["claude", "codex"]);
-var AgentInstallScopeSchema = z19.enum(["project", "user"]);
-var InstallationManifestSchema = z19.strictObject({
+import { z as z18 } from "zod";
+var NativeHostSchema = z18.enum(["claude", "codex"]);
+var AgentInstallScopeSchema = z18.enum(["project", "user"]);
+var InstallationManifestSchema = z18.strictObject({
   host: NativeHostSchema,
-  agents: z19.array(z19.strictObject({
-    name: z19.string().regex(/^[a-z][a-z0-9-]*$/),
-    sha256: z19.string().regex(/^[a-f0-9]{64}$/),
+  agents: z18.array(z18.strictObject({
+    name: z18.string().regex(/^[a-z][a-z0-9-]*$/),
+    sha256: z18.string().regex(/^[a-f0-9]{64}$/),
     registration: AgentRegistrationSchema
   })).min(1)
 }).refine((value) => new Set(value.agents.map((agent) => agent.name)).size === value.agents.length, "Duplicate agent names").refine((value) => value.agents.every((agent) => agent.name === agent.registration.name), "Registration name mismatch");
-var PropsSchema2 = z19.object({
-  root: z19.string().min(1),
-  cwd: z19.string().min(1),
-  home: z19.string().min(1).default(homedir2),
-  env: z19.record(z19.string(), z19.string().optional()).default({})
+var PropsSchema2 = z18.object({
+  root: z18.string().min(1),
+  cwd: z18.string().min(1),
+  home: z18.string().min(1).default(homedir2),
+  env: z18.record(z18.string(), z18.string().optional()).default({})
 });
 
 // src/shared/config-store.ts
@@ -1781,69 +1664,69 @@ var configScopes = ["user", "project", "local", "file"];
 import { Command, Option } from "commander";
 
 // src/tasks/readiness/repository-readiness.ts
-import { z as z25 } from "zod";
+import { z as z24 } from "zod";
 
 // src/shared/env.ts
-import { z as z20 } from "zod";
-var EnvSchema = z20.object({
-  githubToken: z20.string().optional(),
-  jiraToken: z20.string().optional(),
-  jiraEmail: z20.string().optional(),
+import { z as z19 } from "zod";
+var EnvSchema = z19.object({
+  githubToken: z19.string().optional(),
+  jiraToken: z19.string().optional(),
+  jiraEmail: z19.string().optional(),
   jiraHost: JiraHostSchema.optional()
 });
 
 // src/tasks/readiness/probe-diagnostics.ts
-import { z as z21 } from "zod";
-var ProbeDiagnosticsPropsSchema = z21.object({ env: z21.record(z21.string(), z21.string().optional()) });
-var ErrorFactsSchema = z21.object({
-  code: z21.union([z21.string(), z21.number()]).nullable().optional(),
-  status: z21.number().optional(),
-  statusCode: z21.number().optional(),
-  killed: z21.boolean().optional(),
-  name: z21.string().optional(),
-  message: z21.string().optional(),
-  stderr: z21.string().optional(),
-  cause: z21.unknown().optional()
+import { z as z20 } from "zod";
+var ProbeDiagnosticsPropsSchema = z20.object({ env: z20.record(z20.string(), z20.string().optional()) });
+var ErrorFactsSchema = z20.object({
+  code: z20.union([z20.string(), z20.number()]).nullable().optional(),
+  status: z20.number().optional(),
+  statusCode: z20.number().optional(),
+  killed: z20.boolean().optional(),
+  name: z20.string().optional(),
+  message: z20.string().optional(),
+  stderr: z20.string().optional(),
+  cause: z20.unknown().optional()
 });
 
 // src/tasks/readiness/workflow-preflight.ts
-import { z as z24 } from "zod";
-
-// src/orchestration/orchestration-policy.ts
 import { z as z23 } from "zod";
 
-// src/agents/agent-emitter/agent-emitter.schema.ts
+// src/orchestration/orchestration-policy.ts
 import { z as z22 } from "zod";
-var ModelBindingsSchema = z22.strictObject({
-  standard: z22.string().trim().min(1),
-  escalated: z22.string().trim().min(1),
-  expert: z22.string().trim().min(1)
+
+// src/agents/agent-emitter/agent-emitter.schema.ts
+import { z as z21 } from "zod";
+var ModelBindingsSchema = z21.strictObject({
+  standard: z21.string().trim().min(1),
+  escalated: z21.string().trim().min(1),
+  expert: z21.string().trim().min(1)
 });
-var AgentDefinitionSchema = z22.strictObject({
+var AgentDefinitionSchema = z21.strictObject({
   frontmatter: AgentRegistrationSchema,
-  body: z22.string().refine((body) => body.trim() !== "", "agent prompt must not be empty")
+  body: z21.string().refine((body) => body.trim() !== "", "agent prompt must not be empty")
 });
 
 // src/orchestration/orchestration-policy.ts
-var RegistryOrchestrationPolicyPropsSchema = z23.strictObject({
-  agents: z23.array(AgentDefinitionSchema).min(1).refine(
+var RegistryOrchestrationPolicyPropsSchema = z22.strictObject({
+  agents: z22.array(AgentDefinitionSchema).min(1).refine(
     (agents) => new Set(agents.map((agent) => agent.frontmatter.name)).size === agents.length,
     "duplicate agent name"
   )
 });
 
 // src/tasks/readiness/workflow-preflight.ts
-var WorkflowPreflightPropsSchema = z24.object({
-  cwd: z24.string(),
-  env: z24.record(z24.string(), z24.string().optional()),
-  timeoutMs: z24.int().positive().max(6e4).default(1e4)
+var WorkflowPreflightPropsSchema = z23.object({
+  cwd: z23.string(),
+  env: z23.record(z23.string(), z23.string().optional()),
+  timeoutMs: z23.int().positive().max(6e4).default(1e4)
 });
 
 // src/tasks/readiness/repository-readiness.ts
-var RepositoryReadinessPropsSchema = z25.object({
-  cwd: z25.string().optional(),
-  env: z25.record(z25.string(), z25.string().optional()).optional(),
-  timeoutMs: z25.int().positive().max(6e4).default(1e4)
+var RepositoryReadinessPropsSchema = z24.object({
+  cwd: z24.string().optional(),
+  env: z24.record(z24.string(), z24.string().optional()).optional(),
+  timeoutMs: z24.int().positive().max(6e4).default(1e4)
 });
 
 // src/tasks/commands/check/command.ts
@@ -1852,36 +1735,36 @@ var ReadinessFailedError = class extends Error {
 };
 
 // src/operations/local-discovery-cli.ts
-var CharterResultSchema = z26.object({
-  charters: z26.array(
-    z26.object({ path: z26.string(), contents: z26.string(), language: z26.string().nullable() })
+var CharterResultSchema = z25.object({
+  charters: z25.array(
+    z25.object({ path: z25.string(), contents: z25.string(), language: z25.string().nullable() })
   ),
-  unmatched: z26.boolean()
+  unmatched: z25.boolean()
 });
-var ConfigPathResultSchema = z26.object({ path: z26.string() });
-var RfcIdResultSchema = z26.object({ id: z26.string() });
-var CompetenciesResultSchema = z26.array(z26.string());
-var ConfigInspectionResultSchema = z26.object({
-  host: z26.string(),
-  valid: z26.boolean(),
-  values: z26.record(z26.string(), z26.unknown()),
-  sources: z26.record(z26.string(), z26.unknown()),
-  layers: z26.array(z26.unknown()),
-  error: z26.string().optional()
+var ConfigPathResultSchema = z25.object({ path: z25.string() });
+var RfcIdResultSchema = z25.object({ id: z25.string() });
+var CompetenciesResultSchema = z25.array(z25.string());
+var ConfigInspectionResultSchema = z25.object({
+  host: z25.string(),
+  valid: z25.boolean(),
+  values: z25.record(z25.string(), z25.unknown()),
+  sources: z25.record(z25.string(), z25.unknown()),
+  layers: z25.array(z25.unknown()),
+  error: z25.string().optional()
 });
-var ReadinessResultSchema = z26.object({
-  tracker: z26.string().nullable(),
-  repo: z26.string().nullable().optional(),
-  checks: z26.array(z26.unknown()),
-  ok: z26.boolean(),
+var ReadinessResultSchema = z25.object({
+  tracker: z25.string().nullable(),
+  repo: z25.string().nullable().optional(),
+  checks: z25.array(z25.unknown()),
+  ok: z25.boolean(),
   workflow: WorkflowSchema.optional(),
-  scope: z26.enum(["environment", "workflow"])
+  scope: z25.enum(["environment", "workflow"])
 });
-var LocalDiscoveryCliPropsSchema = z26.object({
-  registry: z26.custom(
+var LocalDiscoveryCliPropsSchema = z25.object({
+  registry: z25.custom(
     (value) => typeof value === "object" && value !== null && "invoke" in value
   ),
-  readStdin: z26.custom((value) => typeof value === "function").optional()
+  readStdin: z25.custom((value) => typeof value === "function").optional()
 });
 var CommanderLocalDiscoveryCli = class {
   registry;
@@ -1956,7 +1839,7 @@ var CommanderLocalDiscoveryCli = class {
     const qa = program.command("qa");
     qa.command("instructions").description("print the QA instructions that apply to a directory, nearest first, as JSON").option("--from <dir>").exitOverride().action(async (opts) => {
       process.stdout.write(
-        `${JSON.stringify(await this.invoke("qa-instructions", opts.from === void 0 ? {} : { from: opts.from }, z26.object({ found: z26.boolean(), sources: z26.array(z26.unknown()) })))}
+        `${JSON.stringify(await this.invoke("qa-instructions", opts.from === void 0 ? {} : { from: opts.from }, z25.object({ found: z25.boolean(), sources: z25.array(z25.unknown()) })))}
 `
       );
     });
@@ -1964,7 +1847,7 @@ var CommanderLocalDiscoveryCli = class {
       "print where QA evidence for a ticket is written, and whether git ignores it, as JSON"
     ).argument("<ticket>").exitOverride().action(async (ticket) => {
       process.stdout.write(
-        `${JSON.stringify(await this.invoke("qa-evidence-dir", { ticket }, z26.object({ path: z26.string(), gitignored: z26.boolean().nullable() })))}
+        `${JSON.stringify(await this.invoke("qa-evidence-dir", { ticket }, z25.object({ path: z25.string(), gitignored: z25.boolean().nullable() })))}
 `
       );
     });
@@ -2000,11 +1883,11 @@ var CommanderLocalDiscoveryCli = class {
       const result = await this.invoke(
         "config-set",
         { key, values, ...options.scope === void 0 ? {} : { scope: options.scope } },
-        z26.object({
-          key: z26.string(),
-          scope: z26.enum(configScopes),
-          path: z26.string(),
-          warning: z26.string().optional()
+        z25.object({
+          key: z25.string(),
+          scope: z25.enum(configScopes),
+          path: z25.string(),
+          warning: z25.string().optional()
         })
       );
       process.stdout.write(`${JSON.stringify(result)}
@@ -2014,7 +1897,7 @@ var CommanderLocalDiscoveryCli = class {
       const result = await this.invoke(
         "config-unset",
         { key, ...options.scope === void 0 ? {} : { scope: options.scope } },
-        z26.object({ key: z26.string(), scope: z26.enum(configScopes), path: z26.string() })
+        z25.object({ key: z25.string(), scope: z25.enum(configScopes), path: z25.string() })
       );
       process.stdout.write(`${JSON.stringify(result)}
 `);
@@ -2051,21 +1934,21 @@ var CharterSelectionError = class extends Error {
 };
 
 // src/operations/cli-coverage.ts
-import { z as z27 } from "zod";
-var RouteDispositionSchema = z27.discriminatedUnion("status", [
-  z27.object({
-    status: z27.literal("supported"),
+import { z as z26 } from "zod";
+var RouteDispositionSchema = z26.discriminatedUnion("status", [
+  z26.object({
+    status: z26.literal("supported"),
     route: CliRouteSchema,
     operationId: OperationIdSchema
   }),
-  z27.object({
-    status: z27.literal("pending-migration"),
+  z26.object({
+    status: z26.literal("pending-migration"),
     route: CliRouteSchema,
     operationId: OperationIdSchema
   }),
-  z27.object({ status: z27.literal("excluded"), route: CliRouteSchema, reason: z27.string().min(1) })
+  z26.object({ status: z26.literal("excluded"), route: CliRouteSchema, reason: z26.string().min(1) })
 ]);
-var CliRouteCoveragePropsSchema = z27.object({ entries: z27.array(RouteDispositionSchema) });
+var CliRouteCoveragePropsSchema = z26.object({ entries: z26.array(RouteDispositionSchema) });
 var CliRouteCoverageError = class extends Error {
   name = "CliRouteCoverageError";
 };
@@ -2181,17 +2064,6 @@ var ManifestCliRouteCoverage = class _ManifestCliRouteCoverage {
     return routes;
   }
 };
-var pendingRoutes = [
-  "board post heartbeat",
-  "board post item",
-  "board post activity",
-  "board items",
-  "packet create",
-  "packet new-id",
-  "packet update",
-  "packet get",
-  "packet reviewers"
-];
 var excludedRoutes = [
   {
     path: ["mcp"],
@@ -2202,21 +2074,6 @@ var excludedRoutes = [
     path: ["hook", "pre-bash"],
     aliases: ["guard-commit"],
     reason: "Consumes Claude hook payloads and governs host shell commands."
-  },
-  {
-    path: ["hook", "board-heartbeat"],
-    aliases: [],
-    reason: "Consumes Claude PostToolUse payloads and runs as a host hook."
-  },
-  {
-    path: ["hook", "agent-dispatch"],
-    aliases: [],
-    reason: "Consumes Claude PreToolUse agent payloads for local session tracking."
-  },
-  {
-    path: ["hook", "agent-stop"],
-    aliases: [],
-    reason: "Consumes Claude SubagentStop payloads and reports host lifecycle events."
   },
   {
     path: ["hook", "subagent-status"],
@@ -2232,13 +2089,7 @@ var excludedRoutes = [
     path: ["agents", "install"],
     aliases: [],
     reason: "Installs native Codex agent registrations into host-owned directories."
-  },
-  {
-    path: ["board", "login"],
-    aliases: [],
-    reason: "Provisions a machine-local Ariadne credential from interactive input."
-  },
-  { path: ["board", "logout"], aliases: [], reason: "Removes a machine-local Ariadne credential." }
+  }
 ];
 var cliRouteCoverage = new ManifestCliRouteCoverage({
   entries: [
@@ -2295,37 +2146,11 @@ var cliRouteCoverage = new ManifestCliRouteCoverage({
       ["pr list", "pr-list"],
       ["pr threads", "pr-threads"],
       ["pr thread-reply", "pr-thread-reply"],
-      ["pr request-review", "pr-request-review"],
-      ["board post heartbeat", "board-post-heartbeat"],
-      ["board post item", "board-post-item"],
-      ["board post activity", "board-post-activity"],
-      ["board items", "board-items"],
-      ["packet create", "packet-create"],
-      ["packet new-id", "packet-new-id"],
-      ["packet update", "packet-update"],
-      ["packet get", "packet-get"],
-      ["packet reviewers", "packet-reviewers"]
+      ["pr request-review", "pr-request-review"]
     ].map(([path, operationId]) => ({
       status: "supported",
       route: { path: (path ?? "").split(" "), aliases: [] },
       operationId: operationId ?? ""
-    })),
-    ...pendingRoutes.filter(
-      (path) => !(/* @__PURE__ */ new Set([
-        "board post heartbeat",
-        "board post item",
-        "board post activity",
-        "board items",
-        "packet create",
-        "packet new-id",
-        "packet update",
-        "packet get",
-        "packet reviewers"
-      ])).has(path)
-    ).map((path) => ({
-      status: "pending-migration",
-      route: { path: path.split(" "), aliases: [] },
-      operationId: `cli-${path.replaceAll(" ", "-")}`
     })),
     ...excludedRoutes.map((route) => ({
       status: "excluded",
@@ -2338,17 +2163,17 @@ var cliRouteCoverage = new ManifestCliRouteCoverage({
 // src/operations/tracker-entity-operations.ts
 import { existsSync as existsSync6, realpathSync as realpathSync5, statSync as statSync6 } from "node:fs";
 import { isAbsolute as isAbsolute5, relative as relative4, resolve as resolve7 } from "node:path";
-import { z as z32 } from "zod";
+import { z as z31 } from "zod";
 
 // src/tasks/evidence/evidence.ts
 import { realpathSync as realpathSync3 } from "node:fs";
 import { basename as basename3 } from "node:path/posix";
-import { z as z28 } from "zod";
+import { z as z27 } from "zod";
 var mediaReference = /(!?)\[([^\]]*)\]\(\s*<?([^\s()<>]+)>?(?:\s+"[^"]*")?\s*\)/g;
 var absoluteTarget = /^[a-zA-Z][a-zA-Z0-9+.-]*:|^\/\/|^#/;
 var localPrefix = /^(?:\.\/)+/;
 var fenceRun2 = /^ {0,3}(`{3,}|~{3,})(.*)$/;
-var AttachmentSpecSchema = z28.string().min(1).transform((spec) => {
+var AttachmentSpecSchema = z27.string().min(1).transform((spec) => {
   const hash = spec.lastIndexOf("#");
   const path = hash > 0 ? spec.slice(0, hash) : spec;
   const caption = hash > 0 ? spec.slice(hash + 1).trim() : "";
@@ -2554,123 +2379,123 @@ A tracker body must stand on its own for an engineer on a fresh clone. Inline th
 var portableContextGuard = new RegexPortableContextGuard();
 
 // src/tasks/task-tracker/task-tracker.ts
-import { z as z29 } from "zod";
-var TrackerUserSchema = z29.object({
-  accountId: z29.string(),
-  displayName: z29.string()
+import { z as z28 } from "zod";
+var TrackerUserSchema = z28.object({
+  accountId: z28.string(),
+  displayName: z28.string()
 });
-var EntityMetadataSchema = z29.object({
-  tddId: z29.number().optional(),
-  epicId: z29.number().optional(),
-  notes: z29.string().optional(),
+var EntityMetadataSchema = z28.object({
+  tddId: z28.number().optional(),
+  epicId: z28.number().optional(),
+  notes: z28.string().optional(),
   /** Explicit body-format override read first by BodyFormatDetector (docs/bug-report-format.md). */
-  kind: z29.enum(["bug", "story"]).optional(),
+  kind: z28.enum(["bug", "story"]).optional(),
   /** Why a blocked-by edge leaves this ticket's epic, keyed by blocker id (docs/epic-boundaries.md). */
-  crossEpicReasons: z29.record(z29.string(), z29.string()).optional()
+  crossEpicReasons: z28.record(z28.string(), z28.string()).optional()
 }).passthrough();
-var CommentSchema = z29.object({
-  id: z29.string(),
-  body: z29.string(),
-  author: z29.string(),
-  createdAt: z29.string(),
-  updatedAt: z29.string()
+var CommentSchema = z28.object({
+  id: z28.string(),
+  body: z28.string(),
+  author: z28.string(),
+  createdAt: z28.string(),
+  updatedAt: z28.string()
 });
-var AttachmentSchema = z29.object({
-  id: z29.string(),
-  filename: z29.string(),
-  mimeType: z29.string(),
-  size: z29.number().optional(),
-  mediaUuid: z29.string().optional()
+var AttachmentSchema = z28.object({
+  id: z28.string(),
+  filename: z28.string(),
+  mimeType: z28.string(),
+  size: z28.number().optional(),
+  mediaUuid: z28.string().optional()
 });
-var TechnicalDesignSchema = z29.object({
-  id: z29.string(),
-  epicId: z29.string(),
-  url: z29.string().optional(),
-  body: z29.string(),
-  comments: z29.array(CommentSchema),
+var TechnicalDesignSchema = z28.object({
+  id: z28.string(),
+  epicId: z28.string(),
+  url: z28.string().optional(),
+  body: z28.string(),
+  comments: z28.array(CommentSchema),
   metadata: EntityMetadataSchema.default({}),
-  updatedAt: z29.string()
+  updatedAt: z28.string()
 });
-var TicketSchema = z29.object({
-  id: z29.string(),
-  size: z29.literal("ticket"),
-  status: z29.string(),
-  labels: z29.array(z29.string()),
-  title: z29.string(),
-  body: z29.string(),
-  comments: z29.array(CommentSchema),
-  assignee: z29.string().nullable(),
-  attachments: z29.array(AttachmentSchema).default([]),
-  reporter: z29.string().nullable().default(null),
-  issueType: z29.string().default("unknown"),
-  blockedBy: z29.array(z29.string()).default([]),
-  blocking: z29.array(z29.string()).default([]),
+var TicketSchema = z28.object({
+  id: z28.string(),
+  size: z28.literal("ticket"),
+  status: z28.string(),
+  labels: z28.array(z28.string()),
+  title: z28.string(),
+  body: z28.string(),
+  comments: z28.array(CommentSchema),
+  assignee: z28.string().nullable(),
+  attachments: z28.array(AttachmentSchema).default([]),
+  reporter: z28.string().nullable().default(null),
+  issueType: z28.string().default("unknown"),
+  blockedBy: z28.array(z28.string()).default([]),
+  blocking: z28.array(z28.string()).default([]),
   metadata: EntityMetadataSchema.default({}),
-  updatedAt: z29.string()
+  updatedAt: z28.string()
 });
-var EpicSchema = z29.object({
-  id: z29.string(),
-  size: z29.literal("epic"),
-  status: z29.string(),
-  labels: z29.array(z29.string()),
-  title: z29.string(),
-  body: z29.string(),
-  childIssues: z29.array(TicketSchema),
-  comments: z29.array(CommentSchema),
+var EpicSchema = z28.object({
+  id: z28.string(),
+  size: z28.literal("epic"),
+  status: z28.string(),
+  labels: z28.array(z28.string()),
+  title: z28.string(),
+  body: z28.string(),
+  childIssues: z28.array(TicketSchema),
+  comments: z28.array(CommentSchema),
   tdd: TechnicalDesignSchema.optional(),
   metadata: EntityMetadataSchema.default({}),
-  updatedAt: z29.string()
+  updatedAt: z28.string()
 });
-var CreateEpicInputSchema = z29.object({
-  title: z29.string(),
-  body: z29.string(),
-  labels: z29.array(z29.string()).default([]),
+var CreateEpicInputSchema = z28.object({
+  title: z28.string(),
+  body: z28.string(),
+  labels: z28.array(z28.string()).default([]),
   metadata: EntityMetadataSchema.partial().optional()
 });
-var CreateTicketInputSchema = z29.object({
-  title: z29.string(),
-  body: z29.string(),
+var CreateTicketInputSchema = z28.object({
+  title: z28.string(),
+  body: z28.string(),
   /** Absent for a standalone ticket: a ticket-sized RFC has no epic to parent to. */
-  epicId: z29.string().optional(),
-  labels: z29.array(z29.string()).default([]),
-  assignee: z29.string().optional(),
+  epicId: z28.string().optional(),
+  labels: z28.array(z28.string()).default([]),
+  assignee: z28.string().optional(),
   metadata: EntityMetadataSchema.partial().optional()
 });
-var CreateTechnicalDesignInputSchema = z29.object({
-  title: z29.string(),
-  body: z29.string(),
-  epicId: z29.string(),
+var CreateTechnicalDesignInputSchema = z28.object({
+  title: z28.string(),
+  body: z28.string(),
+  epicId: z28.string(),
   metadata: EntityMetadataSchema.partial().optional()
 });
-var UpdateEpicInputSchema = z29.object({
-  body: z29.string(),
-  title: z29.string().optional(),
-  labels: z29.array(z29.string()).optional()
+var UpdateEpicInputSchema = z28.object({
+  body: z28.string(),
+  title: z28.string().optional(),
+  labels: z28.array(z28.string()).optional()
 });
-var UpdateTicketInputSchema = z29.object({
-  body: z29.string(),
-  title: z29.string().optional(),
-  labels: z29.array(z29.string()).optional()
+var UpdateTicketInputSchema = z28.object({
+  body: z28.string(),
+  title: z28.string().optional(),
+  labels: z28.array(z28.string()).optional()
 });
-var UpdateInitiativeInputSchema = z29.object({
-  body: z29.string(),
-  title: z29.string().optional()
+var UpdateInitiativeInputSchema = z28.object({
+  body: z28.string(),
+  title: z28.string().optional()
 });
-var InitiativeSchema = z29.object({
-  id: z29.string(),
-  size: z29.literal("initiative"),
-  title: z29.string(),
-  body: z29.string(),
-  epics: z29.array(z29.object({ id: z29.string(), title: z29.string() })).default([])
+var InitiativeSchema = z28.object({
+  id: z28.string(),
+  size: z28.literal("initiative"),
+  title: z28.string(),
+  body: z28.string(),
+  epics: z28.array(z28.object({ id: z28.string(), title: z28.string() })).default([])
 });
-var CreateInitiativeInputSchema = z29.object({
-  title: z29.string(),
-  body: z29.string()
+var CreateInitiativeInputSchema = z28.object({
+  title: z28.string(),
+  body: z28.string()
 });
-var partialWriteErrorSchema = z29.object({
-  name: z29.literal("TaskTrackerPartialWriteError"),
-  id: z29.string().min(1),
-  message: z29.string()
+var partialWriteErrorSchema = z28.object({
+  name: z28.literal("TaskTrackerPartialWriteError"),
+  id: z28.string().min(1),
+  message: z28.string()
 });
 var TaskTrackerPartialWriteError = class extends Error {
   name = "TaskTrackerPartialWriteError";
@@ -2688,7 +2513,7 @@ var TaskTrackerPartialWriteError = class extends Error {
 };
 
 // src/operations/tracker-read-operations.ts
-import { z as z30 } from "zod";
+import { z as z29 } from "zod";
 
 // src/tasks/epic-boundary/epic-boundary.ts
 var TrackerRefFormatter = class {
@@ -3148,10 +2973,10 @@ var PrecedenceBodyFormatDetector = class {
 var bodyFormatDetector = new PrecedenceBodyFormatDetector();
 
 // src/operations/tracker-read-operations.ts
-var propsSchema = z30.object({
-  getTracker: z30.custom((value) => typeof value === "function"),
-  getPrHost: z30.custom((value) => typeof value === "function").optional(),
-  getConfig: z30.custom((value) => typeof value === "function").optional()
+var propsSchema = z29.object({
+  getTracker: z29.custom((value) => typeof value === "function"),
+  getPrHost: z29.custom((value) => typeof value === "function").optional(),
+  getConfig: z29.custom((value) => typeof value === "function").optional()
 });
 var sectionNames = [
   "problem-statement",
@@ -3169,73 +2994,73 @@ var sectionNames = [
   "reproduction-notes"
 ];
 var sectionNameSet = new Set(sectionNames);
-var sectionName = z30.string().refine(
+var sectionName = z29.string().refine(
   (value) => sectionNameSet.has(value),
   `unknown section \u2014 expected one of: ${sectionNames.join(", ")}`
 );
-var entityInput = z30.strictObject({ id: z30.string().min(1) });
+var entityInput = z29.strictObject({ id: z29.string().min(1) });
 var ticketInput = entityInput.extend({
   section: sectionName.optional()
 });
 var ticketResult = TicketSchema.passthrough();
-var epicResult = EpicSchema.extend({ childIssues: z30.array(ticketResult) }).passthrough();
+var epicResult = EpicSchema.extend({ childIssues: z29.array(ticketResult) }).passthrough();
 var initiativeResult = InitiativeSchema.extend({
-  epics: z30.array(z30.object({ id: z30.string(), title: z30.string() }).passthrough())
+  epics: z29.array(z29.object({ id: z29.string(), title: z29.string() }).passthrough())
 }).passthrough();
 var tddResult = TechnicalDesignSchema.passthrough();
-var sectionResult = z30.object({
-  id: z30.string(),
-  section: z30.string(),
-  format: z30.enum(["layered-body", "bug-report"]),
-  markdown: z30.string().nullable(),
-  items: z30.array(z30.object({ text: z30.string(), done: z30.boolean() })).optional()
+var sectionResult = z29.object({
+  id: z29.string(),
+  section: z29.string(),
+  format: z29.enum(["layered-body", "bug-report"]),
+  markdown: z29.string().nullable(),
+  items: z29.array(z29.object({ text: z29.string(), done: z29.boolean() })).optional()
 });
-var edgeResult = z30.object({
-  ticket: z30.string(),
-  ticketEpic: z30.string(),
-  blockedBy: z30.string(),
-  blockerEpic: z30.string().nullable(),
-  justification: z30.string().nullable()
+var edgeResult = z29.object({
+  ticket: z29.string(),
+  ticketEpic: z29.string(),
+  blockedBy: z29.string(),
+  blockerEpic: z29.string().nullable(),
+  justification: z29.string().nullable()
 });
-var planTicket = z30.object({
-  id: z30.string(),
-  status: z30.string(),
-  blockedBy: z30.array(z30.string()),
-  epicId: z30.string().optional()
+var planTicket = z29.object({
+  id: z29.string(),
+  status: z29.string(),
+  blockedBy: z29.array(z29.string()),
+  epicId: z29.string().optional()
 });
-var dependencyPlan = z30.object({
-  waves: z30.array(z30.array(planTicket)),
-  cycles: z30.array(z30.string())
+var dependencyPlan = z29.object({
+  waves: z29.array(z29.array(planTicket)),
+  cycles: z29.array(z29.string())
 });
 var TrackerDependencyPlanSchema = dependencyPlan.extend({
-  crossEpicEdges: z30.array(edgeResult),
-  warnings: z30.array(z30.string())
+  crossEpicEdges: z29.array(edgeResult),
+  warnings: z29.array(z29.string())
 });
-var TrackerReviewPlanSchema = z30.object({
-  epic: z30.object({ id: z30.string(), title: z30.string() }).optional(),
-  initiative: z30.object({ id: z30.string(), title: z30.string() }).optional(),
-  defaultBranch: z30.string(),
-  route: z30.enum(["simple", "complex", "incomplete"]),
-  reasons: z30.array(z30.string()),
-  missing: z30.array(z30.string()),
-  blocked: z30.array(
-    z30.object({
-      ticketId: z30.string(),
-      title: z30.string(),
-      wave: z30.number(),
-      blockedBy: z30.array(z30.string()),
-      pr: z30.object({
-        number: z30.number(),
-        url: z30.string(),
-        headRefName: z30.string(),
-        baseRefName: z30.string()
+var TrackerReviewPlanSchema = z29.object({
+  epic: z29.object({ id: z29.string(), title: z29.string() }).optional(),
+  initiative: z29.object({ id: z29.string(), title: z29.string() }).optional(),
+  defaultBranch: z29.string(),
+  route: z29.enum(["simple", "complex", "incomplete"]),
+  reasons: z29.array(z29.string()),
+  missing: z29.array(z29.string()),
+  blocked: z29.array(
+    z29.object({
+      ticketId: z29.string(),
+      title: z29.string(),
+      wave: z29.number(),
+      blockedBy: z29.array(z29.string()),
+      pr: z29.object({
+        number: z29.number(),
+        url: z29.string(),
+        headRefName: z29.string(),
+        baseRefName: z29.string()
       }).nullable()
     })
   ),
-  unblocksOnMerge: z30.array(z30.string()),
-  crossEpicEdges: z30.array(edgeResult),
-  warnings: z30.array(z30.string()),
-  cycles: z30.array(z30.string())
+  unblocksOnMerge: z29.array(z29.string()),
+  crossEpicEdges: z29.array(edgeResult),
+  warnings: z29.array(z29.string()),
+  cycles: z29.array(z29.string())
 });
 var DefaultTrackerReadOperations = class {
   props;
@@ -3250,7 +3075,7 @@ var DefaultTrackerReadOperations = class {
         ["read", "network"],
         ["ticket", "get"],
         ticketInput,
-        z30.union([ticketResult, sectionResult]),
+        z29.union([ticketResult, sectionResult]),
         (input) => this.getTicket(input)
       ),
       this.descriptor(
@@ -3259,7 +3084,7 @@ var DefaultTrackerReadOperations = class {
         ["read", "network"],
         ["ticket", "transitions"],
         entityInput,
-        z30.object({ id: z30.string(), transitions: z30.array(z30.string()) }),
+        z29.object({ id: z29.string(), transitions: z29.array(z29.string()) }),
         async ({ id }) => ({ id, transitions: await this.props.getTracker().listTransitions(id) })
       ),
       this.descriptor(
@@ -3267,8 +3092,8 @@ var DefaultTrackerReadOperations = class {
         "List users available for tracker assignment.",
         ["read", "network"],
         ["users", "get"],
-        z30.strictObject({}),
-        z30.array(TrackerUserSchema.passthrough()),
+        z29.strictObject({}),
+        z29.array(TrackerUserSchema.passthrough()),
         () => this.props.getTracker().getUsers()
       ),
       this.descriptor(
@@ -3447,65 +3272,65 @@ var PullRequestHostUnavailableError = class extends Error {
 // src/operations/ticket-lifecycle-operations.ts
 import { existsSync as existsSync5, realpathSync as realpathSync4, statSync as statSync5 } from "node:fs";
 import { isAbsolute as isAbsolute4, relative as relative3, resolve as resolve6 } from "node:path";
-import { z as z31 } from "zod";
-var propsSchema2 = z31.object({
-  getTracker: z31.custom((value) => typeof value === "function"),
-  cwd: z31.string().min(1),
-  trustedRoots: z31.array(z31.string().min(1)).default([])
+import { z as z30 } from "zod";
+var propsSchema2 = z30.object({
+  getTracker: z30.custom((value) => typeof value === "function"),
+  cwd: z30.string().min(1),
+  trustedRoots: z30.array(z30.string().min(1)).default([])
 });
-var idSchema = z31.string().min(1);
-var blockInput = z31.object({ ticketId: idSchema, blockerId: idSchema, reason: z31.string().optional() }).strict();
-var ticketPairInput = z31.object({ ticketId: idSchema, blockerId: idSchema }).strict();
-var statusInput = z31.object({ id: idSchema, status: z31.string().min(1) }).strict();
-var commentInput = z31.object({
+var idSchema = z30.string().min(1);
+var blockInput = z30.object({ ticketId: idSchema, blockerId: idSchema, reason: z30.string().optional() }).strict();
+var ticketPairInput = z30.object({ ticketId: idSchema, blockerId: idSchema }).strict();
+var statusInput = z30.object({ id: idSchema, status: z30.string().min(1) }).strict();
+var commentInput = z30.object({
   id: idSchema,
-  body: z31.string(),
-  attach: z31.array(z31.string().min(1)).default([])
+  body: z30.string(),
+  attach: z30.array(z30.string().min(1)).default([])
 }).strict();
-var labelInput = z31.object({
+var labelInput = z30.object({
   id: idSchema,
-  add: z31.array(z31.string()).default([]),
-  remove: z31.array(z31.string()).default([])
+  add: z30.array(z30.string()).default([]),
+  remove: z30.array(z30.string()).default([])
 }).strict().refine((input) => input.add.length > 0 || input.remove.length > 0, {
   message: "ticket label needs at least one --add or --remove"
 });
-var blockResult = z31.object({
+var blockResult = z30.object({
   ticketId: idSchema,
   blockerId: idSchema,
   ticketEpic: idSchema.nullable(),
   blockerEpic: idSchema.nullable(),
-  crossEpic: z31.boolean(),
-  reasonRecorded: z31.boolean(),
-  warnings: z31.array(z31.string())
+  crossEpic: z30.boolean(),
+  reasonRecorded: z30.boolean(),
+  warnings: z30.array(z30.string())
 });
-var blockPartial = z31.object({
+var blockPartial = z30.object({
   ticketId: idSchema,
   blockerId: idSchema,
-  completedSteps: z31.array(z31.string())
+  completedSteps: z30.array(z30.string())
 });
-var ticketPairResult = z31.object({ ticketId: idSchema, blockerId: idSchema });
-var statusResult = z31.object({ id: idSchema, status: z31.string() });
-var commentPartial = z31.object({
+var ticketPairResult = z30.object({ ticketId: idSchema, blockerId: idSchema });
+var statusResult = z30.object({ id: idSchema, status: z30.string() });
+var commentPartial = z30.object({
   id: idSchema,
-  attachments: z31.array(
-    AttachmentSchema.extend({ path: z31.string(), caption: z31.string(), referenced: z31.boolean() })
+  attachments: z30.array(
+    AttachmentSchema.extend({ path: z30.string(), caption: z30.string(), referenced: z30.boolean() })
   ),
-  body: z31.string(),
-  completedSteps: z31.array(z31.string())
+  body: z30.string(),
+  completedSteps: z30.array(z30.string())
 });
-var commentResult = z31.union([CommentSchema, commentPartial]);
-var labelResult = z31.object({
+var commentResult = z30.union([CommentSchema, commentPartial]);
+var labelResult = z30.object({
   id: idSchema,
-  added: z31.array(z31.string()),
-  removed: z31.array(z31.string())
+  added: z30.array(z30.string()),
+  removed: z30.array(z30.string())
 });
-var labelPartial = z31.object({
+var labelPartial = z30.object({
   id: idSchema,
-  added: z31.array(z31.string()),
-  removed: z31.array(z31.string()),
-  requestedAdd: z31.array(z31.string()),
-  requestedRemove: z31.array(z31.string()),
-  completedSteps: z31.array(z31.string())
+  added: z30.array(z30.string()),
+  removed: z30.array(z30.string()),
+  requestedAdd: z30.array(z30.string()),
+  requestedRemove: z30.array(z30.string()),
+  completedSteps: z30.array(z30.string())
 });
 var DefaultTicketLifecycleOperations = class {
   props;
@@ -3523,7 +3348,7 @@ var DefaultTicketLifecycleOperations = class {
         ["write", "network"],
         ["ticket", "block"],
         blockInput,
-        z31.union([blockResult, blockPartial]),
+        z30.union([blockResult, blockPartial]),
         (input) => this.block(input)
       ),
       this.descriptor(
@@ -3559,7 +3384,7 @@ var DefaultTicketLifecycleOperations = class {
         ["write", "network"],
         ["ticket", "label"],
         labelInput,
-        z31.union([labelPartial, labelResult]),
+        z30.union([labelPartial, labelResult]),
         (input) => this.updateLabels(input)
       )
     ];
@@ -3738,60 +3563,60 @@ var DefaultTicketLifecycleOperations = class {
 };
 
 // src/operations/tracker-entity-operations.ts
-var labelListSchema = z32.array(z32.string()).transform((labels) => [...new Set(labels.map((label) => label.trim()).filter(Boolean))]);
+var labelListSchema = z31.array(z31.string()).transform((labels) => [...new Set(labels.map((label) => label.trim()).filter(Boolean))]);
 var labelsSchema = labelListSchema.default([]);
-var createEpicInput = z32.object({
+var createEpicInput = z31.object({
   ...CreateEpicInputSchema.shape,
   labels: labelsSchema,
-  allowLocalPaths: z32.boolean().default(false)
+  allowLocalPaths: z31.boolean().default(false)
 }).strict();
-var updateEpicInput = z32.object({
+var updateEpicInput = z31.object({
   ...UpdateEpicInputSchema.shape,
   labels: labelListSchema.optional(),
-  allowLocalPaths: z32.boolean().default(false)
+  allowLocalPaths: z31.boolean().default(false)
 }).strict();
 var createInitiativeInput = CreateInitiativeInputSchema.extend({
-  allowLocalPaths: z32.boolean().default(false)
+  allowLocalPaths: z31.boolean().default(false)
 }).strict();
 var updateInitiativeInput = UpdateInitiativeInputSchema.extend({
-  allowLocalPaths: z32.boolean().default(false)
+  allowLocalPaths: z31.boolean().default(false)
 }).strict();
-var createTicketInput = z32.object({
+var createTicketInput = z31.object({
   ...CreateTicketInputSchema.shape,
   labels: labelsSchema,
-  allowLocalPaths: z32.boolean().default(false)
+  allowLocalPaths: z31.boolean().default(false)
 }).strict();
-var updateTicketInput = z32.object({
+var updateTicketInput = z31.object({
   ...UpdateTicketInputSchema.shape,
   labels: labelListSchema.optional(),
-  allowLocalPaths: z32.boolean().default(false),
-  attach: z32.array(z32.string().min(1)).default([])
+  allowLocalPaths: z31.boolean().default(false),
+  attach: z31.array(z31.string().min(1)).default([])
 }).strict();
 var createTddInput = CreateTechnicalDesignInputSchema.extend({
-  allowLocalPaths: z32.boolean().default(false)
+  allowLocalPaths: z31.boolean().default(false)
 }).strict();
-var entityId = z32.string().min(1);
-var linkInput = z32.object({ epicId: entityId, initiativeId: entityId }).strict();
-var partialTicketEdit = z32.object({
+var entityId = z31.string().min(1);
+var linkInput = z31.object({ epicId: entityId, initiativeId: entityId }).strict();
+var partialTicketEdit = z31.object({
   id: entityId,
-  attachments: z32.array(AttachmentSchema),
-  body: z32.string()
+  attachments: z31.array(AttachmentSchema),
+  body: z31.string()
 });
-var ticketEditResult = z32.union([TicketSchema, partialTicketEdit]);
-var partialTicketCreate = z32.object({ id: entityId, title: z32.string() });
-var ticketCreateResult = z32.union([TicketSchema, partialTicketCreate]);
-var partialEntityWrite = z32.object({
+var ticketEditResult = z31.union([TicketSchema, partialTicketEdit]);
+var partialTicketCreate = z31.object({ id: entityId, title: z31.string() });
+var ticketCreateResult = z31.union([TicketSchema, partialTicketCreate]);
+var partialEntityWrite = z31.object({
   id: entityId,
-  title: z32.string().optional(),
-  body: z32.string().optional()
+  title: z31.string().optional(),
+  body: z31.string().optional()
 });
-var partialTddCreate = z32.object({ id: entityId, epicId: entityId, body: z32.string() });
-var propsSchema3 = z32.object({
-  getTracker: z32.custom((value) => typeof value === "function"),
-  getPrHost: z32.custom((value) => typeof value === "function").optional(),
-  getConfig: z32.custom((value) => typeof value === "function").optional(),
-  cwd: z32.string().min(1),
-  trustedRoots: z32.array(z32.string().min(1)).default([])
+var partialTddCreate = z31.object({ id: entityId, epicId: entityId, body: z31.string() });
+var propsSchema3 = z31.object({
+  getTracker: z31.custom((value) => typeof value === "function"),
+  getPrHost: z31.custom((value) => typeof value === "function").optional(),
+  getConfig: z31.custom((value) => typeof value === "function").optional(),
+  cwd: z31.string().min(1),
+  trustedRoots: z31.array(z31.string().min(1)).default([])
 });
 var DefaultTrackerEntityOperations = class {
   props;
@@ -3819,7 +3644,7 @@ var DefaultTrackerEntityOperations = class {
         ["write", "network"],
         ["epic", "create"],
         createEpicInput,
-        z32.union([EpicSchema, partialEntityWrite]),
+        z31.union([EpicSchema, partialEntityWrite]),
         (input) => this.createEpic(input)
       ),
       this.descriptor(
@@ -3827,8 +3652,8 @@ var DefaultTrackerEntityOperations = class {
         "Update an epic description, title, or labels.",
         ["write", "network"],
         ["epic", "edit"],
-        z32.object({ id: entityId, ...updateEpicInput.shape }).strict(),
-        z32.union([EpicSchema, partialEntityWrite]),
+        z31.object({ id: entityId, ...updateEpicInput.shape }).strict(),
+        z31.union([EpicSchema, partialEntityWrite]),
         ({ id, ...input }) => this.editEpic(id, input)
       ),
       this.descriptor(
@@ -3837,7 +3662,7 @@ var DefaultTrackerEntityOperations = class {
         ["write", "network"],
         ["epic", "link-initiative"],
         linkInput,
-        z32.object({ epicId: entityId, initiativeId: entityId }),
+        z31.object({ epicId: entityId, initiativeId: entityId }),
         async ({ epicId, initiativeId }) => {
           await this.props.getTracker().linkEpicToInitiative(epicId, initiativeId);
           return { epicId, initiativeId };
@@ -3849,7 +3674,7 @@ var DefaultTrackerEntityOperations = class {
         ["write", "network"],
         ["initiative", "create"],
         createInitiativeInput,
-        z32.union([InitiativeSchema, partialEntityWrite]),
+        z31.union([InitiativeSchema, partialEntityWrite]),
         (input) => this.createInitiative(input)
       ),
       this.descriptor(
@@ -3857,8 +3682,8 @@ var DefaultTrackerEntityOperations = class {
         "Update an initiative description or title.",
         ["write", "network"],
         ["initiative", "edit"],
-        z32.object({ id: entityId, ...updateInitiativeInput.shape }).strict(),
-        z32.union([InitiativeSchema, partialEntityWrite]),
+        z31.object({ id: entityId, ...updateInitiativeInput.shape }).strict(),
+        z31.union([InitiativeSchema, partialEntityWrite]),
         ({ id, ...input }) => this.editInitiative(id, input)
       ),
       this.descriptor(
@@ -3875,7 +3700,7 @@ var DefaultTrackerEntityOperations = class {
         "Update a ticket and attach local evidence files.",
         ["write", "network"],
         ["ticket", "edit"],
-        z32.object({ id: entityId, ...updateTicketInput.shape }).strict(),
+        z31.object({ id: entityId, ...updateTicketInput.shape }).strict(),
         ticketEditResult,
         ({ id, ...input }) => this.editTicket(id, input)
       ),
@@ -3885,7 +3710,7 @@ var DefaultTrackerEntityOperations = class {
         ["write", "network"],
         ["tdd", "create"],
         createTddInput,
-        z32.union([TechnicalDesignSchema, partialTddCreate]),
+        z31.union([TechnicalDesignSchema, partialTddCreate]),
         (input) => this.createTdd(input)
       )
     ];
@@ -4074,13 +3899,13 @@ var DefaultTrackerEntityOperations = class {
 // src/operations/pr-operations.ts
 import { realpathSync as realpathSync6, statSync as statSync7 } from "node:fs";
 import { isAbsolute as isAbsolute6, relative as relative5, resolve as resolve8 } from "node:path";
-import { z as z36 } from "zod";
+import { z as z35 } from "zod";
 
 // src/git/pr-template/pr-template.ts
-import { z as z34 } from "zod";
+import { z as z33 } from "zod";
 
 // src/git/semantic-types.ts
-import { z as z33 } from "zod";
+import { z as z32 } from "zod";
 var semanticTypes = [
   "feat",
   "fix",
@@ -4094,24 +3919,24 @@ var semanticTypes = [
   "style",
   "revert"
 ];
-var SemanticTypeSchema = z33.enum(semanticTypes);
+var SemanticTypeSchema = z32.enum(semanticTypes);
 
 // src/git/pr-template/pr-template.ts
 var maxChangeLineLength = 256;
 var maxChangeLines = 5;
-var PullRequestTemplateSchema = z34.object({
-  type: z34.enum(semanticTypes),
-  scope: z34.string().min(1),
-  description: z34.string().min(1),
-  whatWasChanged: z34.array(z34.string().min(1).max(maxChangeLineLength)).min(1).max(maxChangeLines),
-  whyWasItChanged: z34.string().min(1),
-  otsMaterials: z34.string().min(1).optional(),
-  ticketId: z34.string().min(1).optional(),
-  ticketUrl: z34.url().optional(),
-  baseBranch: z34.string().min(1),
-  headBranch: z34.string().min(1),
-  reviewers: z34.array(z34.string()).default([]),
-  labels: z34.array(z34.string()).default([])
+var PullRequestTemplateSchema = z33.object({
+  type: z33.enum(semanticTypes),
+  scope: z33.string().min(1),
+  description: z33.string().min(1),
+  whatWasChanged: z33.array(z33.string().min(1).max(maxChangeLineLength)).min(1).max(maxChangeLines),
+  whyWasItChanged: z33.string().min(1),
+  otsMaterials: z33.string().min(1).optional(),
+  ticketId: z33.string().min(1).optional(),
+  ticketUrl: z33.url().optional(),
+  baseBranch: z33.string().min(1),
+  headBranch: z33.string().min(1),
+  reviewers: z33.array(z33.string()).default([]),
+  labels: z33.array(z33.string()).default([])
 });
 var DefaultPullRequestBuilder = class {
   build(input) {
@@ -4159,18 +3984,18 @@ var DefaultPullRequestBuilder = class {
 var pullRequestBuilder = new DefaultPullRequestBuilder();
 
 // src/code-review/review.schema.ts
-import { z as z35 } from "zod";
+import { z as z34 } from "zod";
 var reviewContractVersion = 1;
 var reviewSchemaRevision = 1;
-var ReviewOutcomeSchema = z35.enum(["APPROVED", "CHANGES_NEEDED", "ESCALATE", "INCOMPLETE"]);
-var FindingIdSchema = z35.string().regex(/^f-[a-f0-9]{10}$/);
-var HeadShaSchema = z35.string().regex(/^[a-f0-9]{40}$/);
-var ReviewPathSchema = z35.string().max(400).regex(/^(?!\/)(?!.*\\)(?!.*(?:^|\/)\.{1,2}(?:\/|$))[^\p{Cc}]*$/u);
-var TextSchema = z35.string().min(1).max(16e3);
-var LineTextSchema = z35.string().min(1).max(400).regex(/^[^\r\n]+$/);
-var PositiveIdSchema = z35.number().int().positive().max(Number.MAX_SAFE_INTEGER);
-var HttpsUrlSchema = z35.url().regex(/^https:\/\//);
-var CategorySchema = z35.enum([
+var ReviewOutcomeSchema = z34.enum(["APPROVED", "CHANGES_NEEDED", "ESCALATE", "INCOMPLETE"]);
+var FindingIdSchema = z34.string().regex(/^f-[a-f0-9]{10}$/);
+var HeadShaSchema = z34.string().regex(/^[a-f0-9]{40}$/);
+var ReviewPathSchema = z34.string().max(400).regex(/^(?!\/)(?!.*\\)(?!.*(?:^|\/)\.{1,2}(?:\/|$))[^\p{Cc}]*$/u);
+var TextSchema = z34.string().min(1).max(16e3);
+var LineTextSchema = z34.string().min(1).max(400).regex(/^[^\r\n]+$/);
+var PositiveIdSchema = z34.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+var HttpsUrlSchema = z34.url().regex(/^https:\/\//);
+var CategorySchema = z34.enum([
   "security",
   "correctness",
   "data",
@@ -4181,7 +4006,7 @@ var CategorySchema = z35.enum([
   "readability",
   "docs"
 ]);
-var ActionLabelSchema = z35.enum([
+var ActionLabelSchema = z34.enum([
   "issue",
   "todo",
   "suggestion",
@@ -4191,15 +4016,15 @@ var ActionLabelSchema = z35.enum([
   "typo",
   "polish"
 ]);
-var InformationLabelSchema = z35.enum(["praise", "note", "thought"]);
-var SeveritySchema = z35.enum(["critical", "major", "minor", "trivial"]);
-var DecisionOptionsSchema = z35.array(
-  z35.strictObject({ id: z35.string().regex(/^[a-z][a-z0-9-]{0,79}$/), description: TextSchema })
+var InformationLabelSchema = z34.enum(["praise", "note", "thought"]);
+var SeveritySchema = z34.enum(["critical", "major", "minor", "trivial"]);
+var DecisionOptionsSchema = z34.array(
+  z34.strictObject({ id: z34.string().regex(/^[a-z][a-z0-9-]{0,79}$/), description: TextSchema })
 ).min(2);
 var findingFields = {
   path: ReviewPathSchema,
-  line: z35.number().int().nonnegative(),
-  start_line: z35.number().int().positive().optional(),
+  line: z34.number().int().nonnegative(),
+  start_line: z34.number().int().positive().optional(),
   category: CategorySchema.optional(),
   subject: LineTextSchema,
   discussion: TextSchema,
@@ -4208,73 +4033,73 @@ var findingFields = {
 var actionFields = {
   ...findingFields,
   label: ActionLabelSchema,
-  type: z35.enum(["fix", "clarify"]),
-  blocking: z35.boolean(),
+  type: z34.enum(["fix", "clarify"]),
+  blocking: z34.boolean(),
   severity: SeveritySchema,
   details: TextSchema,
   resolved_when: TextSchema
 };
 var decisionFields = {
   ...actionFields,
-  type: z35.literal("decide"),
+  type: z34.literal("decide"),
   decision_owner: LineTextSchema,
   decision_options: DecisionOptionsSchema
 };
 var informationFields = {
   ...findingFields,
   label: InformationLabelSchema,
-  blocking: z35.literal(false),
+  blocking: z34.literal(false),
   details: TextSchema.optional()
 };
-var NewFindingSchema = z35.union([
-  z35.strictObject(actionFields),
-  z35.strictObject(decisionFields),
-  z35.strictObject(informationFields)
+var NewFindingSchema = z34.union([
+  z34.strictObject(actionFields),
+  z34.strictObject(decisionFields),
+  z34.strictObject(informationFields)
 ]);
-var ActionableFindingSchema = z35.union([
-  z35.strictObject({ ...actionFields, id: FindingIdSchema }),
-  z35.strictObject({ ...decisionFields, id: FindingIdSchema })
+var ActionableFindingSchema = z34.union([
+  z34.strictObject({ ...actionFields, id: FindingIdSchema }),
+  z34.strictObject({ ...decisionFields, id: FindingIdSchema })
 ]);
-var StoredFindingSchema = z35.union([
+var StoredFindingSchema = z34.union([
   ...ActionableFindingSchema.options,
-  z35.strictObject({ ...informationFields, id: FindingIdSchema })
+  z34.strictObject({ ...informationFields, id: FindingIdSchema })
 ]);
-var ReviewEvidenceSchema = z35.discriminatedUnion("kind", [
-  z35.strictObject({
-    kind: z35.literal("github_comment"),
+var ReviewEvidenceSchema = z34.discriminatedUnion("kind", [
+  z34.strictObject({
+    kind: z34.literal("github_comment"),
     comment_id: PositiveIdSchema,
     url: HttpsUrlSchema
   }),
-  z35.strictObject({
-    kind: z35.literal("code"),
+  z34.strictObject({
+    kind: z34.literal("code"),
     commit_sha: HeadShaSchema,
     path: ReviewPathSchema.min(1),
-    line: z35.number().int().positive()
+    line: z34.number().int().positive()
   }),
-  z35.strictObject({ kind: z35.literal("commit"), sha: HeadShaSchema }),
-  z35.strictObject({
-    kind: z35.literal("check_run"),
+  z34.strictObject({ kind: z34.literal("commit"), sha: HeadShaSchema }),
+  z34.strictObject({
+    kind: z34.literal("check_run"),
     check_run_id: PositiveIdSchema,
     commit_sha: HeadShaSchema
   }),
-  z35.strictObject({ kind: z35.literal("document"), url: HttpsUrlSchema }),
-  z35.strictObject({
-    kind: z35.literal("verification"),
+  z34.strictObject({ kind: z34.literal("document"), url: HttpsUrlSchema }),
+  z34.strictObject({
+    kind: z34.literal("verification"),
     commit_sha: HeadShaSchema,
     command: TextSchema,
-    result: z35.literal("passed"),
+    result: z34.literal("passed"),
     report_url: HttpsUrlSchema
   }),
-  z35.strictObject({
-    kind: z35.literal("thread_resolution"),
-    thread_id: z35.string().min(1),
+  z34.strictObject({
+    kind: z34.literal("thread_resolution"),
+    thread_id: z34.string().min(1),
     author_id: PositiveIdSchema
   })
 ]);
-var DecisionAnswerSchema = z35.strictObject({
+var DecisionAnswerSchema = z34.strictObject({
   comment_id: PositiveIdSchema,
   author_id: PositiveIdSchema,
-  option_id: z35.string().min(1)
+  option_id: z34.string().min(1)
 });
 var transitionFields = {
   id: FindingIdSchema,
@@ -4282,81 +4107,81 @@ var transitionFields = {
   reply: TextSchema.optional(),
   decision: DecisionAnswerSchema.optional()
 };
-var PriorFindingSchema = z35.union([
-  z35.strictObject({
+var PriorFindingSchema = z34.union([
+  z34.strictObject({
     ...transitionFields,
-    status: z35.literal("resolved"),
-    evidence: z35.array(ReviewEvidenceSchema).min(1)
+    status: z34.literal("resolved"),
+    evidence: z34.array(ReviewEvidenceSchema).min(1)
   }),
-  z35.strictObject({
+  z34.strictObject({
     ...transitionFields,
-    status: z35.literal("withdrawn"),
-    evidence: z35.array(ReviewEvidenceSchema).min(1),
-    withdrawal_basis: z35.enum(["incorrect", "no_longer_applicable", "dismissed"])
+    status: z34.literal("withdrawn"),
+    evidence: z34.array(ReviewEvidenceSchema).min(1),
+    withdrawal_basis: z34.enum(["incorrect", "no_longer_applicable", "dismissed"])
   }),
-  z35.strictObject({
+  z34.strictObject({
     ...transitionFields,
-    status: z35.literal("still_open"),
-    evidence: z35.array(ReviewEvidenceSchema).optional(),
+    status: z34.literal("still_open"),
+    evidence: z34.array(ReviewEvidenceSchema).optional(),
     updated_finding: ActionableFindingSchema.optional()
   })
 ]);
 var reviewFields = {
-  contract_version: z35.literal(reviewContractVersion),
-  schema_revision: z35.literal(reviewSchemaRevision),
+  contract_version: z34.literal(reviewContractVersion),
+  schema_revision: z34.literal(reviewSchemaRevision),
   head_sha: HeadShaSchema,
-  review_complete: z35.boolean(),
-  incomplete_reason: z35.string().max(16e3).optional(),
+  review_complete: z34.boolean(),
+  incomplete_reason: z34.string().max(16e3).optional(),
   summary: TextSchema,
   outcome: ReviewOutcomeSchema,
   outcome_reason: TextSchema,
   remaining_risk: TextSchema,
-  extensions: z35.record(z35.string(), z35.json()).optional()
+  extensions: z34.record(z34.string(), z34.json()).optional()
 };
-var ReviewSchema = z35.strictObject({
+var ReviewSchema = z34.strictObject({
   ...reviewFields,
-  findings: z35.array(NewFindingSchema),
-  prior_findings: z35.array(PriorFindingSchema)
+  findings: z34.array(NewFindingSchema),
+  prior_findings: z34.array(PriorFindingSchema)
 });
-var FindingRecordSchema = z35.strictObject({
-  v: z35.literal(reviewContractVersion),
-  schema_revision: z35.literal(reviewSchemaRevision),
+var FindingRecordSchema = z34.strictObject({
+  v: z34.literal(reviewContractVersion),
+  schema_revision: z34.literal(reviewSchemaRevision),
   finding: ActionableFindingSchema,
-  status: z35.enum(["open", "resolved", "withdrawn"]),
-  evidence: z35.array(ReviewEvidenceSchema),
+  status: z34.enum(["open", "resolved", "withdrawn"]),
+  evidence: z34.array(ReviewEvidenceSchema),
   decision: DecisionAnswerSchema.optional()
 });
-var ReviewStateSchema = z35.strictObject({
-  v: z35.literal(reviewContractVersion),
-  schema_revision: z35.literal(reviewSchemaRevision),
+var ReviewStateSchema = z34.strictObject({
+  v: z34.literal(reviewContractVersion),
+  schema_revision: z34.literal(reviewSchemaRevision),
   sha: HeadShaSchema,
   outcome: ReviewOutcomeSchema,
-  records: z35.array(
-    z35.union([
-      z35.strictObject({
+  records: z34.array(
+    z34.union([
+      z34.strictObject({
         id: FindingIdSchema,
-        status: z35.enum(["open", "resolved", "withdrawn"]),
-        location: z35.union([
-          z35.strictObject({ kind: z35.literal("review_comment"), comment_id: PositiveIdSchema }),
-          z35.strictObject({ kind: z35.literal("review_body"), review_id: PositiveIdSchema })
+        status: z34.enum(["open", "resolved", "withdrawn"]),
+        location: z34.union([
+          z34.strictObject({ kind: z34.literal("review_comment"), comment_id: PositiveIdSchema }),
+          z34.strictObject({ kind: z34.literal("review_body"), review_id: PositiveIdSchema })
         ])
       }),
-      z35.strictObject({
+      z34.strictObject({
         id: FindingIdSchema,
-        status: z35.literal("informational"),
-        fingerprint: z35.string().min(1),
-        finding: z35.strictObject({ ...informationFields, id: FindingIdSchema }).optional()
+        status: z34.literal("informational"),
+        fingerprint: z34.string().min(1),
+        finding: z34.strictObject({ ...informationFields, id: FindingIdSchema }).optional()
       })
     ])
   )
 });
-var TransportReviewSchema = z35.strictObject({
+var TransportReviewSchema = z34.strictObject({
   ...reviewFields,
-  findings: z35.array(
-    z35.strictObject({
+  findings: z34.array(
+    z34.strictObject({
       ...actionFields,
-      type: z35.enum(["fix", "clarify", "decide"]).optional(),
-      label: z35.enum([...ActionLabelSchema.options, ...InformationLabelSchema.options]),
+      type: z34.enum(["fix", "clarify", "decide"]).optional(),
+      label: z34.enum([...ActionLabelSchema.options, ...InformationLabelSchema.options]),
       severity: SeveritySchema.optional(),
       details: TextSchema.optional(),
       resolved_when: TextSchema.optional(),
@@ -4364,103 +4189,103 @@ var TransportReviewSchema = z35.strictObject({
       decision_options: DecisionOptionsSchema.optional()
     })
   ),
-  prior_findings: z35.array(
-    z35.strictObject({
+  prior_findings: z34.array(
+    z34.strictObject({
       ...transitionFields,
-      status: z35.enum(["resolved", "still_open", "withdrawn"]),
-      evidence: z35.array(ReviewEvidenceSchema).optional(),
-      withdrawal_basis: z35.enum(["incorrect", "no_longer_applicable", "dismissed"]).optional(),
+      status: z34.enum(["resolved", "still_open", "withdrawn"]),
+      evidence: z34.array(ReviewEvidenceSchema).optional(),
+      withdrawal_basis: z34.enum(["incorrect", "no_longer_applicable", "dismissed"]).optional(),
       updated_finding: StoredFindingSchema.optional()
     })
   )
 });
 
 // src/operations/pr-operations.ts
-var propsSchema4 = z36.strictObject({
-  cwd: z36.string().min(1),
-  getHost: z36.custom((value) => typeof value === "function")
+var propsSchema4 = z35.strictObject({
+  cwd: z35.string().min(1),
+  getHost: z35.custom((value) => typeof value === "function")
 });
-var createInput = z36.strictObject({
+var createInput = z35.strictObject({
   type: SemanticTypeSchema,
-  scope: z36.string().min(1),
-  description: z36.string().min(1),
-  why: z36.string().min(1),
-  what: z36.array(z36.string().min(1).max(256)).min(1).max(5),
-  ots: z36.string().min(1).optional(),
-  base: z36.string().min(1),
-  head: z36.string().min(1),
-  ticketId: z36.string().min(1).optional(),
-  ticketUrl: z36.url().optional(),
-  reviewer: z36.array(z36.string()).default([]),
-  label: z36.array(z36.string()).default([]),
-  attach: z36.array(z36.string()).default([])
+  scope: z35.string().min(1),
+  description: z35.string().min(1),
+  why: z35.string().min(1),
+  what: z35.array(z35.string().min(1).max(256)).min(1).max(5),
+  ots: z35.string().min(1).optional(),
+  base: z35.string().min(1),
+  head: z35.string().min(1),
+  ticketId: z35.string().min(1).optional(),
+  ticketUrl: z35.url().optional(),
+  reviewer: z35.array(z35.string()).default([]),
+  label: z35.array(z35.string()).default([]),
+  attach: z35.array(z35.string()).default([])
 });
-var commentInput2 = z36.strictObject({
-  number: z36.number().int().positive(),
-  body: z36.string(),
-  attach: z36.array(z36.string()).default([])
+var commentInput2 = z35.strictObject({
+  number: z35.number().int().positive(),
+  body: z35.string(),
+  attach: z35.array(z35.string()).default([])
 });
-var listInput = z36.strictObject({ ticket: z36.array(z36.string().min(1)).min(1) });
-var reviewInput = z36.strictObject({
-  number: z36.number().int().positive(),
-  reviewer: z36.array(z36.string().min(1)).min(1)
+var listInput = z35.strictObject({ ticket: z35.array(z35.string().min(1)).min(1) });
+var reviewInput = z35.strictObject({
+  number: z35.number().int().positive(),
+  reviewer: z35.array(z35.string().min(1)).min(1)
 });
-var threadsInput = z36.strictObject({
-  number: z36.number().int().positive(),
-  trustedAuthors: z36.array(z36.string().min(1)).default([])
+var threadsInput = z35.strictObject({
+  number: z35.number().int().positive(),
+  trustedAuthors: z35.array(z35.string().min(1)).default([])
 });
-var threadReplyInput = z36.strictObject({
-  threadId: z36.string().min(1),
-  body: z36.string().min(1)
+var threadReplyInput = z35.strictObject({
+  threadId: z35.string().min(1),
+  body: z35.string().min(1)
 });
-var threadReplyResultSchema = z36.strictObject({ id: z36.string(), url: z36.string() });
-var threadCommentSchema = z36.strictObject({
-  id: z36.string(),
-  url: z36.string(),
-  authorLogin: z36.string(),
-  authorType: z36.enum(["User", "Bot"]),
-  body: z36.string(),
-  createdAt: z36.string()
+var threadReplyResultSchema = z35.strictObject({ id: z35.string(), url: z35.string() });
+var threadCommentSchema = z35.strictObject({
+  id: z35.string(),
+  url: z35.string(),
+  authorLogin: z35.string(),
+  authorType: z35.enum(["User", "Bot"]),
+  body: z35.string(),
+  createdAt: z35.string()
 });
-var reviewThreadSchema = z36.strictObject({
-  id: z36.string(),
-  path: z36.string(),
-  line: z36.number().nullable(),
-  originalLine: z36.number().nullable(),
-  isResolved: z36.boolean(),
-  isOutdated: z36.boolean(),
-  commentsTruncated: z36.boolean(),
-  comments: z36.array(threadCommentSchema),
+var reviewThreadSchema = z35.strictObject({
+  id: z35.string(),
+  path: z35.string(),
+  line: z35.number().nullable(),
+  originalLine: z35.number().nullable(),
+  isResolved: z35.boolean(),
+  isOutdated: z35.boolean(),
+  commentsTruncated: z35.boolean(),
+  comments: z35.array(threadCommentSchema),
   finding: FindingRecordSchema.nullable(),
-  markerError: z36.string().nullable()
+  markerError: z35.string().nullable()
 });
-var pullRequestThreadsSchema = z36.strictObject({
-  pullRequest: z36.strictObject({
-    number: z36.number(),
-    url: z36.string(),
-    title: z36.string(),
-    body: z36.string(),
-    headRefName: z36.string(),
-    headRefOid: z36.string(),
-    baseRefName: z36.string(),
-    authorLogin: z36.string()
+var pullRequestThreadsSchema = z35.strictObject({
+  pullRequest: z35.strictObject({
+    number: z35.number(),
+    url: z35.string(),
+    title: z35.string(),
+    body: z35.string(),
+    headRefName: z35.string(),
+    headRefOid: z35.string(),
+    baseRefName: z35.string(),
+    authorLogin: z35.string()
   }),
-  threads: z36.array(reviewThreadSchema)
+  threads: z35.array(reviewThreadSchema)
 });
-var createdSchema = z36.object({ number: z36.number().int().positive(), url: z36.string().url() });
-var commentResultSchema = z36.object({ url: z36.string() });
-var openPullRequestSchema = z36.object({
-  ticket: z36.string(),
-  number: z36.number(),
-  url: z36.string(),
-  headRefName: z36.string(),
-  baseRefName: z36.string(),
-  title: z36.string()
+var createdSchema = z35.object({ number: z35.number().int().positive(), url: z35.string().url() });
+var commentResultSchema = z35.object({ url: z35.string() });
+var openPullRequestSchema = z35.object({
+  ticket: z35.string(),
+  number: z35.number(),
+  url: z35.string(),
+  headRefName: z35.string(),
+  baseRefName: z35.string(),
+  title: z35.string()
 });
-var reviewerResultSchema = z36.object({
-  number: z36.number().int().positive(),
-  requested: z36.array(z36.string()),
-  failed: z36.array(z36.object({ login: z36.string(), error: z36.string() }))
+var reviewerResultSchema = z35.object({
+  number: z35.number().int().positive(),
+  requested: z35.array(z35.string()),
+  failed: z35.array(z35.object({ login: z35.string(), error: z35.string() }))
 });
 var PullRequestAttachmentPathError = class extends Error {
   name = "PullRequestAttachmentPathError";
@@ -4505,7 +4330,7 @@ var DefaultPrOperations = class {
         this.validateAttachments(input.attach);
         return this.getHost().commentOnPullRequest(input.number, input.body, { attach: input.attach });
       }),
-      this.descriptor("pr-list", "List open pull requests matched to ticket identifiers.", ["read", "network", "process"], ["pr", "list"], listInput, z36.array(openPullRequestSchema), (input) => this.getHost().listOpenPullRequestsForTickets(input.ticket)),
+      this.descriptor("pr-list", "List open pull requests matched to ticket identifiers.", ["read", "network", "process"], ["pr", "list"], listInput, z35.array(openPullRequestSchema), (input) => this.getHost().listOpenPullRequestsForTickets(input.ticket)),
       this.descriptor("pr-threads", "List a pull request's review threads with trusted finding markers.", ["read", "network", "process"], ["pr", "threads"], threadsInput, pullRequestThreadsSchema, (input) => this.getHost().listReviewThreads(input.number, { trustedAuthors: input.trustedAuthors })),
       this.descriptor("pr-thread-reply", "Reply in an existing pull request review thread.", ["write", "network", "process"], ["pr", "thread-reply"], threadReplyInput, threadReplyResultSchema, (input) => this.getHost().replyToReviewThread(input.threadId, input.body)),
       this.descriptor("pr-request-review", "Request reviewers for a pull request and preserve each outcome.", effects, ["pr", "request-review"], reviewInput, reviewerResultSchema, async (input) => {
@@ -4563,326 +4388,10 @@ var DefaultPrOperations = class {
   }
 };
 
-// src/operations/ariadne-operations.ts
-import { z as z38 } from "zod";
-
-// src/shared/ariadne/packet-id-generator.ts
-import { randomBytes } from "node:crypto";
-var maxSlugLength = 60;
-var fallbackSlug = "packet";
-var suffixPattern = /-[0-9a-f]{8}$/;
-var RandomPacketIdGenerator = class {
-  generate(title) {
-    return `${this.slug(title)}-${this.suffix()}`;
-  }
-  regenerate(id) {
-    const slug = this.trim(id.replace(suffixPattern, ""));
-    const previous = id.slice(-8);
-    let suffix = this.suffix();
-    while (suffix === previous) suffix = this.suffix();
-    return `${slug === "" ? fallbackSlug : slug}-${suffix}`;
-  }
-  slug(title) {
-    const kebab = this.trim(title.toLowerCase().replace(/[^a-z0-9]+/g, "-"));
-    return kebab === "" ? fallbackSlug : kebab;
-  }
-  trim(text2) {
-    return text2.slice(0, maxSlugLength).replace(/^-+|-+$/g, "");
-  }
-  suffix() {
-    return randomBytes(4).toString("hex");
-  }
-};
-var packetIdGenerator = new RandomPacketIdGenerator();
-
-// src/shared/ariadne/review-packet.schema.ts
-import { z as z37 } from "zod";
-var packetLimits = {
-  title: 200,
-  objective: 600,
-  highlight: 200,
-  highlights: 5,
-  prs: 30,
-  focusAreas: 10,
-  rationale: 2e3,
-  anchors: 10,
-  path: 400,
-  reviewers: 10,
-  ticket: 100
-};
-var focusAreaKinds = ["design-pattern", "business-logic", "data-schema", "other"];
-var anchorSides = ["LEFT", "RIGHT"];
-var textSchema = (max) => z37.string().min(1, "must not be blank").max(max, `must be at most ${max} characters`);
-var oneLineTextSchema = (max) => textSchema(max).refine((value) => !/[\r\n]/.test(value), "must be one line");
-var PositiveIntSchema = z37.number().int().positive();
-var PacketIdSchema = AgentRecordIdSchema;
-var OperationIdSchema2 = z37.string().regex(/^[A-Za-z0-9_-]{16,80}$/, "must be 16\u201380 letters, digits, underscores or hyphens");
-var HeadShaSchema2 = z37.string().regex(/^[0-9a-f]{40}$/, "must be a 40-character lowercase hex commit sha");
-var GithubLoginSchema = z37.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/, "must be a GitHub login");
-var PacketAnchorSchema = z37.strictObject({
-  path: textSchema(packetLimits.path),
-  line: PositiveIntSchema,
-  startLine: optionalSchema(PositiveIntSchema),
-  side: z37.enum(anchorSides)
-}).refine((anchor) => anchor.startLine === void 0 || anchor.startLine < anchor.line, {
-  path: ["startLine"],
-  message: "must be before line"
-});
-var SignOffTimeSchema = z37.string().regex(/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,3})?Z$/, "must be an ISO 8601 UTC time ending in Z").refine((value) => {
-  const [year = 0, month = 0, day = 0] = value.slice(0, 10).split("-").map(Number);
-  const date = new Date(Date.UTC(year, month - 1, day));
-  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
-}, "must be a real calendar date");
-var FocusAreaSchema = z37.strictObject({
-  id: AgentRecordIdSchema,
-  kind: z37.enum(focusAreaKinds),
-  title: oneLineTextSchema(packetLimits.title),
-  rationale: textSchema(packetLimits.rationale),
-  anchors: z37.array(PacketAnchorSchema).max(packetLimits.anchors, `up to ${packetLimits.anchors} anchors`)
-});
-var PacketPrSchema = z37.strictObject({
-  repo: z37.string().regex(/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9_.-]{1,100}$/, "must be owner/name"),
-  number: PositiveIntSchema,
-  headSha: HeadShaSchema2,
-  title: oneLineTextSchema(packetLimits.title),
-  ticket: optionalSchema(oneLineTextSchema(packetLimits.ticket)),
-  signOff: z37.strictObject({ at: SignOffTimeSchema, headSha: HeadShaSchema2 }).nullable().optional(),
-  focusAreas: z37.array(FocusAreaSchema).max(packetLimits.focusAreas, `up to ${packetLimits.focusAreas} focus areas per PR`)
-});
-var PacketInputSchema = z37.strictObject({
-  id: PacketIdSchema,
-  title: oneLineTextSchema(packetLimits.title),
-  overview: z37.strictObject({
-    objective: textSchema(packetLimits.objective),
-    highlights: z37.array(oneLineTextSchema(packetLimits.highlight)).min(1, "at least 1 highlight").max(packetLimits.highlights, `up to ${packetLimits.highlights} highlights`)
-  }),
-  prs: z37.array(PacketPrSchema).min(1, "at least 1 PR").max(packetLimits.prs, `up to ${packetLimits.prs} PRs`),
-  reviewers: z37.array(GithubLoginSchema).min(1, "at least 1 reviewer").max(packetLimits.reviewers, `up to ${packetLimits.reviewers} reviewers`)
-});
-var PacketUpdateSchema = z37.strictObject({
-  expectedRevision: z37.number().int().nonnegative(),
-  operationId: OperationIdSchema2,
-  packet: PacketInputSchema.omit({ id: true })
-});
-var GithubSnapshotSchema = z37.looseObject({ id: z37.union([z37.string(), z37.number()]), login: z37.string() });
-var PacketSchema = z37.looseObject({
-  id: z37.string(),
-  authorId: z37.string(),
-  title: z37.string(),
-  overview: z37.looseObject({ objective: z37.string(), highlights: z37.array(z37.string()) }),
-  prs: z37.array(z37.looseObject({ repo: z37.string(), number: z37.number() })),
-  reviewers: z37.array(z37.looseObject({ id: z37.string(), github: GithubSnapshotSchema })),
-  status: z37.enum(["open", "closed"]),
-  revision: z37.number().int(),
-  createdAt: z37.string(),
-  updatedAt: z37.string()
-});
-var ReviewerSchema = z37.looseObject({ id: z37.string(), name: z37.string(), github: GithubSnapshotSchema });
-var PacketResponseSchema = z37.looseObject({ packet: PacketSchema }).transform((response) => response.packet);
-var ReviewerListResponseSchema = z37.looseObject({ reviewers: z37.array(ReviewerSchema) });
-
-// src/operations/ariadne-operations.ts
-var BoardResultSchema = (value) => z38.discriminatedUnion("status", [
-  z38.object({
-    status: z38.literal("skipped"),
-    reason: z38.enum([
-      "disabled",
-      "no-token",
-      "invalid-url",
-      "not-jira-ticket",
-      "nothing-recorded"
-    ]),
-    notices: z38.array(z38.string()).optional()
-  }),
-  z38.object({
-    status: z38.literal("failed"),
-    message: z38.string(),
-    notices: z38.array(z38.string()).optional()
-  }),
-  z38.object({ status: z38.literal("ok"), value, notices: z38.array(z38.string()).optional() })
-]);
-var packetInput = z38.unknown();
-var packetIdInput = z38.strictObject({ title: z38.string() });
-var packetUpdateInput = z38.strictObject({
-  id: z38.string().min(1),
-  packet: z38.unknown(),
-  expectedRevision: z38.number().int().nonnegative()
-});
-var packetOutput = PacketSchema;
-var reviewersOutput = ReviewerListResponseSchema;
-var AriadneOperationsPropsSchema = z38.object({
-  getBoard: z38.custom((value) => typeof value === "function"),
-  getPackets: z38.custom((value) => typeof value === "function")
-});
-var inputSchemas = {
-  heartbeat: z38.object({
-    input: HeartbeatInputSchema.omit({ session: true }).extend({
-      session: z38.string().optional(),
-      ticket: z38.string().optional(),
-      step: z38.string(),
-      repo: z38.string().optional(),
-      branch: z38.string().optional(),
-      skill: z38.string().optional(),
-      detail: z38.string().optional()
-    }),
-    options: z38.object({ strict: z38.boolean().optional(), skill: z38.string().optional() }).optional()
-  }),
-  item: z38.object({
-    input: ItemInputSchema.omit({ session: true }).extend({
-      session: z38.string().optional(),
-      ticket: z38.string().optional(),
-      title: z38.string(),
-      detail: z38.string().optional(),
-      options: z38.array(z38.string()).optional(),
-      id: z38.string().optional()
-    }),
-    options: z38.object({ strict: z38.boolean().optional(), skill: z38.string().optional() }).optional()
-  }),
-  activity: z38.object({
-    input: ActivityInputSchema.omit({ session: true }).extend({
-      session: z38.string().optional(),
-      ticket: z38.string().optional(),
-      text: z38.string(),
-      id: z38.string().optional()
-    }),
-    options: z38.object({ strict: z38.boolean().optional(), skill: z38.string().optional() }).optional()
-  }),
-  items: z38.strictObject({
-    session: z38.string().optional(),
-    ticket: z38.string().optional(),
-    strict: z38.boolean().optional()
-  })
-};
-var DefaultAriadneOperations = class {
-  props;
-  constructor(props) {
-    this.props = AriadneOperationsPropsSchema.parse(props);
-  }
-  operations() {
-    return [
-      this.descriptor(
-        "board-post-heartbeat",
-        "Report a run heartbeat to Ariadne.",
-        ["write", "network"],
-        ["board", "post", "heartbeat"],
-        inputSchemas.heartbeat,
-        BoardResultSchema(HeartbeatResponseSchema),
-        ({ input, options }) => this.mapBoard(this.props.getBoard().heartbeat(input, this.boardOptions(options)))
-      ),
-      this.descriptor(
-        "board-post-item",
-        "Post a question or request to an Ariadne run.",
-        ["write", "network"],
-        ["board", "post", "item"],
-        inputSchemas.item,
-        BoardResultSchema(ItemResponseSchema),
-        ({ input, options }) => this.mapBoard(
-          this.props.getBoard().item(input, {
-            ...this.boardOptions(options),
-            bootstrapMissingSession: false
-          })
-        )
-      ),
-      this.descriptor(
-        "board-post-activity",
-        "Add activity to an Ariadne run.",
-        ["write", "network"],
-        ["board", "post", "activity"],
-        inputSchemas.activity,
-        BoardResultSchema(ActivityResponseSchema),
-        ({ input, options }) => this.mapBoard(
-          this.props.getBoard().activity(input, {
-            ...this.boardOptions(options),
-            bootstrapMissingSession: false
-          })
-        )
-      ),
-      this.descriptor(
-        "board-items",
-        "List items for an Ariadne run.",
-        ["read", "network"],
-        ["board", "items"],
-        inputSchemas.items,
-        BoardResultSchema(ItemListResponseSchema),
-        ({ session, ticket, strict }) => this.mapBoard(
-          this.props.getBoard().items(session, strict === void 0 ? {} : { strict }, ticket)
-        )
-      ),
-      this.descriptor(
-        "packet-create",
-        "Publish a validated Ariadne review packet.",
-        ["write", "network"],
-        ["packet", "create"],
-        z38.strictObject({ packet: packetInput }),
-        packetOutput,
-        ({ packet }) => this.props.getPackets().create(packet)
-      ),
-      this.descriptor(
-        "packet-new-id",
-        "Generate a reusable Ariadne review packet id.",
-        [],
-        ["packet", "new-id"],
-        packetIdInput,
-        z38.object({ id: z38.string() }),
-        ({ title }) => ({ id: packetIdGenerator.generate(title) })
-      ),
-      this.descriptor(
-        "packet-update",
-        "Replace a review packet at its expected revision.",
-        ["write", "network"],
-        ["packet", "update"],
-        packetUpdateInput,
-        packetOutput,
-        ({ id, packet, expectedRevision }) => this.props.getPackets().update(id, { packet, expectedRevision })
-      ),
-      this.descriptor(
-        "packet-get",
-        "Read an Ariadne review packet and its revision.",
-        ["read", "network"],
-        ["packet", "get"],
-        z38.object({ id: z38.string().min(1) }),
-        packetOutput,
-        ({ id }) => this.props.getPackets().get(id)
-      ),
-      this.descriptor(
-        "packet-reviewers",
-        "List Ariadne members who can review packets.",
-        ["read", "network"],
-        ["packet", "reviewers"],
-        z38.strictObject({}),
-        reviewersOutput,
-        () => this.props.getPackets().reviewers()
-      )
-    ];
-  }
-  boardOptions(options) {
-    return {
-      ...options?.strict === void 0 ? {} : { strict: options.strict },
-      ...options?.skill === void 0 ? {} : { skill: options.skill }
-    };
-  }
-  async mapBoard(outcome) {
-    const result = await outcome;
-    if (result.status === "posted") return { ...result, status: "ok" };
-    return result;
-  }
-  descriptor(id, description, effects, path, inputSchema, outputSchema, handler) {
-    return {
-      id,
-      description,
-      effects,
-      cli: { path, aliases: [] },
-      inputSchema,
-      outputSchema,
-      handler
-    };
-  }
-};
-
 // src/operations/git-config-operations.ts
 import { existsSync as existsSync7, lstatSync, realpathSync as realpathSync7 } from "node:fs";
 import { dirname as dirname6, isAbsolute as isAbsolute7, join as join7, parse, relative as relative6, resolve as resolve9, sep as sep4 } from "node:path";
-import { z as z40 } from "zod";
+import { z as z37 } from "zod";
 
 // src/git/branch-namer/branch-namer.ts
 var BranchNamer = class {
@@ -4935,25 +4444,25 @@ ${line.trim()}`) === "";
 };
 
 // src/git/commit-message-builder/commit-message.schema.ts
-import { z as z39 } from "zod";
-var CommitMessageInputSchema = z39.object({
+import { z as z36 } from "zod";
+var CommitMessageInputSchema = z36.object({
   type: SemanticTypeSchema,
   // Bare issue numbers make one-character scopes legitimate; 32 clears a 10-character tracker key plus a six-digit number.
-  scope: z39.string().min(1).max(32),
-  description: z39.string().min(2).max(50),
-  body: z39.string().optional(),
-  model: z39.string().max(72).optional(),
-  footers: z39.array(z39.string().regex(/^[a-zA-Z0-9-]+(: |=).*$/)).default([])
+  scope: z36.string().min(1).max(32),
+  description: z36.string().min(2).max(50),
+  body: z36.string().optional(),
+  model: z36.string().max(72).optional(),
+  footers: z36.array(z36.string().regex(/^[a-zA-Z0-9-]+(: |=).*$/)).default([])
 });
-var CommitMessageHeaderSchema = z39.preprocess(
+var CommitMessageHeaderSchema = z36.preprocess(
   (arg) => {
-    return z39.string({ error: "Git Commit headers should be 72 characters or less" }).max(72).parse(arg);
+    return z36.string({ error: "Git Commit headers should be 72 characters or less" }).max(72).parse(arg);
   },
-  z39.templateLiteral([SemanticTypeSchema, "(", z39.string(), "): ", z39.string()])
+  z36.templateLiteral([SemanticTypeSchema, "(", z36.string(), "): ", z36.string()])
 );
-var CommitMessageBuilderPropsSchema = z39.object({
-  binPath: z39.string().min(1),
-  agentEnv: z39.string().optional()
+var CommitMessageBuilderPropsSchema = z36.object({
+  binPath: z36.string().min(1),
+  agentEnv: z36.string().optional()
 });
 
 // src/git/commit-message-builder/commit-message-builder.ts
@@ -5010,36 +4519,36 @@ var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
 };
 
 // src/operations/git-config-operations.ts
-var ConfigScopeSchema = z40.enum(configScopes);
-var ConfigSetInputSchema = z40.object({
-  key: z40.string().min(1),
-  values: z40.array(z40.string()).min(1),
+var ConfigScopeSchema = z37.enum(configScopes);
+var ConfigSetInputSchema = z37.object({
+  key: z37.string().min(1),
+  values: z37.array(z37.string()).min(1),
   scope: ConfigScopeSchema.optional()
 }).strict();
-var ConfigUnsetInputSchema = z40.object({ key: z40.string().min(1), scope: ConfigScopeSchema.optional() }).strict();
+var ConfigUnsetInputSchema = z37.object({ key: z37.string().min(1), scope: ConfigScopeSchema.optional() }).strict();
 var GitCommitInputSchema = CommitMessageInputSchema.extend({
-  files: z40.array(z40.string()).default([])
+  files: z37.array(z37.string()).default([])
 }).strict();
-var GitCheckoutInputSchema = z40.object({
-  type: z40.string().min(1),
-  scope: z40.string().min(1),
-  description: z40.string().optional(),
-  from: z40.string().optional()
+var GitCheckoutInputSchema = z37.object({
+  type: z37.string().min(1),
+  scope: z37.string().min(1),
+  description: z37.string().optional(),
+  from: z37.string().optional()
 }).strict();
-var GitPushInputSchema = z40.object({ remote: z40.string().min(1).default("origin"), setUpstream: z40.boolean().default(true) }).strict();
-var CommitMessageOutputSchema = z40.object({ message: z40.string() });
-var BranchNameInputSchema = z40.object({ type: z40.string().min(1), scope: z40.string().min(1), description: z40.string().optional() }).strict();
-var ConfigOperationPolicySchema = z40.object({
-  scopes: z40.array(ConfigScopeSchema).default(["project", "local"]),
-  roots: z40.array(z40.string().min(1)).default([])
+var GitPushInputSchema = z37.object({ remote: z37.string().min(1).default("origin"), setUpstream: z37.boolean().default(true) }).strict();
+var CommitMessageOutputSchema = z37.object({ message: z37.string() });
+var BranchNameInputSchema = z37.object({ type: z37.string().min(1), scope: z37.string().min(1), description: z37.string().optional() }).strict();
+var ConfigOperationPolicySchema = z37.object({
+  scopes: z37.array(ConfigScopeSchema).default(["project", "local"]),
+  roots: z37.array(z37.string().min(1)).default([])
 }).strict();
-var GitConfigOperationsPropsSchema = z40.object({
-  cwd: z40.string().min(1),
-  configStore: z40.custom((value) => typeof value === "object" && value !== null),
-  git: z40.custom((value) => typeof value === "object" && value !== null),
+var GitConfigOperationsPropsSchema = z37.object({
+  cwd: z37.string().min(1),
+  configStore: z37.custom((value) => typeof value === "object" && value !== null),
+  git: z37.custom((value) => typeof value === "object" && value !== null),
   configPolicy: ConfigOperationPolicySchema.default({ scopes: ["project", "local"], roots: [] }),
-  binPath: z40.string().default(process.argv[1] ?? ""),
-  agentEnv: z40.string().optional()
+  binPath: z37.string().default(process.argv[1] ?? ""),
+  agentEnv: z37.string().optional()
 });
 var LaunchConfigOperationDeniedError = class extends Error {
   name = "LaunchConfigOperationDeniedError";
@@ -5062,11 +4571,11 @@ var DefaultGitConfigOperations = class {
         ["write", "process"],
         ["config", "set"],
         ConfigSetInputSchema,
-        z40.object({
-          key: z40.string(),
+        z37.object({
+          key: z37.string(),
           scope: ConfigScopeSchema,
-          path: z40.string(),
-          warning: z40.string().optional()
+          path: z37.string(),
+          warning: z37.string().optional()
         }),
         (input) => this.setConfig(input)
       ),
@@ -5076,7 +4585,7 @@ var DefaultGitConfigOperations = class {
         ["write", "process"],
         ["config", "unset"],
         ConfigUnsetInputSchema,
-        z40.object({ key: z40.string(), scope: ConfigScopeSchema, path: z40.string() }),
+        z37.object({ key: z37.string(), scope: ConfigScopeSchema, path: z37.string() }),
         (input) => this.unsetConfig(input)
       ),
       this.descriptor(
@@ -5085,7 +4594,7 @@ var DefaultGitConfigOperations = class {
         ["write", "process"],
         ["git", "commit"],
         GitCommitInputSchema,
-        z40.object({ sha: z40.string(), message: z40.string() }),
+        z37.object({ sha: z37.string(), message: z37.string() }),
         (input) => this.commit(input)
       ),
       this.descriptor(
@@ -5094,10 +4603,10 @@ var DefaultGitConfigOperations = class {
         ["write", "process"],
         ["git", "checkout"],
         GitCheckoutInputSchema,
-        z40.object({
-          branch: z40.string(),
-          from: z40.string().nullable(),
-          renamedFrom: z40.string().nullable()
+        z37.object({
+          branch: z37.string(),
+          from: z37.string().nullable(),
+          renamedFrom: z37.string().nullable()
         }),
         (input) => this.checkout(input)
       ),
@@ -5107,7 +4616,7 @@ var DefaultGitConfigOperations = class {
         ["write", "network", "process"],
         ["git", "push"],
         GitPushInputSchema,
-        z40.object({ branch: z40.string(), remote: z40.string(), setUpstream: z40.boolean() }),
+        z37.object({ branch: z37.string(), remote: z37.string(), setUpstream: z37.boolean() }),
         (input) => this.push(input)
       ),
       this.descriptor(
@@ -5125,7 +4634,7 @@ var DefaultGitConfigOperations = class {
         ["read", "process"],
         ["branch-name"],
         BranchNameInputSchema,
-        z40.object({ branch: z40.string() }),
+        z37.object({ branch: z37.string() }),
         (input) => ({
           branch: branchNamer.name({
             type: input.type,
@@ -5249,30 +4758,30 @@ var DefaultGitConfigOperations = class {
 };
 
 // src/operations/review-operations.ts
-import { z as z47 } from "zod";
+import { z as z44 } from "zod";
 
 // src/code-review/review-policy.ts
 import { execFileSync } from "node:child_process";
 import { readFileSync as readFileSync7, realpathSync as realpathSync8 } from "node:fs";
 import { dirname as dirname7, join as join8, relative as relative7 } from "node:path";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
-import { z as z42 } from "zod";
+import { z as z39 } from "zod";
 
 // src/bundled-docs/charter-catalog/charter-catalog.ts
 import { matchesGlob } from "node:path";
 import { parse as parseYaml3 } from "yaml";
-import { z as z41 } from "zod";
+import { z as z38 } from "zod";
 var coreCharterId = "coding-charter";
 var languageCharterPrefix = `${coreCharterId}-`;
-var LanguageFrontmatterSchema = z41.strictObject({
-  language: z41.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
-  "applies-to": z41.array(z41.string().min(1)).min(1)
+var LanguageFrontmatterSchema = z38.strictObject({
+  language: z38.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+  "applies-to": z38.array(z38.string().min(1)).min(1)
 }).transform(({ language, "applies-to": appliesTo }) => ({ language, appliesTo }));
-var FrontmatterSchema = z41.string().transform((contents, ctx) => {
+var FrontmatterSchema = z38.string().transform((contents, ctx) => {
   const block = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/.exec(contents)?.[1];
   if (block === void 0) {
     ctx.addIssue({ code: "custom", message: "missing YAML frontmatter" });
-    return z41.NEVER;
+    return z38.NEVER;
   }
   return parseYaml3(block);
 }).pipe(LanguageFrontmatterSchema);
@@ -5298,7 +4807,7 @@ var DocCharterCatalog = class {
   languageCharter(doc) {
     const parsed = FrontmatterSchema.safeParse(doc.contents);
     if (!parsed.success) {
-      throw new CharterFormatError(`Charter "${doc.id}" has invalid frontmatter: ${z41.prettifyError(parsed.error)}`);
+      throw new CharterFormatError(`Charter "${doc.id}" has invalid frontmatter: ${z38.prettifyError(parsed.error)}`);
     }
     const expectedId = `${languageCharterPrefix}${parsed.data.language}`;
     if (doc.id !== expectedId) {
@@ -5317,15 +4826,15 @@ var CharterFormatError = class extends Error {
 };
 
 // src/code-review/review-policy.ts
-var ReviewPolicyPropsSchema = z42.strictObject({
-  home: z42.string().min(1).optional(),
-  env: z42.custom(
+var ReviewPolicyPropsSchema = z39.strictObject({
+  home: z39.string().min(1).optional(),
+  env: z39.custom(
     (value) => typeof value === "object" && value !== null && !Array.isArray(value)
   ).optional()
 });
-var LoadPolicyPropsSchema = z42.strictObject({ paths: z42.array(z42.string()).optional() });
-var RepositoryContextPropsSchema = z42.strictObject({
-  cwd: z42.string().min(1),
+var LoadPolicyPropsSchema = z39.strictObject({ paths: z39.array(z39.string()).optional() });
+var RepositoryContextPropsSchema = z39.strictObject({
+  cwd: z39.string().min(1),
   trustedRef: HeadShaSchema,
   contextPath: ReviewPathSchema.min(1).default("CODE-REVIEW.md")
 });
@@ -5411,10 +4920,10 @@ var ReviewPolicyError = class extends Error {
 // src/code-review/github-review-verifier.ts
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { z as z43 } from "zod";
-var GhReviewGitHubApiPropsSchema = z43.strictObject({
-  cwd: z43.string().min(1).optional(),
-  env: z43.custom(
+import { z as z40 } from "zod";
+var GhReviewGitHubApiPropsSchema = z40.strictObject({
+  cwd: z40.string().min(1).optional(),
+  env: z40.custom(
     (value) => typeof value === "object" && value !== null && !Array.isArray(value)
   ).optional()
 });
@@ -5450,20 +4959,20 @@ var GhReviewGitHubApi = class {
     return JSON.parse(stdout);
   }
 };
-var GitHubReviewVerifierPropsSchema = z43.strictObject({
-  repo: z43.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
-  prNumber: z43.number().int().positive(),
-  prAuthorId: z43.number().int().positive(),
-  owners: z43.record(z43.string(), z43.array(z43.string().min(1))).default({}),
-  requireMapping: z43.boolean().default(false)
+var GitHubReviewVerifierPropsSchema = z40.strictObject({
+  repo: z40.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
+  prNumber: z40.number().int().positive(),
+  prAuthorId: z40.number().int().positive(),
+  owners: z40.record(z40.string(), z40.array(z40.string().min(1))).default({}),
+  requireMapping: z40.boolean().default(false)
 });
-var UserSchema = z43.looseObject({ id: z43.number(), login: z43.string(), type: z43.string() });
-var CommentSchema2 = z43.looseObject({
-  id: z43.number(),
+var UserSchema = z40.looseObject({ id: z40.number(), login: z40.string(), type: z40.string() });
+var CommentSchema2 = z40.looseObject({
+  id: z40.number(),
   user: UserSchema,
-  issue_url: z43.string().optional(),
-  pull_request_url: z43.string().optional(),
-  body: z43.string()
+  issue_url: z40.string().optional(),
+  pull_request_url: z40.string().optional(),
+  body: z40.string()
 });
 var GitHubReviewVerifier = class {
   props;
@@ -5484,10 +4993,10 @@ var GitHubReviewVerifier = class {
     if (evidence.kind === "commit") return this.reaches(evidence.sha, headSha);
     if (evidence.kind === "check_run") {
       if (evidence.commit_sha !== headSha) return false;
-      const check = z43.looseObject({
-        head_sha: z43.string(),
-        status: z43.string(),
-        conclusion: z43.string().nullable()
+      const check = z40.looseObject({
+        head_sha: z40.string(),
+        status: z40.string(),
+        conclusion: z40.string().nullable()
       }).parse(await this.api.get(`/repos/${this.props.repo}/check-runs/${evidence.check_run_id}`));
       return check.head_sha === headSha && check.status === "completed" && check.conclusion === "success";
     }
@@ -5504,7 +5013,7 @@ var GitHubReviewVerifier = class {
     if (owners !== void 0)
       return owners.some((login) => login.toLowerCase() === comment.user.login.toLowerCase());
     if (this.props.requireMapping || comment.user.id === this.props.prAuthorId) return false;
-    const permission = z43.looseObject({ permission: z43.string() }).parse(
+    const permission = z40.looseObject({ permission: z40.string() }).parse(
       await this.api.get(
         `/repos/${this.props.repo}/collaborators/${encodeURIComponent(comment.user.login)}/permission`
       )
@@ -5514,14 +5023,14 @@ var GitHubReviewVerifier = class {
   async dismissal(evidence) {
     if (evidence.kind !== "thread_resolution" || evidence.author_id === this.props.prAuthorId)
       return false;
-    const result = z43.looseObject({
-      data: z43.looseObject({
-        node: z43.looseObject({
-          isResolved: z43.boolean(),
-          resolvedBy: z43.looseObject({ databaseId: z43.number(), actorType: z43.string() }).nullable(),
-          pullRequest: z43.looseObject({
-            number: z43.number(),
-            repository: z43.looseObject({ nameWithOwner: z43.string() })
+    const result = z40.looseObject({
+      data: z40.looseObject({
+        node: z40.looseObject({
+          isResolved: z40.boolean(),
+          resolvedBy: z40.looseObject({ databaseId: z40.number(), actorType: z40.string() }).nullable(),
+          pullRequest: z40.looseObject({
+            number: z40.number(),
+            repository: z40.looseObject({ nameWithOwner: z40.string() })
           })
         }).nullable()
       })
@@ -5537,12 +5046,12 @@ var GitHubReviewVerifier = class {
   /** True when `sha` is the head or an ancestor of it, so the head contains that commit. */
   async reaches(sha, headSha) {
     if (sha === headSha) return true;
-    const comparison = z43.looseObject({ status: z43.string() }).parse(await this.api.get(`/repos/${this.props.repo}/compare/${sha}...${headSha}`));
+    const comparison = z40.looseObject({ status: z40.string() }).parse(await this.api.get(`/repos/${this.props.repo}/compare/${sha}...${headSha}`));
     return ["ahead", "identical"].includes(comparison.status);
   }
   /** True when `ref` has `path` as a file with at least `line` lines. */
   async hasLine(path, line, ref) {
-    const file = z43.looseObject({ type: z43.string(), encoding: z43.string(), content: z43.string() }).parse(
+    const file = z40.looseObject({ type: z40.string(), encoding: z40.string(), content: z40.string() }).parse(
       await this.api.get(
         `/repos/${this.props.repo}/contents/${path.split("/").map(encodeURIComponent).join("/")}?ref=${ref}`
       )
@@ -5575,11 +5084,11 @@ var GitHubReviewVerifier = class {
 };
 
 // src/code-review/review-planner.ts
-import { randomBytes as randomBytes2 } from "node:crypto";
-import { z as z45 } from "zod";
+import { randomBytes } from "node:crypto";
+import { z as z42 } from "zod";
 
 // src/code-review/review-contract.ts
-import { z as z44 } from "zod";
+import { z as z41 } from "zod";
 var InvalidReviewError = class extends Error {
   name = "InvalidReviewError";
 };
@@ -5637,8 +5146,8 @@ var ZodReviewContract = class {
   }
   schemas() {
     return {
-      full: z44.toJSONSchema(ReviewSchema, { target: "draft-07" }),
-      transport: z44.toJSONSchema(TransportReviewSchema, { target: "draft-07" })
+      full: z41.toJSONSchema(ReviewSchema, { target: "draft-07" }),
+      transport: z41.toJSONSchema(TransportReviewSchema, { target: "draft-07" })
     };
   }
   normalize(finding) {
@@ -5780,8 +5289,8 @@ var EvidenceReviewPlanner = class {
     return { review, records: retained, informational, outcome, problems };
   }
   newId(ids) {
-    let id = `f-${randomBytes2(5).toString("hex")}`;
-    while (ids.has(id)) id = `f-${randomBytes2(5).toString("hex")}`;
+    let id = `f-${randomBytes(5).toString("hex")}`;
+    while (ids.has(id)) id = `f-${randomBytes(5).toString("hex")}`;
     ids.add(id);
     return id;
   }
@@ -5804,19 +5313,19 @@ var EvidenceReviewPlanner = class {
     return "APPROVED";
   }
 };
-var ValidatedEvidencePropsSchema = z45.strictObject({
-  verified: z45.array(z45.string()),
-  authorizedDecisions: z45.array(z45.string()),
-  dismissals: z45.array(z45.string())
+var ValidatedEvidencePropsSchema = z42.strictObject({
+  verified: z42.array(z42.string()),
+  authorizedDecisions: z42.array(z42.string()),
+  dismissals: z42.array(z42.string())
 });
 
 // src/code-review/review-codec.ts
 import { createHash } from "node:crypto";
-import { z as z46 } from "zod";
-var MarkerInputSchema = z46.strictObject({
-  body: z46.string(),
-  authorId: z46.number().int().positive(),
-  trustedAuthorIds: z46.array(z46.number().int().positive())
+import { z as z43 } from "zod";
+var MarkerInputSchema = z43.strictObject({
+  body: z43.string(),
+  authorId: z43.number().int().positive(),
+  trustedAuthorIds: z43.array(z43.number().int().positive())
 });
 var JsonReviewCodec = class {
   finding(record) {
@@ -5893,71 +5402,71 @@ ${this.finding(validated)}`;
 };
 
 // src/operations/review-operations.ts
-var ReviewOperationsLaunchPropsSchema = z47.strictObject({
-  cwd: z47.string().min(1).optional(),
+var ReviewOperationsLaunchPropsSchema = z44.strictObject({
+  cwd: z44.string().min(1).optional(),
   trustedRef: HeadShaSchema.optional(),
-  owners: z47.record(z47.string(), z47.array(z47.string().min(1))).default({}),
-  requireMapping: z47.boolean().default(false)
+  owners: z44.record(z44.string(), z44.array(z44.string().min(1))).default({}),
+  requireMapping: z44.boolean().default(false)
 });
 var ReviewOperationsPropsSchema = ReviewOperationsLaunchPropsSchema.extend({
-  cwd: z47.string().min(1),
-  env: z47.custom(
+  cwd: z44.string().min(1),
+  env: z44.custom(
     (value) => typeof value === "object" && value !== null && !Array.isArray(value)
   ).optional(),
-  policy: z47.custom(
+  policy: z44.custom(
     (value) => typeof value === "object" && value !== null && "repository" in value && "load" in value
   ).optional(),
-  api: z47.custom(
+  api: z44.custom(
     (value) => typeof value === "object" && value !== null && "get" in value && "graphql" in value
   ).optional()
 });
-var JsonValueSchema = z47.json();
-var schemaInput = z47.strictObject({ transport: z47.boolean().default(false) });
-var reviewInput2 = z47.strictObject({ review: JsonValueSchema });
+var JsonValueSchema = z44.json();
+var schemaInput = z44.strictObject({ transport: z44.boolean().default(false) });
+var reviewInput2 = z44.strictObject({ review: JsonValueSchema });
 var reviewOutput = ReviewSchema;
-var stateInput = z47.strictObject({ state: JsonValueSchema });
-var stateOutput = z47.string();
-var contextInput = z47.strictObject({
-  contextPath: z47.string().min(1).default("CODE-REVIEW.md")
+var stateInput = z44.strictObject({ state: JsonValueSchema });
+var stateOutput = z44.string();
+var contextInput = z44.strictObject({
+  contextPath: z44.string().min(1).default("CODE-REVIEW.md")
 });
-var contextOutput = z47.object({
+var contextOutput = z44.object({
   trustedRef: HeadShaSchema,
-  contextPath: z47.string(),
-  sources: z47.array(z47.object({ path: z47.string(), contents: z47.string() })),
-  missing: z47.array(z47.string())
+  contextPath: z44.string(),
+  sources: z44.array(z44.object({ path: z44.string(), contents: z44.string() })),
+  missing: z44.array(z44.string())
 });
-var planInput = z47.strictObject({
-  number: z47.number().int().positive(),
-  repo: z47.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
+var planInput = z44.strictObject({
+  number: z44.number().int().positive(),
+  repo: z44.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
   review: JsonValueSchema,
-  records: z47.array(JsonValueSchema)
+  records: z44.array(JsonValueSchema)
 });
-var renderInput = z47.strictObject({
+var renderInput = z44.strictObject({
   review: JsonValueSchema,
-  records: z47.array(FindingRecordSchema),
-  outcome: z47.string(),
-  problems: z47.array(z47.string())
+  records: z44.array(FindingRecordSchema),
+  outcome: z44.string(),
+  problems: z44.array(z44.string())
 });
-var renderOutput = z47.object({
-  headSha: z47.string(),
-  outcome: z47.string(),
-  problems: z47.array(z47.string()),
-  findings: z47.array(
-    z47.object({
-      id: z47.string(),
-      status: z47.string(),
-      path: z47.string(),
-      line: z47.number(),
-      body: z47.string()
+var renderOutput = z44.object({
+  headSha: z44.string(),
+  outcome: z44.string(),
+  problems: z44.array(z44.string()),
+  findings: z44.array(
+    z44.object({
+      id: z44.string(),
+      status: z44.string(),
+      path: z44.string(),
+      line: z44.number(),
+      body: z44.string()
     })
   )
 });
-var planOutput = z47.object({
+var planOutput = z44.object({
   review: ReviewSchema,
-  records: z47.array(FindingRecordSchema),
-  informational: z47.array(StoredFindingSchema),
-  outcome: z47.enum(["APPROVED", "CHANGES_NEEDED", "ESCALATE", "INCOMPLETE"]),
-  problems: z47.array(z47.string())
+  records: z44.array(FindingRecordSchema),
+  informational: z44.array(StoredFindingSchema),
+  outcome: z44.enum(["APPROVED", "CHANGES_NEEDED", "ESCALATE", "INCOMPLETE"]),
+  problems: z44.array(z44.string())
 });
 var MissingTrustedReviewRefError = class extends Error {
   name = "MissingTrustedReviewRefError";
@@ -6062,9 +5571,9 @@ var DefaultReviewOperations = class {
         planInput,
         planOutput,
         async ({ number, repo, review, records }) => {
-          const pullRequest = z47.looseObject({
-            head: z47.looseObject({ sha: HeadShaSchema }),
-            user: z47.looseObject({ id: z47.number().int().positive() })
+          const pullRequest = z44.looseObject({
+            head: z44.looseObject({ sha: HeadShaSchema }),
+            user: z44.looseObject({ id: z44.number().int().positive() })
           }).parse(await this.api.get(`/repos/${repo}/pulls/${number}`));
           const planner = new EvidenceReviewPlanner({
             verifier: new GitHubReviewVerifier({
@@ -6100,7 +5609,6 @@ export {
   CliRouteCoverageError,
   CliRouteSchema,
   CommanderLocalDiscoveryCli,
-  DefaultAriadneOperations,
   DefaultGitConfigOperations,
   DefaultLocalDiscoveryOperations,
   DefaultPrOperations,

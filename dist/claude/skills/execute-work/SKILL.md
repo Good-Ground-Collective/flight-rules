@@ -25,7 +25,6 @@ Human questions require invocation-level `allowHumanQuestions: true` and support
 - Before the first repository or tracker mutation, run `flight-rules check --workflow execute-work` and require `"ok": true` for the workflow’s environment checks. Resolve failed required checks before continuing. Use the native harness for permissions and worker dispatch; no runtime evidence file is required.
 - Config carries a **`repo`** field (`owner/repo`). `flight-rules pr create` needs it regardless of tracker — the PR always lands on GitHub — and it throws before parsing a single option when it is missing. On a Jira-tracked repo `repo` is often absent, because the tracker doesn't need it and `skills/setup/SKILL.md` doesn't ask for it. **Step 2 discovers and stores it**, and it must be settled _before_ the loop runs: reaching step 7 without it means a pushed branch and no PR.
 - The **working tree is clean**. A dirty tree stops the run _before any mutation_: the commit step commits by explicit path, so pre-existing edits to a file the implementer also touched would be swept into the commit silently.
-- **Ariadne reporting is optional.** The `flight-rules board post` lines below report the run to Ariadne's Agents page. When Ariadne is not configured, or the ticket is not a Jira key, they print nothing and exit 0. A failed post prints one line and still exits 0. Never retry one, wait on one, or let its output change the run.
 
 ### Plain-git mode
 
@@ -135,13 +134,7 @@ gh repo view --json nameWithOwner --jq .nameWithOwner
 
 Questions to ask: "Which status means work has started?", "Which status means a PR is open and awaiting review? (it may not appear in the list — the tracker only reports statuses reachable from where the ticket sits now)", and "PRs will be opened against `<owner/repo>` — is that right?"
 
-The repo question is closed, so also post it to Ariadne when you ask it in chat:
-
-```bash
-flight-rules board post item --skill flight-rules:execute-work --kind question --ticket <id> --title "Open PRs against <owner/repo>?" --option Yes --option No
-```
-
-The first answer wins. If the person says they answered in Ariadne, read the answer from `chosenOption` in `flight-rules board items --ticket <id> --json`. A `No` still needs the right `owner/repo` from chat.
+If the answer to the repo question is no, ask for the right `owner/repo`.
 
 **Store** each answer with `flight-rules config set`, one call per field:
 
@@ -223,13 +216,7 @@ Do not include your own opinion on how to build it. The walkthrough and the char
 
 Dispatch the two agents in strict alternation. Count iterations out loud; you will report the count. Follow `VerifiedImplementationLoop` from the shared contract: `next` derives the implementation request from paired receipts and `verify` derives the independent verifier request. Native parents apply the same transitions through their available dispatch tools. Use the native harness for dispatch and handle its access or capacity errors; three attempts never imply three concurrent workers or three levels of nesting.
 
-**a. Dispatch the implementer selected in the table below** with the brief from step 5. Report the step first, with `--state caution` on iterations 2 and 3:
-
-```bash
-flight-rules board post heartbeat --ticket <id> --step implement --state nominal --branch <branch> --skill flight-rules:execute-work
-```
-
-Then dispatch. On **iterations 2 and 3**, add the previous verifier's itemized FAIL entries **verbatim** — the criterion, the verdict, and the evidence exactly as the verifier wrote them. That evidence _is_ the definition of what still needs fixing; rewriting it in your own words is how a retry loses the thread.
+**a. Dispatch the implementer selected in the table below** with the brief from step 5. On **iterations 2 and 3**, add the previous verifier's itemized FAIL entries **verbatim** — the criterion, the verdict, and the evidence exactly as the verifier wrote them. That evidence _is_ the definition of what still needs fixing; rewriting it in your own words is how a retry loses the thread.
 
 **Select the agent by iteration.** The agent's declared tier is mapped by the host adapter; dispatch by name without overriding its model.
 
@@ -262,12 +249,7 @@ openQuestions:
 
 Keep `filesChanged[].path` — the commit step stages and commits exactly that set, and the implementer leaves its edits unstaged, so a path it forgot to report is a path that does not ship. If `openQuestions` is present, see Error handling: it goes to the user, unanswered.
 
-**b. Dispatch `code-verifier`** with the contract, fetched fresh and structured. Report the step first, with `<n>` the iteration number:
-
-```bash
-flight-rules board post heartbeat --ticket <id> --step "verify <n>/3" --state nominal --branch <branch> --skill flight-rules:execute-work
-```
-
+**b. Dispatch `code-verifier`** with the contract, fetched fresh and structured.
 Fetch the contract section for the ticket's format:
 
 ```bash
@@ -313,13 +295,7 @@ Only once `verified: true`.
 
 **Capture the evidence.** Decide whether this change has a visible surface. Read the ticket's Solution, its contract items, and its Guided Walkthrough or Reproduction Notes, and look at the union of `filesChanged[].path`: client or UI paths, or a contract item that names something a user sees, mean yes. A backend change still counts when its consequence renders somewhere — an endpoint that now returns a differently formatted string has a visible surface on the page that shows it, so that page is what you capture. The repo's QA instructions often say which page shows which backend change; read them with `flight-rules qa instructions --from <directory of the changed code>`. When they report `"found": false`, or describe no web surface for this change, there is nothing to capture. Write two or three lines of **capture directions**: which screen, what to do, and whether the take is before-and-after (a bug) or after-only (a story).
 
-When there is a visible surface, report the QA step:
-
-```bash
-flight-rules board post heartbeat --ticket <id> --step qa --state nominal --branch <branch> --skill flight-rules:execute-work
-```
-
-Then invoke the `capture-evidence` skill with the directions, the ticket id, and the directory of the changed code as `from`. It drives the app, writes screenshots and video under the directory `flight-rules qa evidence-dir <ticket>` prints, and returns an evidence manifest: one entry per file with `path`, `kind` (`image` or `video`), `phase` (`before` or `after`), and `caption`. Keep the manifest; step 7 hands it to the PR body and the ticket comment, and step 9 reports it.
+When there is a visible surface, invoke the `capture-evidence` skill with the directions, the ticket id, and the directory of the changed code as `from`. It drives the app, writes screenshots and video under the directory `flight-rules qa evidence-dir <ticket>` prints, and returns an evidence manifest: one entry per file with `path`, `kind` (`image` or `video`), `phase` (`before` or `after`), and `caption`. Keep the manifest; step 7 hands it to the PR body and the ticket comment, and step 9 reports it.
 
 When there is no visible surface, write one line instead: `No visual evidence: <reason>` — for example `No visual evidence: API-only change with no UI consequence.` That line travels everywhere the manifest would have.
 
@@ -327,13 +303,7 @@ When capture fails on a visible change, write `No visual evidence: capture faile
 
 The evidence directory is gitignored, or outside this worktree entirely when running in a linked worktree, so nothing from it shows in `git status --porcelain` and nothing from it ever goes in the `--file` set below.
 
-**Commit.** Report the PR step first:
-
-```bash
-flight-rules board post heartbeat --ticket <id> --step pr --state nominal --branch <branch> --skill flight-rules:execute-work
-```
-
-Stage by explicit path. Passing any `--file` scopes the commit to exactly those paths, so an unrelated stray edit cannot ride along; **omitting `--file` entirely commits the whole index**, which is why you always pass it. Repeat `--file` once per path.
+**Commit.** Stage by explicit path. Passing any `--file` scopes the commit to exactly those paths, so an unrelated stray edit cannot ride along; **omitting `--file` entirely commits the whole index**, which is why you always pass it. Repeat `--file` once per path.
 
 **Always write a body.** A squash merge builds the PR's merge message from the commit messages, so a commit with no body reaches the default branch as a subject and a pile of `Flight-Rules-Version` trailers. Write the body to a file outside the repo, for example `$TMPDIR/<id>-commit.md`, and pass it with `--body-file`. Use a file rather than `--body "…"` so newlines, backticks, and `$` survive without shell escaping. The body says what changed and why, in a few short paragraphs or a bullet list: the behaviour the ticket asked for, the approach and any non-obvious choice, and the ticket id. Take it from the ticket and the implementer's report. Do not paste the diff or the verifier's checklist. Do not add trailers to the file either; the CLI appends them.
 
@@ -429,12 +399,6 @@ flight-rules pr create --type <type> --scope <id> --description "<description>" 
 - `--ticket-url` — the link the reviewer follows back to the ticket.
 - `--attach` — one per evidence manifest item, as `<path>#<caption>`, using the manifest's `path` exactly. The command uploads each file and rewrites the matching `![caption](<path>)` reference in the OTS Materials block to the hosted asset; a file the block does not reference is appended at the end. So the paths in `--ots` and the paths in `--attach` must be the same strings, or the body ships a dead link and an orphaned image below it. When the capture step produced `No visual evidence: <reason>`, pass no `--attach` at all; the agent has put that line in `otsMaterials`.
 
-Report the open PR, with `<number>` from the URL `pr create` printed:
-
-```bash
-flight-rules board post activity --skill flight-rules:execute-work --ticket <id> --text "Opened PR #<number>" --level success
-```
-
 **Move the ticket:**
 
 ```bash
@@ -463,12 +427,6 @@ Run `flight-rules doc review-remediation` and read the full output. Follow it wi
 - **No summary comment.** Post no summary, decision or self-review comment. Replies in other reviewers' existing threads are the only review comments this step authorizes.
 - **Initial loop.** "The implement/verify loop the calling skill defines" is step 6; publishing uses step 7's commit/push procedure without creating another PR.
 
-After successful completion, report the wait on a person to Ariadne, not as a PR comment:
-
-```bash
-flight-rules board post heartbeat --ticket <id> --step pr --state hold --branch <branch> --skill flight-rules:execute-work --detail "PR #<number> is waiting for review"
-```
-
 ### 9. Report
 
 Give the user, in this order:
@@ -495,11 +453,7 @@ Give the user, in this order:
 
 ## Error handling
 
-When a red gate below stops the run, report it before you stop. Pass the step you were on and the gate's one-line reason, and leave out `--branch` when step 4 has not run yet:
-
-```bash
-flight-rules board post heartbeat --ticket <id> --step <current step> --state abort --branch <branch> --skill flight-rules:execute-work --detail "<one-line reason>"
-```
+When a red gate below stops the run, report it, with the step you were on and the gate's one-line reason, before you stop.
 
 - **Dirty working tree** → stop before mutating anything. Report the dirty paths and ask the user to commit or stash. No branch, no transition, no dispatch.
 - **Missing or empty contract section** (Acceptance Criteria, or Fixed When on a bug report) → stop and ask. Never invent the contract.

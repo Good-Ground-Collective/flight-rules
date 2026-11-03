@@ -1,7 +1,7 @@
 import type { DependencyPlan } from '../dependency-planner/dependency-planner.js';
 import type { Ticket } from '../task-tracker/task-tracker.js';
 import type { OpenPullRequest } from '../../pr/pull-request-host/pull-request-host.js';
-/** A PR set larger than this needs a Review Packet rather than plain review requests. */
+/** A PR set larger than this needs per-PR reviewer choices in wave order rather than one request for the set. */
 export declare const maxSimplePrCount = 4;
 export interface BlockedPullRequest {
     number: number;
@@ -37,8 +37,8 @@ export interface ReviewPlan {
     unblocksOnMerge: string[];
 }
 /**
- * Decides whether blocked PRs need only plain review requests or a Review
- * Packet: a set is complex when it spans more than one wave, when any PR is
+ * Decides whether blocked PRs need one set of review requests or per-PR
+ * choices in wave order: a set is complex when it spans more than one wave, when any PR is
  * stacked on a branch other than the default, or when it holds more than
  * maxSimplePrCount PRs. Every rule that fires is named in `reasons`.
  */

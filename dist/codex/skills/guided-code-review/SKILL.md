@@ -59,8 +59,8 @@ Differences from the normal flow:
    language charter's mandates only against the files it governs. Never carry one
    language's idioms onto another's files.
 4. **Load the diff.** (Reference §3.)
-5. **Detect the mode.** Self-review starts when explicitly requested (by the
-   packet-authoring skill, or the user says "review my PR"), or when the login
+5. **Detect the mode.** Self-review starts when explicitly requested (the user
+   says "review my PR"), or when the login
    from `gh api user` equals the PR author's login. Otherwise this is a normal
    reviewer run. Announce the mode to the user.
 6. **In self-review, read the other reviewers.** Load reference §7 and classify

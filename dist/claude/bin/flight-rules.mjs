@@ -1005,14 +1005,14 @@ var require_foldFlowLines = __commonJS({
     var FOLD_FLOW = "flow";
     var FOLD_BLOCK = "block";
     var FOLD_QUOTED = "quoted";
-    function foldFlowLines(text7, indent2, mode = "flow", { indentAtStart, lineWidth = 80, minContentWidth = 20, onFold, onOverflow } = {}) {
+    function foldFlowLines(text6, indent2, mode = "flow", { indentAtStart, lineWidth = 80, minContentWidth = 20, onFold, onOverflow } = {}) {
       if (!lineWidth || lineWidth < 0)
-        return text7;
+        return text6;
       if (lineWidth < minContentWidth)
         minContentWidth = 0;
       const endStep = Math.max(1 + minContentWidth, 1 + lineWidth - indent2.length);
-      if (text7.length <= endStep)
-        return text7;
+      if (text6.length <= endStep)
+        return text6;
       const folds = [];
       const escapedFolds = {};
       let end = lineWidth - indent2.length;
@@ -1029,14 +1029,14 @@ var require_foldFlowLines = __commonJS({
       let escStart = -1;
       let escEnd = -1;
       if (mode === FOLD_BLOCK) {
-        i = consumeMoreIndentedLines(text7, i, indent2.length);
+        i = consumeMoreIndentedLines(text6, i, indent2.length);
         if (i !== -1)
           end = i + endStep;
       }
-      for (let ch; ch = text7[i += 1]; ) {
+      for (let ch; ch = text6[i += 1]; ) {
         if (mode === FOLD_QUOTED && ch === "\\") {
           escStart = i;
-          switch (text7[i + 1]) {
+          switch (text6[i + 1]) {
             case "x":
               i += 3;
               break;
@@ -1053,12 +1053,12 @@ var require_foldFlowLines = __commonJS({
         }
         if (ch === "\n") {
           if (mode === FOLD_BLOCK)
-            i = consumeMoreIndentedLines(text7, i, indent2.length);
+            i = consumeMoreIndentedLines(text6, i, indent2.length);
           end = i + indent2.length + endStep;
           split = void 0;
         } else {
           if (ch === " " && prev && prev !== " " && prev !== "\n" && prev !== "	") {
-            const next = text7[i + 1];
+            const next = text6[i + 1];
             if (next && next !== " " && next !== "\n" && next !== "	")
               split = i;
           }
@@ -1070,12 +1070,12 @@ var require_foldFlowLines = __commonJS({
             } else if (mode === FOLD_QUOTED) {
               while (prev === " " || prev === "	") {
                 prev = ch;
-                ch = text7[i += 1];
+                ch = text6[i += 1];
                 overflow = true;
               }
               const j = i > escEnd + 1 ? i - 2 : escStart - 1;
               if (escapedFolds[j])
-                return text7;
+                return text6;
               folds.push(j);
               escapedFolds[j] = true;
               end = j + endStep;
@@ -1090,39 +1090,39 @@ var require_foldFlowLines = __commonJS({
       if (overflow && onOverflow)
         onOverflow();
       if (folds.length === 0)
-        return text7;
+        return text6;
       if (onFold)
         onFold();
-      let res = text7.slice(0, folds[0]);
+      let res = text6.slice(0, folds[0]);
       for (let i2 = 0; i2 < folds.length; ++i2) {
         const fold = folds[i2];
-        const end2 = folds[i2 + 1] || text7.length;
+        const end2 = folds[i2 + 1] || text6.length;
         if (fold === 0)
           res = `
-${indent2}${text7.slice(0, end2)}`;
+${indent2}${text6.slice(0, end2)}`;
         else {
           if (mode === FOLD_QUOTED && escapedFolds[fold])
-            res += `${text7[fold]}\\`;
+            res += `${text6[fold]}\\`;
           res += `
-${indent2}${text7.slice(fold + 1, end2)}`;
+${indent2}${text6.slice(fold + 1, end2)}`;
         }
       }
       return res;
     }
-    function consumeMoreIndentedLines(text7, i, indent2) {
+    function consumeMoreIndentedLines(text6, i, indent2) {
       let end = i;
       let start = i + 1;
-      let ch = text7[start];
+      let ch = text6[start];
       while (ch === " " || ch === "	") {
         if (i < start + indent2) {
-          ch = text7[++i];
+          ch = text6[++i];
         } else {
           do {
-            ch = text7[++i];
+            ch = text6[++i];
           } while (ch && ch !== "\n");
           end = i;
           start = i + 1;
-          ch = text7[start];
+          ch = text6[start];
         }
       }
       return end;
@@ -10497,9 +10497,9 @@ Expecting one of '${allowedValues.join("', '")}'`);
       helpWidth: context.helpWidth,
       outputHasColors: context.hasColors
     });
-    const text7 = helper.formatHelp(this, helper);
-    if (context.hasColors) return text7;
-    return this._outputConfiguration.stripColor(text7);
+    const text6 = helper.formatHelp(this, helper);
+    if (context.hasColors) return text6;
+    return this._outputConfiguration.stripColor(text6);
   }
   /**
    * @typedef HelpContext
@@ -10659,7 +10659,7 @@ Expecting one of '${allowedValues.join("', '")}'`);
    * @param {(string | Function)} text - string to add, or a function returning a string
    * @return {Command} `this` command for chaining
    */
-  addHelpText(position2, text7) {
+  addHelpText(position2, text6) {
     const allowedValues = ["beforeAll", "before", "after", "afterAll"];
     if (!allowedValues.includes(position2)) {
       throw new Error(`Unexpected value for position to addHelpText.
@@ -10668,10 +10668,10 @@ Expecting one of '${allowedValues.join("', '")}'`);
     const helpEvent = `${position2}Help`;
     this.on(helpEvent, (context) => {
       let helpStr;
-      if (typeof text7 === "function") {
-        helpStr = text7({ error: context.error, command: context.command });
+      if (typeof text6 === "function") {
+        helpStr = text6({ error: context.error, command: context.command });
       } else {
-        helpStr = text7;
+        helpStr = text6;
       }
       if (helpStr) {
         context.write(`${helpStr}
@@ -20026,8 +20026,8 @@ function ko_default() {
 }
 
 // node_modules/zod/v4/locales/lt.js
-var capitalizeFirstCharacter = (text7) => {
-  return text7.charAt(0).toUpperCase() + text7.slice(1);
+var capitalizeFirstCharacter = (text6) => {
+  return text6.charAt(0).toUpperCase() + text6.slice(1);
 };
 function getUnitTypeFromNumber(number4) {
   const abs = Math.abs(number4);
@@ -31368,11 +31368,11 @@ var GhPullRequestHost = class {
   }
   describeFailure(err) {
     const stderr = this.readStringProperty(err, "stderr")?.trim();
-    const text7 = stderr !== void 0 && stderr.length > 0 ? stderr : err instanceof Error ? err.message : String(err);
-    return text7.split("\n")[0]?.trim() ?? text7;
+    const text6 = stderr !== void 0 && stderr.length > 0 ? stderr : err instanceof Error ? err.message : String(err);
+    return text6.split("\n")[0]?.trim() ?? text6;
   }
-  escapeRegExp(text7) {
-    return text7.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  escapeRegExp(text6) {
+    return text6.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
   async runCreate(template, title, bodyFile, attach) {
     const args = [
@@ -31441,117 +31441,6 @@ import { dirname as dirname2, isAbsolute, join as join3, resolve as resolve2 } f
 // src/tasks/jira-task-tracker/jira-host.ts
 var JiraHostSchema = external_exports.string().transform((host) => host.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, ""));
 
-// src/shared/ariadne/ariadne.schema.ts
-var defaultAriadneUrl = "https://ariadne-api-xohlbba2ea-uc.a.run.app";
-var loopbackHosts = /* @__PURE__ */ new Set(["localhost", "127.0.0.1"]);
-var AriadneUrlSchema = external_exports.url().refine((value) => {
-  if (!URL.canParse(value)) return false;
-  const url2 = new URL(value);
-  return url2.protocol === "https:" || url2.protocol === "http:" && loopbackHosts.has(url2.hostname);
-}, "must be https (http only for localhost or 127.0.0.1)");
-var agentStates = ["nominal", "caution", "abort", "hold"];
-var agentItemKinds = ["question", "blocker", "testable", "wave-gate"];
-var agentActivityLevels = ["info", "success", "caution", "abort"];
-var agentLimits = {
-  step: 60,
-  heartbeatDetail: 500,
-  title: 200,
-  itemDetail: 2e3,
-  option: 60,
-  options: 6,
-  text: 500,
-  branch: 255
-};
-var AgentTextNormalizer = class {
-  /** Whitespace runs collapse to a space and control characters go. */
-  oneLine(value, max) {
-    return this.cut(value.replace(/[\x00-\x08\x0e-\x1f\x7f]/g, "").replace(/\s+/g, " ").trim(), max);
-  }
-  /** Line feeds stay; tabs become spaces and other control characters go. */
-  multiLine(value, max) {
-    const normalized = value.replace(/\r\n?/g, "\n").replace(/\t/g, " ").replace(/[\x00-\x09\x0b-\x1f\x7f]/g, "").trim();
-    return this.cut(normalized, max);
-  }
-  /** Overlong text ends in an ellipsis, never in half a surrogate pair. */
-  cut(value, max) {
-    if (value.length <= max) return value;
-    const head = value.slice(0, max - 1).replace(/[\uD800-\uDBFF]$/, "");
-    return `${head.trimEnd()}\u2026`;
-  }
-};
-var normalizer = new AgentTextNormalizer();
-var oneLineSchema = (max) => external_exports.string().transform((value) => normalizer.oneLine(value, max)).pipe(external_exports.string().min(1, "must not be blank"));
-var multiLineSchema = (max) => external_exports.string().transform((value) => normalizer.multiLine(value, max)).pipe(external_exports.string().min(1, "must not be blank"));
-var optionalSchema = (schema) => external_exports.preprocess((value) => value === "" || value === null ? void 0 : value, schema.optional());
-var AgentSessionIdSchema = external_exports.string().regex(/^[A-Za-z0-9_-]{1,80}$/, "must be 1\u201380 letters, digits, underscores or hyphens");
-var AgentRecordIdSchema = AgentSessionIdSchema;
-var TicketKeySchema = external_exports.string().transform((value) => value.trim().toUpperCase()).pipe(external_exports.string().regex(/^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,8}$/, "must be a Jira issue key: project key, hyphen, number"));
-var RepoSchema = external_exports.string().regex(/^(?:[A-Za-z0-9][A-Za-z0-9-]{0,38}\/)?[A-Za-z0-9_.-]{1,100}$/, "must be owner/name or name").refine((value) => !value.includes(".."), "must not contain ..");
-var BranchSchema = external_exports.string().regex(/^[A-Za-z0-9_+@][A-Za-z0-9._/+@-]{0,254}$/, "must be a branch name as git prints it").refine((value) => !value.includes(".."), "must not contain ..");
-var SkillSchema = external_exports.string().regex(/^[A-Za-z0-9:._-]{1,80}$/, "must be up to 80 of A-Z a-z 0-9 : . _ -");
-var HeartbeatInputSchema = external_exports.strictObject({
-  session: AgentSessionIdSchema,
-  step: oneLineSchema(agentLimits.step),
-  state: external_exports.enum(agentStates),
-  ticket: optionalSchema(TicketKeySchema),
-  repo: optionalSchema(RepoSchema),
-  branch: optionalSchema(BranchSchema),
-  skill: optionalSchema(SkillSchema),
-  detail: optionalSchema(oneLineSchema(agentLimits.heartbeatDetail))
-});
-var ItemInputSchema = external_exports.strictObject({
-  session: AgentSessionIdSchema,
-  kind: external_exports.enum(agentItemKinds),
-  title: oneLineSchema(agentLimits.title),
-  ticket: optionalSchema(TicketKeySchema),
-  detail: optionalSchema(multiLineSchema(agentLimits.itemDetail)),
-  options: external_exports.array(oneLineSchema(agentLimits.option)).max(agentLimits.options, `up to ${agentLimits.options} options`).refine((labels) => new Set(labels).size === labels.length, "options must be distinct").optional(),
-  id: optionalSchema(AgentRecordIdSchema)
-});
-var ActivityInputSchema = external_exports.strictObject({
-  session: AgentSessionIdSchema,
-  text: oneLineSchema(agentLimits.text),
-  level: optionalSchema(external_exports.enum(agentActivityLevels)),
-  ticket: optionalSchema(TicketKeySchema),
-  id: optionalSchema(AgentRecordIdSchema)
-});
-var AgentSessionSchema = external_exports.looseObject({
-  id: external_exports.string(),
-  ownerId: external_exports.string(),
-  ticket: external_exports.string().nullable(),
-  step: external_exports.string(),
-  state: external_exports.string(),
-  lastHeartbeat: external_exports.string(),
-  running: external_exports.boolean()
-});
-var AgentItemSchema = external_exports.looseObject({
-  id: external_exports.string(),
-  session: external_exports.string(),
-  kind: external_exports.string(),
-  ticket: external_exports.string().nullable(),
-  title: external_exports.string(),
-  detail: external_exports.string().nullable(),
-  options: external_exports.array(external_exports.string()),
-  status: external_exports.string(),
-  chosenOption: external_exports.string().nullable(),
-  createdAt: external_exports.string(),
-  resolvedAt: external_exports.string().nullable(),
-  resolvedBy: external_exports.string().nullable()
-});
-var AgentActivitySchema = external_exports.looseObject({
-  id: external_exports.string(),
-  at: external_exports.string(),
-  session: external_exports.string(),
-  ticket: external_exports.string().nullable(),
-  level: external_exports.string(),
-  text: external_exports.string()
-});
-var HeartbeatResponseSchema = external_exports.looseObject({ session: AgentSessionSchema });
-var ItemResponseSchema = external_exports.looseObject({ item: AgentItemSchema, created: external_exports.boolean() });
-var ActivityResponseSchema = external_exports.looseObject({ activity: AgentActivitySchema, created: external_exports.boolean() });
-var ItemListResponseSchema = external_exports.looseObject({ items: external_exports.array(AgentItemSchema) });
-var AgentErrorBodySchema = external_exports.looseObject({ error: external_exports.string(), message: external_exports.string().optional() });
-
 // src/shared/config.ts
 var seedCompetencies = [
   "define-a-schema",
@@ -31589,13 +31478,7 @@ var ConfigSchema = external_exports.object({
   qaRecipe: external_exports.string().optional().describe(
     "Deprecated: path to a legacy QA recipe, read only when no QA.md or AGENTS.md QA section exists; relative paths resolve against the directory holding this config file; defaults to flight-rules.qa.md beside it"
   ),
-  competencies: external_exports.array(external_exports.string()).default([...seedCompetencies]),
-  "ariadne.url": AriadneUrlSchema.optional().describe(
-    "Ariadne API base URL for `flight-rules board`; https only (http for localhost); read only from user or local scope; defaults to the production Ariadne API"
-  ),
-  "ariadne.enabled": external_exports.boolean().optional().describe(
-    "Set false to stop `flight-rules board` reporting even when an Ariadne token is set; read only from user or local scope; defaults to true"
-  )
+  competencies: external_exports.array(external_exports.string()).default([...seedCompetencies])
 }).superRefine((cfg, ctx) => {
   if (cfg.tracker === "github" && cfg.repo === void 0) {
     ctx.addIssue({
@@ -31985,7 +31868,6 @@ var FileNativeInstallation = class _FileNativeInstallation {
 
 // src/shared/config-store.ts
 var configScopes = ["user", "project", "local", "file"];
-var userScopedKeys = /* @__PURE__ */ new Set(["ariadne.url", "ariadne.enabled"]);
 var ConfigStore = class {
   cwd;
   env;
@@ -32042,14 +31924,12 @@ var ConfigStore = class {
   }
   /**
    * The scope a write lands in when the caller names none: wherever the key
-   * is set now, else `user` for a person-level key such as `ariadne.url`,
-   * else the config file when one exists, else `local`.
+   * is set now, else the config file when one exists, else `local`.
    */
   defaultScopeFor(key) {
     const layers = this.layers();
     const owner = [...layers].reverse().find((layer) => key in layer.values);
     if (owner !== void 0) return owner.scope;
-    if (userScopedKeys.has(key)) return "user";
     return this.layer(layers, "file").present ? "file" : "local";
   }
   set(key, rawValues, scope) {
@@ -32139,9 +32019,8 @@ ${lines.join("\n")}
     const field = Object.entries(ConfigSchema.shape).find(([name]) => name === key)?.[1];
     if (field === void 0) return void 0;
     const isArray = field.safeParse([]).success && !field.safeParse("").success;
-    const isBoolean = field.safeParse(true).success && !field.safeParse("").success;
     const joined = rawValues.join(" ");
-    const value = isArray ? [...rawValues] : isBoolean && (joined === "true" || joined === "false") ? joined === "true" : joined;
+    const value = isArray ? [...rawValues] : joined;
     const result = field.safeParse(value);
     if (!result.success) {
       throw new Error(`Invalid value for ${key}: ${result.error.issues.map((i) => i.message).join("; ")}`);
@@ -32226,1143 +32105,6 @@ var EnvLoader = class {
       ...this.overrides
     };
     return this.cachedEnv;
-  }
-};
-
-// src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.99.0";
-
-// src/shared/ariadne/review-packet.schema.ts
-var packetLimits = {
-  title: 200,
-  objective: 600,
-  highlight: 200,
-  highlights: 5,
-  prs: 30,
-  focusAreas: 10,
-  rationale: 2e3,
-  anchors: 10,
-  path: 400,
-  reviewers: 10,
-  ticket: 100
-};
-var focusAreaKinds = ["design-pattern", "business-logic", "data-schema", "other"];
-var anchorSides = ["LEFT", "RIGHT"];
-var textSchema = (max) => external_exports.string().min(1, "must not be blank").max(max, `must be at most ${max} characters`);
-var oneLineTextSchema = (max) => textSchema(max).refine((value) => !/[\r\n]/.test(value), "must be one line");
-var PositiveIntSchema = external_exports.number().int().positive();
-var PacketIdSchema = AgentRecordIdSchema;
-var OperationIdSchema = external_exports.string().regex(/^[A-Za-z0-9_-]{16,80}$/, "must be 16\u201380 letters, digits, underscores or hyphens");
-var HeadShaSchema2 = external_exports.string().regex(/^[0-9a-f]{40}$/, "must be a 40-character lowercase hex commit sha");
-var GithubLoginSchema = external_exports.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/, "must be a GitHub login");
-var PacketAnchorSchema = external_exports.strictObject({
-  path: textSchema(packetLimits.path),
-  line: PositiveIntSchema,
-  startLine: optionalSchema(PositiveIntSchema),
-  side: external_exports.enum(anchorSides)
-}).refine((anchor2) => anchor2.startLine === void 0 || anchor2.startLine < anchor2.line, {
-  path: ["startLine"],
-  message: "must be before line"
-});
-var SignOffTimeSchema = external_exports.string().regex(/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,3})?Z$/, "must be an ISO 8601 UTC time ending in Z").refine((value) => {
-  const [year = 0, month = 0, day = 0] = value.slice(0, 10).split("-").map(Number);
-  const date5 = new Date(Date.UTC(year, month - 1, day));
-  return date5.getUTCFullYear() === year && date5.getUTCMonth() === month - 1 && date5.getUTCDate() === day;
-}, "must be a real calendar date");
-var FocusAreaSchema = external_exports.strictObject({
-  id: AgentRecordIdSchema,
-  kind: external_exports.enum(focusAreaKinds),
-  title: oneLineTextSchema(packetLimits.title),
-  rationale: textSchema(packetLimits.rationale),
-  anchors: external_exports.array(PacketAnchorSchema).max(packetLimits.anchors, `up to ${packetLimits.anchors} anchors`)
-});
-var PacketPrSchema = external_exports.strictObject({
-  repo: external_exports.string().regex(/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9_.-]{1,100}$/, "must be owner/name"),
-  number: PositiveIntSchema,
-  headSha: HeadShaSchema2,
-  title: oneLineTextSchema(packetLimits.title),
-  ticket: optionalSchema(oneLineTextSchema(packetLimits.ticket)),
-  signOff: external_exports.strictObject({ at: SignOffTimeSchema, headSha: HeadShaSchema2 }).nullable().optional(),
-  focusAreas: external_exports.array(FocusAreaSchema).max(packetLimits.focusAreas, `up to ${packetLimits.focusAreas} focus areas per PR`)
-});
-var PacketInputSchema = external_exports.strictObject({
-  id: PacketIdSchema,
-  title: oneLineTextSchema(packetLimits.title),
-  overview: external_exports.strictObject({
-    objective: textSchema(packetLimits.objective),
-    highlights: external_exports.array(oneLineTextSchema(packetLimits.highlight)).min(1, "at least 1 highlight").max(packetLimits.highlights, `up to ${packetLimits.highlights} highlights`)
-  }),
-  prs: external_exports.array(PacketPrSchema).min(1, "at least 1 PR").max(packetLimits.prs, `up to ${packetLimits.prs} PRs`),
-  reviewers: external_exports.array(GithubLoginSchema).min(1, "at least 1 reviewer").max(packetLimits.reviewers, `up to ${packetLimits.reviewers} reviewers`)
-});
-var PacketUpdateSchema = external_exports.strictObject({
-  expectedRevision: external_exports.number().int().nonnegative(),
-  operationId: OperationIdSchema,
-  packet: PacketInputSchema.omit({ id: true })
-});
-var GithubSnapshotSchema = external_exports.looseObject({ id: external_exports.union([external_exports.string(), external_exports.number()]), login: external_exports.string() });
-var PacketSchema = external_exports.looseObject({
-  id: external_exports.string(),
-  authorId: external_exports.string(),
-  title: external_exports.string(),
-  overview: external_exports.looseObject({ objective: external_exports.string(), highlights: external_exports.array(external_exports.string()) }),
-  prs: external_exports.array(external_exports.looseObject({ repo: external_exports.string(), number: external_exports.number() })),
-  reviewers: external_exports.array(external_exports.looseObject({ id: external_exports.string(), github: GithubSnapshotSchema })),
-  status: external_exports.enum(["open", "closed"]),
-  revision: external_exports.number().int(),
-  createdAt: external_exports.string(),
-  updatedAt: external_exports.string()
-});
-var ReviewerSchema = external_exports.looseObject({ id: external_exports.string(), name: external_exports.string(), github: GithubSnapshotSchema });
-var PacketResponseSchema = external_exports.looseObject({ packet: PacketSchema }).transform((response) => response.packet);
-var ReviewerListResponseSchema = external_exports.looseObject({ reviewers: external_exports.array(ReviewerSchema) });
-
-// src/shared/ariadne/ariadne-transport.ts
-var FetchAriadneTransport = class {
-  async send(request2) {
-    const response = await fetch(request2.url, {
-      method: request2.method,
-      headers: request2.headers,
-      ...request2.body !== void 0 ? { body: request2.body } : {},
-      signal: AbortSignal.timeout(request2.timeoutMs)
-    });
-    return { status: response.status, body: await response.text() };
-  }
-};
-
-// src/shared/ariadne/ariadne-client.ts
-var AriadneError = class extends Error {
-  failure;
-  status;
-  code;
-  constructor(props) {
-    super(props.message, props.cause === void 0 ? void 0 : { cause: props.cause });
-    this.name = "AriadneError";
-    this.failure = props.failure;
-    this.status = props.status;
-    this.code = props.code;
-  }
-};
-var ariadneTimeoutMs = 5e3;
-var ariadneAttempts = 2;
-var AriadneClient = class {
-  baseUrl;
-  token;
-  transport;
-  timeoutMs;
-  constructor(props) {
-    this.baseUrl = props.baseUrl.replace(/\/+$/, "");
-    this.token = props.token;
-    this.transport = props.transport ?? new FetchAriadneTransport();
-    this.timeoutMs = props.timeoutMs ?? ariadneTimeoutMs;
-  }
-  /** POST /v1/agents/heartbeat: creates or updates the session. */
-  async heartbeat(input2) {
-    const body = this.validate(HeartbeatInputSchema, input2, "heartbeat");
-    return this.request("POST", "/v1/agents/heartbeat", HeartbeatResponseSchema, body);
-  }
-  /** POST /v1/agents/items: 404 `session_not_found` until the session has a heartbeat. */
-  async postItem(input2) {
-    const body = this.validate(ItemInputSchema, input2, "item");
-    return this.request("POST", "/v1/agents/items", ItemResponseSchema, body);
-  }
-  /** POST /v1/agents/activity: 404 `session_not_found` until the session has a heartbeat. */
-  async postActivity(input2) {
-    const body = this.validate(ActivityInputSchema, input2, "activity");
-    return this.request("POST", "/v1/agents/activity", ActivityResponseSchema, body);
-  }
-  /** GET /v1/agents/items?session=…: every item of the session, open and resolved, oldest first. */
-  async listItems(session) {
-    const id = this.validate(AgentSessionIdSchema, session, "session");
-    return this.request(
-      "GET",
-      `/v1/agents/items?session=${encodeURIComponent(id)}`,
-      ItemListResponseSchema
-    );
-  }
-  /** POST /v1/review-packets: ids are global; replaying an id and body is idempotent, a different body is 409 `packet_exists`, another author's id is 409 `packet_id_taken`. */
-  async createPacket(input2) {
-    const body = this.validate(PacketInputSchema, input2, "packet");
-    return this.request("POST", "/v1/review-packets", PacketResponseSchema, body);
-  }
-  /** PUT /v1/review-packets/{id}: a stale `expectedRevision` is 409 `revision_conflict`; a repeated `operationId` is replayed. */
-  async updatePacket(id, input2) {
-    const packetId = this.validate(PacketIdSchema, id, "packet id");
-    const body = this.validate(PacketUpdateSchema, input2, "packet update");
-    return this.request(
-      "PUT",
-      `/v1/review-packets/${encodeURIComponent(packetId)}`,
-      PacketResponseSchema,
-      body
-    );
-  }
-  /** GET /v1/review-packets/{id}. */
-  async getPacket(id) {
-    const packetId = this.validate(PacketIdSchema, id, "packet id");
-    return this.request(
-      "GET",
-      `/v1/review-packets/${encodeURIComponent(packetId)}`,
-      PacketResponseSchema
-    );
-  }
-  /** GET /v1/review-packets/reviewers: active members with a linked GitHub login. */
-  async listReviewers() {
-    return this.request("GET", "/v1/review-packets/reviewers", ReviewerListResponseSchema);
-  }
-  validate(schema, input2, what) {
-    const result = schema.safeParse(input2);
-    if (result.success) return result.data;
-    const detail = result.error.issues.map((issue2) => `${issue2.path.join(".") || what}: ${issue2.message}`).join("; ");
-    throw new AriadneError({ failure: "invalid-input", message: `invalid ${what}: ${detail}` });
-  }
-  async request(method, path3, schema, body) {
-    const request2 = {
-      method,
-      url: `${this.baseUrl}${path3}`,
-      headers: {
-        Accept: "application/json",
-        "User-Agent": `flight-rules/${appVersion}`,
-        ...this.token !== void 0 ? { Authorization: `Bearer ${this.token}` } : {},
-        ...body !== void 0 ? { "Content-Type": "application/json" } : {}
-      },
-      ...body !== void 0 ? { body: JSON.stringify(body) } : {},
-      timeoutMs: this.timeoutMs
-    };
-    const response = await this.send(request2);
-    if (response.status < 200 || response.status > 299) throw this.httpError(response);
-    let json2;
-    try {
-      json2 = JSON.parse(response.body);
-    } catch (err) {
-      throw new AriadneError({
-        failure: "bad-response",
-        message: `${method} ${path3} returned a body that is not JSON`,
-        cause: err
-      });
-    }
-    const parsed = schema.safeParse(json2);
-    if (!parsed.success) {
-      throw new AriadneError({
-        failure: "bad-response",
-        message: `${method} ${path3} returned an unexpected shape: ${parsed.error.issues.map((i) => i.path.join(".")).join(", ")}`
-      });
-    }
-    return parsed.data;
-  }
-  async send(request2) {
-    let lastError;
-    const attempts = request2.method === "GET" ? ariadneAttempts : 1;
-    for (let attempt = 1; attempt <= attempts; attempt++) {
-      try {
-        const response = await this.transport.send(request2);
-        if (response.status < 500 || attempt === attempts) return response;
-      } catch (err) {
-        lastError = err;
-      }
-    }
-    throw new AriadneError({
-      failure: "network",
-      message: `no response from ${this.baseUrl} after ${attempts} attempt${attempts === 1 ? "" : "s"} (${this.describeNetworkError(lastError)})`,
-      cause: lastError
-    });
-  }
-  describeNetworkError(err) {
-    if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) {
-      return `timed out after ${this.timeoutMs / 1e3} s`;
-    }
-    const cause = err instanceof Error && err.cause instanceof Error ? `: ${err.cause.message}` : "";
-    return err instanceof Error ? `${err.message}${cause}` : String(err);
-  }
-  httpError(response) {
-    let parsed;
-    try {
-      const result = AgentErrorBodySchema.safeParse(JSON.parse(response.body));
-      parsed = result.success ? result.data : void 0;
-    } catch {
-      parsed = void 0;
-    }
-    const code2 = parsed?.error;
-    const reason = parsed?.message ?? (code2 === void 0 ? "no error body" : "");
-    return new AriadneError({
-      failure: "http",
-      status: response.status,
-      ...code2 !== void 0 ? { code: code2 } : {},
-      message: [`${response.status}`, code2, reason].filter((part) => part !== void 0 && part !== "").join(" ")
-    });
-  }
-};
-
-// src/shared/ariadne/board-state-files.ts
-import { existsSync as existsSync7, mkdirSync as mkdirSync5, readFileSync as readFileSync7, readdirSync as readdirSync2, rmSync, statSync as statSync3, writeFileSync as writeFileSync5 } from "node:fs";
-import { homedir as homedir4 } from "node:os";
-import { join as join8 } from "node:path";
-var stateIdPattern = /^[A-Za-z0-9_-]{1,80}$/;
-var BoardStateFiles = class {
-  now;
-  env;
-  home;
-  constructor(props = {}) {
-    this.env = props.env ?? process.env;
-    this.home = props.home ?? homedir4();
-    this.now = props.now ?? Date.now;
-  }
-  root() {
-    const stateHome = this.env["XDG_STATE_HOME"];
-    const base = stateHome !== void 0 && stateHome !== "" ? stateHome : join8(this.home, ".local", "state");
-    return join8(base, "flight-rules", "board");
-  }
-  read(folder, id, schema) {
-    const path3 = this.pathFor(folder, id);
-    if (path3 === void 0 || !existsSync7(path3)) return void 0;
-    try {
-      const parsed = schema.safeParse(JSON.parse(readFileSync7(path3, "utf-8")));
-      return parsed.success ? parsed.data : void 0;
-    } catch {
-      return void 0;
-    }
-  }
-  write(folder, id, value) {
-    const path3 = this.pathFor(folder, id);
-    if (path3 === void 0) return;
-    mkdirSync5(this.folder(folder), { recursive: true, mode: 448 });
-    writeFileSync5(path3, JSON.stringify(value), { mode: 384 });
-  }
-  /** Writes a file only if none exists, atomically; returns whether it wrote. */
-  create(folder, id, value) {
-    const path3 = this.pathFor(folder, id);
-    if (path3 === void 0) return false;
-    mkdirSync5(this.folder(folder), { recursive: true, mode: 448 });
-    try {
-      writeFileSync5(path3, JSON.stringify(value), { mode: 384, flag: "wx" });
-      return true;
-    } catch {
-      return false;
-    }
-  }
-  remove(folder, id) {
-    const path3 = this.pathFor(folder, id);
-    if (path3 !== void 0) rmSync(path3, { force: true });
-  }
-  /** Deletes a folder's files last written more than `maxAgeMs` ago. */
-  prune(folder, maxAgeMs) {
-    const dir = this.folder(folder);
-    if (!existsSync7(dir)) return;
-    const cutoff = this.now() - maxAgeMs;
-    for (const name of readdirSync2(dir)) {
-      const path3 = join8(dir, name);
-      try {
-        if (statSync3(path3).mtimeMs < cutoff) rmSync(path3, { force: true });
-      } catch {
-        continue;
-      }
-    }
-  }
-  folder(folder) {
-    return folder === void 0 ? this.root() : join8(this.root(), folder);
-  }
-  pathFor(folder, id) {
-    return stateIdPattern.test(id) ? join8(this.folder(folder), `${id}.json`) : void 0;
-  }
-};
-
-// src/shared/ariadne/board-session-store.ts
-var HeartbeatRecordSchema = external_exports.object({
-  session: external_exports.string(),
-  step: external_exports.string(),
-  state: external_exports.enum(agentStates),
-  ticket: external_exports.string().optional(),
-  repo: external_exports.string().optional(),
-  branch: external_exports.string().optional(),
-  skill: external_exports.string().optional(),
-  detail: external_exports.string().optional()
-});
-var SessionRecordSchema = external_exports.object({
-  heartbeat: HeartbeatRecordSchema,
-  /** When a skill last posted this heartbeat. */
-  recordedAt: external_exports.number(),
-  /** When any heartbeat for the session was last sent, by a skill or the hook. */
-  sentAt: external_exports.number()
-});
-var InferredRecordSchema = external_exports.object({
-  heartbeat: HeartbeatRecordSchema,
-  /** When the hook last sent this inferred heartbeat. */
-  sentAt: external_exports.number()
-});
-var ThreadRecordSchema = external_exports.object({
-  /** The board session a skill last posted to by default from this Claude Code session. */
-  board: external_exports.string().optional(),
-  /** When the hook last spawned a branch lookup for this Claude Code session's main thread. */
-  branchCheckedAt: external_exports.number().optional()
-});
-var ThreadSkillRecordSchema = external_exports.object({ skill: external_exports.string() });
-var inferredFolder = "inferred";
-var threadsFolder = "threads";
-var threadSkillsFolder = "thread-skills";
-var unsafeSessionCharacters = /[^A-Za-z0-9_-]/g;
-var maxSessionLength = 80;
-var TicketSessionKey = class {
-  key(claudeSession, ticket) {
-    const prefix = claudeSession.trim().replace(unsafeSessionCharacters, "_");
-    if (prefix === "" || ticket === "") return void 0;
-    return `${prefix.slice(0, Math.max(0, maxSessionLength - ticket.length - 1))}-${ticket}`;
-  }
-};
-var ticketSessionKey = new TicketSessionKey();
-var BoardSessionStore = class {
-  files;
-  now;
-  constructor(props = {}) {
-    this.files = new BoardStateFiles(props);
-    this.now = this.files.now;
-  }
-  dir() {
-    return this.files.root();
-  }
-  read(session) {
-    return this.files.read(void 0, session, SessionRecordSchema);
-  }
-  /** Remembers a heartbeat a skill just sent. */
-  record(heartbeat) {
-    const now = this.now();
-    this.files.write(void 0, heartbeat.session, { heartbeat: this.compact(heartbeat), recordedAt: now, sentAt: now });
-  }
-  /**
-   * The skill heartbeat a skill recorded for the session within `maxAgeMs`,
-   * whatever its state; an older record counts as none.
-   */
-  recent(session, maxAgeMs) {
-    const record2 = this.read(session);
-    return record2 !== void 0 && this.now() - record2.recordedAt <= maxAgeMs ? record2.heartbeat : void 0;
-  }
-  /**
-   * Remembers a placeholder heartbeat only where no skill has recorded a
-   * recent one: a fresh record is never replaced, and a missing file is
-   * created atomically, so a skill's own heartbeat landing at the same
-   * moment from another process wins. Returns whether it was remembered.
-   */
-  recordIfAbsent(heartbeat, maxAgeMs) {
-    if (this.recent(heartbeat.session, maxAgeMs) !== void 0) return false;
-    const now = this.now();
-    const record2 = { heartbeat: this.compact(heartbeat), recordedAt: now, sentAt: now };
-    if (this.read(heartbeat.session) === void 0) return this.files.create(void 0, heartbeat.session, record2);
-    this.files.write(void 0, heartbeat.session, record2);
-    return true;
-  }
-  /**
-   * Claims the next liveness heartbeat for a session: returns its record and
-   * marks it sent, or returns undefined when there is nothing to keep alive.
-   * That is when no skill has recorded one, the record is older than
-   * `maxAgeMs`, the run aborted, or one was sent less than `intervalMs` ago.
-   */
-  claim(session, intervalMs, maxAgeMs) {
-    const record2 = this.read(session);
-    if (record2 === void 0) return void 0;
-    const now = this.now();
-    if (record2.heartbeat.state === "abort") return void 0;
-    if (now - record2.recordedAt > maxAgeMs) return void 0;
-    if (now - record2.sentAt < intervalMs) return void 0;
-    const claimed = { ...record2, sentAt: now };
-    this.files.write(void 0, session, claimed);
-    return claimed;
-  }
-  /** Whether a skill has posted to this session within `maxAgeMs`, whatever its state. */
-  hasSkillRecord(session, maxAgeMs) {
-    const record2 = this.read(session);
-    return record2 !== void 0 && this.now() - record2.recordedAt <= maxAgeMs;
-  }
-  /** Whether a skill record is one the hook keeps alive: not aborted and within `maxAgeMs`. */
-  isLive(session, maxAgeMs) {
-    const record2 = this.read(session);
-    return record2 !== void 0 && record2.heartbeat.state !== "abort" && this.now() - record2.recordedAt <= maxAgeMs;
-  }
-  readInferred(session) {
-    return this.files.read(inferredFolder, session, InferredRecordSchema);
-  }
-  /**
-   * Claims a liveness heartbeat the hook inferred: stores it and returns true,
-   * or returns false when one was sent for the session less than `intervalMs` ago.
-   */
-  claimInferred(heartbeat, intervalMs) {
-    const now = this.now();
-    const previous3 = this.readInferred(heartbeat.session);
-    if (previous3 !== void 0 && now - previous3.sentAt < intervalMs) return false;
-    this.files.write(inferredFolder, heartbeat.session, { heartbeat: this.compact(heartbeat), sentAt: now });
-    return true;
-  }
-  /** Remembers that a skill posted to `board` by default from this Claude Code session. */
-  pointThread(claudeSession, board) {
-    this.files.write(threadsFolder, claudeSession, { ...this.thread(claudeSession), board });
-  }
-  /** The board session a skill last posted to by default from this Claude Code session. */
-  threadSession(claudeSession) {
-    return this.thread(claudeSession)?.board;
-  }
-  /** At most one main-thread branch lookup per `intervalMs` per Claude Code session. */
-  claimBranchCheck(claudeSession, intervalMs) {
-    const now = this.now();
-    const thread = this.thread(claudeSession);
-    if (thread?.branchCheckedAt !== void 0 && now - thread.branchCheckedAt < intervalMs) return false;
-    this.files.write(threadsFolder, claudeSession, { ...thread, branchCheckedAt: now });
-    return true;
-  }
-  /** Remembers the skill this Claude Code session's main thread just loaded. */
-  recordThreadSkill(claudeSession, skill) {
-    if (this.threadSkill(claudeSession) === skill) return;
-    this.files.write(threadSkillsFolder, claudeSession, { skill });
-  }
-  /** The skill this Claude Code session's main thread last loaded, if any. */
-  threadSkill(claudeSession) {
-    return this.files.read(threadSkillsFolder, claudeSession, ThreadSkillRecordSchema)?.skill;
-  }
-  /** Deletes inferred heartbeats and thread records untouched for `maxAgeMs`. */
-  prune(maxAgeMs) {
-    this.files.prune(inferredFolder, maxAgeMs);
-    this.files.prune(threadsFolder, maxAgeMs);
-    this.files.prune(threadSkillsFolder, maxAgeMs);
-  }
-  thread(claudeSession) {
-    return this.files.read(threadsFolder, claudeSession, ThreadRecordSchema);
-  }
-  compact(heartbeat) {
-    const { session, step, state } = heartbeat;
-    const optional2 = Object.fromEntries(
-      ["ticket", "repo", "branch", "skill", "detail"].map((key) => [key, heartbeat[key]]).filter(([, value]) => value !== void 0 && value !== "")
-    );
-    return { session, step, state, ...optional2 };
-  }
-};
-
-// src/shared/ariadne/ariadne-board.ts
-var claudeSessionEnv = "CLAUDE_CODE_SESSION_ID";
-var bootstrapStep = "started";
-var bootstrapRecoveryMs = 60 * 6e4;
-var personalScopes = /* @__PURE__ */ new Set(["user", "local"]);
-var scopeLabels = {
-  user: "user settings",
-  project: "project settings",
-  local: "local settings",
-  file: "the flight-rules config file"
-};
-var urlKey = "ariadne.url";
-var enabledKey = "ariadne.enabled";
-var AriadneBoard = class {
-  readLayers;
-  tokens;
-  env;
-  transport;
-  timeoutMs;
-  sessions;
-  constructor(props) {
-    this.readLayers = props.readLayers;
-    this.tokens = props.tokens;
-    this.env = props.env ?? process.env;
-    this.transport = props.transport;
-    this.timeoutMs = props.timeoutMs;
-    this.sessions = props.sessions;
-  }
-  /**
-   * `ariadne.url` (default: production) and `ariadne.enabled` (default:
-   * true), read only from the user and local layers, local winning. Project
-   * and file layers are ignored with a notice. A URL that is not https (or
-   * http on localhost) leaves `url` undefined, so nothing is ever sent to it.
-   */
-  settings() {
-    const notices = [];
-    let rawUrl;
-    let rawEnabled;
-    for (const layer of this.readLayers()) {
-      for (const key of [urlKey, enabledKey]) {
-        if (!(key in layer.values)) continue;
-        const value = layer.values[key];
-        if (!personalScopes.has(layer.scope)) {
-          notices.push(`ignored ${key} from ${scopeLabels[layer.scope]}; set it in user scope`);
-          continue;
-        }
-        if (value === void 0 || value === null || value === "") continue;
-        if (key === urlKey) rawUrl = { value, scope: layer.scope };
-        else rawEnabled = { value, scope: layer.scope };
-      }
-    }
-    let url2 = defaultAriadneUrl;
-    if (rawUrl !== void 0) {
-      const parsed = AriadneUrlSchema.safeParse(rawUrl.value);
-      url2 = parsed.success ? parsed.data : void 0;
-      if (!parsed.success) {
-        notices.push(
-          `ignored ${urlKey} from ${scopeLabels[rawUrl.scope]}: ${parsed.error.issues.map((i) => i.message).join("; ")}; nothing is sent until it is fixed`
-        );
-      }
-    }
-    let enabled = true;
-    if (rawEnabled !== void 0) {
-      const value = rawEnabled.value;
-      if (value === true || value === "true") enabled = true;
-      else if (value === false || value === "false") enabled = false;
-      else {
-        enabled = false;
-        notices.push(
-          `ignored ${enabledKey} from ${scopeLabels[rawEnabled.scope]}: expected true or false; reporting is off until it is fixed`
-        );
-      }
-    }
-    return { url: url2, enabled, notices };
-  }
-  /**
-   * The session a call reports to without `--session`: with a Jira ticket,
-   * `<Claude Code session id>-<TICKET>`, the same row the heartbeat hook
-   * keeps alive for a sub-agent on that ticket; without one, the Claude Code
-   * session id. Undefined outside a Claude Code session.
-   */
-  defaultSession(ticket) {
-    const value = this.env[claudeSessionEnv]?.trim();
-    if (value === void 0 || value === "") return void 0;
-    const key = ticket !== void 0 ? TicketKeySchema.safeParse(ticket) : void 0;
-    return key?.success === true ? ticketSessionKey.key(value, key.data) : value;
-  }
-  /**
-   * Whether a post would be sent: a token, enabled and a valid URL. Read by
-   * the hooks before they start a child process; never touches the network.
-   * The token is checked first because it is cheap, and reading the config
-   * layers is not, so a machine without a token pays for neither.
-   */
-  reportable() {
-    try {
-      if (this.tokens.resolve() === void 0) return false;
-      const settings = this.settings();
-      return settings.enabled && settings.url !== void 0;
-    } catch {
-      return false;
-    }
-  }
-  /**
-   * Posts a heartbeat and remembers it for the session, so the heartbeat
-   * hook can keep the session alive with the same ticket and step.
-   */
-  async heartbeat(input2, options = {}) {
-    return this.call(
-      options,
-      input2.session,
-      async (client, session) => {
-        const sent = { ...input2, session };
-        try {
-          const response = await client.heartbeat(sent);
-          this.remember(sent, input2.session === void 0);
-          return response;
-        } catch (err) {
-          if (!(err instanceof AriadneError) || err.failure !== "invalid-input")
-            this.remember(sent, input2.session === void 0);
-          throw err;
-        }
-      },
-      input2.ticket
-    );
-  }
-  /**
-   * Re-sends the last heartbeat a skill posted for `session`, without
-   * refreshing when it was recorded, or else the one the heartbeat hook
-   * inferred for it. The heartbeat hook's liveness ping; a skill's heartbeat
-   * always wins, so its step is never overwritten.
-   */
-  async replay(session, options = {}) {
-    const record2 = this.sessions?.read(session) ?? this.sessions?.readInferred(session);
-    if (record2 === void 0) return { status: "skipped", reason: "nothing-recorded" };
-    return this.call(
-      options,
-      session,
-      (client) => client.heartbeat(record2.heartbeat),
-      record2.heartbeat.ticket
-    );
-  }
-  /**
-   * Posts an item. A session that has never sent a heartbeat (or has aged
-   * out) gets one first, with step `started`, state `nominal` and the
-   * reporting skill when one is named, and the item is posted again. A live
-   * session's step is never overwritten this way.
-   */
-  async item(input2, options = {}) {
-    return this.call(
-      options,
-      input2.session,
-      (client, session) => this.withSession(
-        client,
-        {
-          session,
-          ticket: input2.ticket,
-          skill: options.skill,
-          defaulted: input2.session === void 0,
-          bootstrapMissingSession: options.bootstrapMissingSession !== false
-        },
-        () => client.postItem({ ...input2, session })
-      ),
-      input2.ticket
-    );
-  }
-  /** Posts one activity line, creating the session first as `item` does. */
-  async activity(input2, options = {}) {
-    return this.call(
-      options,
-      input2.session,
-      (client, session) => this.withSession(
-        client,
-        {
-          session,
-          ticket: input2.ticket,
-          skill: options.skill,
-          defaulted: input2.session === void 0,
-          bootstrapMissingSession: options.bootstrapMissingSession !== false
-        },
-        () => client.postActivity({ ...input2, session })
-      ),
-      input2.ticket
-    );
-  }
-  /**
-   * Every item of one of the caller's sessions, open and resolved, with any
-   * chosen option. Without `session`, `ticket` picks the default session a
-   * post on that ticket uses.
-   */
-  async items(session, options = {}, ticket) {
-    return this.call(options, session, (client, id) => client.listItems(id), ticket);
-  }
-  /**
-   * Remembering is best effort: a full disk must not fail a report. A
-   * heartbeat sent to the default session also becomes the Claude Code
-   * session's current skill session, which the heartbeat hook keeps alive.
-   */
-  remember(heartbeat, defaulted) {
-    try {
-      this.sessions?.record(heartbeat);
-      const claudeSession = this.defaultSession();
-      if (defaulted && claudeSession !== void 0 && claudeSession !== heartbeat.session) {
-        this.sessions?.pointThread(claudeSession, heartbeat.session);
-      }
-    } catch {
-      return;
-    }
-  }
-  /**
-   * Runs `post`, first creating the session when the API has none. A skill
-   * heartbeat recorded for the session in the last hour, such as one that
-   * failed in transit, creates it with its own step and state. Otherwise the
-   * session starts as `started`, and when a skill is named that placeholder
-   * is remembered as the skill's heartbeat, so the heartbeat hook keeps it
-   * alive and never replaces its skill with an agent type it infers. The
-   * placeholder never replaces a heartbeat a skill recorded meanwhile.
-   */
-  async withSession(client, target, post) {
-    try {
-      return await post();
-    } catch (err) {
-      if (!(err instanceof AriadneError) || err.code !== "session_not_found") throw err;
-      if (!target.bootstrapMissingSession) throw err;
-    }
-    const { session, ticket, skill, defaulted } = target;
-    const recorded = this.bestEffort(() => this.sessions?.recent(session, bootstrapRecoveryMs));
-    if (recorded !== void 0) {
-      await client.heartbeat(recorded);
-      return post();
-    }
-    const named = skill !== void 0 && skill !== "";
-    const heartbeat = {
-      session,
-      ticket,
-      step: bootstrapStep,
-      state: "nominal",
-      ...named ? { skill } : {}
-    };
-    await client.heartbeat(heartbeat);
-    if (named) this.rememberPlaceholder(heartbeat, defaulted);
-    return post();
-  }
-  rememberPlaceholder(heartbeat, defaulted) {
-    const remembered = this.bestEffort(
-      () => this.sessions?.recordIfAbsent(heartbeat, bootstrapRecoveryMs)
-    );
-    const claudeSession = this.defaultSession();
-    if (remembered === true && defaulted && claudeSession !== void 0 && claudeSession !== heartbeat.session) {
-      this.bestEffort(() => this.sessions?.pointThread(claudeSession, heartbeat.session));
-    }
-  }
-  /** Local state is best effort: a full or unreadable disk must not fail a report. */
-  bestEffort(run3) {
-    try {
-      return run3();
-    } catch {
-      return void 0;
-    }
-  }
-  async call(options, requestedSession, run3, ticket) {
-    let settings;
-    try {
-      settings = this.settings();
-    } catch (err) {
-      return { status: "failed", message: err instanceof Error ? err.message : String(err) };
-    }
-    const noted = (outcome) => settings.notices.length > 0 ? { ...outcome, notices: settings.notices } : outcome;
-    const url2 = settings.url;
-    if (!settings.enabled) return noted({ status: "skipped", reason: "disabled" });
-    if (url2 === void 0) return noted({ status: "skipped", reason: "invalid-url" });
-    if (ticket !== void 0 && ticket !== "" && !TicketKeySchema.safeParse(ticket).success) {
-      return {
-        status: "skipped",
-        reason: "not-jira-ticket",
-        notices: [
-          ...settings.notices,
-          `skipped: ${ticket} is not a Jira issue key, and Ariadne tracks only Jira tickets`
-        ]
-      };
-    }
-    let token;
-    try {
-      token = this.tokens.resolve()?.token;
-    } catch (err) {
-      return noted({ status: "failed", message: err instanceof Error ? err.message : String(err) });
-    }
-    if (token === void 0 && options.strict !== true)
-      return noted({ status: "skipped", reason: "no-token" });
-    const session = requestedSession ?? this.defaultSession(ticket);
-    if (session === void 0) {
-      return noted({
-        status: "failed",
-        message: `no session id: pass --session, or run inside Claude Code so ${claudeSessionEnv} is set`
-      });
-    }
-    const client = new AriadneClient({
-      baseUrl: url2,
-      token,
-      ...this.transport !== void 0 ? { transport: this.transport } : {},
-      ...this.timeoutMs !== void 0 ? { timeoutMs: this.timeoutMs } : {}
-    });
-    try {
-      return noted({ status: "posted", value: await run3(client, session) });
-    } catch (err) {
-      return noted({
-        status: "failed",
-        message: this.redact(this.describe(err, url2, token !== void 0), token)
-      });
-    }
-  }
-  describe(err, url2, hasToken) {
-    if (!(err instanceof AriadneError)) return err instanceof Error ? err.message : String(err);
-    if (err.status === 401 && err.code === "agent_token_expired") {
-      return "Ariadne agent token expired (401 agent_token_expired) \u2014 create a new one in Ariadne \u203A Settings \u203A Connections and run `flight-rules board login`";
-    }
-    if (err.status === 401) {
-      return hasToken ? "Ariadne agent token not recognised (401 unauthorized); it may be revoked or mistyped. Create a new one in Ariadne \u203A Settings \u203A Connections and set ARIADNE_AGENT_TOKEN or run `flight-rules board login`" : "no Ariadne token (401 unauthorized). Set ARIADNE_AGENT_TOKEN, or run `flight-rules board login` with an agent token from Ariadne \u203A Settings \u203A Connections";
-    }
-    if (err.code === "agents_opt_in_required") {
-      return "Agents reporting is off for you (403 agents_opt_in_required). Turn on Agents in Ariadne \u203A Settings \u203A Connections";
-    }
-    if (err.failure === "network") return `could not reach Ariadne at ${url2}: ${err.message}`;
-    return `Ariadne ${err.failure === "http" ? "returned" : "request failed:"} ${err.message}`;
-  }
-  /** Belt and braces: no message may ever carry the token. */
-  redact(message, token) {
-    return token === void 0 || token === "" ? message : message.split(token).join("[redacted]");
-  }
-};
-
-// src/shared/ariadne/ariadne-packets.ts
-import { randomUUID } from "node:crypto";
-
-// src/shared/ariadne/packet-id-generator.ts
-import { randomBytes } from "node:crypto";
-var maxSlugLength = 60;
-var fallbackSlug = "packet";
-var suffixPattern = /-[0-9a-f]{8}$/;
-var RandomPacketIdGenerator = class {
-  generate(title) {
-    return `${this.slug(title)}-${this.suffix()}`;
-  }
-  regenerate(id) {
-    const slug = this.trim(id.replace(suffixPattern, ""));
-    const previous3 = id.slice(-8);
-    let suffix = this.suffix();
-    while (suffix === previous3) suffix = this.suffix();
-    return `${slug === "" ? fallbackSlug : slug}-${suffix}`;
-  }
-  slug(title) {
-    const kebab = this.trim(title.toLowerCase().replace(/[^a-z0-9]+/g, "-"));
-    return kebab === "" ? fallbackSlug : kebab;
-  }
-  trim(text7) {
-    return text7.slice(0, maxSlugLength).replace(/^-+|-+$/g, "");
-  }
-  suffix() {
-    return randomBytes(4).toString("hex");
-  }
-};
-var packetIdGenerator = new RandomPacketIdGenerator();
-
-// src/shared/ariadne/ariadne-packets.ts
-var AriadnePacketError = class extends Error {
-  name = "AriadnePacketError";
-};
-var personalScopes2 = /* @__PURE__ */ new Set(["user", "local"]);
-var urlKey2 = "ariadne.url";
-var AriadnePackets = class {
-  readLayers;
-  tokens;
-  transport;
-  timeoutMs;
-  constructor(props) {
-    this.readLayers = props.readLayers;
-    this.tokens = props.tokens;
-    this.transport = props.transport;
-    this.timeoutMs = props.timeoutMs;
-  }
-  /**
-   * Publishes a packet, generating its id from the title when the file has none.
-   */
-  async create(packet) {
-    const first = this.withId(packet);
-    return this.call((client) => client.createPacket(first.packet));
-  }
-  async update(id, input2) {
-    const operationId = input2.operationId ?? randomUUID().replaceAll("-", "");
-    return this.call(
-      (client) => client.updatePacket(id, {
-        expectedRevision: input2.expectedRevision,
-        operationId,
-        packet: input2.packet
-      })
-    );
-  }
-  async get(id) {
-    return this.call((client) => client.getPacket(id));
-  }
-  async reviewers() {
-    return this.call((client) => client.listReviewers());
-  }
-  /** The packet carrying an id: the file's own, or one generated from its title. Anything else is left for validation to reject. */
-  withId(packet) {
-    if (typeof packet !== "object" || packet === null || Array.isArray(packet))
-      return { packet, id: "" };
-    const fields = { ...packet };
-    if (typeof fields["id"] === "string") return { packet: fields, id: fields["id"] };
-    if (fields["id"] === void 0 && typeof fields["title"] === "string") {
-      const id = packetIdGenerator.generate(fields["title"]);
-      return { packet: { ...fields, id }, id };
-    }
-    return { packet: fields, id: "" };
-  }
-  /**
-   * `ariadne.url` (default: production) read only from the user and local
-   * layers, local winning. A URL that is not https (or http on localhost)
-   * throws, so the token never goes to it.
-   */
-  url() {
-    let raw;
-    for (const layer of this.readLayers()) {
-      if (!personalScopes2.has(layer.scope)) continue;
-      const value = layer.values[urlKey2];
-      if (value !== void 0 && value !== null && value !== "") raw = value;
-    }
-    if (raw === void 0) return defaultAriadneUrl;
-    const parsed = AriadneUrlSchema.safeParse(raw);
-    if (parsed.success) return parsed.data;
-    throw new AriadnePacketError(
-      `ariadne.url is invalid (${parsed.error.issues.map((i) => i.message).join("; ")}); fix it with \`flight-rules config set ariadne.url <https url> --scope user\``
-    );
-  }
-  token() {
-    const resolved = this.tokens.resolve();
-    if (resolved !== void 0) return resolved.token;
-    throw new AriadnePacketError(
-      "no Ariadne token; set ARIADNE_AGENT_TOKEN, or run `flight-rules board login` with an agent token from Ariadne \u203A Settings \u203A Connections"
-    );
-  }
-  async call(run3) {
-    const url2 = this.url();
-    const token = this.token();
-    const client = new AriadneClient({
-      baseUrl: url2,
-      token,
-      ...this.transport !== void 0 ? { transport: this.transport } : {},
-      ...this.timeoutMs !== void 0 ? { timeoutMs: this.timeoutMs } : {}
-    });
-    try {
-      return await run3(client);
-    } catch (err) {
-      throw new AriadnePacketError(this.redact(this.describe(err, url2), token), { cause: err });
-    }
-  }
-  describe(err, url2) {
-    if (!(err instanceof AriadneError)) return err instanceof Error ? err.message : String(err);
-    if (err.failure === "invalid-input")
-      return `${err.message}; fix the packet file and retry, nothing was sent`;
-    if (err.failure === "network") {
-      return `could not reach Ariadne at ${url2}: ${err.message}; check the network and \`ariadne.url\`, then retry`;
-    }
-    if (err.status === 401 && err.code === "agent_token_expired") {
-      return "Ariadne agent token expired (401 agent_token_expired); create a new one in Ariadne \u203A Settings \u203A Connections and run `flight-rules board login`";
-    }
-    if (err.status === 401) {
-      return "Ariadne did not accept the token (401 unauthorized); it may be revoked or mistyped. Create a new one in Ariadne \u203A Settings \u203A Connections and set ARIADNE_AGENT_TOKEN or run `flight-rules board login`";
-    }
-    if (err.code === "agents_opt_in_required") {
-      return "Agents access is off for you (403 agents_opt_in_required); turn on Agents in Ariadne \u203A Settings \u203A Connections and retry";
-    }
-    if (err.code === "revision_conflict") {
-      return "the packet changed since you read it (409 revision_conflict); re-read with `flight-rules packet get <id>` and retry";
-    }
-    if (err.code === "packet_exists") {
-      return "a packet with this id already exists with different content (409 packet_exists); use `flight-rules packet update <id>` to revise it, or choose a new id";
-    }
-    if (err.code === "packet_id_taken") {
-      return "the packet id is taken by another author (409 packet_id_taken); choose a different id, or get one with `flight-rules packet new-id --title <title>`";
-    }
-    if (err.code === "reviewer_not_found") {
-      return `a reviewer is not an active Ariadne member with a linked GitHub login (422 reviewer_not_found): ${err.message}; list valid logins with \`flight-rules packet reviewers\``;
-    }
-    if (err.failure === "http")
-      return `Ariadne returned ${err.message}; check the packet and retry`;
-    return `Ariadne request failed: ${err.message}`;
-  }
-  /** Belt and braces: no message may ever carry the token. */
-  redact(message, token) {
-    return token === "" ? message : message.split(token).join("[redacted]");
-  }
-};
-
-// src/shared/ariadne/ariadne-token-store.ts
-import { chmodSync, existsSync as existsSync8, mkdirSync as mkdirSync6, readFileSync as readFileSync8, rmSync as rmSync2, writeFileSync as writeFileSync6 } from "node:fs";
-import { homedir as homedir5 } from "node:os";
-import { dirname as dirname9, join as join9 } from "node:path";
-var agentTokenPattern = /^ariadne_agent_[0-9a-f]{16}_[A-Za-z0-9_-]{43}$/;
-var ariadneTokenEnvNames = ["ARIADNE_AGENT_TOKEN", "ARIADNE_TOKEN"];
-var AriadneTokenStore = class {
-  env;
-  home;
-  constructor(props = {}) {
-    this.env = props.env ?? process.env;
-    this.home = props.home ?? homedir5();
-  }
-  isAgentToken(value) {
-    return agentTokenPattern.test(value);
-  }
-  /** `$XDG_CONFIG_HOME/flight-rules/ariadne-token`, else `~/.config/flight-rules/ariadne-token`. */
-  path() {
-    const configHome = this.env["XDG_CONFIG_HOME"];
-    const base = configHome !== void 0 && configHome !== "" ? configHome : join9(this.home, ".config");
-    return join9(base, "flight-rules", "ariadne-token");
-  }
-  resolve() {
-    for (const name of ariadneTokenEnvNames) {
-      const value2 = this.env[name]?.trim();
-      if (value2 !== void 0 && value2 !== "") return { token: value2, source: name };
-    }
-    const path3 = this.path();
-    if (!existsSync8(path3)) return void 0;
-    const value = readFileSync8(path3, "utf-8").trim();
-    return value === "" ? void 0 : { token: value, source: "file" };
-  }
-  /** The environment variable that would win over a saved file, if one is set. */
-  shadowingEnv() {
-    return ariadneTokenEnvNames.find((name) => (this.env[name]?.trim() ?? "") !== "");
-  }
-  /** Saves an agent token with mode 0600 and returns the path. Rejects anything that is not one. */
-  save(token) {
-    const value = token.trim();
-    if (!this.isAgentToken(value)) {
-      throw new Error(
-        "That is not an Ariadne agent token (expected ariadne_agent_<16 hex>_<43 characters>). Create one in Ariadne \u203A Settings \u203A Connections."
-      );
-    }
-    const path3 = this.path();
-    mkdirSync6(dirname9(path3), { recursive: true, mode: 448 });
-    writeFileSync6(path3, `${value}
-`, { mode: 384 });
-    chmodSync(path3, 384);
-    return path3;
-  }
-  /** Deletes the saved token; returns whether one existed. */
-  remove() {
-    const path3 = this.path();
-    if (!existsSync8(path3)) return false;
-    rmSync2(path3);
-    return true;
-  }
-};
-
-// src/shared/ariadne/board-agent-store.ts
-import { existsSync as existsSync9, readdirSync as readdirSync3 } from "node:fs";
-import { join as join10 } from "node:path";
-var DispatchRecordSchema = external_exports.object({
-  /** The Jira key the dispatch named, or null when it named none. */
-  ticket: external_exports.string().nullable(),
-  description: external_exports.string(),
-  /** The dispatching Claude Code session. */
-  session: external_exports.string(),
-  /** A digest of the prompt, so a sub-agent found only through its transcript still finds its dispatch. */
-  promptDigest: external_exports.string().optional(),
-  at: external_exports.number()
-});
-var AgentRecordSchema = external_exports.object({
-  /** The Jira key the sub-agent works on, or null once resolved to none. */
-  ticket: external_exports.string().nullable(),
-  description: external_exports.string().optional(),
-  agentType: external_exports.string().optional(),
-  toolUseId: external_exports.string().optional(),
-  /** The Claude Code session the sub-agent runs in. */
-  session: external_exports.string(),
-  at: external_exports.number()
-});
-var AgentSkillRecordSchema = external_exports.object({ skill: external_exports.string() });
-var dispatchFolder = "dispatch";
-var agentsFolder = "agents";
-var agentSkillsFolder = "agent-skills";
-var BoardAgentStore = class {
-  files;
-  constructor(props = {}) {
-    this.files = new BoardStateFiles(props);
-  }
-  now() {
-    return this.files.now();
-  }
-  recordDispatch(toolUseId, record2) {
-    this.files.write(dispatchFolder, toolUseId, record2);
-  }
-  readDispatch(toolUseId) {
-    return this.files.read(dispatchFolder, toolUseId, DispatchRecordSchema);
-  }
-  /** The dispatch in `session` whose prompt has this digest; reads every dispatch file, so only a fallback uses it. */
-  findDispatchByPrompt(session, promptDigest) {
-    const dir = join10(this.files.root(), dispatchFolder);
-    if (!existsSync9(dir)) return void 0;
-    for (const name of readdirSync3(dir)) {
-      if (!name.endsWith(".json")) continue;
-      const record2 = this.readDispatch(name.slice(0, -".json".length));
-      if (record2?.session === session && record2.promptDigest === promptDigest) return record2;
-    }
-    return void 0;
-  }
-  removeDispatch(toolUseId) {
-    this.files.remove(dispatchFolder, toolUseId);
-  }
-  recordAgent(agentId, record2) {
-    this.files.write(agentsFolder, agentId, record2);
-  }
-  readAgent(agentId) {
-    return this.files.read(agentsFolder, agentId, AgentRecordSchema);
-  }
-  removeAgent(agentId) {
-    this.files.remove(agentsFolder, agentId);
-    this.files.remove(agentSkillsFolder, agentId);
-  }
-  /** Remembers the skill a sub-agent just loaded; rewrites nothing when it is unchanged. */
-  recordAgentSkill(agentId, skill) {
-    if (this.readAgentSkill(agentId) === skill) return;
-    this.files.write(agentSkillsFolder, agentId, { skill });
-  }
-  readAgentSkill(agentId) {
-    return this.files.read(agentSkillsFolder, agentId, AgentSkillRecordSchema)?.skill;
-  }
-  /** Deletes dispatch and sub-agent records untouched for `maxAgeMs`. */
-  prune(maxAgeMs) {
-    this.files.prune(dispatchFolder, maxAgeMs);
-    this.files.prune(agentsFolder, maxAgeMs);
-    this.files.prune(agentSkillsFolder, maxAgeMs);
   }
 };
 
@@ -34222,8 +32964,8 @@ var convertMarkedBigIntsReviver = (key, value, context, userReviver) => {
   if (!hasUserReviver) return value;
   return userReviver(key, value, context);
 };
-var JSONParseV2 = (text7, reviver) => {
-  return JSON.parse(text7, (key, value, context) => {
+var JSONParseV2 = (text6, reviver) => {
+  return JSON.parse(text6, (key, value, context) => {
     const isNumber = typeof value === "number";
     const isOutOfBounds = value > Number.MAX_SAFE_INTEGER || value < Number.MIN_SAFE_INTEGER;
     const isBigNumber = isNumber && isOutOfBounds;
@@ -34281,8 +33023,8 @@ var applyReviverIteratively = (parsed, userReviver) => {
   }
   return rootHolder[""];
 };
-var serializeBigInts = (text7) => {
-  return text7.replace(
+var serializeBigInts = (text6) => {
+  return text6.replace(
     stringsOrLargeNumbers,
     (match, digits, fractional, exponential) => {
       const isString = match[0] === '"';
@@ -34296,18 +33038,18 @@ var serializeBigInts = (text7) => {
     }
   );
 };
-var JSONParse = (text7, reviver) => {
-  if (!text7) return originalParse(text7, reviver);
+var JSONParse = (text6, reviver) => {
+  if (!text6) return originalParse(text6, reviver);
   try {
-    if (isContextSourceSupported()) return JSONParseV2(text7, reviver);
-    const serializedData = serializeBigInts(text7);
+    if (isContextSourceSupported()) return JSONParseV2(text6, reviver);
+    const serializedData = serializeBigInts(text6);
     return originalParse(
       serializedData,
       (key, value, context) => convertMarkedBigIntsReviver(key, value, context, reviver)
     );
   } catch (error62) {
     if (error62 instanceof RangeError) {
-      const serializedData = serializeBigInts(text7);
+      const serializedData = serializeBigInts(text6);
       const parsed = originalParse(serializedData);
       return applyReviverIteratively(parsed, reviver);
     }
@@ -34475,12 +33217,12 @@ async function getResponseData(response) {
   }
   const mimetype = parse4(contentType);
   if (isJSONResponse(mimetype)) {
-    let text7 = "";
+    let text6 = "";
     try {
-      text7 = await response.text();
-      return JSONParse(text7);
+      text6 = await response.text();
+      return JSONParse(text6);
     } catch (err) {
-      return text7;
+      return text6;
     }
   } else if (mimetype.type.startsWith("text/") || // `application/octet-stream` is the canonical "arbitrary binary" type
   // (RFC 2046) and must never be decoded as text, even when the response
@@ -38207,7 +36949,7 @@ var GitHubTaskTracker = class {
 };
 
 // src/tasks/jira-task-tracker/jira-task-tracker.ts
-import { readFileSync as readFileSync9 } from "node:fs";
+import { readFileSync as readFileSync7 } from "node:fs";
 import { basename as basename2 } from "node:path";
 
 // src/tasks/jira-task-tracker/jira-api-error.ts
@@ -38254,8 +36996,8 @@ var JiraClient = class {
       ...signal === void 0 ? {} : { signal }
     });
     if (!res.ok) await this.throwApiError(res);
-    const text7 = await res.text();
-    const data = text7.length > 0 ? JSON.parse(text7) : void 0;
+    const text6 = await res.text();
+    const data = text6.length > 0 ? JSON.parse(text6) : void 0;
     return data;
   }
   /**
@@ -38276,8 +37018,8 @@ var JiraClient = class {
       body: form
     });
     if (!res.ok) await this.throwApiError(res);
-    const text7 = await res.text();
-    const data = text7.length > 0 ? JSON.parse(text7) : void 0;
+    const text6 = await res.text();
+    const data = text6.length > 0 ? JSON.parse(text6) : void 0;
     return data;
   }
   /**
@@ -38347,8 +37089,8 @@ var ConfluenceClient = class {
       ...body !== void 0 ? { body: JSON.stringify(body) } : {}
     });
     if (!res.ok) await this.throwApiError(res);
-    const text7 = await res.text();
-    const data = text7.length > 0 ? JSON.parse(text7) : void 0;
+    const text6 = await res.text();
+    const data = text6.length > 0 ? JSON.parse(text6) : void 0;
     return data;
   }
   async fetchWithRetry(url2, init, attempt = 0) {
@@ -40986,7 +39728,7 @@ function resolveAllAttention(events, context) {
   let index2 = -1;
   let open2;
   let group;
-  let text7;
+  let text6;
   let openingSequence;
   let closingSequence;
   let use;
@@ -41024,7 +39766,7 @@ function resolveAllAttention(events, context) {
             },
             end
           };
-          text7 = {
+          text6 = {
             type: use > 1 ? "strongText" : "emphasisText",
             start: {
               ...events[open2][1].end
@@ -41052,9 +39794,9 @@ function resolveAllAttention(events, context) {
           if (events[open2][1].end.offset - events[open2][1].start.offset) {
             nextEvents = push(nextEvents, [["enter", events[open2][1], context], ["exit", events[open2][1], context]]);
           }
-          nextEvents = push(nextEvents, [["enter", group, context], ["enter", openingSequence, context], ["exit", openingSequence, context], ["enter", text7, context]]);
+          nextEvents = push(nextEvents, [["enter", group, context], ["enter", openingSequence, context], ["exit", openingSequence, context], ["enter", text6, context]]);
           nextEvents = push(nextEvents, resolveAll(context.parser.constructs.insideSpan.null, events.slice(open2 + 1, index2), context));
-          nextEvents = push(nextEvents, [["exit", text7, context], ["enter", closingSequence, context], ["exit", closingSequence, context], ["exit", group, context]]);
+          nextEvents = push(nextEvents, [["exit", text6, context], ["enter", closingSequence, context], ["exit", closingSequence, context], ["exit", group, context]]);
           if (events[index2][1].end.offset - events[index2][1].start.offset) {
             offset = 2;
             nextEvents = push(nextEvents, [["enter", events[index2][1], context], ["exit", events[index2][1], context]]);
@@ -42502,7 +41244,7 @@ function resolveHeadingAtx(events, context) {
   let contentEnd = events.length - 2;
   let contentStart = 3;
   let content3;
-  let text7;
+  let text6;
   if (events[contentStart][1].type === "whitespace") {
     contentStart += 2;
   }
@@ -42518,13 +41260,13 @@ function resolveHeadingAtx(events, context) {
       start: events[contentStart][1].start,
       end: events[contentEnd][1].end
     };
-    text7 = {
+    text6 = {
       type: "chunkText",
       start: events[contentStart][1].start,
       end: events[contentEnd][1].end,
       contentType: "text"
     };
-    splice(events, contentStart, contentEnd - contentStart + 1, [["enter", content3, context], ["enter", text7, context], ["exit", text7, context], ["exit", content3, context]]);
+    splice(events, contentStart, contentEnd - contentStart + 1, [["enter", content3, context], ["enter", text6, context], ["exit", text6, context], ["exit", content3, context]]);
   }
   return events;
 }
@@ -43414,7 +42156,7 @@ function resolveToLabelEnd(events, context) {
       ...events[close][1].end
     }
   };
-  const text7 = {
+  const text6 = {
     type: "labelText",
     start: {
       ...events[open2 + offset + 2][1].end
@@ -43425,9 +42167,9 @@ function resolveToLabelEnd(events, context) {
   };
   media = [["enter", group, context], ["enter", label, context]];
   media = push(media, events.slice(open2 + 1, open2 + offset + 3));
-  media = push(media, [["enter", text7, context]]);
+  media = push(media, [["enter", text6, context]]);
   media = push(media, resolveAll(context.parser.constructs.insideSpan.null, events.slice(open2 + offset + 4, close - 3), context));
-  media = push(media, [["exit", text7, context], events[close - 2], events[close - 1], ["exit", label, context]]);
+  media = push(media, [["exit", text6, context], events[close - 2], events[close - 1], ["exit", label, context]]);
   media = push(media, events.slice(close + 1));
   media = push(media, [["exit", group, context]]);
   splice(events, open2, events.length, media);
@@ -43807,7 +42549,7 @@ var setextUnderline = {
 function resolveToSetextUnderline(events, context) {
   let index2 = events.length;
   let content3;
-  let text7;
+  let text6;
   let definition2;
   while (index2--) {
     if (events[index2][0] === "enter") {
@@ -43816,7 +42558,7 @@ function resolveToSetextUnderline(events, context) {
         break;
       }
       if (events[index2][1].type === "paragraph") {
-        text7 = index2;
+        text6 = index2;
       }
     } else {
       if (events[index2][1].type === "content") {
@@ -43836,9 +42578,9 @@ function resolveToSetextUnderline(events, context) {
       ...events[events.length - 1][1].end
     }
   };
-  events[text7][1].type = "setextHeadingText";
+  events[text6][1].type = "setextHeadingText";
   if (definition2) {
-    events.splice(text7, 0, ["enter", heading, context]);
+    events.splice(text6, 0, ["enter", heading, context]);
     events.splice(definition2 + 1, 0, ["exit", events[content3][1], context]);
     events[content3][1].end = {
       ...events[definition2][1].end
@@ -43942,10 +42684,10 @@ function initializeFactory(field) {
   function initializeText(effects) {
     const self = this;
     const constructs2 = this.parser.constructs[field];
-    const text7 = effects.attempt(constructs2, start, notText);
+    const text6 = effects.attempt(constructs2, start, notText);
     return start;
     function start(code2) {
-      return atBreak(code2) ? text7(code2) : notText(code2);
+      return atBreak(code2) ? text6(code2) : notText(code2);
     }
     function notText(code2) {
       if (code2 === null) {
@@ -43959,7 +42701,7 @@ function initializeFactory(field) {
     function data(code2) {
       if (atBreak(code2)) {
         effects.exit("data");
-        return text7(code2);
+        return text6(code2);
       }
       effects.consume(code2);
       return data;
@@ -45007,7 +43749,7 @@ function compiler(options) {
     const siblings = node3.children;
     let tail = siblings[siblings.length - 1];
     if (!tail || tail.type !== "text") {
-      tail = text7();
+      tail = text6();
       tail.position = {
         start: point2(token.start),
         // @ts-expect-error: we’ll add `end` later.
@@ -45252,7 +43994,7 @@ function compiler(options) {
       children: []
     };
   }
-  function text7() {
+  function text6() {
     return {
       type: "text",
       value: ""
@@ -46643,17 +45385,17 @@ function gfmStrikethrough(options) {
               start: Object.assign({}, events[open2][1].start),
               end: Object.assign({}, events[index2][1].end)
             };
-            const text7 = {
+            const text6 = {
               type: "strikethroughText",
               start: Object.assign({}, events[open2][1].end),
               end: Object.assign({}, events[index2][1].start)
             };
-            const nextEvents = [["enter", strikethrough, context], ["enter", events[open2][1], context], ["exit", events[open2][1], context], ["enter", text7, context]];
+            const nextEvents = [["enter", strikethrough, context], ["enter", events[open2][1], context], ["exit", events[open2][1], context], ["enter", text6, context]];
             const insideSpan2 = context.parser.constructs.insideSpan.null;
             if (insideSpan2) {
               splice(nextEvents, nextEvents.length, 0, resolveAll(insideSpan2, events.slice(open2 + 1, index2), context));
             }
-            splice(nextEvents, nextEvents.length, 0, [["exit", text7, context], ["enter", events[index2][1], context], ["exit", events[index2][1], context], ["exit", strikethrough, context]]);
+            splice(nextEvents, nextEvents.length, 0, [["exit", text6, context], ["enter", events[index2][1], context], ["exit", events[index2][1], context], ["exit", strikethrough, context]]);
             splice(events, open2 - 1, index2 - open2 + 3, nextEvents);
             index2 = open2 + nextEvents.length - 2;
             break;
@@ -47453,8 +46195,8 @@ var LayeredBodyAdfConverter = class {
   }
   /** Looks up a target's basename as an OWN entry, so inherited names (`constructor`, `__proto__`) never resolve. */
   mediaByName(target, media) {
-    const basename9 = target.slice(target.lastIndexOf("/") + 1);
-    return Object.hasOwn(media, basename9) ? media[basename9] : void 0;
+    const basename7 = target.slice(target.lastIndexOf("/") + 1);
+    return Object.hasOwn(media, basename7) ? media[basename7] : void 0;
   }
   /** The ADF block type an mdast node maps to, or `''` when it only degrades to literal text. */
   adfType(node3) {
@@ -47512,9 +46254,9 @@ var LayeredBodyAdfConverter = class {
   alertType(node3) {
     const first = node3.children[0];
     if (first === void 0 || first.type !== "paragraph") return void 0;
-    const text7 = first.children[0];
-    if (text7 === void 0 || text7.type !== "text") return void 0;
-    return alertMarker.exec(text7.value)?.[1];
+    const text6 = first.children[0];
+    if (text6 === void 0 || text6.type !== "text") return void 0;
+    return alertMarker.exec(text6.value)?.[1];
   }
   /**
    * Returns the blockquote's children with the admonition marker (and its trailing
@@ -47525,10 +46267,10 @@ var LayeredBodyAdfConverter = class {
   stripAlertMarker(children) {
     const [first, ...rest] = children;
     if (first === void 0 || first.type !== "paragraph") return children;
-    const [text7, ...moreInline] = first.children;
-    if (text7 === void 0 || text7.type !== "text") return children;
-    const stripped = text7.value.replace(alertMarker, "");
-    const inline = stripped === "" ? moreInline : [{ ...text7, value: stripped }, ...moreInline];
+    const [text6, ...moreInline] = first.children;
+    if (text6 === void 0 || text6.type !== "text") return children;
+    const stripped = text6.value.replace(alertMarker, "");
+    const inline = stripped === "" ? moreInline : [{ ...text6, value: stripped }, ...moreInline];
     if (inline.length === 0) return rest;
     return [{ ...first, children: inline }, ...rest];
   }
@@ -47828,12 +46570,12 @@ var LayeredBodyAdfConverter = class {
    * task list would accrete a `>` on every round trip.
    */
   literalBlock(node3, source, stripEnclosingQuote = false) {
-    const text7 = this.literal(node3, source);
-    const inner = stripEnclosingQuote ? this.stripEnclosingQuote(text7) : text7;
+    const text6 = this.literal(node3, source);
+    const inner = stripEnclosingQuote ? this.stripEnclosingQuote(text6) : text6;
     return { type: "paragraph", content: this.textSegments(inner, []) };
   }
-  stripEnclosingQuote(text7) {
-    return text7.split("\n").map((line, index2) => index2 === 0 ? line : line.replace(/^> ?/, "")).join("\n");
+  stripEnclosingQuote(text6) {
+    return text6.split("\n").map((line, index2) => index2 === 0 ? line : line.replace(/^> ?/, "")).join("\n");
   }
   literal(node3, source) {
     return source.slice(node3.position?.start.offset ?? 0, node3.position?.end.offset ?? 0);
@@ -47848,9 +46590,9 @@ var LayeredBodyAdfConverter = class {
         return this.inlineToMarkdown(node3.content ?? [], names);
       case "codeBlock": {
         const language = typeof node3.attrs?.["language"] === "string" ? node3.attrs["language"] : "";
-        const text7 = (node3.content ?? []).map((child) => child.text ?? "").join("");
+        const text6 = (node3.content ?? []).map((child) => child.text ?? "").join("");
         return `\`\`\`${language}
-${text7}
+${text6}
 \`\`\``;
       }
       case "taskList":
@@ -48029,7 +46771,7 @@ ${indent2}`)}`;
       if (node3.text === void 0) {
         closeFrom(0);
         const inner = node3.content !== void 0 ? this.inlineToMarkdown(node3.content, names) : "";
-        out += [...node3.marks ?? []].reverse().reduce((text8, mark) => this.applyMark(text8, mark), inner);
+        out += [...node3.marks ?? []].reverse().reduce((text7, mark) => this.applyMark(text7, mark), inner);
         continue;
       }
       const marks = node3.marks ?? [];
@@ -48050,12 +46792,12 @@ ${indent2}`)}`;
       }
       closeFrom(common);
       const opening = marks.slice(common);
-      let text7 = node3.text;
+      let text6 = node3.text;
       if (common === 0 && opening.length > 0 && opening.every((mark) => this.isEmphasis(mark))) {
-        const lead = /^\s+/.exec(text7)?.[0];
-        if (lead !== void 0 && lead.length < text7.length) {
+        const lead = /^\s+/.exec(text6)?.[0];
+        if (lead !== void 0 && lead.length < text6.length) {
           out += lead;
-          text7 = text7.slice(lead.length);
+          text6 = text6.slice(lead.length);
         }
       }
       for (let k = common; k < marks.length; k++) {
@@ -48064,7 +46806,7 @@ ${indent2}`)}`;
         out += this.markOpen(mark);
         open2.push(mark);
       }
-      out += this.escapeText(text7, open2.some((mark) => mark.type === "code"));
+      out += this.escapeText(text6, open2.some((mark) => mark.type === "code"));
     }
     closeFrom(0);
     return out;
@@ -48080,8 +46822,8 @@ ${indent2}`)}`;
    */
   mentionToMarkdown(node3) {
     const id = typeof node3.attrs?.["id"] === "string" ? node3.attrs["id"] : "";
-    const text7 = node3.attrs?.["text"];
-    const display = typeof text7 === "string" ? text7.startsWith("@") ? text7.slice(1) : text7 : "";
+    const text6 = node3.attrs?.["text"];
+    const display = typeof text6 === "string" ? text6.startsWith("@") ? text6.slice(1) : text6 : "";
     return `@{${id}|${this.escapeMentionDisplay(display)}}`;
   }
   /**
@@ -48097,20 +46839,20 @@ ${indent2}`)}`;
    * Wraps text in the markdown for one mark, innermost-first. Only used for the
    * rare content-bearing inline node; the main text path coalesces marks instead.
    */
-  applyMark(text7, mark) {
+  applyMark(text6, mark) {
     switch (mark.type) {
       case "code":
-        return `\`${text7}\``;
+        return `\`${text6}\``;
       case "em":
-        return `*${text7}*`;
+        return `*${text6}*`;
       case "strong":
-        return `**${text7}**`;
+        return `**${text6}**`;
       case "strike":
-        return `~~${text7}~~`;
+        return `~~${text6}~~`;
       case "link":
-        return this.linkToMarkdown(text7, mark);
+        return this.linkToMarkdown(text6, mark);
       default:
-        return text7;
+        return text6;
     }
   }
   markOpen(mark) {
@@ -48162,22 +46904,22 @@ ${indent2}`)}`;
    * but only when the destination needs no escaping and there's no title — so the
    * autolink re-parses to the same href. Otherwise the caller emits `[text](dest)`.
    */
-  tryBareUrl(text7, mark) {
+  tryBareUrl(text6, mark) {
     if (mark.type !== "link") return void 0;
     const href = mark.attrs?.["href"];
     if (typeof href !== "string") return void 0;
     if (typeof mark.attrs?.["title"] === "string") return void 0;
-    if (text7 !== href || this.encodeDestination(href) !== href) return void 0;
+    if (text6 !== href || this.encodeDestination(href) !== href) return void 0;
     return href;
   }
-  linkToMarkdown(text7, mark) {
+  linkToMarkdown(text6, mark) {
     const href = mark.attrs?.["href"];
-    if (typeof href !== "string") return text7;
-    const bare = this.tryBareUrl(text7, mark);
+    if (typeof href !== "string") return text6;
+    const bare = this.tryBareUrl(text6, mark);
     if (bare !== void 0) return bare;
     const title = mark.attrs?.["title"];
     const suffix = typeof title === "string" ? ` "${this.encodeTitle(title)}"` : "";
-    return `[${text7}](${this.encodeDestination(href)}${suffix})`;
+    return `[${text6}](${this.encodeDestination(href)}${suffix})`;
   }
   /**
    * Escapes a link destination so it re-parses to the same string: literal `\`
@@ -48208,9 +46950,9 @@ ${indent2}`)}`;
    * text node that itself reads as a mention token (`@{id|name}`) is escaped to
    * `\@{…}` so it re-parses as text rather than a mention.
    */
-  escapeText(text7, insideCode) {
-    if (insideCode) return text7;
-    const escaped = text7.replace(/[\\*`]/g, (ch) => `\\${ch}`);
+  escapeText(text6, insideCode) {
+    if (insideCode) return text6;
+    const escaped = text6.replace(/[\\*`]/g, (ch) => `\\${ch}`);
     return escaped.replace(this.mentionToken(), (full) => `\\${full}`);
   }
 };
@@ -48221,18 +46963,18 @@ var import_yaml2 = __toESM(require_dist(), 1);
 
 // src/tasks/jira-task-tracker/adf.ts
 var DefaultAdfBuilder = class {
-  doc(text7) {
+  doc(text6) {
     return {
       version: 1,
       type: "doc",
-      content: [{ type: "paragraph", content: [{ type: "text", text: text7 }] }]
+      content: [{ type: "paragraph", content: [{ type: "text", text: text6 }] }]
     };
   }
-  codeBlock(text7, language = "yaml") {
+  codeBlock(text6, language = "yaml") {
     return {
       type: "codeBlock",
       attrs: { language },
-      content: [{ type: "text", text: text7 }]
+      content: [{ type: "text", text: text6 }]
     };
   }
   expand(title, child) {
@@ -48268,9 +47010,9 @@ var JiraAdfMetadataService = class {
   readMetadataYaml(doc) {
     const expand2 = doc.content.find((n) => this.isMetadataExpand(n));
     const codeBlock = expand2?.content?.find((n) => n.type === "codeBlock");
-    const text7 = codeBlock?.content?.find((n) => n.type === "text")?.text;
-    if (text7 === void 0 || text7.trim() === "") return void 0;
-    return text7;
+    const text6 = codeBlock?.content?.find((n) => n.type === "text")?.text;
+    if (text6 === void 0 || text6.trim() === "") return void 0;
+    return text6;
   }
   isMetadataExpand(node3) {
     return node3.type === "expand" && node3.attrs?.["title"] === metadataTitle;
@@ -48608,7 +47350,7 @@ var JiraTaskTracker = class {
    */
   async addAttachment(ticketId, filePath) {
     const filename = basename2(filePath);
-    const file2 = new File([readFileSync9(filePath)], filename, {
+    const file2 = new File([readFileSync7(filePath)], filename, {
       type: this.mimeTypes.forFilename(filename)
     });
     const uploaded = JiraUploadedAttachmentsSchema.parse(
@@ -48920,8 +47662,8 @@ var RedactedProbeDiagnostics = class {
       ([key, value]) => /token|secret|password|api[_-]?key|credential/i.test(key) && Boolean(value)
     ).flatMap(([, value]) => value === void 0 ? [] : [value, encodeURIComponent(value)]).sort((a, b) => b.length - a.length);
   }
-  redact(text7) {
-    let result = text7.replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/@]+@/gi, "$1[REDACTED]@").replace(/\b(Bearer|Basic)\s+[^\s,'";]+/gi, "$1 [REDACTED]").replace(/([?&](?:token|access_token|api_key|key|signature)=)[^&#\s]+/gi, "$1[REDACTED]").replace(/\b(?:gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+)\b/g, "[REDACTED]");
+  redact(text6) {
+    let result = text6.replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/@]+@/gi, "$1[REDACTED]@").replace(/\b(Bearer|Basic)\s+[^\s,'";]+/gi, "$1 [REDACTED]").replace(/([?&](?:token|access_token|api_key|key|signature)=)[^&#\s]+/gi, "$1[REDACTED]").replace(/\b(?:gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+)\b/g, "[REDACTED]");
     for (const secret of this.secrets) result = result.replaceAll(secret, "[REDACTED]");
     return result;
   }
@@ -49772,12 +48514,12 @@ var NodeRepositoryReadiness = class {
 };
 
 // src/operations/git-config-operations.ts
-import { existsSync as existsSync10, lstatSync as lstatSync2, realpathSync as realpathSync3 } from "node:fs";
-import { dirname as dirname11, isAbsolute as isAbsolute3, join as join12, parse as parse6, relative as relative2, resolve as resolve5, sep as sep4 } from "node:path";
+import { existsSync as existsSync7, lstatSync as lstatSync2, realpathSync as realpathSync3 } from "node:fs";
+import { dirname as dirname10, isAbsolute as isAbsolute3, join as join9, parse as parse6, relative as relative2, resolve as resolve5, sep as sep4 } from "node:path";
 
 // src/git/commit-message-builder/commit-message-builder.ts
-import { readFileSync as readFileSync10 } from "node:fs";
-import { dirname as dirname10, join as join11 } from "node:path";
+import { readFileSync as readFileSync8 } from "node:fs";
+import { dirname as dirname9, join as join8 } from "node:path";
 
 // src/shared/attribution-stripper/attribution-stripper.ts
 var trailerText = String.raw`(?:Co-Authored-By:[^\n"']*(?:Claude|anthropic\.com)[^\n"']*|Claude-Session:[^\n"']*|https://claude\.ai/code/session_[A-Za-z0-9_-]+)`;
@@ -49789,9 +48531,9 @@ var closingBlock = new RegExp(
 var attributionLine = new RegExp(String.raw`(?:^|\r?\n)[ \t]*${trailerText}${lineEnd}`, "gi");
 var messageCommand = /(^|[\s;&|(])(?:git\b[^\n;&|]*\bcommit\b|gh\s+pr\s+(?:create|edit)\b|flight-rules\s+(?:git\s+commit|pr\s+create)\b)/;
 var AttributionStripper = class {
-  strip(text7) {
-    const stripped = text7.replace(closingBlock, "").replace(attributionLine, "");
-    if (stripped === text7) return text7;
+  strip(text6) {
+    const stripped = text6.replace(closingBlock, "").replace(attributionLine, "");
+    if (stripped === text6) return text6;
     return stripped.replace(/\n{3,}/g, "\n\n");
   }
   /** The command with attribution removed, or undefined when it writes no message or carries none. */
@@ -49863,8 +48605,8 @@ var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
   }
   static readPluginVersion(binPath) {
     try {
-      const pkgPath = join11(dirname10(binPath), "..", "package.json");
-      const parsed = JSON.parse(readFileSync10(pkgPath, "utf-8"));
+      const pkgPath = join8(dirname9(binPath), "..", "package.json");
+      const parsed = JSON.parse(readFileSync8(pkgPath, "utf-8"));
       if (typeof parsed === "object" && parsed !== null && "version" in parsed && typeof parsed.version === "string") {
         return parsed.version;
       }
@@ -50047,9 +48789,9 @@ var DefaultGitConfigOperations = class {
     const path3 = this.props.configStore.pathFor(scope);
     const absolutePath = isAbsolute3(path3) ? path3 : resolve5(this.props.cwd, path3);
     this.rejectDanglingSymlinks(absolutePath);
-    let existingPath = existsSync10(absolutePath) ? absolutePath : dirname11(absolutePath);
-    while (!existsSync10(existingPath)) {
-      const parent = dirname11(existingPath);
+    let existingPath = existsSync7(absolutePath) ? absolutePath : dirname10(absolutePath);
+    while (!existsSync7(existingPath)) {
+      const parent = dirname10(existingPath);
       if (parent === existingPath)
         throw new LaunchConfigOperationDeniedError(
           `Configuration path has no existing parent: ${path3}`
@@ -50057,7 +48799,7 @@ var DefaultGitConfigOperations = class {
       existingPath = parent;
     }
     const resolvedExistingPath = realpathSync3(existingPath);
-    const target = existsSync10(absolutePath) ? resolvedExistingPath : resolve5(resolvedExistingPath, relative2(existingPath, absolutePath));
+    const target = existsSync7(absolutePath) ? resolvedExistingPath : resolve5(resolvedExistingPath, relative2(existingPath, absolutePath));
     if (!this.allowedRoots.some((root) => {
       const rel = relative2(root, target);
       return rel === "" || !rel.startsWith("..") && !isAbsolute3(rel);
@@ -50071,7 +48813,7 @@ var DefaultGitConfigOperations = class {
     const root = parse6(path3).root;
     let current = root;
     for (const part of path3.slice(root.length).split(sep4).filter(Boolean)) {
-      current = join12(current, part);
+      current = join9(current, part);
       try {
         if (!lstatSync2(current).isSymbolicLink()) continue;
       } catch {
@@ -50135,19 +48877,19 @@ var FlightRulesPropsSchema = external_exports.object({
 });
 
 // src/operations/local-discovery-operations.ts
-import { readdirSync as readdirSync4 } from "node:fs";
+import { readdirSync as readdirSync2 } from "node:fs";
 import { resolve as resolve7 } from "node:path";
 
 // src/tasks/qa-instructions/qa-instructions.ts
-import { existsSync as existsSync11, readFileSync as readFileSync11, statSync as statSync4 } from "node:fs";
-import { dirname as dirname12, join as join13, resolve as resolve6 } from "node:path";
+import { existsSync as existsSync8, readFileSync as readFileSync9, statSync as statSync3 } from "node:fs";
+import { dirname as dirname11, join as join10, resolve as resolve6 } from "node:path";
 var atxHeading = /^ {0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$/;
 var fenceRun = /^ {0,3}(`{3,}|~{3,})/;
 var legacyHint = 'Legacy QA recipe in use. Move its content into a QA.md at the repo root (or a "QA" section of AGENTS.md); see docs/qa-instructions.md.';
 var nodeFileSystem = {
-  isFile: (path3) => existsSync11(path3) && statSync4(path3).isFile(),
-  exists: (path3) => existsSync11(path3),
-  readFile: (path3) => readFileSync11(path3, "utf8")
+  isFile: (path3) => existsSync8(path3) && statSync3(path3).isFile(),
+  exists: (path3) => existsSync8(path3),
+  readFile: (path3) => readFileSync9(path3, "utf8")
 };
 var QaInstructionsFinder = class {
   fs;
@@ -50197,25 +48939,25 @@ var QaInstructionsFinder = class {
   /** The start directory and each parent up to the repository root; only the start when no root is found. */
   levels(from) {
     const absolute = resolve6(from);
-    const start = this.fs.isFile(absolute) ? dirname12(absolute) : absolute;
+    const start = this.fs.isFile(absolute) ? dirname11(absolute) : absolute;
     const levels = [];
     let current = start;
     for (; ; ) {
       levels.push(current);
-      if (this.fs.exists(join13(current, ".git"))) return levels;
-      const parent = dirname12(current);
+      if (this.fs.exists(join10(current, ".git"))) return levels;
+      const parent = dirname11(current);
       if (parent === current) return [start];
       current = parent;
     }
   }
   sourceAt(dir) {
-    const agentsMd = join13(dir, "AGENTS.md");
+    const agentsMd = join10(dir, "AGENTS.md");
     if (this.fs.isFile(agentsMd)) {
       const section = this.extractQaSection(this.fs.readFile(agentsMd));
       if (section !== void 0)
         return { path: agentsMd, kind: "agents-md-section", dir, content: section };
     }
-    return this.fileSource(join13(dir, "QA.md"), "qa-md", dir) ?? this.fileSource(join13(dir, ".agents", "QA.md"), "agents-dir-qa-md", dir);
+    return this.fileSource(join10(dir, "QA.md"), "qa-md", dir) ?? this.fileSource(join10(dir, ".agents", "QA.md"), "agents-dir-qa-md", dir);
   }
   fileSource(path3, kind, dir) {
     if (!this.fs.isFile(path3)) return void 0;
@@ -50224,7 +48966,7 @@ var QaInstructionsFinder = class {
   }
   legacySource(path3) {
     if (path3 === void 0) return void 0;
-    const source = this.fileSource(path3, "legacy-recipe", dirname12(path3));
+    const source = this.fileSource(path3, "legacy-recipe", dirname11(path3));
     return source === void 0 ? void 0 : { ...source, legacy: true, hint: legacyHint };
   }
 };
@@ -50440,7 +49182,7 @@ var DefaultLocalDiscoveryOperations = class {
     const directory = getRfcDir(this.props.getConfig(), this.props.cwd);
     let files;
     try {
-      files = readdirSync4(directory);
+      files = readdirSync2(directory);
     } catch {
       return { id: "RFC-001", directory };
     }
@@ -50599,8 +49341,8 @@ var RepositoryPathsError = class extends Error {
 
 // src/code-review/review-policy.ts
 import { execFileSync as execFileSync3 } from "node:child_process";
-import { readFileSync as readFileSync12, realpathSync as realpathSync4 } from "node:fs";
-import { dirname as dirname13, join as join14, relative as relative3 } from "node:path";
+import { readFileSync as readFileSync10, realpathSync as realpathSync4 } from "node:fs";
+import { dirname as dirname12, join as join11, relative as relative3 } from "node:path";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
 var ReviewPolicyPropsSchema = external_exports.strictObject({
   home: external_exports.string().min(1).optional(),
@@ -50619,17 +49361,17 @@ var FileReviewPolicy = class {
   env;
   constructor(props = {}) {
     const parsed = ReviewPolicyPropsSchema.parse(props);
-    this.home = parsed.home ?? join14(dirname13(fileURLToPath3(import.meta.url)), "..");
+    this.home = parsed.home ?? join11(dirname12(fileURLToPath3(import.meta.url)), "..");
     this.env = props.env ?? process.env;
   }
   load(input2 = {}) {
     const { paths } = LoadPolicyPropsSchema.parse(input2);
-    const docs = realpathSync4(join14(this.home, "docs"));
+    const docs = realpathSync4(join11(this.home, "docs"));
     const read = (id) => {
-      const path3 = realpathSync4(join14(docs, `${id}.md`));
+      const path3 = realpathSync4(join11(docs, `${id}.md`));
       if (relative3(docs, path3).startsWith(".."))
         throw new ReviewPolicyError("review policy path leaves the installed docs directory");
-      return readFileSync12(path3, "utf8");
+      return readFileSync10(path3, "utf8");
     };
     const catalog = new DocCharterCatalog({ docs: new FileDocResolver({ docsDir: docs }) });
     const charters = (paths === void 0 ? catalog.all() : catalog.select(paths)).map(
@@ -50832,8 +49574,8 @@ var GitHubReviewVerifier = class {
       )
     );
     if (file2.type !== "file" || file2.encoding !== "base64") return false;
-    const text7 = Buffer.from(file2.content, "base64").toString("utf8");
-    const lines = text7 === "" ? 0 : text7.split("\n").length - (text7.endsWith("\n") ? 1 : 0);
+    const text6 = Buffer.from(file2.content, "base64").toString("utf8");
+    const lines = text6 === "" ? 0 : text6.split("\n").length - (text6.endsWith("\n") ? 1 : 0);
     return line <= lines;
   }
   async comment(id, url2) {
@@ -50859,7 +49601,7 @@ var GitHubReviewVerifier = class {
 };
 
 // src/code-review/review-planner.ts
-import { randomBytes as randomBytes2 } from "node:crypto";
+import { randomBytes } from "node:crypto";
 var EvidenceReviewPlanner = class {
   verifier;
   constructor(props) {
@@ -50974,8 +49716,8 @@ var EvidenceReviewPlanner = class {
     return { review, records: retained, informational, outcome, problems };
   }
   newId(ids) {
-    let id = `f-${randomBytes2(5).toString("hex")}`;
-    while (ids.has(id)) id = `f-${randomBytes2(5).toString("hex")}`;
+    let id = `f-${randomBytes(5).toString("hex")}`;
+    while (ids.has(id)) id = `f-${randomBytes(5).toString("hex")}`;
     ids.add(id);
     return id;
   }
@@ -51207,7 +49949,7 @@ var DefaultReviewOperations = class {
 };
 
 // src/operations/tracker-entity-operations.ts
-import { existsSync as existsSync13, realpathSync as realpathSync7, statSync as statSync6 } from "node:fs";
+import { existsSync as existsSync10, realpathSync as realpathSync7, statSync as statSync5 } from "node:fs";
 import { isAbsolute as isAbsolute5, relative as relative5, resolve as resolve9 } from "node:path";
 
 // src/tasks/evidence/evidence.ts
@@ -51401,8 +50143,8 @@ var maxReported = 5;
 var RegexPortableContextGuard = class {
   find(body) {
     return body.split("\n").flatMap(
-      (text7, index2) => localReferencePatterns.flatMap(
-        (pattern) => [...text7.matchAll(pattern)].map((m) => ({ line: index2 + 1, match: m[0].replace(trailingPunctuation, "") }))
+      (text6, index2) => localReferencePatterns.flatMap(
+        (pattern) => [...text6.matchAll(pattern)].map((m) => ({ line: index2 + 1, match: m[0].replace(trailingPunctuation, "") }))
       )
     );
   }
@@ -51424,7 +50166,7 @@ var portableContextGuard = new RegexPortableContextGuard();
 
 // src/operations/operation.schema.ts
 var OperationEffectSchema = external_exports.enum(["read", "write", "network", "process"]);
-var OperationIdSchema2 = external_exports.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
+var OperationIdSchema = external_exports.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
 var CliRouteSchema = external_exports.object({
   path: external_exports.array(external_exports.string().min(1)).min(1),
   aliases: external_exports.array(external_exports.string().min(1)).default([])
@@ -51441,7 +50183,7 @@ var OperationEnvelopeSchema = external_exports.discriminatedUnion("status", [
 
 // src/operations/operation-registry.ts
 var OperationDescriptorSchema = external_exports.object({
-  id: OperationIdSchema2,
+  id: OperationIdSchema,
   description: external_exports.string().min(1),
   inputSchema: external_exports.custom((value) => value instanceof external_exports.ZodType),
   outputSchema: external_exports.custom((value) => value instanceof external_exports.ZodType),
@@ -51454,7 +50196,7 @@ var OperationRegistryPropsSchema = external_exports.object({
   policy: external_exports.custom().optional()
 });
 var AccessPolicyPropsSchema = external_exports.object({
-  allowedOperationIds: external_exports.array(OperationIdSchema2).default([]),
+  allowedOperationIds: external_exports.array(OperationIdSchema).default([]),
   allowedEffects: external_exports.array(OperationEffectSchema).default([])
 });
 var LaunchOperationAccessPolicy = class {
@@ -51958,7 +50700,7 @@ var BlobSectionSource = class {
       if (current !== void 0) raw[current]?.push(line);
       i++;
     }
-    const text7 = (key) => {
+    const text6 = (key) => {
       const joined = (raw[key] ?? []).join("\n").trim();
       return joined.length > 0 ? joined : void 0;
     };
@@ -51968,7 +50710,7 @@ var BlobSectionSource = class {
       fixedWhenItems: this.checklistItems(raw.fixedWhen)
     };
     for (const key of stringSectionKeys) {
-      const value = text7(key);
+      const value = text6(key);
       if (value !== void 0) sections[key] = value;
     }
     return sections;
@@ -52386,7 +51128,7 @@ var PullRequestHostUnavailableError = class extends Error {
 };
 
 // src/operations/ticket-lifecycle-operations.ts
-import { existsSync as existsSync12, realpathSync as realpathSync6, statSync as statSync5 } from "node:fs";
+import { existsSync as existsSync9, realpathSync as realpathSync6, statSync as statSync4 } from "node:fs";
 import { isAbsolute as isAbsolute4, relative as relative4, resolve as resolve8 } from "node:path";
 var propsSchema2 = external_exports.object({
   getTracker: external_exports.custom((value) => typeof value === "function"),
@@ -52664,9 +51406,9 @@ var DefaultTicketLifecycleOperations = class {
   }
   trustedFilePath(path3) {
     const absolute = isAbsolute4(path3) ? path3 : resolve8(this.props.cwd, path3);
-    if (!existsSync12(absolute)) throw new Error(`Attachment file does not exist: ${path3}`);
+    if (!existsSync9(absolute)) throw new Error(`Attachment file does not exist: ${path3}`);
     const realPath = realpathSync6(absolute);
-    const stat = statSync5(realPath);
+    const stat = statSync4(realPath);
     const contained = this.roots.some((root) => {
       const fromRoot = relative4(root, realPath);
       return fromRoot === "" || !fromRoot.startsWith("..") && !isAbsolute4(fromRoot);
@@ -52998,9 +51740,9 @@ var DefaultTrackerEntityOperations = class {
   }
   trustedFilePath(path3) {
     const absolute = isAbsolute5(path3) ? path3 : resolve9(this.props.cwd, path3);
-    if (!existsSync13(absolute)) throw new Error(`Attachment file does not exist: ${path3}`);
+    if (!existsSync10(absolute)) throw new Error(`Attachment file does not exist: ${path3}`);
     const realPath = realpathSync7(absolute);
-    const stat = statSync6(realPath);
+    const stat = statSync5(realPath);
     const contained = this.roots.some((root) => {
       const fromRoot = relative5(root, realPath);
       return fromRoot === "" || !fromRoot.startsWith("..") && !isAbsolute5(fromRoot);
@@ -53008,204 +51750,6 @@ var DefaultTrackerEntityOperations = class {
     if (!contained || !stat.isFile())
       throw new Error(`Attachment file is outside trusted roots: ${path3}`);
     return realPath;
-  }
-};
-
-// src/operations/ariadne-operations.ts
-var BoardResultSchema = (value) => external_exports.discriminatedUnion("status", [
-  external_exports.object({
-    status: external_exports.literal("skipped"),
-    reason: external_exports.enum([
-      "disabled",
-      "no-token",
-      "invalid-url",
-      "not-jira-ticket",
-      "nothing-recorded"
-    ]),
-    notices: external_exports.array(external_exports.string()).optional()
-  }),
-  external_exports.object({
-    status: external_exports.literal("failed"),
-    message: external_exports.string(),
-    notices: external_exports.array(external_exports.string()).optional()
-  }),
-  external_exports.object({ status: external_exports.literal("ok"), value, notices: external_exports.array(external_exports.string()).optional() })
-]);
-var packetInput = external_exports.unknown();
-var packetIdInput = external_exports.strictObject({ title: external_exports.string() });
-var packetUpdateInput = external_exports.strictObject({
-  id: external_exports.string().min(1),
-  packet: external_exports.unknown(),
-  expectedRevision: external_exports.number().int().nonnegative()
-});
-var packetOutput = PacketSchema;
-var reviewersOutput = ReviewerListResponseSchema;
-var AriadneOperationsPropsSchema = external_exports.object({
-  getBoard: external_exports.custom((value) => typeof value === "function"),
-  getPackets: external_exports.custom((value) => typeof value === "function")
-});
-var inputSchemas = {
-  heartbeat: external_exports.object({
-    input: HeartbeatInputSchema.omit({ session: true }).extend({
-      session: external_exports.string().optional(),
-      ticket: external_exports.string().optional(),
-      step: external_exports.string(),
-      repo: external_exports.string().optional(),
-      branch: external_exports.string().optional(),
-      skill: external_exports.string().optional(),
-      detail: external_exports.string().optional()
-    }),
-    options: external_exports.object({ strict: external_exports.boolean().optional(), skill: external_exports.string().optional() }).optional()
-  }),
-  item: external_exports.object({
-    input: ItemInputSchema.omit({ session: true }).extend({
-      session: external_exports.string().optional(),
-      ticket: external_exports.string().optional(),
-      title: external_exports.string(),
-      detail: external_exports.string().optional(),
-      options: external_exports.array(external_exports.string()).optional(),
-      id: external_exports.string().optional()
-    }),
-    options: external_exports.object({ strict: external_exports.boolean().optional(), skill: external_exports.string().optional() }).optional()
-  }),
-  activity: external_exports.object({
-    input: ActivityInputSchema.omit({ session: true }).extend({
-      session: external_exports.string().optional(),
-      ticket: external_exports.string().optional(),
-      text: external_exports.string(),
-      id: external_exports.string().optional()
-    }),
-    options: external_exports.object({ strict: external_exports.boolean().optional(), skill: external_exports.string().optional() }).optional()
-  }),
-  items: external_exports.strictObject({
-    session: external_exports.string().optional(),
-    ticket: external_exports.string().optional(),
-    strict: external_exports.boolean().optional()
-  })
-};
-var DefaultAriadneOperations = class {
-  props;
-  constructor(props) {
-    this.props = AriadneOperationsPropsSchema.parse(props);
-  }
-  operations() {
-    return [
-      this.descriptor(
-        "board-post-heartbeat",
-        "Report a run heartbeat to Ariadne.",
-        ["write", "network"],
-        ["board", "post", "heartbeat"],
-        inputSchemas.heartbeat,
-        BoardResultSchema(HeartbeatResponseSchema),
-        ({ input: input2, options }) => this.mapBoard(this.props.getBoard().heartbeat(input2, this.boardOptions(options)))
-      ),
-      this.descriptor(
-        "board-post-item",
-        "Post a question or request to an Ariadne run.",
-        ["write", "network"],
-        ["board", "post", "item"],
-        inputSchemas.item,
-        BoardResultSchema(ItemResponseSchema),
-        ({ input: input2, options }) => this.mapBoard(
-          this.props.getBoard().item(input2, {
-            ...this.boardOptions(options),
-            bootstrapMissingSession: false
-          })
-        )
-      ),
-      this.descriptor(
-        "board-post-activity",
-        "Add activity to an Ariadne run.",
-        ["write", "network"],
-        ["board", "post", "activity"],
-        inputSchemas.activity,
-        BoardResultSchema(ActivityResponseSchema),
-        ({ input: input2, options }) => this.mapBoard(
-          this.props.getBoard().activity(input2, {
-            ...this.boardOptions(options),
-            bootstrapMissingSession: false
-          })
-        )
-      ),
-      this.descriptor(
-        "board-items",
-        "List items for an Ariadne run.",
-        ["read", "network"],
-        ["board", "items"],
-        inputSchemas.items,
-        BoardResultSchema(ItemListResponseSchema),
-        ({ session, ticket, strict }) => this.mapBoard(
-          this.props.getBoard().items(session, strict === void 0 ? {} : { strict }, ticket)
-        )
-      ),
-      this.descriptor(
-        "packet-create",
-        "Publish a validated Ariadne review packet.",
-        ["write", "network"],
-        ["packet", "create"],
-        external_exports.strictObject({ packet: packetInput }),
-        packetOutput,
-        ({ packet }) => this.props.getPackets().create(packet)
-      ),
-      this.descriptor(
-        "packet-new-id",
-        "Generate a reusable Ariadne review packet id.",
-        [],
-        ["packet", "new-id"],
-        packetIdInput,
-        external_exports.object({ id: external_exports.string() }),
-        ({ title }) => ({ id: packetIdGenerator.generate(title) })
-      ),
-      this.descriptor(
-        "packet-update",
-        "Replace a review packet at its expected revision.",
-        ["write", "network"],
-        ["packet", "update"],
-        packetUpdateInput,
-        packetOutput,
-        ({ id, packet, expectedRevision }) => this.props.getPackets().update(id, { packet, expectedRevision })
-      ),
-      this.descriptor(
-        "packet-get",
-        "Read an Ariadne review packet and its revision.",
-        ["read", "network"],
-        ["packet", "get"],
-        external_exports.object({ id: external_exports.string().min(1) }),
-        packetOutput,
-        ({ id }) => this.props.getPackets().get(id)
-      ),
-      this.descriptor(
-        "packet-reviewers",
-        "List Ariadne members who can review packets.",
-        ["read", "network"],
-        ["packet", "reviewers"],
-        external_exports.strictObject({}),
-        reviewersOutput,
-        () => this.props.getPackets().reviewers()
-      )
-    ];
-  }
-  boardOptions(options) {
-    return {
-      ...options?.strict === void 0 ? {} : { strict: options.strict },
-      ...options?.skill === void 0 ? {} : { skill: options.skill }
-    };
-  }
-  async mapBoard(outcome) {
-    const result = await outcome;
-    if (result.status === "posted") return { ...result, status: "ok" };
-    return result;
-  }
-  descriptor(id, description, effects, path3, inputSchema, outputSchema, handler2) {
-    return {
-      id,
-      description,
-      effects,
-      cli: { path: path3, aliases: [] },
-      inputSchema,
-      outputSchema,
-      handler: handler2
-    };
   }
 };
 
@@ -53365,35 +51909,6 @@ var DefaultFlightRules = class {
       getConfig: () => this.config(),
       cwd: this.cwd
     });
-  }
-  ariadneOperations() {
-    return new DefaultAriadneOperations({
-      getBoard: () => this.board(),
-      getPackets: () => this.packets()
-    });
-  }
-  board() {
-    return new AriadneBoard({
-      readLayers: () => this.configStore().layers(),
-      tokens: this.ariadneTokens(),
-      env: this.env,
-      sessions: this.boardSessions()
-    });
-  }
-  packets() {
-    return new AriadnePackets({
-      readLayers: () => this.configStore().layers(),
-      tokens: this.ariadneTokens()
-    });
-  }
-  ariadneTokens() {
-    return new AriadneTokenStore({ env: this.env });
-  }
-  boardSessions() {
-    return new BoardSessionStore({ env: this.env });
-  }
-  boardAgents() {
-    return new BoardAgentStore({ env: this.env });
   }
 };
 function createFlightRules(props = {}) {
@@ -53666,7 +52181,7 @@ var CharterSelectionError = class extends Error {
 };
 
 // src/code-review/commands/command.ts
-import { readFileSync as readFileSync13 } from "node:fs";
+import { readFileSync as readFileSync11 } from "node:fs";
 var ReviewCommandPropsSchema = external_exports.object({
   registry: external_exports.custom(
     (value) => Boolean(value && typeof value === "object" && "invoke" in value)
@@ -53696,7 +52211,7 @@ var CommanderReviewCommand = class {
     });
     review.command("validate").argument("<file>", "structured reviewer result").action(async (file2) => {
       const result = await this.invoke("review-validate", {
-        review: JSON.parse(readFileSync13(file2, "utf8"))
+        review: JSON.parse(readFileSync11(file2, "utf8"))
       });
       process.stdout.write(JSON.stringify(result) + "\n");
     });
@@ -53706,7 +52221,7 @@ var CommanderReviewCommand = class {
         records: external_exports.array(external_exports.json()),
         outcome: external_exports.string(),
         problems: external_exports.array(external_exports.string())
-      }).parse(JSON.parse(readFileSync13(file2, "utf8")));
+      }).parse(JSON.parse(readFileSync11(file2, "utf8")));
       const result = await this.invoke("review-render", {
         review: plan.review,
         records: plan.records,
@@ -53717,7 +52232,7 @@ var CommanderReviewCommand = class {
     });
     review.command("state").argument("<file>", "index with actual persisted artifact IDs").action(async (file2) => {
       const result = await this.invoke("review-state", {
-        state: JSON.parse(readFileSync13(file2, "utf8"))
+        state: JSON.parse(readFileSync11(file2, "utf8"))
       });
       process.stdout.write(`${external_exports.string().parse(result)}
 `);
@@ -53737,10 +52252,10 @@ var CommanderReviewCommand = class {
         const input2 = {
           number: external_exports.coerce.number().int().positive().parse(number4),
           repo: opts.repo,
-          review: JSON.parse(readFileSync13(opts.file, "utf8")),
-          records: JSON.parse(readFileSync13(opts.recordsFile, "utf8"))
+          review: JSON.parse(readFileSync11(opts.file, "utf8")),
+          records: JSON.parse(readFileSync11(opts.recordsFile, "utf8"))
         };
-        const owners = opts.ownersFile === void 0 ? {} : external_exports.record(external_exports.string(), external_exports.array(external_exports.string().min(1))).parse(JSON.parse(readFileSync13(opts.ownersFile, "utf8")));
+        const owners = opts.ownersFile === void 0 ? {} : external_exports.record(external_exports.string(), external_exports.array(external_exports.string().min(1))).parse(JSON.parse(readFileSync11(opts.ownersFile, "utf8")));
         const registry2 = this.createTrustedRegistry({
           owners,
           requireMapping: opts.requireMapping ?? false
@@ -53775,483 +52290,10 @@ function createReviewCommand(props) {
   return new CommanderReviewCommand(props).create();
 }
 
-// src/shared/commands/board/command.ts
-import { createInterface } from "node:readline";
-import { text as text5 } from "node:stream/consumers";
-import { Writable } from "node:stream";
-
-// src/shared/collect.ts
-function collect(value, previous3) {
-  return [...previous3, value];
-}
-
-// src/operations/ariadne-command-client.ts
-var ClientPropsSchema = external_exports.object({
-  registry: external_exports.custom(
-    (value) => typeof value === "object" && value !== null && "invoke" in value
-  )
-});
-var BoardOperationResultSchema = external_exports.discriminatedUnion("status", [
-  external_exports.object({
-    status: external_exports.literal("skipped"),
-    reason: external_exports.enum(["disabled", "no-token", "invalid-url", "not-jira-ticket", "nothing-recorded"]),
-    notices: external_exports.array(external_exports.string()).optional()
-  }),
-  external_exports.object({
-    status: external_exports.literal("failed"),
-    message: external_exports.string(),
-    notices: external_exports.array(external_exports.string()).optional()
-  }),
-  external_exports.object({
-    status: external_exports.literal("ok"),
-    value: external_exports.unknown(),
-    notices: external_exports.array(external_exports.string()).optional()
-  })
-]);
-var RegistryAriadneCommandClient = class {
-  registry;
-  constructor(props) {
-    this.registry = ClientPropsSchema.parse(props).registry;
-  }
-  async board(id, input2, valueSchema) {
-    const result = await this.registry.invoke(id, input2);
-    if (result.status !== "success") {
-      throw new OperationCliError({
-        operationId: id,
-        errorName: result.error.name,
-        message: result.error.message,
-        ...result.status === "partial" ? { partialData: result.data } : {}
-      });
-    }
-    const parsed = BoardOperationResultSchema.parse(result.data);
-    if (parsed.status === "ok") {
-      return {
-        status: "posted",
-        value: valueSchema.parse(parsed.value),
-        ...parsed.notices === void 0 ? {} : { notices: parsed.notices }
-      };
-    }
-    if (parsed.status === "skipped") {
-      return {
-        status: "skipped",
-        reason: parsed.reason,
-        ...parsed.notices === void 0 ? {} : { notices: parsed.notices }
-      };
-    }
-    return {
-      status: "failed",
-      message: parsed.message,
-      ...parsed.notices === void 0 ? {} : { notices: parsed.notices }
-    };
-  }
-  async packet(id, input2, outputSchema) {
-    const result = await this.registry.invoke(id, input2);
-    if (result.status !== "success") {
-      throw new OperationCliError({
-        operationId: id,
-        errorName: result.error.name,
-        message: result.error.message,
-        ...result.status === "partial" ? { partialData: result.data } : {}
-      });
-    }
-    return outputSchema.parse(result.data);
-  }
-};
-
-// src/shared/commands/board/command.ts
-var HiddenPrompt = class {
-  async read(label) {
-    if (process.stdin.isTTY !== true) return text5(process.stdin);
-    process.stderr.write(label);
-    const muted = new Writable({ write: (_chunk, _encoding, done) => done() });
-    const prompt = createInterface({ input: process.stdin, output: muted, terminal: true });
-    try {
-      return await new Promise((resolve16) => prompt.once("line", resolve16));
-    } finally {
-      prompt.close();
-      process.stderr.write("\n");
-    }
-  }
-};
-var ticketHelp = "Jira issue key";
-var sessionHelp = "session id; defaults to <$CLAUDE_CODE_SESSION_ID>-<TICKET>, the row the heartbeat hook keeps alive for that ticket";
-var itemsSessionHelp = "session id; defaults to <$CLAUDE_CODE_SESSION_ID>-<TICKET> with --ticket, else $CLAUDE_CODE_SESSION_ID";
-var skillHelp = "the skill reporting, e.g. flight-rules:execute-work";
-var bootstrapSkillHelp = `${skillHelp}; names the skill on a session this post has to create`;
-var strictHelp = "exit 1 when the post fails, and post even without a token so a missing one fails with 401";
-function createBoardCommand(getBoard, getTokens = () => new AriadneTokenStore(), readSecret = () => new HiddenPrompt().read("Ariadne agent token: "), registry2) {
-  const operations = registry2 === void 0 ? void 0 : new RegistryAriadneCommandClient({ registry: registry2 });
-  const board = new Command("board").description(
-    "report this run to Ariadne's Agents page (opt-in; silent unless an Ariadne token is set)"
-  ).addHelpText(
-    "after",
-    [
-      "",
-      "Token: $ARIADNE_AGENT_TOKEN, then $ARIADNE_TOKEN, then the file `board login` saves.",
-      "There is no fallback to the ariadne CLI's Keychain session, so each machine needs its",
-      "own agent token from Ariadne \u203A Settings \u203A Connections.",
-      "Config: ariadne.url (https; http only for localhost) and ariadne.enabled, read only from",
-      "user or local scope; project settings and the config file cannot set them.",
-      "Not configured or disabled: prints nothing, exits 0. A failure is one stderr line and",
-      "exit 0; --strict makes it exit 1. `board items` is read-only; answer items in Ariadne."
-    ].join("\n")
-  );
-  board.exitOverride();
-  const withReportOptions = (command, jsonHelp, session = sessionHelp) => command.option("--session <id>", session).option("--strict", strictHelp).option("--json", jsonHelp).exitOverride();
-  const finish = (outcome, opts, print, loud = opts.strict === true) => {
-    if (loud)
-      for (const notice of outcome.notices ?? [])
-        process.stderr.write(`flight-rules board: ${notice}
-`);
-    if (outcome.status === "skipped") return;
-    if (outcome.status === "failed") {
-      if (opts.strict === true) throw new Error(`flight-rules board: ${outcome.message}`);
-      process.stderr.write(`flight-rules board: ${outcome.message}
-`);
-      return;
-    }
-    print(outcome.value);
-  };
-  const printJson = (opts) => (value) => {
-    if (opts.json === true) process.stdout.write(JSON.stringify(value) + "\n");
-  };
-  const describeItem = (item) => {
-    const answer = item.chosenOption !== null ? ` -> ${item.chosenOption}` : item.options.length > 0 ? ` [${item.options.join(" | ")}]` : "";
-    return `${item.status}	${item.kind}	${item.ticket ?? "-"}	${item.id}	${item.title}${answer}`;
-  };
-  const post = new Command("post").description(
-    "send a heartbeat, an item that needs a person, or an activity line"
-  );
-  post.exitOverride();
-  withReportOptions(
-    post.command("heartbeat").description("create or update this session: ticket, step and state").requiredOption("--ticket <key>", ticketHelp).requiredOption(
-      "--step <step>",
-      "one line up to 60 characters: implement, verify 2/3, pr, qa"
-    ).addOption(
-      new Option("--state <state>", "how the run is going").choices(agentStates).makeOptionMandatory()
-    ).option("--branch <branch>", "the branch as git prints it").option("--repo <repo>", "owner/name").option("--skill <skill>", skillHelp).option("--detail <line>", "one line up to 500 characters"),
-    "print the API response {session} as JSON"
-  ).action(async (opts) => {
-    const input2 = {
-      session: opts.session,
-      ticket: opts.ticket,
-      step: opts.step,
-      state: opts.state,
-      branch: opts.branch,
-      repo: opts.repo,
-      skill: opts.skill,
-      detail: opts.detail
-    };
-    const outcome = operations === void 0 ? await getBoard().heartbeat(input2, { strict: opts.strict === true }) : await operations.board(
-      "board-post-heartbeat",
-      {
-        input: input2,
-        options: { strict: opts.strict === true }
-      },
-      HeartbeatResponseSchema
-    );
-    finish(outcome, opts, printJson(opts));
-  });
-  withReportOptions(
-    post.command("item").description(
-      "ask a person for something: a question, blocker, testable or wave gate, with up to 6 options"
-    ).addOption(
-      new Option("--kind <kind>", "what the person is asked for").choices(agentItemKinds).makeOptionMandatory()
-    ).requiredOption("--ticket <key>", ticketHelp).requiredOption("--title <text>", "one line up to 200 characters").option("--detail <text>", "up to 2,000 characters; line breaks allowed").option(
-      "--option <label>",
-      "an answer the person can choose (repeatable, up to 6)",
-      collect,
-      []
-    ).option(
-      "--id <id>",
-      "client id; reposting the same id returns the stored item and its chosenOption"
-    ).option("--skill <skill>", bootstrapSkillHelp),
-    "print the API response {item, created} as JSON, including any chosenOption"
-  ).action(async (opts) => {
-    const input2 = {
-      session: opts.session,
-      kind: opts.kind,
-      ticket: opts.ticket,
-      title: opts.title,
-      detail: opts.detail,
-      ...opts.option.length > 0 ? { options: opts.option } : {},
-      id: opts.id
-    };
-    const outcome = operations === void 0 ? await getBoard().item(input2, { strict: opts.strict === true, skill: opts.skill }) : await operations.board(
-      "board-post-item",
-      {
-        input: input2,
-        options: {
-          strict: opts.strict === true,
-          ...opts.skill === void 0 ? {} : { skill: opts.skill }
-        }
-      },
-      ItemResponseSchema
-    );
-    finish(outcome, opts, printJson(opts));
-  });
-  withReportOptions(
-    post.command("activity").description("add one line to the session's activity stream").requiredOption("--ticket <key>", ticketHelp).requiredOption("--text <line>", "one line up to 500 characters").addOption(new Option("--level <level>", "defaults to info").choices(agentActivityLevels)).option("--id <id>", "client id; reposting the same id stores nothing new").option("--skill <skill>", bootstrapSkillHelp),
-    "print the API response {activity, created} as JSON"
-  ).action(async (opts) => {
-    const input2 = {
-      session: opts.session,
-      ticket: opts.ticket,
-      text: opts.text,
-      level: opts.level,
-      id: opts.id
-    };
-    const outcome = operations === void 0 ? await getBoard().activity(input2, { strict: opts.strict === true, skill: opts.skill }) : await operations.board(
-      "board-post-activity",
-      {
-        input: input2,
-        options: {
-          strict: opts.strict === true,
-          ...opts.skill === void 0 ? {} : { skill: opts.skill }
-        }
-      },
-      ActivityResponseSchema
-    );
-    finish(outcome, opts, printJson(opts));
-  });
-  board.addCommand(post);
-  withReportOptions(
-    board.command("items").description("list a session's items, open and resolved, with any chosen option").option(
-      "--ticket <key>",
-      "the Jira key the items were posted on; picks the same default session as the post"
-    ),
-    "print {items} as JSON",
-    itemsSessionHelp
-  ).action(async (opts) => {
-    const outcome = operations === void 0 ? await getBoard().items(opts.session, { strict: opts.strict === true }, opts.ticket) : await operations.board(
-      "board-items",
-      {
-        session: opts.session,
-        ticket: opts.ticket,
-        strict: opts.strict === true
-      },
-      ItemListResponseSchema
-    );
-    finish(
-      outcome,
-      opts,
-      ({ items }) => {
-        if (opts.json === true) {
-          process.stdout.write(JSON.stringify({ items }) + "\n");
-          return;
-        }
-        process.stdout.write(items.map((item) => describeItem(item) + "\n").join(""));
-      },
-      true
-    );
-  });
-  board.command("login").description(
-    "save this machine's Ariadne agent token (each machine needs its own, from Ariadne \u203A Settings \u203A Connections), read from stdin or a hidden prompt, with mode 0600"
-  ).exitOverride().action(async () => {
-    const tokens = getTokens();
-    const path3 = tokens.save(await readSecret());
-    const shadowedBy = tokens.shadowingEnv();
-    process.stdout.write(
-      JSON.stringify({
-        saved: path3,
-        ...shadowedBy !== void 0 ? { warning: `$${shadowedBy} is set and takes precedence over the saved token` } : {}
-      }) + "\n"
-    );
-  });
-  board.command("logout").description("delete the agent token saved by `board login`").exitOverride().action(() => {
-    const tokens = getTokens();
-    process.stdout.write(
-      JSON.stringify({ removed: tokens.remove(), path: tokens.path() }) + "\n"
-    );
-  });
-  return board;
-}
-
-// src/shared/commands/packet/command.ts
-import { readFileSync as readFileSync14, writeFileSync as writeFileSync7 } from "node:fs";
-
-// src/shared/decimal-integer.ts
-var DecimalIntegerParser = class {
-  /** A pull request number or similar count that starts at 1. */
-  positive(value) {
-    return this.parse(value, /^[1-9][0-9]*$/, "must be a positive whole number written in decimal digits");
-  }
-  /** A revision, which starts at 0. */
-  nonNegative(value) {
-    return this.parse(value, /^(0|[1-9][0-9]*)$/, "must be a whole number from 0 written in decimal digits");
-  }
-  parse(value, pattern, message) {
-    const parsed = Number(value);
-    if (!pattern.test(value) || !Number.isSafeInteger(parsed)) throw new InvalidArgumentError(message);
-    return parsed;
-  }
-};
-var decimalIntegers = new DecimalIntegerParser();
-
-// src/shared/commands/packet/command.ts
-var serverOwnedFields = /* @__PURE__ */ new Set([
-  "id",
-  "authorId",
-  "status",
-  "revision",
-  "createdAt",
-  "updatedAt"
-]);
-var ReviewerEntrySchema = external_exports.union([
-  external_exports.string(),
-  external_exports.looseObject({ github: external_exports.looseObject({ login: external_exports.string() }) }).transform((reviewer) => reviewer.github.login)
-]);
-var UpdateFileSchema = external_exports.looseObject({
-  id: external_exports.string().optional(),
-  revision: external_exports.number().int().optional(),
-  reviewers: external_exports.array(ReviewerEntrySchema).optional()
-}).transform((file2) => ({
-  id: file2.id,
-  revision: file2.revision,
-  packet: {
-    ...Object.fromEntries(Object.entries(file2).filter(([key]) => !serverOwnedFields.has(key))),
-    ...file2.reviewers !== void 0 ? { reviewers: file2.reviewers } : {}
-  }
-}));
-var PacketIdWriteError = class extends Error {
-  name = "PacketIdWriteError";
-};
-var JsonObjectSchema = external_exports.record(external_exports.string(), external_exports.unknown());
-var PacketFile = class {
-  constructor(path3) {
-    this.path = path3;
-  }
-  path;
-  /** The file's JSON exactly as written; strict validation happens before anything is sent. */
-  read() {
-    let text7;
-    try {
-      text7 = readFileSync14(this.path, "utf8");
-    } catch (err) {
-      throw new Error(
-        `cannot read ${this.path}: ${err instanceof Error ? err.message : String(err)}`,
-        { cause: err }
-      );
-    }
-    try {
-      return JSON.parse(text7);
-    } catch (err) {
-      throw new Error(
-        `${this.path} is not valid JSON: ${err instanceof Error ? err.message : String(err)}`,
-        { cause: err }
-      );
-    }
-  }
-  /** Runs after the packet is stored, so a failure says so and names the id the file still needs. */
-  writeId(file2, id) {
-    try {
-      writeFileSync7(this.path, JSON.stringify({ ...file2, id }, null, 2) + "\n");
-    } catch (err) {
-      throw new PacketIdWriteError(
-        `packet ${id} was published, but its id could not be written to ${this.path}: ${err instanceof Error ? err.message : String(err)}; add "id": "${id}" to the file before re-running, or a re-run publishes a second packet`,
-        { cause: err }
-      );
-    }
-  }
-  readForUpdate() {
-    const parsed = UpdateFileSchema.safeParse(this.read());
-    if (parsed.success) return parsed.data;
-    throw new Error(
-      `${this.path} must hold one packet object: ${parsed.error.issues.map((issue2) => `${issue2.path.join(".") || "file"}: ${issue2.message}`).join("; ")}`
-    );
-  }
-};
-var PacketCommandFactory = class {
-  create(getPackets, registry2) {
-    const operations = registry2 === void 0 ? void 0 : new RegistryAriadneCommandClient({ registry: registry2 });
-    const packet = new Command("packet").description("publish and revise a Review Packet in Ariadne, as its author").addHelpText(
-      "after",
-      [
-        "",
-        "Token: $ARIADNE_AGENT_TOKEN, then $ARIADNE_TOKEN, then the file `board login` saves.",
-        "Config: ariadne.url (https; http only for localhost), read only from user or local scope.",
-        "A packet carries titles, annotations and anchors (path and line) only; code and diffs",
-        "are rejected locally, as is over-long text. Every failure exits 1 with a next step.",
-        "See docs/review-packets.md."
-      ].join("\n")
-    );
-    packet.exitOverride();
-    const print = (value) => {
-      process.stdout.write(JSON.stringify(value) + "\n");
-    };
-    packet.command("create").description(
-      "publish a packet from a JSON file; prints the stored packet. An id is generated from the title when the file has none, and the published id is written back into the file so a re-run replays instead of creating a second packet"
-    ).requiredOption("--file <path>", "the packet JSON").exitOverride().action(async (opts) => {
-      const packetFile = new PacketFile(opts.file);
-      const input2 = packetFile.read();
-      const published = operations === void 0 ? await getPackets().create(input2) : await operations.packet("packet-create", { packet: input2 }, PacketSchema);
-      print(published);
-      const written = JsonObjectSchema.safeParse(input2);
-      if (written.success && written.data.id !== published.id)
-        packetFile.writeId(written.data, published.id);
-    });
-    packet.command("new-id").description(
-      'print {"id": "<slug>-<8 hex>"}: a globally unique packet id to write into the packet file once and reuse for every retry'
-    ).requiredOption("--title <title>", "the packet title").exitOverride().action(async (opts) => {
-      print(
-        operations === void 0 ? { id: packetIdGenerator.generate(opts.title) } : await operations.packet(
-          "packet-new-id",
-          { title: opts.title },
-          external_exports.object({ id: external_exports.string() })
-        )
-      );
-    });
-    packet.command("update").description(
-      "revise a packet from a JSON file; a stale revision fails with 409 revision_conflict"
-    ).argument("<id>", "the packet id").requiredOption(
-      "--file <path>",
-      "the packet JSON; `packet get` output works, and its revision is used"
-    ).option(
-      "--expected-revision <n>",
-      "the revision you read, in decimal digits; defaults to the file's `revision`",
-      (value) => decimalIntegers.nonNegative(value)
-    ).exitOverride().action(async (id, opts) => {
-      const file2 = new PacketFile(opts.file).readForUpdate();
-      if (file2.id !== void 0 && file2.id !== id) {
-        throw new Error(
-          `${opts.file} holds packet ${file2.id} but the command names ${id}; nothing was sent`
-        );
-      }
-      const expectedRevision = opts.expectedRevision ?? file2.revision;
-      if (expectedRevision === void 0 || !Number.isInteger(expectedRevision) || expectedRevision < 0) {
-        throw new Error(
-          "no expected revision: pass --expected-revision <n>, or use a file with a numeric `revision` such as `flight-rules packet get` output; nothing was sent"
-        );
-      }
-      print(
-        operations === void 0 ? await getPackets().update(id, { packet: file2.packet, expectedRevision }) : await operations.packet(
-          "packet-update",
-          { id, packet: file2.packet, expectedRevision },
-          PacketSchema
-        )
-      );
-    });
-    packet.command("get").description("print a packet, including its revision").argument("<id>", "the packet id").exitOverride().action(async (id) => {
-      print(
-        operations === void 0 ? await getPackets().get(id) : await operations.packet("packet-get", { id }, PacketSchema)
-      );
-    });
-    packet.command("reviewers").description(
-      "list the Ariadne members you can name as reviewers: {id, name, github: {id, login}}"
-    ).exitOverride().action(async () => {
-      print(
-        operations === void 0 ? await getPackets().reviewers() : await operations.packet("packet-reviewers", {}, ReviewerListResponseSchema)
-      );
-    });
-    return packet;
-  }
-};
-var createPacketCommand = (getPackets, registry2) => new PacketCommandFactory().create(getPackets, registry2);
-
 // src/tasks/commands/resolve-body.ts
-import { readFileSync as readFileSync15 } from "node:fs";
+import { readFileSync as readFileSync12 } from "node:fs";
 function resolveBody(opts) {
-  if (opts.bodyFile !== void 0) return readFileSync15(opts.bodyFile, "utf8");
+  if (opts.bodyFile !== void 0) return readFileSync12(opts.bodyFile, "utf8");
   if (opts.body !== void 0) return opts.body;
   throw new Error("one of --body or --body-file is required");
 }
@@ -54474,6 +52516,11 @@ function createInitiativeCommand(getTracker, getPrHost, getConfig = () => ({}), 
   return initiative;
 }
 
+// src/shared/collect.ts
+function collect(value, previous3) {
+  return [...previous3, value];
+}
+
 // src/tasks/commands/ticket/command.ts
 function createTicketCommand(getTracker, registry2) {
   const ticket = new Command("ticket");
@@ -54625,495 +52672,10 @@ function createUsersCommand(getTracker, registry2) {
 }
 
 // src/hooks/commands/hook/command.ts
-import { text as text6 } from "node:stream/consumers";
-
-// src/hooks/board-heartbeat/board-heartbeat.ts
-import { spawn } from "node:child_process";
-import { basename as basename4 } from "node:path";
-
-// src/shared/ariadne/ticket-key-extractor.ts
-var keyPattern = /(?<![A-Za-z0-9_])(?<![A-Z0-9]-)[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,8}(?![A-Za-z0-9_])/g;
-var phrasePattern = /\b(?:ticket|building)\s*:?\s+([A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,8})(?![A-Za-z0-9_])/gi;
-var urlPattern = /\b[a-z][a-z0-9+.-]*:\/\/\S+/gi;
-var notProjectKeys = /* @__PURE__ */ new Set([
-  "AES",
-  "CVE",
-  "ES",
-  "GPT",
-  "HTTP",
-  "ISO",
-  "MD",
-  "PEP",
-  "RFC",
-  "SHA",
-  "TLS",
-  "SSL",
-  "UTF",
-  "WCAG"
-]);
-var TicketKeyExtractor = class {
-  /**
-   * The ticket an Agent dispatch is about: a key in the description, then a
-   * "ticket <KEY>" or "building <KEY>" phrase in the prompt, then the first
-   * key in the prompt.
-   */
-  fromDispatch(description, prompt) {
-    return this.firstKey(description) ?? this.fromPrompt(prompt);
-  }
-  /** A "ticket <KEY>" or "building <KEY>" phrase, then the first key. */
-  fromPrompt(prompt) {
-    if (prompt === void 0) return void 0;
-    const text7 = this.withoutUrls(prompt);
-    for (const match of text7.matchAll(phrasePattern)) {
-      const key = this.valid(match[1]);
-      if (key !== void 0) return key;
-    }
-    return this.firstKey(text7);
-  }
-  /** The first key in a description, a branch name or a directory name. */
-  firstKey(text7) {
-    if (text7 === void 0) return void 0;
-    for (const match of this.withoutUrls(text7).matchAll(keyPattern)) {
-      const key = this.valid(match[0]);
-      if (key !== void 0) return key;
-    }
-    return void 0;
-  }
-  withoutUrls(text7) {
-    return text7.replace(urlPattern, " ");
-  }
-  valid(candidate) {
-    if (candidate === void 0) return void 0;
-    const parsed = TicketKeySchema.safeParse(candidate);
-    if (!parsed.success) return void 0;
-    const project = parsed.data.slice(0, parsed.data.indexOf("-"));
-    return notProjectKeys.has(project) ? void 0 : parsed.data;
-  }
-};
-
-// src/hooks/board-heartbeat/agent-dispatch-hook.ts
-var boardStateMaxAgeMs = 24 * 60 * 6e4;
-var maxDescriptionLength = 200;
-var AgentDispatchInputSchema = external_exports.looseObject({
-  session_id: external_exports.string(),
-  tool_use_id: external_exports.string(),
-  tool_input: external_exports.looseObject({
-    description: external_exports.string().optional(),
-    prompt: external_exports.string().optional()
-  }),
-  /** Present when a sub-agent dispatches its own sub-agent. */
-  agent_id: external_exports.string().optional()
-});
-var AgentDispatchHook = class {
-  agents;
-  sessions;
-  resolver;
-  extractor;
-  constructor(props) {
-    this.agents = props.agents;
-    this.sessions = props.sessions;
-    this.resolver = props.resolver;
-    this.extractor = props.extractor ?? new TicketKeyExtractor();
-  }
-  record(payload) {
-    const parsed = AgentDispatchInputSchema.safeParse(payload);
-    if (!parsed.success) return;
-    const { session_id: session, tool_use_id: toolUseId, tool_input: input2, agent_id: parentAgent } = parsed.data;
-    const description = (input2.description ?? "").trim().slice(0, maxDescriptionLength);
-    const ticket = this.extractor.fromDispatch(input2.description, input2.prompt) ?? (parentAgent !== void 0 ? this.agents.readAgent(parentAgent)?.ticket : void 0) ?? null;
-    this.agents.recordDispatch(toolUseId, {
-      ticket,
-      description,
-      session,
-      ...input2.prompt !== void 0 ? { promptDigest: this.resolver.digest(input2.prompt) } : {},
-      at: this.agents.now()
-    });
-    this.agents.prune(boardStateMaxAgeMs);
-    this.sessions.prune(boardStateMaxAgeMs);
-  }
-};
-
-// src/hooks/board-heartbeat/board-heartbeat.ts
-var heartbeatIntervalMs = 6e4;
-var heartbeatMaxAgeMs = 60 * 6e4;
-var checkoutStep = "working";
-var subagentStep = "sub-agent";
-var PostToolUseInputSchema = external_exports.looseObject({
-  session_id: external_exports.string(),
-  agent_id: external_exports.string().optional(),
-  agent_type: external_exports.string().optional(),
-  transcript_path: external_exports.string().optional(),
-  cwd: external_exports.string().optional(),
-  tool_name: external_exports.string().optional(),
-  tool_use_id: external_exports.string().optional(),
-  tool_input: external_exports.unknown().optional(),
-  tool_response: external_exports.unknown().optional()
-});
-var SkillCallSchema = external_exports.looseObject({ skill: external_exports.string() });
-var AsyncLaunchSchema = external_exports.looseObject({ status: external_exports.literal("async_launched"), agentId: external_exports.string() });
-var SubagentStopInputSchema = external_exports.looseObject({
-  session_id: external_exports.string(),
-  agent_id: external_exports.string(),
-  agent_type: external_exports.string().optional(),
-  transcript_path: external_exports.string().optional(),
-  agent_transcript_path: external_exports.string().optional()
-});
-var SkillNameSchema = HeartbeatInputSchema.shape.skill;
-var StepSchema = HeartbeatInputSchema.shape.step;
-var BoardHeartbeatHook = class {
-  sessions;
-  agents;
-  resolver;
-  extractor;
-  reportable;
-  constructor(props) {
-    this.sessions = props.sessions;
-    this.agents = props.agents;
-    this.resolver = props.resolver;
-    this.extractor = props.extractor ?? new TicketKeyExtractor();
-    this.reportable = props.reportable ?? (() => true);
-  }
-  /** The heartbeat to send now, already claimed, or undefined. */
-  due(payload) {
-    const parsed = PostToolUseInputSchema.safeParse(payload);
-    if (!parsed.success) return void 0;
-    const input2 = parsed.data;
-    const claudeSession = input2.session_id;
-    this.bridgeBackgroundLaunch(input2);
-    const invoked = this.invokedSkill(input2);
-    if (input2.agent_id !== void 0) {
-      if (invoked !== void 0) this.agents?.recordAgentSkill(input2.agent_id, invoked);
-      const mapping = this.resolver?.resolve({
-        agentId: input2.agent_id,
-        session: claudeSession,
-        transcriptPath: input2.transcript_path,
-        agentType: input2.agent_type
-      });
-      if (mapping !== void 0 && mapping.ticket !== null) {
-        const ticket = mapping.ticket;
-        const skill2 = this.agents?.readAgentSkill(input2.agent_id) ?? mapping.agentType ?? input2.agent_type;
-        return this.dueForTicket(
-          claudeSession,
-          ticket,
-          (session) => this.subagentHeartbeat(session, ticket, mapping.description, skill2)
-        );
-      }
-    } else if (invoked !== void 0) {
-      this.sessions.recordThreadSkill(claudeSession, invoked);
-    }
-    const skill = this.skillThread(claudeSession);
-    if (skill !== void 0) return this.send(this.sessions.claim(skill, heartbeatIntervalMs, heartbeatMaxAgeMs)?.heartbeat.session);
-    if (input2.agent_id !== void 0 || input2.cwd === void 0) return void 0;
-    const fromCheckout = this.extractor.firstKey(basename4(input2.cwd));
-    if (fromCheckout !== void 0) {
-      return this.dueForTicket(claudeSession, fromCheckout, (session) => this.checkoutHeartbeat(claudeSession, session, fromCheckout));
-    }
-    if (!this.sessions.claimBranchCheck(claudeSession, heartbeatIntervalMs) || !this.reportable()) return void 0;
-    return { kind: "branch", claudeSession, cwd: input2.cwd };
-  }
-  /**
-   * Run by the detached child for a main thread: `branch` is what git
-   * printed. Returns the session to replay, already claimed, or undefined.
-   */
-  dueForBranch(claudeSession, branch) {
-    const ticket = this.extractor.firstKey(branch);
-    if (ticket === void 0) return void 0;
-    const due = this.dueForTicket(claudeSession, ticket, (session) => this.checkoutHeartbeat(claudeSession, session, ticket, branch));
-    return due?.kind === "send" ? due.session : void 0;
-  }
-  /**
-   * A sub-agent stopped: forgets it, and returns the activity line to post
-   * when it was working on a Jira ticket and Ariadne is configured.
-   */
-  stopped(payload) {
-    const parsed = SubagentStopInputSchema.safeParse(payload);
-    if (!parsed.success || this.agents === void 0) return void 0;
-    const input2 = parsed.data;
-    const mapping = this.resolver?.resolve({
-      agentId: input2.agent_id,
-      session: input2.session_id,
-      transcriptPath: input2.transcript_path,
-      agentTranscriptPath: input2.agent_transcript_path,
-      agentType: input2.agent_type
-    });
-    this.agents.removeAgent(input2.agent_id);
-    if (mapping?.toolUseId !== void 0) this.agents.removeDispatch(mapping.toolUseId);
-    if (mapping === void 0 || mapping.ticket === null) return void 0;
-    const session = ticketSessionKey.key(input2.session_id, mapping.ticket);
-    if (session === void 0 || !this.reportable()) return void 0;
-    const what = mapping.description !== void 0 && mapping.description !== "" ? mapping.description : mapping.agentType ?? input2.agent_type ?? subagentStep;
-    return { session, ticket: mapping.ticket, text: `Finished: ${what}`, id: `finished-${input2.agent_id}` };
-  }
-  /**
-   * A skill's heartbeat replayed if a skill posted to the ticket's session
-   * within a day (only while it is live), else a heartbeat the hook infers.
-   */
-  dueForTicket(claudeSession, ticket, infer) {
-    const session = ticketSessionKey.key(claudeSession, ticket);
-    if (session === void 0) return void 0;
-    if (this.sessions.hasSkillRecord(session, boardStateMaxAgeMs)) {
-      return this.send(this.sessions.claim(session, heartbeatIntervalMs, heartbeatMaxAgeMs)?.heartbeat.session);
-    }
-    if (!this.sessions.claimInferred(infer(session), heartbeatIntervalMs) || !this.reportable()) return void 0;
-    return { kind: "send", session };
-  }
-  /**
-   * The live skill session for this Claude Code session: one recorded under
-   * the session id itself (an explicit `--session`, or an older CLI), else
-   * the one a skill last posted to by default from it.
-   */
-  skillThread(claudeSession) {
-    if (this.sessions.isLive(claudeSession, heartbeatMaxAgeMs)) return claudeSession;
-    const pointed = this.sessions.threadSession(claudeSession);
-    return pointed !== void 0 && this.sessions.isLive(pointed, heartbeatMaxAgeMs) ? pointed : void 0;
-  }
-  /** The skill a Skill tool call just loaded, when it is a name Ariadne accepts. */
-  invokedSkill(input2) {
-    if (input2.tool_name !== "Skill") return void 0;
-    const call = SkillCallSchema.safeParse(input2.tool_input);
-    if (!call.success) return void 0;
-    const skill = SkillNameSchema.safeParse(call.data.skill);
-    return skill.success ? skill.data : void 0;
-  }
-  bridgeBackgroundLaunch(input2) {
-    if (input2.tool_name !== "Agent" || input2.tool_use_id === void 0) return;
-    const launch = AsyncLaunchSchema.safeParse(input2.tool_response);
-    if (launch.success) this.resolver?.bridge(launch.data.agentId, input2.tool_use_id, input2.session_id);
-  }
-  subagentHeartbeat(session, ticket, description, skillName) {
-    const step = StepSchema.safeParse(description ?? "");
-    const skill = SkillNameSchema.safeParse(skillName);
-    return {
-      session,
-      ticket,
-      step: step.success ? step.data : subagentStep,
-      state: "nominal",
-      ...skill.success && skill.data !== void 0 ? { skill: skill.data } : {}
-    };
-  }
-  /** A main thread's heartbeat names the skill it last loaded, when it loaded one. */
-  checkoutHeartbeat(claudeSession, session, ticket, branch) {
-    const skill = this.sessions.threadSkill(claudeSession);
-    return {
-      session,
-      ticket,
-      step: checkoutStep,
-      state: "nominal",
-      ...branch !== void 0 ? { branch } : {},
-      ...skill !== void 0 ? { skill } : {}
-    };
-  }
-  send(session) {
-    return session === void 0 ? void 0 : { kind: "send", session };
-  }
-};
-var DetachedHeartbeatSender = class {
-  execPath;
-  entry;
-  constructor(props = {}) {
-    this.execPath = props.execPath ?? process.execPath;
-    this.entry = "entry" in props ? props.entry : process.argv[1];
-  }
-  send(session) {
-    this.spawnHook(["board-heartbeat", "--send", session]);
-  }
-  sendBranch(claudeSession, cwd) {
-    this.spawnHook(["board-heartbeat", "--branch", claudeSession, "--cwd", cwd]);
-  }
-  sendFinished(report) {
-    this.spawnHook(["agent-stop", "--send", report.session, "--ticket", report.ticket, "--text", report.text, "--id", report.id]);
-  }
-  spawnHook(args) {
-    if (this.entry === void 0) return;
-    const child = spawn(this.execPath, [this.entry, "hook", ...args], { detached: true, stdio: "ignore" });
-    child.on("error", () => void 0);
-    child.unref();
-  }
-};
-
-// src/hooks/board-heartbeat/board-hook-kit.ts
-import { execFileSync as execFileSync4 } from "node:child_process";
-
-// src/hooks/board-heartbeat/agent-ticket-resolver.ts
-import { createHash as createHash3 } from "node:crypto";
-import { closeSync, existsSync as existsSync14, openSync, readFileSync as readFileSync16, readSync } from "node:fs";
-import { basename as basename5, dirname as dirname14, join as join15 } from "node:path";
-var SubagentMetaSchema = external_exports.looseObject({
-  agentType: external_exports.string().optional(),
-  description: external_exports.string().optional(),
-  toolUseId: external_exports.string().optional()
-});
-var TranscriptLineSchema = external_exports.looseObject({
-  type: external_exports.string().optional(),
-  message: external_exports.looseObject({
-    role: external_exports.string().optional(),
-    content: external_exports.union([external_exports.string(), external_exports.array(external_exports.looseObject({ type: external_exports.string().optional(), text: external_exports.string().optional() }))])
-  }).optional()
-});
-var transcriptHeadBytes = 256 * 1024;
-var AgentTicketResolver = class {
-  agents;
-  extractor;
-  constructor(props) {
-    this.agents = props.agents;
-    this.extractor = props.extractor ?? new TicketKeyExtractor();
-  }
-  /** The cached or freshly resolved record, or undefined while Claude Code has written nothing to read yet. */
-  resolve(location) {
-    if (!stateIdPattern.test(location.agentId)) return void 0;
-    const cached2 = this.agents.readAgent(location.agentId);
-    if (cached2 !== void 0) return cached2;
-    const dir = this.subagentsDir(location);
-    if (dir === void 0) return void 0;
-    const meta3 = this.readMeta(join15(dir, `agent-${location.agentId}.meta.json`));
-    const resolved = meta3 !== void 0 ? this.fromMeta(location, meta3) : this.fromTranscript(location, join15(dir, `agent-${location.agentId}.jsonl`));
-    if (resolved !== void 0) this.agents.recordAgent(location.agentId, resolved);
-    return resolved;
-  }
-  /**
-   * A background Agent call returns the sub-agent's id at once, so its
-   * PostToolUse can map the sub-agent to its dispatch before the sub-agent's
-   * first tool call. A sub-agent that is already mapped is left alone.
-   */
-  bridge(agentId, toolUseId, session) {
-    if (!stateIdPattern.test(agentId) || this.agents.readAgent(agentId) !== void 0) return;
-    const dispatch = this.agents.readDispatch(toolUseId);
-    if (dispatch === void 0) return;
-    this.agents.recordAgent(agentId, {
-      ticket: dispatch.ticket,
-      description: dispatch.description,
-      toolUseId,
-      session,
-      at: this.agents.now()
-    });
-  }
-  /** A stable digest of a prompt, recorded at dispatch and matched against a transcript's first message. */
-  digest(prompt) {
-    return createHash3("sha256").update(prompt.trim()).digest("hex").slice(0, 32);
-  }
-  fromMeta(location, meta3) {
-    const dispatch = meta3.toolUseId !== void 0 ? this.agents.readDispatch(meta3.toolUseId) : void 0;
-    const description = dispatch?.description ?? meta3.description;
-    return {
-      ticket: dispatch !== void 0 ? dispatch.ticket : this.extractor.firstKey(meta3.description) ?? null,
-      ...description !== void 0 ? { description } : {},
-      ...this.agentType(meta3.agentType ?? location.agentType),
-      ...meta3.toolUseId !== void 0 ? { toolUseId: meta3.toolUseId } : {},
-      session: location.session,
-      at: this.agents.now()
-    };
-  }
-  fromTranscript(location, path3) {
-    const prompt = this.firstUserMessage(path3);
-    if (prompt === void 0) return void 0;
-    const dispatch = this.agents.findDispatchByPrompt(location.session, this.digest(prompt));
-    return {
-      ticket: dispatch !== void 0 ? dispatch.ticket : this.extractor.fromPrompt(prompt) ?? null,
-      ...dispatch !== void 0 ? { description: dispatch.description } : {},
-      ...this.agentType(location.agentType),
-      session: location.session,
-      at: this.agents.now()
-    };
-  }
-  agentType(value) {
-    return value !== void 0 && value !== "" ? { agentType: value } : {};
-  }
-  subagentsDir(location) {
-    if (location.agentTranscriptPath !== void 0 && location.agentTranscriptPath !== "") {
-      return dirname14(location.agentTranscriptPath);
-    }
-    const transcript = location.transcriptPath;
-    if (transcript === void 0 || !transcript.endsWith(".jsonl")) return void 0;
-    return join15(dirname14(transcript), basename5(transcript, ".jsonl"), "subagents");
-  }
-  readMeta(path3) {
-    if (!existsSync14(path3)) return void 0;
-    try {
-      const parsed = SubagentMetaSchema.safeParse(JSON.parse(readFileSync16(path3, "utf-8")));
-      return parsed.success ? parsed.data : void 0;
-    } catch {
-      return void 0;
-    }
-  }
-  firstUserMessage(path3) {
-    if (!existsSync14(path3)) return void 0;
-    let head;
-    try {
-      const fd = openSync(path3, "r");
-      try {
-        const buffer = Buffer.alloc(transcriptHeadBytes);
-        head = buffer.subarray(0, readSync(fd, buffer, 0, transcriptHeadBytes, 0)).toString("utf-8");
-      } finally {
-        closeSync(fd);
-      }
-    } catch {
-      return void 0;
-    }
-    for (const line of head.split("\n")) {
-      const text7 = this.userText(line);
-      if (text7 !== void 0) return text7;
-    }
-    return void 0;
-  }
-  userText(line) {
-    let parsed;
-    try {
-      const result = TranscriptLineSchema.safeParse(JSON.parse(line));
-      if (!result.success) return void 0;
-      parsed = result.data;
-    } catch {
-      return void 0;
-    }
-    if (parsed.type !== "user" || parsed.message === void 0) return void 0;
-    const content3 = parsed.message.content;
-    if (typeof content3 === "string") return content3;
-    const text7 = content3.filter((part) => part.type === "text" && part.text !== void 0).map((part) => part.text).join("\n");
-    return text7 === "" ? void 0 : text7;
-  }
-};
-
-// src/hooks/board-heartbeat/board-hook-kit.ts
-var BoardHookKit = class {
-  sessions;
-  agents;
-  board;
-  resolver;
-  constructor(props) {
-    this.sessions = props.sessions;
-    this.agents = props.agents;
-    this.board = props.board;
-    this.resolver = new AgentTicketResolver({ agents: this.agents });
-  }
-  heartbeatHook() {
-    return new BoardHeartbeatHook({
-      sessions: this.sessions,
-      agents: this.agents,
-      resolver: this.resolver,
-      reportable: () => this.board().reportable()
-    });
-  }
-  dispatchHook() {
-    return new AgentDispatchHook({ agents: this.agents, sessions: this.sessions, resolver: this.resolver });
-  }
-};
-var GitBranchReader = class {
-  read(cwd) {
-    try {
-      const branch = execFileSync4("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
-        cwd,
-        encoding: "utf-8",
-        stdio: ["ignore", "pipe", "ignore"],
-        timeout: 2e3
-      }).trim();
-      return branch === "" || branch === "HEAD" ? void 0 : branch;
-    } catch {
-      return void 0;
-    }
-  }
-};
+import { text as text5 } from "node:stream/consumers";
 
 // src/hooks/commit-guard/commit-guard.ts
-import { readFileSync as readFileSync17 } from "node:fs";
+import { readFileSync as readFileSync13 } from "node:fs";
 import { isAbsolute as isAbsolute6, resolve as resolve11 } from "node:path";
 var PreToolUseInputSchema = external_exports.looseObject({
   tool_name: external_exports.string().optional(),
@@ -55206,7 +52768,7 @@ var CommitGuard = class {
     const unquoted = file2.replace(/^["']|["']$/g, "");
     if (unquoted === "-" || !isAbsolute6(unquoted) && cwd === void 0) return false;
     try {
-      const contents = readFileSync17(isAbsolute6(unquoted) ? unquoted : resolve11(cwd ?? "", unquoted), "utf8");
+      const contents = readFileSync13(isAbsolute6(unquoted) ? unquoted : resolve11(cwd ?? "", unquoted), "utf8");
       return /^Flight-Rules-Version: /m.test(contents);
     } catch {
       return false;
@@ -55242,10 +52804,73 @@ var PreBashHook = class {
 };
 
 // src/hooks/subagent-status/subagent-status.ts
-import { randomBytes as randomBytes3 } from "node:crypto";
-import { closeSync as closeSync2, mkdirSync as mkdirSync7, openSync as openSync2, readFileSync as readFileSync18, readSync as readSync2, readdirSync as readdirSync5, renameSync, rmSync as rmSync3, statSync as statSync7, writeFileSync as writeFileSync8 } from "node:fs";
-import { homedir as homedir6 } from "node:os";
-import { basename as basename6, dirname as dirname15, isAbsolute as isAbsolute7, join as join16, resolve as resolve12 } from "node:path";
+import { randomBytes as randomBytes2 } from "node:crypto";
+import { closeSync, mkdirSync as mkdirSync5, openSync, readFileSync as readFileSync14, readSync, readdirSync as readdirSync3, renameSync, rmSync, statSync as statSync6, writeFileSync as writeFileSync5 } from "node:fs";
+import { homedir as homedir4 } from "node:os";
+import { basename as basename4, dirname as dirname13, isAbsolute as isAbsolute7, join as join12, resolve as resolve12 } from "node:path";
+
+// src/shared/ticket-key-extractor.ts
+var TicketKeySchema = external_exports.string().transform((value) => value.trim().toUpperCase()).pipe(external_exports.string().regex(/^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,8}$/));
+var keyPattern = /(?<![A-Za-z0-9_])(?<![A-Z0-9]-)[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,8}(?![A-Za-z0-9_])/g;
+var phrasePattern = /\b(?:ticket|building)\s*:?\s+([A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,8})(?![A-Za-z0-9_])/gi;
+var urlPattern = /\b[a-z][a-z0-9+.-]*:\/\/\S+/gi;
+var notProjectKeys = /* @__PURE__ */ new Set([
+  "AES",
+  "CVE",
+  "ES",
+  "GPT",
+  "HTTP",
+  "ISO",
+  "MD",
+  "PEP",
+  "RFC",
+  "SHA",
+  "TLS",
+  "SSL",
+  "UTF",
+  "WCAG"
+]);
+var TicketKeyExtractor = class {
+  /**
+   * The ticket an Agent dispatch is about: a key in the description, then a
+   * "ticket <KEY>" or "building <KEY>" phrase in the prompt, then the first
+   * key in the prompt.
+   */
+  fromDispatch(description, prompt) {
+    return this.firstKey(description) ?? this.fromPrompt(prompt);
+  }
+  /** A "ticket <KEY>" or "building <KEY>" phrase, then the first key. */
+  fromPrompt(prompt) {
+    if (prompt === void 0) return void 0;
+    const text6 = this.withoutUrls(prompt);
+    for (const match of text6.matchAll(phrasePattern)) {
+      const key = this.valid(match[1]);
+      if (key !== void 0) return key;
+    }
+    return this.firstKey(text6);
+  }
+  /** The first key in a description, a branch name or a directory name. */
+  firstKey(text6) {
+    if (text6 === void 0) return void 0;
+    for (const match of this.withoutUrls(text6).matchAll(keyPattern)) {
+      const key = this.valid(match[0]);
+      if (key !== void 0) return key;
+    }
+    return void 0;
+  }
+  withoutUrls(text6) {
+    return text6.replace(urlPattern, " ");
+  }
+  valid(candidate) {
+    if (candidate === void 0) return void 0;
+    const parsed = TicketKeySchema.safeParse(candidate);
+    if (!parsed.success) return void 0;
+    const project = parsed.data.slice(0, parsed.data.indexOf("-"));
+    return notProjectKeys.has(project) ? void 0 : parsed.data;
+  }
+};
+
+// src/hooks/subagent-status/subagent-status.ts
 var SubagentHarnessSchema = external_exports.enum(["claude-code", "codex"]);
 var SubagentStatusSchema = external_exports.enum(["working", "done", "error"]);
 var SubagentStatusRecordSchema = external_exports.looseObject({
@@ -55265,8 +52890,8 @@ var SubagentStatusRecordSchema = external_exports.looseObject({
 });
 var subagentStatusMaxAgeMs = 24 * 60 * 6e4;
 var subagentTouchIntervalMs = 3e4;
-var maxDescriptionLength2 = 120;
-var transcriptHeadBytes2 = 64 * 1024;
+var maxDescriptionLength = 120;
+var transcriptHeadBytes = 64 * 1024;
 var failedTaskStatuses = /* @__PURE__ */ new Set(["failed", "error", "errored"]);
 var HookPayloadSchema = external_exports.looseObject({
   hook_event_name: external_exports.string().optional(),
@@ -55283,7 +52908,7 @@ var HookPayloadSchema = external_exports.looseObject({
   background_tasks: external_exports.array(external_exports.looseObject({ id: external_exports.string().optional(), status: external_exports.string().optional(), description: external_exports.string().optional() })).optional()
 });
 var ClaudeSubagentMetaSchema = external_exports.looseObject({ agentType: external_exports.string().optional(), description: external_exports.string().optional() });
-var TranscriptLineSchema2 = external_exports.looseObject({
+var TranscriptLineSchema = external_exports.looseObject({
   type: external_exports.string().optional(),
   message: external_exports.looseObject({ role: external_exports.string().optional(), content: external_exports.unknown() }).optional()
 });
@@ -55296,15 +52921,15 @@ var SubagentStatusRecorder = class {
   readBranch;
   constructor(props = {}) {
     this.env = props.env ?? process.env;
-    this.home = props.home ?? homedir6();
+    this.home = props.home ?? homedir4();
     this.now = props.now ?? Date.now;
     this.extractor = props.extractor ?? new TicketKeyExtractor();
     this.readBranch = props.readBranch ?? ((cwd) => new GitHeadReader().branch(cwd));
   }
   folder() {
     const stateHome = this.env["XDG_STATE_HOME"];
-    const base = stateHome !== void 0 && stateHome !== "" ? stateHome : join16(this.home, ".local", "state");
-    return join16(base, "flight-rules", "agents");
+    const base = stateHome !== void 0 && stateHome !== "" ? stateHome : join12(this.home, ".local", "state");
+    return join12(base, "flight-rules", "agents");
   }
   /** Routes a hook payload by its `hook_event_name`. */
   handle(harness, payload) {
@@ -55339,7 +52964,7 @@ var SubagentStatusRecorder = class {
     const records = [];
     for (const name of this.entries()) {
       if (!this.isRecordName(name)) continue;
-      const record2 = this.readPath(join16(this.folder(), name));
+      const record2 = this.readPath(join12(this.folder(), name));
       if (record2 !== void 0) records.push(record2);
     }
     return records;
@@ -55347,13 +52972,13 @@ var SubagentStatusRecorder = class {
   prune() {
     const cutoff = this.now() - subagentStatusMaxAgeMs;
     for (const name of this.entries()) {
-      const path3 = join16(this.folder(), name);
+      const path3 = join12(this.folder(), name);
       if (this.isRecordName(name)) {
         if (!this.expired(path3, cutoff)) continue;
-        for (const marker of this.markers(path3)) rmSync3(marker, { force: true });
-        rmSync3(path3, { force: true });
+        for (const marker of this.markers(path3)) rmSync(marker, { force: true });
+        rmSync(path3, { force: true });
       } else if (this.mtime(path3) < cutoff) {
-        rmSync3(path3, { force: true });
+        rmSync(path3, { force: true });
       }
     }
   }
@@ -55361,7 +52986,7 @@ var SubagentStatusRecorder = class {
     const agent = input2.agent_id;
     if (agent === void 0) return;
     const path3 = this.pathFor(harness, input2.session_id, agent);
-    for (const marker of this.markers(path3)) rmSync3(marker, { force: true });
+    for (const marker of this.markers(path3)) rmSync(marker, { force: true });
     const at = this.timestamp();
     const base = this.readPath(path3) ?? this.fresh(harness, input2, agent, at);
     this.commit(path3, this.enrich({ ...base, status: "working", updated_at: at, ended_at: null }, input2));
@@ -55391,7 +53016,7 @@ var SubagentStatusRecorder = class {
     const at = this.timestamp();
     for (const name of this.entries()) {
       if (!this.isRecordName(name)) continue;
-      const path3 = join16(this.folder(), name);
+      const path3 = join12(this.folder(), name);
       const record2 = this.readPath(path3);
       if (record2 === void 0 || record2.harness !== harness || record2.session_id !== session || record2.status !== "working") continue;
       this.commit(path3, { ...record2, ...this.end(path3, "done", at), updated_at: at });
@@ -55407,8 +53032,8 @@ var SubagentStatusRecorder = class {
    */
   end(path3, status, at) {
     try {
-      mkdirSync7(dirname15(path3), { recursive: true, mode: 448 });
-      writeFileSync8(this.markerPath(path3, status), at, { flag: "wx", mode: 384 });
+      mkdirSync5(dirname13(path3), { recursive: true, mode: 448 });
+      writeFileSync5(this.markerPath(path3, status), at, { flag: "wx", mode: 384 });
     } catch {
     }
     return this.terminal(path3) ?? { status, ended_at: at };
@@ -55416,7 +53041,7 @@ var SubagentStatusRecorder = class {
   terminal(path3) {
     for (const status of ["error", "done"]) {
       try {
-        const ended = readFileSync18(this.markerPath(path3, status), "utf-8").trim();
+        const ended = readFileSync14(this.markerPath(path3, status), "utf-8").trim();
         if (ended !== "") return { status, ended_at: ended };
       } catch {
         continue;
@@ -55434,7 +53059,7 @@ var SubagentStatusRecorder = class {
     }
   }
   markerPath(path3, status) {
-    return join16(dirname15(path3), `.${basename6(path3)}.${status}`);
+    return join12(dirname13(path3), `.${basename4(path3)}.${status}`);
   }
   markers(path3) {
     return [this.markerPath(path3, "done"), this.markerPath(path3, "error")];
@@ -55447,7 +53072,7 @@ var SubagentStatusRecorder = class {
   }
   readText(path3) {
     try {
-      return readFileSync18(path3, "utf-8").trim();
+      return readFileSync14(path3, "utf-8").trim();
     } catch {
       return void 0;
     }
@@ -55508,7 +53133,7 @@ var SubagentStatusRecorder = class {
     const dir = this.claudeSubagentsDir(input2);
     if (dir === void 0) return void 0;
     try {
-      const parsed = ClaudeSubagentMetaSchema.safeParse(JSON.parse(readFileSync18(join16(dir, `agent-${SubagentFileNameSchema.parse(agent)}.meta.json`), "utf-8")));
+      const parsed = ClaudeSubagentMetaSchema.safeParse(JSON.parse(readFileSync14(join12(dir, `agent-${SubagentFileNameSchema.parse(agent)}.meta.json`), "utf-8")));
       return parsed.success ? parsed.data : void 0;
     } catch {
       return void 0;
@@ -55516,16 +53141,16 @@ var SubagentStatusRecorder = class {
   }
   firstPrompt(input2, agent) {
     const dir = this.claudeSubagentsDir(input2);
-    const path3 = input2.agent_transcript_path ?? (dir !== void 0 ? join16(dir, `agent-${SubagentFileNameSchema.parse(agent)}.jsonl`) : void 0);
+    const path3 = input2.agent_transcript_path ?? (dir !== void 0 ? join12(dir, `agent-${SubagentFileNameSchema.parse(agent)}.jsonl`) : void 0);
     if (path3 === void 0 || path3 === null) return void 0;
     const head = this.readHead(path3);
     if (head === void 0) return void 0;
     for (const line of head.split("\n")) {
       try {
-        const parsed = TranscriptLineSchema2.safeParse(JSON.parse(line));
+        const parsed = TranscriptLineSchema.safeParse(JSON.parse(line));
         if (!parsed.success || parsed.data.message?.role !== "user") continue;
-        const text7 = this.contentText(parsed.data.message.content);
-        if (text7 !== void 0) return text7;
+        const text6 = this.contentText(parsed.data.message.content);
+        if (text6 !== void 0) return text6;
       } catch {
         continue;
       }
@@ -55533,17 +53158,17 @@ var SubagentStatusRecorder = class {
     return void 0;
   }
   claudeSubagentsDir(input2) {
-    if (input2.agent_transcript_path !== void 0 && input2.agent_transcript_path !== null) return dirname15(input2.agent_transcript_path);
+    if (input2.agent_transcript_path !== void 0 && input2.agent_transcript_path !== null) return dirname13(input2.agent_transcript_path);
     const transcript = input2.transcript_path;
     if (transcript === void 0 || transcript === null || !transcript.endsWith(".jsonl")) return void 0;
-    return join16(transcript.slice(0, -".jsonl".length), "subagents");
+    return join12(transcript.slice(0, -".jsonl".length), "subagents");
   }
   pathFor(harness, session, agent) {
-    return join16(this.folder(), `${SubagentFileNameSchema.parse(`${harness}-${session}-${agent}`)}.json`);
+    return join12(this.folder(), `${SubagentFileNameSchema.parse(`${harness}-${session}-${agent}`)}.json`);
   }
   readPath(path3) {
     try {
-      const parsed = SubagentStatusRecordSchema.safeParse(JSON.parse(readFileSync18(path3, "utf-8")));
+      const parsed = SubagentStatusRecordSchema.safeParse(JSON.parse(readFileSync14(path3, "utf-8")));
       return parsed.success ? parsed.data : void 0;
     } catch {
       return void 0;
@@ -55551,13 +53176,13 @@ var SubagentStatusRecorder = class {
   }
   write(path3, record2) {
     const folder = this.folder();
-    mkdirSync7(folder, { recursive: true, mode: 448 });
-    const temp = join16(folder, `.${randomBytes3(6).toString("hex")}.tmp`);
+    mkdirSync5(folder, { recursive: true, mode: 448 });
+    const temp = join12(folder, `.${randomBytes2(6).toString("hex")}.tmp`);
     try {
-      writeFileSync8(temp, JSON.stringify(record2, null, 2) + "\n", { mode: 384 });
+      writeFileSync5(temp, JSON.stringify(record2, null, 2) + "\n", { mode: 384 });
       renameSync(temp, path3);
     } catch (error62) {
-      rmSync3(temp, { force: true });
+      rmSync(temp, { force: true });
       throw error62;
     }
   }
@@ -55566,14 +53191,14 @@ var SubagentStatusRecorder = class {
   }
   mtime(path3) {
     try {
-      return statSync7(path3).mtimeMs;
+      return statSync6(path3).mtimeMs;
     } catch {
       return Number.NaN;
     }
   }
   entries() {
     try {
-      return readdirSync5(this.folder());
+      return readdirSync3(this.folder());
     } catch {
       return [];
     }
@@ -55581,9 +53206,9 @@ var SubagentStatusRecorder = class {
   timestamp() {
     return new Date(this.now()).toISOString().replace(/\.\d{3}Z$/, "Z");
   }
-  clip(text7) {
-    const flat = text7.replaceAll(/\s+/g, " ").trim();
-    return flat.length > maxDescriptionLength2 ? flat.slice(0, maxDescriptionLength2) : flat;
+  clip(text6) {
+    const flat = text6.replaceAll(/\s+/g, " ").trim();
+    return flat.length > maxDescriptionLength ? flat.slice(0, maxDescriptionLength) : flat;
   }
   contentText(content3) {
     if (typeof content3 === "string") return content3;
@@ -55597,14 +53222,14 @@ var SubagentStatusRecorder = class {
   readHead(path3) {
     let fd;
     try {
-      fd = openSync2(path3, "r");
-      const buffer = Buffer.alloc(transcriptHeadBytes2);
-      const read = readSync2(fd, buffer, 0, transcriptHeadBytes2, 0);
+      fd = openSync(path3, "r");
+      const buffer = Buffer.alloc(transcriptHeadBytes);
+      const read = readSync(fd, buffer, 0, transcriptHeadBytes, 0);
       return buffer.subarray(0, read).toString("utf-8");
     } catch {
       return void 0;
     } finally {
-      if (fd !== void 0) closeSync2(fd);
+      if (fd !== void 0) closeSync(fd);
     }
   }
 };
@@ -55612,27 +53237,27 @@ var GitHeadReader = class {
   branch(cwd) {
     let dir = resolve12(cwd);
     for (; ; ) {
-      const dotGit = join16(dir, ".git");
+      const dotGit = join12(dir, ".git");
       const isDirectory = this.isDirectory(dotGit);
       if (isDirectory !== void 0) return this.headBranch(dir, dotGit, isDirectory);
-      const parent = dirname15(dir);
+      const parent = dirname13(dir);
       if (parent === dir) return void 0;
       dir = parent;
     }
   }
   isDirectory(path3) {
     try {
-      return statSync7(path3).isDirectory();
+      return statSync6(path3).isDirectory();
     } catch {
       return void 0;
     }
   }
   headBranch(dir, dotGit, isDirectory) {
     try {
-      const pointer = isDirectory ? void 0 : /^gitdir:\s*(.+)$/m.exec(readFileSync18(dotGit, "utf-8"))?.[1]?.trim();
+      const pointer = isDirectory ? void 0 : /^gitdir:\s*(.+)$/m.exec(readFileSync14(dotGit, "utf-8"))?.[1]?.trim();
       const gitDir = isDirectory ? dotGit : pointer !== void 0 ? resolve12(dir, pointer) : void 0;
       if (gitDir === void 0) return void 0;
-      return /^ref:\s*refs\/heads\/(.+)$/m.exec(readFileSync18(join16(gitDir, "HEAD"), "utf-8"))?.[1]?.trim();
+      return /^ref:\s*refs\/heads\/(.+)$/m.exec(readFileSync14(join12(gitDir, "HEAD"), "utf-8"))?.[1]?.trim();
     } catch {
       return void 0;
     }
@@ -55640,33 +53265,7 @@ var GitHeadReader = class {
 };
 
 // src/hooks/commands/hook/command.ts
-var DefaultBoardHookServices = class {
-  kit;
-  heartbeatHook() {
-    return this.hooks().heartbeatHook();
-  }
-  dispatchHook() {
-    return this.hooks().dispatchHook();
-  }
-  sender() {
-    return new DetachedHeartbeatSender();
-  }
-  board() {
-    return createFlightRules().board();
-  }
-  branch() {
-    return new GitBranchReader();
-  }
-  hooks() {
-    if (this.kit === void 0) {
-      const core = createFlightRules();
-      this.kit = new BoardHookKit({ sessions: core.boardSessions(), agents: core.boardAgents(), board: () => core.board() });
-    }
-    return this.kit;
-  }
-};
-var defaultBoardServices = new DefaultBoardHookServices();
-function createHookCommand(getHandler = () => new PreBashHook(), readStdin = () => text6(process.stdin), boardServices = defaultBoardServices, getStatusRecorder = () => new SubagentStatusRecorder()) {
+function createHookCommand(getHandler = () => new PreBashHook(), readStdin = () => text5(process.stdin), getStatusRecorder = () => new SubagentStatusRecorder()) {
   const hook2 = new Command("hook").description("handlers for the plugin's Claude Code hooks");
   hook2.command("pre-bash").alias("guard-commit").description(
     "PreToolUse(Bash): block a hand-written `git commit` in a flight-rules repo, and strip Claude's attribution trailers from commit and PR commands"
@@ -55674,49 +53273,6 @@ function createHookCommand(getHandler = () => new PreBashHook(), readStdin = () 
     try {
       const output2 = getHandler().handle(JSON.parse(await readStdin()));
       if (output2 !== void 0) process.stdout.write(JSON.stringify(output2) + "\n");
-    } catch {
-      return;
-    }
-  });
-  hook2.command("board-heartbeat").description(
-    "PostToolUse: keep this run's Ariadne sessions alive, at most once a minute each: a skill's ticket, a sub-agent's ticket from its dispatch, or the main thread's ticket from its directory or branch; silent, never blocks"
-  ).option("--send <session>", "internal: replay the session's last heartbeat (run detached by the hook)").option("--branch <session>", "internal: heartbeat the ticket in the main thread's branch (run detached by the hook)").option("--cwd <dir>", "internal: the main thread's working directory, with --branch").exitOverride().action(async (opts) => {
-    try {
-      if (opts.send !== void 0) {
-        await boardServices.board().replay(opts.send);
-        return;
-      }
-      if (opts.branch !== void 0) {
-        const branch = opts.cwd !== void 0 ? boardServices.branch().read(opts.cwd) : void 0;
-        const session = branch !== void 0 ? boardServices.heartbeatHook().dueForBranch(opts.branch, branch) : void 0;
-        if (session !== void 0) await boardServices.board().replay(session);
-        return;
-      }
-      const due = boardServices.heartbeatHook().due(JSON.parse(await readStdin()));
-      if (due?.kind === "send") boardServices.sender().send(due.session);
-      else if (due?.kind === "branch") boardServices.sender().sendBranch(due.claudeSession, due.cwd);
-    } catch {
-      return;
-    }
-  });
-  hook2.command("agent-dispatch").description(
-    "PreToolUse(Agent): remember which Jira ticket a sub-agent is dispatched for, so the heartbeat hook can report it; local only, no output, never blocks or changes the call"
-  ).exitOverride().action(async () => {
-    try {
-      boardServices.dispatchHook().record(JSON.parse(await readStdin()));
-    } catch {
-      return;
-    }
-  });
-  hook2.command("agent-stop").description("SubagentStop: post `Finished: <description>` to the sub-agent's Ariadne session and forget the sub-agent; silent, never blocks").option("--send <session>", "internal: post the activity line (run detached by the hook)").option("--ticket <key>", "internal: with --send").option("--text <line>", "internal: with --send").option("--id <id>", "internal: with --send").exitOverride().action(async (opts) => {
-    try {
-      if (opts.send !== void 0) {
-        if (opts.ticket === void 0 || opts.text === void 0) return;
-        await boardServices.board().activity({ session: opts.send, ticket: opts.ticket, text: opts.text, id: opts.id });
-        return;
-      }
-      const report = boardServices.heartbeatHook().stopped(JSON.parse(await readStdin()));
-      if (report !== void 0) boardServices.sender().sendFinished(report);
     } catch {
       return;
     }
@@ -55736,7 +53292,7 @@ function createHookCommand(getHandler = () => new PreBashHook(), readStdin = () 
 }
 
 // src/git/commands/commit/command.ts
-import { readFileSync as readFileSync19 } from "node:fs";
+import { readFileSync as readFileSync15 } from "node:fs";
 function collect2(value, previous3) {
   return [...previous3, value];
 }
@@ -55755,7 +53311,7 @@ function createGitCommand(registry2) {
         type: opts.type,
         scope: opts.scope,
         description: opts.description,
-        body: opts.bodyFile !== void 0 ? readFileSync19(opts.bodyFile, "utf8") : opts.body,
+        body: opts.bodyFile !== void 0 ? readFileSync15(opts.bodyFile, "utf8") : opts.body,
         footers: opts.footer,
         model: opts.model,
         files: opts.file
@@ -55793,9 +53349,9 @@ function createGitCommand(registry2) {
 }
 
 // src/git/commands/message/command.ts
-import { mkdtempSync, readFileSync as readFileSync20, writeFileSync as writeFileSync9 } from "node:fs";
+import { mkdtempSync, readFileSync as readFileSync16, writeFileSync as writeFileSync6 } from "node:fs";
 import { tmpdir as tmpdir2 } from "node:os";
-import { join as join17 } from "node:path";
+import { join as join13 } from "node:path";
 function createCommitMessageCommand(registry2) {
   const operations = new RegistryCommandOperationClient({ registry: registry2 });
   return new Command("commit-message").description(
@@ -55815,14 +53371,14 @@ function createCommitMessageCommand(registry2) {
         type: opts.type,
         scope: opts.scope,
         description: opts.description,
-        body: opts.bodyFile !== void 0 ? readFileSync20(opts.bodyFile, "utf8") : opts.body,
+        body: opts.bodyFile !== void 0 ? readFileSync16(opts.bodyFile, "utf8") : opts.body,
         footers: opts.footer,
         model: opts.model
       },
       external_exports.object({ message: external_exports.string() })
     );
-    const path3 = opts.out ?? join17(mkdtempSync(join17(tmpdir2(), "flight-rules-commit-")), "message.txt");
-    writeFileSync9(path3, `${message}
+    const path3 = opts.out ?? join13(mkdtempSync(join13(tmpdir2(), "flight-rules-commit-")), "message.txt");
+    writeFileSync6(path3, `${message}
 `);
     process.stdout.write(JSON.stringify({ path: path3, message }) + "\n");
   });
@@ -55844,6 +53400,24 @@ function createBranchNameCommand(registry2) {
     process.stdout.write(JSON.stringify({ branch }) + "\n");
   });
 }
+
+// src/shared/decimal-integer.ts
+var DecimalIntegerParser = class {
+  /** A pull request number or similar count that starts at 1. */
+  positive(value) {
+    return this.parse(value, /^[1-9][0-9]*$/, "must be a positive whole number written in decimal digits");
+  }
+  /** A revision, which starts at 0. */
+  nonNegative(value) {
+    return this.parse(value, /^(0|[1-9][0-9]*)$/, "must be a whole number from 0 written in decimal digits");
+  }
+  parse(value, pattern, message) {
+    const parsed = Number(value);
+    if (!pattern.test(value) || !Number.isSafeInteger(parsed)) throw new InvalidArgumentError(message);
+    return parsed;
+  }
+};
+var decimalIntegers = new DecimalIntegerParser();
 
 // src/pr/commands/pr/command.ts
 var propsSchema4 = external_exports.strictObject({
@@ -55925,6 +53499,9 @@ function createPrCommand(registry2) {
   return new CommanderPrCommand({ registry: registry2 }).create();
 }
 
+// src/version.ts
+var appVersion = false ? "0.0.0-dev" : "2.0.0";
+
 // src/plugins/commands/agents/command.ts
 function createAgentsCommand(getInstallation) {
   const command = new Command("agents").description("Inspect or install Codex's separate native agent registrations").exitOverride();
@@ -55945,12 +53522,12 @@ var RouteDispositionSchema = external_exports.discriminatedUnion("status", [
   external_exports.object({
     status: external_exports.literal("supported"),
     route: CliRouteSchema,
-    operationId: OperationIdSchema2
+    operationId: OperationIdSchema
   }),
   external_exports.object({
     status: external_exports.literal("pending-migration"),
     route: CliRouteSchema,
-    operationId: OperationIdSchema2
+    operationId: OperationIdSchema
   }),
   external_exports.object({ status: external_exports.literal("excluded"), route: CliRouteSchema, reason: external_exports.string().min(1) })
 ]);
@@ -56070,17 +53647,6 @@ var ManifestCliRouteCoverage = class _ManifestCliRouteCoverage {
     return routes;
   }
 };
-var pendingRoutes = [
-  "board post heartbeat",
-  "board post item",
-  "board post activity",
-  "board items",
-  "packet create",
-  "packet new-id",
-  "packet update",
-  "packet get",
-  "packet reviewers"
-];
 var excludedRoutes = [
   {
     path: ["mcp"],
@@ -56091,21 +53657,6 @@ var excludedRoutes = [
     path: ["hook", "pre-bash"],
     aliases: ["guard-commit"],
     reason: "Consumes Claude hook payloads and governs host shell commands."
-  },
-  {
-    path: ["hook", "board-heartbeat"],
-    aliases: [],
-    reason: "Consumes Claude PostToolUse payloads and runs as a host hook."
-  },
-  {
-    path: ["hook", "agent-dispatch"],
-    aliases: [],
-    reason: "Consumes Claude PreToolUse agent payloads for local session tracking."
-  },
-  {
-    path: ["hook", "agent-stop"],
-    aliases: [],
-    reason: "Consumes Claude SubagentStop payloads and reports host lifecycle events."
   },
   {
     path: ["hook", "subagent-status"],
@@ -56121,13 +53672,7 @@ var excludedRoutes = [
     path: ["agents", "install"],
     aliases: [],
     reason: "Installs native Codex agent registrations into host-owned directories."
-  },
-  {
-    path: ["board", "login"],
-    aliases: [],
-    reason: "Provisions a machine-local Ariadne credential from interactive input."
-  },
-  { path: ["board", "logout"], aliases: [], reason: "Removes a machine-local Ariadne credential." }
+  }
 ];
 var cliRouteCoverage = new ManifestCliRouteCoverage({
   entries: [
@@ -56184,37 +53729,11 @@ var cliRouteCoverage = new ManifestCliRouteCoverage({
       ["pr list", "pr-list"],
       ["pr threads", "pr-threads"],
       ["pr thread-reply", "pr-thread-reply"],
-      ["pr request-review", "pr-request-review"],
-      ["board post heartbeat", "board-post-heartbeat"],
-      ["board post item", "board-post-item"],
-      ["board post activity", "board-post-activity"],
-      ["board items", "board-items"],
-      ["packet create", "packet-create"],
-      ["packet new-id", "packet-new-id"],
-      ["packet update", "packet-update"],
-      ["packet get", "packet-get"],
-      ["packet reviewers", "packet-reviewers"]
+      ["pr request-review", "pr-request-review"]
     ].map(([path3, operationId]) => ({
       status: "supported",
       route: { path: (path3 ?? "").split(" "), aliases: [] },
       operationId: operationId ?? ""
-    })),
-    ...pendingRoutes.filter(
-      (path3) => !(/* @__PURE__ */ new Set([
-        "board post heartbeat",
-        "board post item",
-        "board post activity",
-        "board items",
-        "packet create",
-        "packet new-id",
-        "packet update",
-        "packet get",
-        "packet reviewers"
-      ])).has(path3)
-    ).map((path3) => ({
-      status: "pending-migration",
-      route: { path: path3.split(" "), aliases: [] },
-      operationId: `cli-${path3.replaceAll(" ", "-")}`
     })),
     ...excludedRoutes.map((route) => ({
       status: "excluded",
@@ -56225,7 +53744,7 @@ var cliRouteCoverage = new ManifestCliRouteCoverage({
 });
 
 // src/mcp/command.ts
-import { readFileSync as readFileSync24 } from "node:fs";
+import { readFileSync as readFileSync20 } from "node:fs";
 
 // node_modules/@modelcontextprotocol/server/dist/chunk-Br0eD_fh.mjs
 var __create2 = Object.create;
@@ -65505,7 +63024,7 @@ var require_core$3 = /* @__PURE__ */ __commonJSMin(((exports) => {
     }
     errorsText(errors = this.errors, { separator = ", ", dataVar = "data" } = {}) {
       if (!errors || errors.length === 0) return "No errors";
-      return errors.map((e) => `${dataVar}${e.instancePath} ${e.message}`).reduce((text7, msg) => text7 + separator + msg);
+      return errors.map((e) => `${dataVar}${e.instancePath} ${e.message}`).reduce((text6, msg) => text6 + separator + msg);
     }
     $dataMetaSchema(metaSchema, keywordsJsonPointers) {
       const rules = this.RULES.all;
@@ -70994,14 +68513,14 @@ function toError(value) {
 }
 
 // src/mcp/mcp-server.ts
-import { existsSync as existsSync16, readFileSync as readFileSync23, realpathSync as realpathSync10, statSync as statSync10 } from "node:fs";
-import { dirname as dirname17, isAbsolute as isAbsolute10, relative as relative8, resolve as resolve15, sep as sep6 } from "node:path";
+import { existsSync as existsSync12, readFileSync as readFileSync19, realpathSync as realpathSync10, statSync as statSync9 } from "node:fs";
+import { dirname as dirname15, isAbsolute as isAbsolute10, relative as relative8, resolve as resolve15, sep as sep6 } from "node:path";
 
 // node_modules/@modelcontextprotocol/server/dist/index.mjs
 var DEFAULT_MAX_REQUEST_BODY_SIZE = 4 * 1024 * 1024;
 
 // src/operations/pr-operations.ts
-import { realpathSync as realpathSync8, statSync as statSync8 } from "node:fs";
+import { realpathSync as realpathSync8, statSync as statSync7 } from "node:fs";
 import { isAbsolute as isAbsolute8, relative as relative6, resolve as resolve13 } from "node:path";
 var propsSchema5 = external_exports.strictObject({
   cwd: external_exports.string().min(1),
@@ -71102,7 +68621,7 @@ var DefaultPrOperations = class {
     const parsed = propsSchema5.parse(props);
     this.cwd = resolve13(parsed.cwd);
     this.launchRoot = realpathSync8(this.cwd);
-    const launchStat = statSync8(this.launchRoot);
+    const launchStat = statSync7(this.launchRoot);
     this.launchDevice = launchStat.dev;
     this.launchInode = launchStat.ino;
     this.getHost = parsed.getHost;
@@ -71166,7 +68685,7 @@ var DefaultPrOperations = class {
       let canonical;
       try {
         canonical = realpathSync8(candidate);
-        if (!statSync8(canonical).isFile()) throw new Error("not a file");
+        if (!statSync7(canonical).isFile()) throw new Error("not a file");
       } catch {
         throw new PullRequestAttachmentPathError(`Attachment is not a readable file: ${pathname}`);
       }
@@ -71178,7 +68697,7 @@ var DefaultPrOperations = class {
   }
   requireOriginalLaunchDirectory() {
     try {
-      const directory = statSync8(this.cwd);
+      const directory = statSync7(this.cwd);
       if (realpathSync8(this.cwd) !== this.launchRoot || directory.dev !== this.launchDevice || directory.ino !== this.launchInode) {
         throw new Error("replaced");
       }
@@ -71191,13 +68710,13 @@ var DefaultPrOperations = class {
 };
 
 // src/sdk/instruction-catalog-core.ts
-import { existsSync as existsSync15, readFileSync as readFileSync22, readdirSync as readdirSync7, realpathSync as realpathSync9, statSync as statSync9 } from "node:fs";
-import { basename as basename8, dirname as dirname16, isAbsolute as isAbsolute9, join as join19, relative as relative7, resolve as resolve14, sep as sep5 } from "node:path";
+import { existsSync as existsSync11, readFileSync as readFileSync18, readdirSync as readdirSync5, realpathSync as realpathSync9, statSync as statSync8 } from "node:fs";
+import { basename as basename6, dirname as dirname14, isAbsolute as isAbsolute9, join as join15, relative as relative7, resolve as resolve14, sep as sep5 } from "node:path";
 import { fileURLToPath as fileURLToPath4 } from "node:url";
 
 // src/agents/agent-registry/agent-registry.ts
-import { readFileSync as readFileSync21, readdirSync as readdirSync6 } from "node:fs";
-import { basename as basename7, join as join18 } from "node:path";
+import { readFileSync as readFileSync17, readdirSync as readdirSync4 } from "node:fs";
+import { basename as basename5, join as join14 } from "node:path";
 
 // src/agents/agent-frontmatter/agent-frontmatter.ts
 var import_yaml4 = __toESM(require_dist(), 1);
@@ -71234,18 +68753,18 @@ var InvalidAgentDefinitionError = class extends Error {
 };
 var FileAgentRegistry = class {
   load(directory) {
-    const agents = readdirSync6(directory, { withFileTypes: true }).filter((entry) => entry.isFile() && entry.name.endsWith(".md")).sort((a, b) => a.name.localeCompare(b.name)).map((entry) => {
-      const markdown = readFileSync21(join18(directory, entry.name), "utf8");
+    const agents = readdirSync4(directory, { withFileTypes: true }).filter((entry) => entry.isFile() && entry.name.endsWith(".md")).sort((a, b) => a.name.localeCompare(b.name)).map((entry) => {
+      const markdown = readFileSync17(join14(directory, entry.name), "utf8");
       const frontmatter = AgentRegistrationSchema.parse(agentFrontmatterParser.parse(markdown));
       const body = markdown.replace(/^---\r?\n[\s\S]*?^---(?:\r?\n|$)/m, "");
-      if (frontmatter.name !== basename7(entry.name, ".md") || body.trim() === "") {
+      if (frontmatter.name !== basename5(entry.name, ".md") || body.trim() === "") {
         throw new InvalidAgentDefinitionError(`Agent ${entry.name} needs a matching name and a nonempty prompt`);
       }
       return { frontmatter, body };
     });
     const canonical = new Map(agents.map((agent) => [agent.frontmatter.name, agent]));
     const names = new Set(canonical.keys());
-    const variants = AgentVariantsSchema.parse(JSON.parse(readFileSync21(join18(directory, "variants.json"), "utf8")));
+    const variants = AgentVariantsSchema.parse(JSON.parse(readFileSync17(join14(directory, "variants.json"), "utf8")));
     for (const variant of variants) {
       const base = canonical.get(variant.extends);
       if (base === void 0 || names.has(variant.name)) {
@@ -71286,10 +68805,10 @@ var ModulePackageHomeLocator = class {
     const parsed = CatalogPropsSchema.parse({ ...props, env: { ...props.env } });
     const override = parsed.env["FLIGHT_RULES_HOME"]?.trim();
     if (override) return override;
-    const moduleDirectory = dirname16(fileURLToPath4(parsed.moduleUrl));
-    if (basename8(moduleDirectory) === "sdk") return resolve14(moduleDirectory, "../..");
-    const bindingParent = dirname16(moduleDirectory);
-    if (basename8(bindingParent) === "sdk" && basename8(dirname16(bindingParent)) === "src") {
+    const moduleDirectory = dirname14(fileURLToPath4(parsed.moduleUrl));
+    if (basename6(moduleDirectory) === "sdk") return resolve14(moduleDirectory, "../..");
+    const bindingParent = dirname14(moduleDirectory);
+    if (basename6(bindingParent) === "sdk" && basename6(dirname14(bindingParent)) === "src") {
       return resolve14(moduleDirectory, "../../..");
     }
     return resolve14(moduleDirectory, "..");
@@ -71309,22 +68828,22 @@ var FileInstructionCatalog = class {
       "agents",
       "resources/agents"
     ]);
-    this.safePath(join19(this.agentDir, "variants.json"), this.agentDir);
+    this.safePath(join15(this.agentDir, "variants.json"), this.agentDir);
     this.agents = new Map(
       new FileAgentRegistry().load(this.agentDir).map((agent) => [agent.frontmatter.name, agent])
     );
   }
   listSkills() {
-    return readdirSync7(this.skillDir, { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile() && entry.name === "SKILL.md").map((entry) => relative7(this.skillDir, join19(entry.parentPath, entry.name)).split(sep5)[0]).filter((name) => name !== void 0).sort();
+    return readdirSync5(this.skillDir, { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile() && entry.name === "SKILL.md").map((entry) => relative7(this.skillDir, join15(entry.parentPath, entry.name)).split(sep5)[0]).filter((name) => name !== void 0).sort();
   }
   loadSkill(name) {
     const parsed = ResourceNameSchema.safeParse(name);
     if (!parsed.success) throw new UnsafeInstructionPathError(`Invalid skill name: ${name}`);
-    const path3 = join19(this.skillDir, parsed.data, "SKILL.md");
+    const path3 = join15(this.skillDir, parsed.data, "SKILL.md");
     return {
       name: parsed.data,
       path: this.safePath(path3, this.skillDir),
-      contents: readFileSync22(this.safePath(path3, this.skillDir), "utf8")
+      contents: readFileSync18(this.safePath(path3, this.skillDir), "utf8")
     };
   }
   listAgents() {
@@ -71338,7 +68857,7 @@ var FileInstructionCatalog = class {
     return agent;
   }
   findResourceDirectory(home, candidates) {
-    if (!existsSync15(home) || !statSync9(home).isDirectory()) {
+    if (!existsSync11(home) || !statSync8(home).isDirectory()) {
       throw new InstructionsUnavailableError(
         `The flight-rules installation directory is unavailable: ${home}`
       );
@@ -71346,7 +68865,7 @@ var FileInstructionCatalog = class {
     const installationRoot = realpathSync9(home);
     for (const candidate of candidates) {
       const path3 = resolve14(installationRoot, candidate);
-      if (!existsSync15(path3) || !statSync9(path3).isDirectory()) continue;
+      if (!existsSync11(path3) || !statSync8(path3).isDirectory()) continue;
       const realPath = realpathSync9(path3);
       const relativePath = relative7(installationRoot, realPath);
       if (relativePath === ".." || relativePath.startsWith(`..${sep5}`) || isAbsolute9(relativePath)) {
@@ -71359,7 +68878,7 @@ var FileInstructionCatalog = class {
     throw new InstructionsUnavailableError(`Canonical resources are unavailable under ${home}`);
   }
   safePath(path3, root) {
-    if (!isAbsolute9(path3) || !existsSync15(path3) || !statSync9(path3).isFile())
+    if (!isAbsolute9(path3) || !existsSync11(path3) || !statSync8(path3).isFile())
       throw new UnknownInstructionError(`Unknown instruction resource: ${path3}`);
     const realPath = realpathSync9(path3);
     const relativePath = relative7(root, realPath);
@@ -71401,21 +68920,21 @@ var LaunchBoundQaFileSystem = class {
   }
   exists(path3) {
     if (!this.isInsideLaunch(path3)) return false;
-    return existsSync16(path3);
+    return existsSync12(path3);
   }
   isFile(path3) {
     this.requireInsideLaunch(path3);
-    return existsSync16(path3) && statSync10(path3).isFile();
+    return existsSync12(path3) && statSync9(path3).isFile();
   }
   readFile(path3) {
     this.requireInsideLaunch(path3);
-    return readFileSync23(path3, "utf8");
+    return readFileSync19(path3, "utf8");
   }
   isInsideLaunch(path3) {
     const absolute = resolve15(path3);
     let existing = absolute;
-    while (!existsSync16(existing)) {
-      const parent = dirname17(existing);
+    while (!existsSync12(existing)) {
+      const parent = dirname15(existing);
       if (parent === existing) return false;
       existing = parent;
     }
@@ -71443,7 +68962,7 @@ var FlightRulesMcpServer = class {
   constructor(props) {
     this.props = McpLaunchPropsSchema.parse(props);
     this.cwd = realpathSync10(this.props.cwd);
-    const directory = statSync10(this.cwd);
+    const directory = statSync9(this.cwd);
     this.launchDevice = directory.dev;
     this.launchInode = directory.ino;
     this.qaFileSystem = new LaunchBoundQaFileSystem({ root: this.cwd });
@@ -71589,7 +69108,6 @@ var FlightRulesMcpServer = class {
         cwd
       }).operations(),
       ...new DefaultPrOperations({ cwd, getHost: () => core.prHost() }).operations(),
-      ...core.ariadneOperations().operations(),
       ...core.gitConfigOperations({ scopes: this.props.allowedConfigScopes, roots: [cwd] }).operations(),
       ...core.reviewOperations({
         cwd,
@@ -71606,7 +69124,7 @@ var FlightRulesMcpServer = class {
   }
   /** Pathnames can be reused after a rename; the launch grant belongs to the original directory. */
   requireOriginalLaunchCheckout() {
-    const directory = existsSync16(this.cwd) ? statSync10(this.cwd) : void 0;
+    const directory = existsSync12(this.cwd) ? statSync9(this.cwd) : void 0;
     if (directory === void 0 || realpathSync10(this.cwd) !== this.cwd || directory.dev !== this.launchDevice || directory.ino !== this.launchInode) {
       throw new LaunchCheckoutChangedError(
         `The launch checkout was moved or replaced: ${this.cwd}`
@@ -71620,7 +69138,7 @@ var FlightRulesMcpServer = class {
     const from = parsedInput.data.from;
     if (typeof from !== "string") return;
     const candidate = isAbsolute10(from) ? from : resolve15(this.cwd, from);
-    if (!existsSync16(candidate)) throw new Error(`QA instructions path does not exist: ${from}`);
+    if (!existsSync12(candidate)) throw new Error(`QA instructions path does not exist: ${from}`);
     const realPath = realpathSync10(candidate);
     const relativePath = relative8(this.cwd, realPath);
     if (relativePath === ".." || relativePath.startsWith(`..${sep6}`) || isAbsolute10(relativePath)) {
@@ -71667,7 +69185,7 @@ function createMcpCommand() {
   ).action(async (options) => {
     const parsed = CommandOptionsSchema.parse(options);
     const owners = parsed.reviewOwnersFile === void 0 ? {} : ReviewOperationsLaunchPropsSchema.shape.owners.parse(
-      JSON.parse(readFileSync24(parsed.reviewOwnersFile, "utf8"))
+      JSON.parse(readFileSync20(parsed.reviewOwnersFile, "utf8"))
     );
     await new StdioFlightRulesMcpTransport({
       cwd: process.cwd(),
@@ -71700,20 +69218,7 @@ function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = () => cr
   const config2 = () => getConfig(overrideTracker);
   const prHost = () => getPrHost(overrideTracker);
   program2.addCommand(createAgentsCommand(() => services.installation()));
-  const boardHooks = () => new BoardHookKit({
-    sessions: services.boardSessions(),
-    agents: services.boardAgents(),
-    board: () => services.board()
-  });
-  program2.addCommand(
-    createHookCommand(void 0, void 0, {
-      heartbeatHook: () => boardHooks().heartbeatHook(),
-      dispatchHook: () => boardHooks().dispatchHook(),
-      sender: () => new DetachedHeartbeatSender(),
-      board: () => services.board(),
-      branch: () => new GitBranchReader()
-    })
-  );
+  program2.addCommand(createHookCommand());
   const docOperation = new DocOperation({ getResolver: () => services.docs() });
   const localOperations = new DefaultLocalDiscoveryOperations({
     cwd: launchCwd,
@@ -71745,11 +69250,7 @@ function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = () => cr
         getConfig: config2,
         cwd: launchCwd
       }).operations(),
-      ...new DefaultPrOperations({ cwd: launchCwd, getHost: prHost }).operations(),
-      ...(services.ariadneOperations?.() ?? new DefaultAriadneOperations({
-        getBoard: () => services.board(),
-        getPackets: () => services.packets()
-      })).operations()
+      ...new DefaultPrOperations({ cwd: launchCwd, getHost: prHost }).operations()
     ],
     policy: new LaunchOperationAccessPolicy({
       allowedEffects: ["read", "write", "process", "network"]
@@ -71786,15 +69287,6 @@ function buildProgram(getTracker, getConfig, getPrHost, getConfigPath = () => cr
       })
     })
   );
-  program2.addCommand(
-    createBoardCommand(
-      () => services.board(),
-      () => services.ariadneTokens(),
-      void 0,
-      operationRegistry
-    )
-  );
-  program2.addCommand(createPacketCommand(() => services.packets(), operationRegistry));
   program2.addCommand(createMcpCommand());
   cliRouteCoverage.check(program2, operationRegistry);
   return program2;

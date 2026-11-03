@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { TicketKeyExtractor } from "../../shared/ariadne/ticket-key-extractor.js";
+import { TicketKeyExtractor } from "../../shared/ticket-key-extractor.js";
 export declare const SubagentHarnessSchema: z.ZodEnum<{
     codex: "codex";
     "claude-code": "claude-code";

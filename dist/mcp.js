@@ -1,8 +1,8 @@
 // src/mcp/mcp-server.ts
-import { existsSync as existsSync15, readFileSync as readFileSync15, realpathSync as realpathSync10, statSync as statSync9 } from "node:fs";
-import { dirname as dirname15, isAbsolute as isAbsolute8, relative as relative8, resolve as resolve13, sep as sep5 } from "node:path";
+import { existsSync as existsSync12, readFileSync as readFileSync13, realpathSync as realpathSync10, statSync as statSync8 } from "node:fs";
+import { dirname as dirname14, isAbsolute as isAbsolute8, relative as relative8, resolve as resolve13, sep as sep5 } from "node:path";
 import { McpServer } from "@modelcontextprotocol/server";
-import { z as z56 } from "zod";
+import { z as z51 } from "zod";
 
 // src/bundled-docs/charter-catalog/charter-catalog.ts
 import { matchesGlob } from "node:path";
@@ -198,128 +198,16 @@ var DocOperation = class {
 // src/operations/local-discovery-operations.ts
 import { readdirSync as readdirSync2 } from "node:fs";
 import { resolve as resolve4 } from "node:path";
-import { z as z11 } from "zod";
+import { z as z10 } from "zod";
 
 // src/shared/config.ts
 import { existsSync as existsSync2, readFileSync as readFileSync2, statSync as statSync2 } from "node:fs";
 import { dirname as dirname2, isAbsolute, join as join2, resolve as resolve2 } from "node:path";
-import { z as z7 } from "zod";
+import { z as z6 } from "zod";
 
 // src/tasks/jira-task-tracker/jira-host.ts
 import { z as z5 } from "zod";
 var JiraHostSchema = z5.string().transform((host) => host.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, ""));
-
-// src/shared/ariadne/ariadne.schema.ts
-import { z as z6 } from "zod";
-var defaultAriadneUrl = "https://ariadne-api-xohlbba2ea-uc.a.run.app";
-var loopbackHosts = /* @__PURE__ */ new Set(["localhost", "127.0.0.1"]);
-var AriadneUrlSchema = z6.url().refine((value) => {
-  if (!URL.canParse(value)) return false;
-  const url = new URL(value);
-  return url.protocol === "https:" || url.protocol === "http:" && loopbackHosts.has(url.hostname);
-}, "must be https (http only for localhost or 127.0.0.1)");
-var agentStates = ["nominal", "caution", "abort", "hold"];
-var agentItemKinds = ["question", "blocker", "testable", "wave-gate"];
-var agentActivityLevels = ["info", "success", "caution", "abort"];
-var agentLimits = {
-  step: 60,
-  heartbeatDetail: 500,
-  title: 200,
-  itemDetail: 2e3,
-  option: 60,
-  options: 6,
-  text: 500,
-  branch: 255
-};
-var AgentTextNormalizer = class {
-  /** Whitespace runs collapse to a space and control characters go. */
-  oneLine(value, max) {
-    return this.cut(value.replace(/[\x00-\x08\x0e-\x1f\x7f]/g, "").replace(/\s+/g, " ").trim(), max);
-  }
-  /** Line feeds stay; tabs become spaces and other control characters go. */
-  multiLine(value, max) {
-    const normalized = value.replace(/\r\n?/g, "\n").replace(/\t/g, " ").replace(/[\x00-\x09\x0b-\x1f\x7f]/g, "").trim();
-    return this.cut(normalized, max);
-  }
-  /** Overlong text ends in an ellipsis, never in half a surrogate pair. */
-  cut(value, max) {
-    if (value.length <= max) return value;
-    const head = value.slice(0, max - 1).replace(/[\uD800-\uDBFF]$/, "");
-    return `${head.trimEnd()}\u2026`;
-  }
-};
-var normalizer = new AgentTextNormalizer();
-var oneLineSchema = (max) => z6.string().transform((value) => normalizer.oneLine(value, max)).pipe(z6.string().min(1, "must not be blank"));
-var multiLineSchema = (max) => z6.string().transform((value) => normalizer.multiLine(value, max)).pipe(z6.string().min(1, "must not be blank"));
-var optionalSchema = (schema) => z6.preprocess((value) => value === "" || value === null ? void 0 : value, schema.optional());
-var AgentSessionIdSchema = z6.string().regex(/^[A-Za-z0-9_-]{1,80}$/, "must be 1\u201380 letters, digits, underscores or hyphens");
-var AgentRecordIdSchema = AgentSessionIdSchema;
-var TicketKeySchema = z6.string().transform((value) => value.trim().toUpperCase()).pipe(z6.string().regex(/^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,8}$/, "must be a Jira issue key: project key, hyphen, number"));
-var RepoSchema = z6.string().regex(/^(?:[A-Za-z0-9][A-Za-z0-9-]{0,38}\/)?[A-Za-z0-9_.-]{1,100}$/, "must be owner/name or name").refine((value) => !value.includes(".."), "must not contain ..");
-var BranchSchema = z6.string().regex(/^[A-Za-z0-9_+@][A-Za-z0-9._/+@-]{0,254}$/, "must be a branch name as git prints it").refine((value) => !value.includes(".."), "must not contain ..");
-var SkillSchema = z6.string().regex(/^[A-Za-z0-9:._-]{1,80}$/, "must be up to 80 of A-Z a-z 0-9 : . _ -");
-var HeartbeatInputSchema = z6.strictObject({
-  session: AgentSessionIdSchema,
-  step: oneLineSchema(agentLimits.step),
-  state: z6.enum(agentStates),
-  ticket: optionalSchema(TicketKeySchema),
-  repo: optionalSchema(RepoSchema),
-  branch: optionalSchema(BranchSchema),
-  skill: optionalSchema(SkillSchema),
-  detail: optionalSchema(oneLineSchema(agentLimits.heartbeatDetail))
-});
-var ItemInputSchema = z6.strictObject({
-  session: AgentSessionIdSchema,
-  kind: z6.enum(agentItemKinds),
-  title: oneLineSchema(agentLimits.title),
-  ticket: optionalSchema(TicketKeySchema),
-  detail: optionalSchema(multiLineSchema(agentLimits.itemDetail)),
-  options: z6.array(oneLineSchema(agentLimits.option)).max(agentLimits.options, `up to ${agentLimits.options} options`).refine((labels) => new Set(labels).size === labels.length, "options must be distinct").optional(),
-  id: optionalSchema(AgentRecordIdSchema)
-});
-var ActivityInputSchema = z6.strictObject({
-  session: AgentSessionIdSchema,
-  text: oneLineSchema(agentLimits.text),
-  level: optionalSchema(z6.enum(agentActivityLevels)),
-  ticket: optionalSchema(TicketKeySchema),
-  id: optionalSchema(AgentRecordIdSchema)
-});
-var AgentSessionSchema = z6.looseObject({
-  id: z6.string(),
-  ownerId: z6.string(),
-  ticket: z6.string().nullable(),
-  step: z6.string(),
-  state: z6.string(),
-  lastHeartbeat: z6.string(),
-  running: z6.boolean()
-});
-var AgentItemSchema = z6.looseObject({
-  id: z6.string(),
-  session: z6.string(),
-  kind: z6.string(),
-  ticket: z6.string().nullable(),
-  title: z6.string(),
-  detail: z6.string().nullable(),
-  options: z6.array(z6.string()),
-  status: z6.string(),
-  chosenOption: z6.string().nullable(),
-  createdAt: z6.string(),
-  resolvedAt: z6.string().nullable(),
-  resolvedBy: z6.string().nullable()
-});
-var AgentActivitySchema = z6.looseObject({
-  id: z6.string(),
-  at: z6.string(),
-  session: z6.string(),
-  ticket: z6.string().nullable(),
-  level: z6.string(),
-  text: z6.string()
-});
-var HeartbeatResponseSchema = z6.looseObject({ session: AgentSessionSchema });
-var ItemResponseSchema = z6.looseObject({ item: AgentItemSchema, created: z6.boolean() });
-var ActivityResponseSchema = z6.looseObject({ activity: AgentActivitySchema, created: z6.boolean() });
-var ItemListResponseSchema = z6.looseObject({ items: z6.array(AgentItemSchema) });
-var AgentErrorBodySchema = z6.looseObject({ error: z6.string(), message: z6.string().optional() });
 
 // src/shared/config.ts
 var seedCompetencies = [
@@ -336,35 +224,29 @@ var seedCompetencies = [
   "async-coordination",
   "auth-check"
 ];
-var ConfigSchema = z7.object({
-  tracker: z7.enum(["github", "jira"]),
-  repo: z7.string().optional().describe("GitHub owner/repo; required when tracker is github"),
+var ConfigSchema = z6.object({
+  tracker: z6.enum(["github", "jira"]),
+  repo: z6.string().optional().describe("GitHub owner/repo; required when tracker is github"),
   jiraHost: JiraHostSchema.optional().describe(
     "Atlassian Cloud host, e.g. acme.atlassian.net"
   ),
-  jiraEmail: z7.string().optional().describe("Atlassian account email for Basic auth"),
-  jiraProject: z7.string().optional().describe("Jira project key holding epics and tickets"),
-  jpdProject: z7.string().optional().describe("Jira Product Discovery project key holding initiatives"),
-  confluenceSpaceKey: z7.string().optional().describe("Confluence space key holding technical design docs"),
-  inProgressStatus: z7.string().optional().describe(
+  jiraEmail: z6.string().optional().describe("Atlassian account email for Basic auth"),
+  jiraProject: z6.string().optional().describe("Jira project key holding epics and tickets"),
+  jpdProject: z6.string().optional().describe("Jira Product Discovery project key holding initiatives"),
+  confluenceSpaceKey: z6.string().optional().describe("Confluence space key holding technical design docs"),
+  inProgressStatus: z6.string().optional().describe(
     "Tracker status meaning work has started; discovered and stored on first run"
   ),
-  inReviewStatus: z7.string().optional().describe(
+  inReviewStatus: z6.string().optional().describe(
     "Tracker status meaning a PR is open; discovered and stored on first run"
   ),
-  defaultLabels: z7.array(z7.string()).default([]),
-  rfcStorage: z7.enum(["local", "global"]).default("local"),
-  rfcStoragePath: z7.string().optional(),
-  qaRecipe: z7.string().optional().describe(
+  defaultLabels: z6.array(z6.string()).default([]),
+  rfcStorage: z6.enum(["local", "global"]).default("local"),
+  rfcStoragePath: z6.string().optional(),
+  qaRecipe: z6.string().optional().describe(
     "Deprecated: path to a legacy QA recipe, read only when no QA.md or AGENTS.md QA section exists; relative paths resolve against the directory holding this config file; defaults to flight-rules.qa.md beside it"
   ),
-  competencies: z7.array(z7.string()).default([...seedCompetencies]),
-  "ariadne.url": AriadneUrlSchema.optional().describe(
-    "Ariadne API base URL for `flight-rules board`; https only (http for localhost); read only from user or local scope; defaults to the production Ariadne API"
-  ),
-  "ariadne.enabled": z7.boolean().optional().describe(
-    "Set false to stop `flight-rules board` reporting even when an Ariadne token is set; read only from user or local scope; defaults to true"
-  )
+  competencies: z6.array(z6.string()).default([...seedCompetencies])
 }).superRefine((cfg, ctx) => {
   if (cfg.tracker === "github" && cfg.repo === void 0) {
     ctx.addIssue({
@@ -577,35 +459,35 @@ var QaInstructionsFinder = class {
 };
 
 // src/tasks/readiness/readiness.schema.ts
-import { z as z10 } from "zod";
+import { z as z9 } from "zod";
 
 // src/agents/agent-frontmatter/agent-frontmatter.schema.ts
-import { z as z8 } from "zod";
+import { z as z7 } from "zod";
 var agentCapabilities = ["read", "edit", "shell", "web", "spawn", "ask"];
 var modelTiers = ["standard", "escalated", "expert"];
 var reasoningLevels = ["low", "medium", "high"];
 var claudeAgentColors = ["red", "blue", "green", "yellow", "purple", "orange", "pink", "cyan"];
-var AgentCapabilitySchema = z8.enum(agentCapabilities);
-var ModelTierSchema = z8.enum(modelTiers);
-var AgentFrontmatterSchema = z8.strictObject({
-  name: z8.string().regex(/^[a-z][a-z0-9-]*$/),
-  description: z8.string().min(1),
-  capabilities: z8.array(AgentCapabilitySchema).min(1).refine(
+var AgentCapabilitySchema = z7.enum(agentCapabilities);
+var ModelTierSchema = z7.enum(modelTiers);
+var AgentFrontmatterSchema = z7.strictObject({
+  name: z7.string().regex(/^[a-z][a-z0-9-]*$/),
+  description: z7.string().min(1),
+  capabilities: z7.array(AgentCapabilitySchema).min(1).refine(
     (capabilities) => new Set(capabilities).size === capabilities.length,
     { message: "duplicate capability" }
   ),
   model: ModelTierSchema,
-  modelReason: z8.string().trim().min(1).optional(),
-  reasoning: z8.enum(reasoningLevels).optional(),
-  sandbox: z8.strictObject({
-    fs: z8.enum(["read-only", "workspace-write"]),
-    network: z8.enum(["none", "enabled"])
+  modelReason: z7.string().trim().min(1).optional(),
+  reasoning: z7.enum(reasoningLevels).optional(),
+  sandbox: z7.strictObject({
+    fs: z7.enum(["read-only", "workspace-write"]),
+    network: z7.enum(["none", "enabled"])
   }).optional(),
-  dispatch: z8.strictObject({
-    maxConcurrent: z8.int().positive(),
-    maxDepth: z8.int().positive()
+  dispatch: z7.strictObject({
+    maxConcurrent: z7.int().positive(),
+    maxDepth: z7.int().positive()
   }).optional(),
-  "x-claude": z8.strictObject({ color: z8.enum(claudeAgentColors).optional() }).optional()
+  "x-claude": z7.strictObject({ color: z7.enum(claudeAgentColors).optional() }).optional()
 });
 var AgentRegistrationSchema = AgentFrontmatterSchema.refine(
   (agent) => agent.model !== "expert" || agent.modelReason !== void 0,
@@ -614,14 +496,14 @@ var AgentRegistrationSchema = AgentFrontmatterSchema.refine(
 
 // src/orchestration/orchestration.schema.ts
 import { isAbsolute as isAbsolute2, relative, sep as sep2 } from "node:path";
-import { z as z9 } from "zod";
-var OrchestrationTextSchema = z9.string().refine((value) => value.trim().length > 0, "must not be blank");
+import { z as z8 } from "zod";
+var OrchestrationTextSchema = z8.string().refine((value) => value.trim().length > 0, "must not be blank");
 var AbsolutePathSchema = OrchestrationTextSchema.refine(
   isAbsolute2,
   "must be an absolute path on this host"
 );
-var CapabilityNameSchema = z9.string().regex(/^[a-z][a-zA-Z0-9:.-]*$/);
-var RunContextObjectSchema = z9.strictObject({
+var CapabilityNameSchema = z8.string().regex(/^[a-z][a-zA-Z0-9:.-]*$/);
+var RunContextObjectSchema = z8.strictObject({
   runId: OrchestrationTextSchema,
   taskId: OrchestrationTextSchema,
   cwd: AbsolutePathSchema,
@@ -633,41 +515,41 @@ var RunContextSchema = RunContextObjectSchema.refine((value) => {
   const path = relative(value.repositoryRoot, value.cwd);
   return path !== ".." && !path.startsWith(`..${sep2}`) && !isAbsolute2(path);
 }, "working directory must be inside the active repository root");
-var CallerContextSchema = RunContextSchema.safeExtend({ attempt: z9.int().positive() });
-var CapabilityEvidenceSchema = z9.discriminatedUnion("state", [
-  z9.strictObject({ state: z9.literal("available"), evidence: OrchestrationTextSchema }),
-  z9.strictObject({
-    state: z9.enum(["denied", "unknown"]),
+var CallerContextSchema = RunContextSchema.safeExtend({ attempt: z8.int().positive() });
+var CapabilityEvidenceSchema = z8.discriminatedUnion("state", [
+  z8.strictObject({ state: z8.literal("available"), evidence: OrchestrationTextSchema }),
+  z8.strictObject({
+    state: z8.enum(["denied", "unknown"]),
     evidence: OrchestrationTextSchema,
     remedy: OrchestrationTextSchema
   })
 ]);
-var AdapterLimitsSchema = z9.strictObject({
-  maxConcurrent: z9.int().nonnegative().nullable(),
-  activeWorkers: z9.int().nonnegative(),
-  currentDepth: z9.int().nonnegative(),
-  maxDepth: z9.int().nonnegative().nullable(),
+var AdapterLimitsSchema = z8.strictObject({
+  maxConcurrent: z8.int().nonnegative().nullable(),
+  activeWorkers: z8.int().nonnegative(),
+  currentDepth: z8.int().nonnegative(),
+  maxDepth: z8.int().nonnegative().nullable(),
   source: OrchestrationTextSchema
 });
-var RuntimeSnapshotSchema = z9.strictObject({
+var RuntimeSnapshotSchema = z8.strictObject({
   context: CallerContextSchema,
-  host: z9.strictObject({ name: OrchestrationTextSchema, version: OrchestrationTextSchema }),
-  observedAt: z9.iso.datetime(),
+  host: z8.strictObject({ name: OrchestrationTextSchema, version: OrchestrationTextSchema }),
+  observedAt: z8.iso.datetime(),
   agent: AgentFrontmatterSchema.shape.name.nullable(),
   spawn: CapabilityEvidenceSchema,
   ask: CapabilityEvidenceSchema,
-  permissions: z9.record(CapabilityNameSchema, CapabilityEvidenceSchema),
+  permissions: z8.record(CapabilityNameSchema, CapabilityEvidenceSchema),
   limits: AdapterLimitsSchema
 });
-var DispatchRequestSchema = z9.strictObject({
+var DispatchRequestSchema = z8.strictObject({
   id: OrchestrationTextSchema,
   agent: AgentFrontmatterSchema.shape.name,
   context: CallerContextSchema,
-  input: z9.record(z9.string(), z9.json()),
-  requiredCapabilities: z9.array(CapabilityNameSchema).optional()
+  input: z8.record(z8.string(), z8.json()),
+  requiredCapabilities: z8.array(CapabilityNameSchema).optional()
 });
-var OrchestrationFailureSchema = z9.strictObject({
-  code: z9.enum([
+var OrchestrationFailureSchema = z8.strictObject({
+  code: z8.enum([
     "UNKNOWN_AGENT",
     "UNSUPPORTED_AGENT_SETTINGS",
     "CONTEXT_MISMATCH",
@@ -692,34 +574,34 @@ var OrchestrationFailureSchema = z9.strictObject({
   remedy: OrchestrationTextSchema,
   capability: CapabilityNameSchema.optional()
 });
-var OutcomeIdentitySchema = z9.strictObject({
+var OutcomeIdentitySchema = z8.strictObject({
   dispatchId: OrchestrationTextSchema,
   agent: AgentFrontmatterSchema.shape.name,
   context: CallerContextSchema
 });
-var DispatchOutcomeSchema = z9.discriminatedUnion("status", [
+var DispatchOutcomeSchema = z8.discriminatedUnion("status", [
   OutcomeIdentitySchema.extend({
-    status: z9.literal("completed"),
-    report: z9.record(z9.string(), z9.json())
+    status: z8.literal("completed"),
+    report: z8.record(z8.string(), z8.json())
   }),
   OutcomeIdentitySchema.extend({
-    status: z9.enum(["failed", "unavailable"]),
+    status: z8.enum(["failed", "unavailable"]),
     failure: OrchestrationFailureSchema
   })
 ]);
-var QuestionRequestSchema = z9.strictObject({
+var QuestionRequestSchema = z8.strictObject({
   context: CallerContextSchema,
   question: OrchestrationTextSchema,
-  allowHumanQuestions: z9.boolean()
+  allowHumanQuestions: z8.boolean()
 });
-var SiblingSkillRequestSchema = z9.strictObject({
+var SiblingSkillRequestSchema = z8.strictObject({
   context: CallerContextSchema,
   skill: OrchestrationTextSchema,
-  input: z9.record(z9.string(), z9.json())
+  input: z8.record(z8.string(), z8.json())
 });
 
 // src/tasks/readiness/readiness.schema.ts
-var WorkflowSchema = z10.enum([
+var WorkflowSchema = z9.enum([
   "execute-work",
   "execute-wave",
   "break-down-work",
@@ -727,17 +609,17 @@ var WorkflowSchema = z10.enum([
   "verify-ticket",
   "remediate-review"
 ]);
-var WorkflowEvidenceSchema = z10.strictObject({
+var WorkflowEvidenceSchema = z9.strictObject({
   context: CallerContextSchema,
-  callerCapabilities: z10.record(z10.string(), CapabilityEvidenceSchema),
-  workers: z10.array(
-    z10.strictObject({ registration: AgentRegistrationSchema, runtime: RuntimeSnapshotSchema })
+  callerCapabilities: z9.record(z9.string(), CapabilityEvidenceSchema),
+  workers: z9.array(
+    z9.strictObject({ registration: AgentRegistrationSchema, runtime: RuntimeSnapshotSchema })
   ).refine(
     (workers) => new Set(workers.map((worker) => worker.registration.name)).size === workers.length,
     "duplicate worker evidence"
   )
 });
-var ReadinessOptionsSchema = z10.strictObject({
+var ReadinessOptionsSchema = z9.strictObject({
   workflow: WorkflowSchema.optional(),
   /** Supplying evidence opts into host checks in addition to environment probes. */
   evidence: WorkflowEvidenceSchema.optional()
@@ -747,81 +629,81 @@ var ReadinessOptionsSchema = z10.strictObject({
 );
 
 // src/operations/local-discovery-operations.ts
-var QaSourceSchema = z11.object({
-  path: z11.string(),
-  kind: z11.enum(["agents-md-section", "qa-md", "agents-dir-qa-md", "legacy-recipe"]),
-  dir: z11.string(),
-  content: z11.string(),
-  legacy: z11.literal(true).optional(),
-  hint: z11.string().optional()
+var QaSourceSchema = z10.object({
+  path: z10.string(),
+  kind: z10.enum(["agents-md-section", "qa-md", "agents-dir-qa-md", "legacy-recipe"]),
+  dir: z10.string(),
+  content: z10.string(),
+  legacy: z10.literal(true).optional(),
+  hint: z10.string().optional()
 });
-var QaInstructionsSchema = z11.object({ found: z11.boolean(), sources: z11.array(QaSourceSchema) });
-var ReadinessCheckSchema = z11.object({
-  name: z11.string(),
-  ok: z11.boolean(),
-  detail: z11.string(),
-  required: z11.boolean().optional(),
-  code: z11.string().optional(),
-  remedy: z11.string().optional()
+var QaInstructionsSchema = z10.object({ found: z10.boolean(), sources: z10.array(QaSourceSchema) });
+var ReadinessCheckSchema = z10.object({
+  name: z10.string(),
+  ok: z10.boolean(),
+  detail: z10.string(),
+  required: z10.boolean().optional(),
+  code: z10.string().optional(),
+  remedy: z10.string().optional()
 });
-var ReadinessReportSchema = z11.object({
-  tracker: z11.string().nullable(),
-  repo: z11.string().nullable().optional(),
-  checks: z11.array(ReadinessCheckSchema),
-  ok: z11.boolean(),
+var ReadinessReportSchema = z10.object({
+  tracker: z10.string().nullable(),
+  repo: z10.string().nullable().optional(),
+  checks: z10.array(ReadinessCheckSchema),
+  ok: z10.boolean(),
   workflow: WorkflowSchema.optional(),
-  scope: z11.enum(["environment", "workflow"])
+  scope: z10.enum(["environment", "workflow"])
 });
-var ConfigInspectionSchema = z11.object({
-  host: z11.string(),
-  valid: z11.boolean(),
-  error: z11.string().optional(),
-  values: z11.record(z11.string(), z11.unknown()),
-  sources: z11.record(
-    z11.string(),
-    z11.object({ scope: z11.enum(["user", "project", "local", "file"]), path: z11.string() })
+var ConfigInspectionSchema = z10.object({
+  host: z10.string(),
+  valid: z10.boolean(),
+  error: z10.string().optional(),
+  values: z10.record(z10.string(), z10.unknown()),
+  sources: z10.record(
+    z10.string(),
+    z10.object({ scope: z10.enum(["user", "project", "local", "file"]), path: z10.string() })
   ),
-  layers: z11.array(
-    z11.object({
-      scope: z11.enum(["user", "project", "local", "file"]),
-      path: z11.string(),
-      present: z11.boolean()
+  layers: z10.array(
+    z10.object({
+      scope: z10.enum(["user", "project", "local", "file"]),
+      path: z10.string(),
+      present: z10.boolean()
     })
   )
 });
-var CharterInputSchema = z11.object({
-  paths: z11.array(z11.string()).optional(),
-  diff: z11.string().optional(),
-  repository: z11.boolean().default(false),
-  pathOutput: z11.boolean().default(false)
+var CharterInputSchema = z10.object({
+  paths: z10.array(z10.string()).optional(),
+  diff: z10.string().optional(),
+  repository: z10.boolean().default(false),
+  pathOutput: z10.boolean().default(false)
 }).strict().refine(
   (input) => Number(input.paths !== void 0 && input.paths.length > 0) + Number(input.diff !== void 0) + Number(input.repository) <= 1,
   "Choose one charter selection source"
 );
-var QaInstructionsInputSchema = z11.object({ from: z11.string().optional() }).strict();
-var RfcDirectoryOutputSchema = z11.object({ path: z11.string() });
-var RfcNextIdOutputSchema = z11.object({
-  id: z11.string().regex(/^RFC-\d+$/),
-  directory: z11.string()
+var QaInstructionsInputSchema = z10.object({ from: z10.string().optional() }).strict();
+var RfcDirectoryOutputSchema = z10.object({ path: z10.string() });
+var RfcNextIdOutputSchema = z10.object({
+  id: z10.string().regex(/^RFC-\d+$/),
+  directory: z10.string()
 });
-var QaRecipeOutputSchema = z11.object({ path: z11.string() });
-var EvidenceDirectoryOutputSchema = z11.object({
-  path: z11.string(),
-  gitignored: z11.boolean().nullable()
+var QaRecipeOutputSchema = z10.object({ path: z10.string() });
+var EvidenceDirectoryOutputSchema = z10.object({
+  path: z10.string(),
+  gitignored: z10.boolean().nullable()
 });
 var rfcIdPattern = /^RFC-(\d+)\.md$/;
-var LocalDiscoveryPropsSchema = z11.object({
-  cwd: z11.string().min(1),
-  getConfig: z11.custom((value) => typeof value === "function"),
-  getConfigStore: z11.custom((value) => typeof value === "function"),
-  getCharters: z11.custom((value) => typeof value === "function"),
-  getRepositoryPaths: z11.custom((value) => typeof value === "function"),
-  getEvidence: z11.custom((value) => typeof value === "function"),
-  getReadiness: z11.custom((value) => typeof value === "function"),
-  getProbe: z11.custom((value) => typeof value === "function"),
-  getTracker: z11.custom((value) => typeof value === "function"),
-  getConfigPath: z11.custom((value) => typeof value === "function"),
-  getQaFinder: z11.custom((value) => typeof value === "function").optional()
+var LocalDiscoveryPropsSchema = z10.object({
+  cwd: z10.string().min(1),
+  getConfig: z10.custom((value) => typeof value === "function"),
+  getConfigStore: z10.custom((value) => typeof value === "function"),
+  getCharters: z10.custom((value) => typeof value === "function"),
+  getRepositoryPaths: z10.custom((value) => typeof value === "function"),
+  getEvidence: z10.custom((value) => typeof value === "function"),
+  getReadiness: z10.custom((value) => typeof value === "function"),
+  getProbe: z10.custom((value) => typeof value === "function"),
+  getTracker: z10.custom((value) => typeof value === "function"),
+  getConfigPath: z10.custom((value) => typeof value === "function"),
+  getQaFinder: z10.custom((value) => typeof value === "function").optional()
 });
 var DefaultLocalDiscoveryOperations = class {
   props;
@@ -836,11 +718,11 @@ var DefaultLocalDiscoveryOperations = class {
         ["read", "process"],
         ["charter"],
         CharterInputSchema,
-        z11.object({
-          charters: z11.array(
-            z11.object({ path: z11.string(), contents: z11.string(), language: z11.string().nullable() })
+        z10.object({
+          charters: z10.array(
+            z10.object({ path: z10.string(), contents: z10.string(), language: z10.string().nullable() })
           ),
-          unmatched: z11.boolean()
+          unmatched: z10.boolean()
         }),
         (input) => this.charter(input)
       ),
@@ -849,8 +731,8 @@ var DefaultLocalDiscoveryOperations = class {
         "Read the configured worker competencies.",
         ["read", "process"],
         ["competencies"],
-        z11.object({}),
-        z11.array(z11.string()),
+        z10.object({}),
+        z10.array(z10.string()),
         () => this.props.getConfig().competencies
       ),
       this.descriptor(
@@ -858,7 +740,7 @@ var DefaultLocalDiscoveryOperations = class {
         "Resolve the RFC directory for this checkout.",
         ["read", "process"],
         ["rfc", "dir"],
-        z11.object({}),
+        z10.object({}),
         RfcDirectoryOutputSchema,
         () => ({ path: getRfcDir(this.props.getConfig(), this.props.cwd) })
       ),
@@ -867,7 +749,7 @@ var DefaultLocalDiscoveryOperations = class {
         "Find the next RFC number in the configured RFC directory.",
         ["read", "process"],
         ["rfc", "next-id"],
-        z11.object({}),
+        z10.object({}),
         RfcNextIdOutputSchema,
         () => this.nextRfcId()
       ),
@@ -885,7 +767,7 @@ var DefaultLocalDiscoveryOperations = class {
         "Resolve the persistent evidence directory for a ticket.",
         ["read", "process"],
         ["qa", "evidence-dir"],
-        z11.object({ ticket: z11.string().min(1) }),
+        z10.object({ ticket: z10.string().min(1) }),
         EvidenceDirectoryOutputSchema,
         (input) => this.props.getEvidence().dirFor(input.ticket)
       ),
@@ -894,7 +776,7 @@ var DefaultLocalDiscoveryOperations = class {
         "Resolve the nearest QA instruction path (deprecated CLI route).",
         ["read", "process"],
         ["qa", "recipe"],
-        z11.object({}),
+        z10.object({}),
         QaRecipeOutputSchema,
         () => this.qaRecipe()
       ),
@@ -903,8 +785,8 @@ var DefaultLocalDiscoveryOperations = class {
         "Resolve the config file path for this checkout.",
         ["read", "process"],
         ["config", "path"],
-        z11.object({}),
-        z11.object({ path: z11.string() }),
+        z10.object({}),
+        z10.object({ path: z10.string() }),
         () => ({ path: this.props.getConfigStore().filePath() })
       ),
       this.descriptor(
@@ -912,7 +794,7 @@ var DefaultLocalDiscoveryOperations = class {
         "Inspect merged configuration and its sources.",
         ["read", "process"],
         ["config", "show"],
-        z11.object({}),
+        z10.object({}),
         ConfigInspectionSchema,
         () => this.props.getConfigStore().inspect()
       ),
@@ -1013,43 +895,43 @@ var BlankQaRecipeError = class extends Error {
 };
 
 // src/operations/operation-registry.ts
-import { z as z13 } from "zod";
+import { z as z12 } from "zod";
 
 // src/operations/operation.schema.ts
-import { z as z12 } from "zod";
-var OperationEffectSchema = z12.enum(["read", "write", "network", "process"]);
-var OperationIdSchema = z12.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
-var CliRouteSchema = z12.object({
-  path: z12.array(z12.string().min(1)).min(1),
-  aliases: z12.array(z12.string().min(1)).default([])
+import { z as z11 } from "zod";
+var OperationEffectSchema = z11.enum(["read", "write", "network", "process"]);
+var OperationIdSchema = z11.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
+var CliRouteSchema = z11.object({
+  path: z11.array(z11.string().min(1)).min(1),
+  aliases: z11.array(z11.string().min(1)).default([])
 });
-var OperationErrorSchema = z12.object({
-  name: z12.string().min(1),
-  message: z12.string()
+var OperationErrorSchema = z11.object({
+  name: z11.string().min(1),
+  message: z11.string()
 });
-var OperationEnvelopeSchema = z12.discriminatedUnion("status", [
-  z12.object({ status: z12.literal("success"), data: z12.unknown() }),
-  z12.object({ status: z12.literal("error"), error: OperationErrorSchema }),
-  z12.object({ status: z12.literal("partial"), data: z12.unknown(), error: OperationErrorSchema })
+var OperationEnvelopeSchema = z11.discriminatedUnion("status", [
+  z11.object({ status: z11.literal("success"), data: z11.unknown() }),
+  z11.object({ status: z11.literal("error"), error: OperationErrorSchema }),
+  z11.object({ status: z11.literal("partial"), data: z11.unknown(), error: OperationErrorSchema })
 ]);
 
 // src/operations/operation-registry.ts
-var OperationDescriptorSchema = z13.object({
+var OperationDescriptorSchema = z12.object({
   id: OperationIdSchema,
-  description: z13.string().min(1),
-  inputSchema: z13.custom((value) => value instanceof z13.ZodType),
-  outputSchema: z13.custom((value) => value instanceof z13.ZodType),
-  effects: z13.array(OperationEffectSchema),
+  description: z12.string().min(1),
+  inputSchema: z12.custom((value) => value instanceof z12.ZodType),
+  outputSchema: z12.custom((value) => value instanceof z12.ZodType),
+  effects: z12.array(OperationEffectSchema),
   cli: CliRouteSchema,
-  handler: z13.custom((value) => typeof value === "function")
+  handler: z12.custom((value) => typeof value === "function")
 });
-var OperationRegistryPropsSchema = z13.object({
-  operations: z13.array(z13.custom()),
-  policy: z13.custom().optional()
+var OperationRegistryPropsSchema = z12.object({
+  operations: z12.array(z12.custom()),
+  policy: z12.custom().optional()
 });
-var AccessPolicyPropsSchema = z13.object({
-  allowedOperationIds: z13.array(OperationIdSchema).default([]),
-  allowedEffects: z13.array(OperationEffectSchema).default([])
+var AccessPolicyPropsSchema = z12.object({
+  allowedOperationIds: z12.array(OperationIdSchema).default([]),
+  allowedEffects: z12.array(OperationEffectSchema).default([])
 });
 var LaunchOperationAccessPolicy = class {
   operationIds;
@@ -1067,13 +949,13 @@ var OperationInputShape = class {
   fieldsOf(schema) {
     let json;
     try {
-      json = z13.toJSONSchema(schema, { io: "input", unrepresentable: "any" });
+      json = z12.toJSONSchema(schema, { io: "input", unrepresentable: "any" });
     } catch {
       return [];
     }
-    const parsed = z13.object({
-      properties: z13.record(z13.string(), z13.unknown()).optional(),
-      required: z13.array(z13.string()).optional()
+    const parsed = z12.object({
+      properties: z12.record(z12.string(), z12.unknown()).optional(),
+      required: z12.array(z12.string()).optional()
     }).safeParse(json);
     if (!parsed.success) return [];
     const required = new Set(parsed.data.required ?? []);
@@ -1088,12 +970,12 @@ var OperationInputShape = class {
     return `{ ${fields.map(({ name, type, required }) => `${name}${required ? "" : "?"}: ${type}`).join(", ")} }`;
   }
   typeOf(property) {
-    const parsed = z13.object({
-      type: z13.union([z13.string(), z13.array(z13.string())]).optional(),
-      enum: z13.array(z13.unknown()).optional(),
-      const: z13.unknown().optional(),
-      items: z13.unknown().optional(),
-      anyOf: z13.array(z13.unknown()).optional()
+    const parsed = z12.object({
+      type: z12.union([z12.string(), z12.array(z12.string())]).optional(),
+      enum: z12.array(z12.unknown()).optional(),
+      const: z12.unknown().optional(),
+      items: z12.unknown().optional(),
+      anyOf: z12.array(z12.unknown()).optional()
     }).safeParse(property);
     if (!parsed.success) return "unknown";
     const { type, enum: options, items, anyOf } = parsed.data;
@@ -1180,10 +1062,10 @@ var MapOperationRegistry = class {
     }
     try {
       const output = await operation.handler(parsedInput.data);
-      const partial = z13.object({
-        status: z13.literal("partial"),
-        data: z13.unknown(),
-        error: z13.object({ name: z13.string().min(1), message: z13.string() })
+      const partial = z12.object({
+        status: z12.literal("partial"),
+        data: z12.unknown(),
+        error: z12.object({ name: z12.string().min(1), message: z12.string() })
       }).safeParse(output);
       if (partial.success) {
         const parsedPartial = operation.outputSchema.safeParse(partial.data.data);
@@ -1214,28 +1096,28 @@ var MapOperationRegistry = class {
 };
 
 // src/operations/review-operations.ts
-import { z as z20 } from "zod";
+import { z as z19 } from "zod";
 
 // src/code-review/review-policy.ts
 import { execFileSync } from "node:child_process";
 import { readFileSync as readFileSync4, realpathSync as realpathSync2 } from "node:fs";
 import { dirname as dirname4, join as join4, relative as relative2 } from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
-import { z as z15 } from "zod";
+import { z as z14 } from "zod";
 
 // src/code-review/review.schema.ts
-import { z as z14 } from "zod";
+import { z as z13 } from "zod";
 var reviewContractVersion = 1;
 var reviewSchemaRevision = 1;
-var ReviewOutcomeSchema = z14.enum(["APPROVED", "CHANGES_NEEDED", "ESCALATE", "INCOMPLETE"]);
-var FindingIdSchema = z14.string().regex(/^f-[a-f0-9]{10}$/);
-var HeadShaSchema = z14.string().regex(/^[a-f0-9]{40}$/);
-var ReviewPathSchema = z14.string().max(400).regex(/^(?!\/)(?!.*\\)(?!.*(?:^|\/)\.{1,2}(?:\/|$))[^\p{Cc}]*$/u);
-var TextSchema = z14.string().min(1).max(16e3);
-var LineTextSchema = z14.string().min(1).max(400).regex(/^[^\r\n]+$/);
-var PositiveIdSchema = z14.number().int().positive().max(Number.MAX_SAFE_INTEGER);
-var HttpsUrlSchema = z14.url().regex(/^https:\/\//);
-var CategorySchema = z14.enum([
+var ReviewOutcomeSchema = z13.enum(["APPROVED", "CHANGES_NEEDED", "ESCALATE", "INCOMPLETE"]);
+var FindingIdSchema = z13.string().regex(/^f-[a-f0-9]{10}$/);
+var HeadShaSchema = z13.string().regex(/^[a-f0-9]{40}$/);
+var ReviewPathSchema = z13.string().max(400).regex(/^(?!\/)(?!.*\\)(?!.*(?:^|\/)\.{1,2}(?:\/|$))[^\p{Cc}]*$/u);
+var TextSchema = z13.string().min(1).max(16e3);
+var LineTextSchema = z13.string().min(1).max(400).regex(/^[^\r\n]+$/);
+var PositiveIdSchema = z13.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+var HttpsUrlSchema = z13.url().regex(/^https:\/\//);
+var CategorySchema = z13.enum([
   "security",
   "correctness",
   "data",
@@ -1246,7 +1128,7 @@ var CategorySchema = z14.enum([
   "readability",
   "docs"
 ]);
-var ActionLabelSchema = z14.enum([
+var ActionLabelSchema = z13.enum([
   "issue",
   "todo",
   "suggestion",
@@ -1256,15 +1138,15 @@ var ActionLabelSchema = z14.enum([
   "typo",
   "polish"
 ]);
-var InformationLabelSchema = z14.enum(["praise", "note", "thought"]);
-var SeveritySchema = z14.enum(["critical", "major", "minor", "trivial"]);
-var DecisionOptionsSchema = z14.array(
-  z14.strictObject({ id: z14.string().regex(/^[a-z][a-z0-9-]{0,79}$/), description: TextSchema })
+var InformationLabelSchema = z13.enum(["praise", "note", "thought"]);
+var SeveritySchema = z13.enum(["critical", "major", "minor", "trivial"]);
+var DecisionOptionsSchema = z13.array(
+  z13.strictObject({ id: z13.string().regex(/^[a-z][a-z0-9-]{0,79}$/), description: TextSchema })
 ).min(2);
 var findingFields = {
   path: ReviewPathSchema,
-  line: z14.number().int().nonnegative(),
-  start_line: z14.number().int().positive().optional(),
+  line: z13.number().int().nonnegative(),
+  start_line: z13.number().int().positive().optional(),
   category: CategorySchema.optional(),
   subject: LineTextSchema,
   discussion: TextSchema,
@@ -1273,73 +1155,73 @@ var findingFields = {
 var actionFields = {
   ...findingFields,
   label: ActionLabelSchema,
-  type: z14.enum(["fix", "clarify"]),
-  blocking: z14.boolean(),
+  type: z13.enum(["fix", "clarify"]),
+  blocking: z13.boolean(),
   severity: SeveritySchema,
   details: TextSchema,
   resolved_when: TextSchema
 };
 var decisionFields = {
   ...actionFields,
-  type: z14.literal("decide"),
+  type: z13.literal("decide"),
   decision_owner: LineTextSchema,
   decision_options: DecisionOptionsSchema
 };
 var informationFields = {
   ...findingFields,
   label: InformationLabelSchema,
-  blocking: z14.literal(false),
+  blocking: z13.literal(false),
   details: TextSchema.optional()
 };
-var NewFindingSchema = z14.union([
-  z14.strictObject(actionFields),
-  z14.strictObject(decisionFields),
-  z14.strictObject(informationFields)
+var NewFindingSchema = z13.union([
+  z13.strictObject(actionFields),
+  z13.strictObject(decisionFields),
+  z13.strictObject(informationFields)
 ]);
-var ActionableFindingSchema = z14.union([
-  z14.strictObject({ ...actionFields, id: FindingIdSchema }),
-  z14.strictObject({ ...decisionFields, id: FindingIdSchema })
+var ActionableFindingSchema = z13.union([
+  z13.strictObject({ ...actionFields, id: FindingIdSchema }),
+  z13.strictObject({ ...decisionFields, id: FindingIdSchema })
 ]);
-var StoredFindingSchema = z14.union([
+var StoredFindingSchema = z13.union([
   ...ActionableFindingSchema.options,
-  z14.strictObject({ ...informationFields, id: FindingIdSchema })
+  z13.strictObject({ ...informationFields, id: FindingIdSchema })
 ]);
-var ReviewEvidenceSchema = z14.discriminatedUnion("kind", [
-  z14.strictObject({
-    kind: z14.literal("github_comment"),
+var ReviewEvidenceSchema = z13.discriminatedUnion("kind", [
+  z13.strictObject({
+    kind: z13.literal("github_comment"),
     comment_id: PositiveIdSchema,
     url: HttpsUrlSchema
   }),
-  z14.strictObject({
-    kind: z14.literal("code"),
+  z13.strictObject({
+    kind: z13.literal("code"),
     commit_sha: HeadShaSchema,
     path: ReviewPathSchema.min(1),
-    line: z14.number().int().positive()
+    line: z13.number().int().positive()
   }),
-  z14.strictObject({ kind: z14.literal("commit"), sha: HeadShaSchema }),
-  z14.strictObject({
-    kind: z14.literal("check_run"),
+  z13.strictObject({ kind: z13.literal("commit"), sha: HeadShaSchema }),
+  z13.strictObject({
+    kind: z13.literal("check_run"),
     check_run_id: PositiveIdSchema,
     commit_sha: HeadShaSchema
   }),
-  z14.strictObject({ kind: z14.literal("document"), url: HttpsUrlSchema }),
-  z14.strictObject({
-    kind: z14.literal("verification"),
+  z13.strictObject({ kind: z13.literal("document"), url: HttpsUrlSchema }),
+  z13.strictObject({
+    kind: z13.literal("verification"),
     commit_sha: HeadShaSchema,
     command: TextSchema,
-    result: z14.literal("passed"),
+    result: z13.literal("passed"),
     report_url: HttpsUrlSchema
   }),
-  z14.strictObject({
-    kind: z14.literal("thread_resolution"),
-    thread_id: z14.string().min(1),
+  z13.strictObject({
+    kind: z13.literal("thread_resolution"),
+    thread_id: z13.string().min(1),
     author_id: PositiveIdSchema
   })
 ]);
-var DecisionAnswerSchema = z14.strictObject({
+var DecisionAnswerSchema = z13.strictObject({
   comment_id: PositiveIdSchema,
   author_id: PositiveIdSchema,
-  option_id: z14.string().min(1)
+  option_id: z13.string().min(1)
 });
 var transitionFields = {
   id: FindingIdSchema,
@@ -1347,81 +1229,81 @@ var transitionFields = {
   reply: TextSchema.optional(),
   decision: DecisionAnswerSchema.optional()
 };
-var PriorFindingSchema = z14.union([
-  z14.strictObject({
+var PriorFindingSchema = z13.union([
+  z13.strictObject({
     ...transitionFields,
-    status: z14.literal("resolved"),
-    evidence: z14.array(ReviewEvidenceSchema).min(1)
+    status: z13.literal("resolved"),
+    evidence: z13.array(ReviewEvidenceSchema).min(1)
   }),
-  z14.strictObject({
+  z13.strictObject({
     ...transitionFields,
-    status: z14.literal("withdrawn"),
-    evidence: z14.array(ReviewEvidenceSchema).min(1),
-    withdrawal_basis: z14.enum(["incorrect", "no_longer_applicable", "dismissed"])
+    status: z13.literal("withdrawn"),
+    evidence: z13.array(ReviewEvidenceSchema).min(1),
+    withdrawal_basis: z13.enum(["incorrect", "no_longer_applicable", "dismissed"])
   }),
-  z14.strictObject({
+  z13.strictObject({
     ...transitionFields,
-    status: z14.literal("still_open"),
-    evidence: z14.array(ReviewEvidenceSchema).optional(),
+    status: z13.literal("still_open"),
+    evidence: z13.array(ReviewEvidenceSchema).optional(),
     updated_finding: ActionableFindingSchema.optional()
   })
 ]);
 var reviewFields = {
-  contract_version: z14.literal(reviewContractVersion),
-  schema_revision: z14.literal(reviewSchemaRevision),
+  contract_version: z13.literal(reviewContractVersion),
+  schema_revision: z13.literal(reviewSchemaRevision),
   head_sha: HeadShaSchema,
-  review_complete: z14.boolean(),
-  incomplete_reason: z14.string().max(16e3).optional(),
+  review_complete: z13.boolean(),
+  incomplete_reason: z13.string().max(16e3).optional(),
   summary: TextSchema,
   outcome: ReviewOutcomeSchema,
   outcome_reason: TextSchema,
   remaining_risk: TextSchema,
-  extensions: z14.record(z14.string(), z14.json()).optional()
+  extensions: z13.record(z13.string(), z13.json()).optional()
 };
-var ReviewSchema = z14.strictObject({
+var ReviewSchema = z13.strictObject({
   ...reviewFields,
-  findings: z14.array(NewFindingSchema),
-  prior_findings: z14.array(PriorFindingSchema)
+  findings: z13.array(NewFindingSchema),
+  prior_findings: z13.array(PriorFindingSchema)
 });
-var FindingRecordSchema = z14.strictObject({
-  v: z14.literal(reviewContractVersion),
-  schema_revision: z14.literal(reviewSchemaRevision),
+var FindingRecordSchema = z13.strictObject({
+  v: z13.literal(reviewContractVersion),
+  schema_revision: z13.literal(reviewSchemaRevision),
   finding: ActionableFindingSchema,
-  status: z14.enum(["open", "resolved", "withdrawn"]),
-  evidence: z14.array(ReviewEvidenceSchema),
+  status: z13.enum(["open", "resolved", "withdrawn"]),
+  evidence: z13.array(ReviewEvidenceSchema),
   decision: DecisionAnswerSchema.optional()
 });
-var ReviewStateSchema = z14.strictObject({
-  v: z14.literal(reviewContractVersion),
-  schema_revision: z14.literal(reviewSchemaRevision),
+var ReviewStateSchema = z13.strictObject({
+  v: z13.literal(reviewContractVersion),
+  schema_revision: z13.literal(reviewSchemaRevision),
   sha: HeadShaSchema,
   outcome: ReviewOutcomeSchema,
-  records: z14.array(
-    z14.union([
-      z14.strictObject({
+  records: z13.array(
+    z13.union([
+      z13.strictObject({
         id: FindingIdSchema,
-        status: z14.enum(["open", "resolved", "withdrawn"]),
-        location: z14.union([
-          z14.strictObject({ kind: z14.literal("review_comment"), comment_id: PositiveIdSchema }),
-          z14.strictObject({ kind: z14.literal("review_body"), review_id: PositiveIdSchema })
+        status: z13.enum(["open", "resolved", "withdrawn"]),
+        location: z13.union([
+          z13.strictObject({ kind: z13.literal("review_comment"), comment_id: PositiveIdSchema }),
+          z13.strictObject({ kind: z13.literal("review_body"), review_id: PositiveIdSchema })
         ])
       }),
-      z14.strictObject({
+      z13.strictObject({
         id: FindingIdSchema,
-        status: z14.literal("informational"),
-        fingerprint: z14.string().min(1),
-        finding: z14.strictObject({ ...informationFields, id: FindingIdSchema }).optional()
+        status: z13.literal("informational"),
+        fingerprint: z13.string().min(1),
+        finding: z13.strictObject({ ...informationFields, id: FindingIdSchema }).optional()
       })
     ])
   )
 });
-var TransportReviewSchema = z14.strictObject({
+var TransportReviewSchema = z13.strictObject({
   ...reviewFields,
-  findings: z14.array(
-    z14.strictObject({
+  findings: z13.array(
+    z13.strictObject({
       ...actionFields,
-      type: z14.enum(["fix", "clarify", "decide"]).optional(),
-      label: z14.enum([...ActionLabelSchema.options, ...InformationLabelSchema.options]),
+      type: z13.enum(["fix", "clarify", "decide"]).optional(),
+      label: z13.enum([...ActionLabelSchema.options, ...InformationLabelSchema.options]),
       severity: SeveritySchema.optional(),
       details: TextSchema.optional(),
       resolved_when: TextSchema.optional(),
@@ -1429,27 +1311,27 @@ var TransportReviewSchema = z14.strictObject({
       decision_options: DecisionOptionsSchema.optional()
     })
   ),
-  prior_findings: z14.array(
-    z14.strictObject({
+  prior_findings: z13.array(
+    z13.strictObject({
       ...transitionFields,
-      status: z14.enum(["resolved", "still_open", "withdrawn"]),
-      evidence: z14.array(ReviewEvidenceSchema).optional(),
-      withdrawal_basis: z14.enum(["incorrect", "no_longer_applicable", "dismissed"]).optional(),
+      status: z13.enum(["resolved", "still_open", "withdrawn"]),
+      evidence: z13.array(ReviewEvidenceSchema).optional(),
+      withdrawal_basis: z13.enum(["incorrect", "no_longer_applicable", "dismissed"]).optional(),
       updated_finding: StoredFindingSchema.optional()
     })
   )
 });
 
 // src/code-review/review-policy.ts
-var ReviewPolicyPropsSchema = z15.strictObject({
-  home: z15.string().min(1).optional(),
-  env: z15.custom(
+var ReviewPolicyPropsSchema = z14.strictObject({
+  home: z14.string().min(1).optional(),
+  env: z14.custom(
     (value) => typeof value === "object" && value !== null && !Array.isArray(value)
   ).optional()
 });
-var LoadPolicyPropsSchema = z15.strictObject({ paths: z15.array(z15.string()).optional() });
-var RepositoryContextPropsSchema = z15.strictObject({
-  cwd: z15.string().min(1),
+var LoadPolicyPropsSchema = z14.strictObject({ paths: z14.array(z14.string()).optional() });
+var RepositoryContextPropsSchema = z14.strictObject({
+  cwd: z14.string().min(1),
   trustedRef: HeadShaSchema,
   contextPath: ReviewPathSchema.min(1).default("CODE-REVIEW.md")
 });
@@ -1535,10 +1417,10 @@ var ReviewPolicyError = class extends Error {
 // src/code-review/github-review-verifier.ts
 import { execFile as execFile2 } from "node:child_process";
 import { promisify as promisify2 } from "node:util";
-import { z as z16 } from "zod";
-var GhReviewGitHubApiPropsSchema = z16.strictObject({
-  cwd: z16.string().min(1).optional(),
-  env: z16.custom(
+import { z as z15 } from "zod";
+var GhReviewGitHubApiPropsSchema = z15.strictObject({
+  cwd: z15.string().min(1).optional(),
+  env: z15.custom(
     (value) => typeof value === "object" && value !== null && !Array.isArray(value)
   ).optional()
 });
@@ -1574,20 +1456,20 @@ var GhReviewGitHubApi = class {
     return JSON.parse(stdout);
   }
 };
-var GitHubReviewVerifierPropsSchema = z16.strictObject({
-  repo: z16.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
-  prNumber: z16.number().int().positive(),
-  prAuthorId: z16.number().int().positive(),
-  owners: z16.record(z16.string(), z16.array(z16.string().min(1))).default({}),
-  requireMapping: z16.boolean().default(false)
+var GitHubReviewVerifierPropsSchema = z15.strictObject({
+  repo: z15.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
+  prNumber: z15.number().int().positive(),
+  prAuthorId: z15.number().int().positive(),
+  owners: z15.record(z15.string(), z15.array(z15.string().min(1))).default({}),
+  requireMapping: z15.boolean().default(false)
 });
-var UserSchema = z16.looseObject({ id: z16.number(), login: z16.string(), type: z16.string() });
-var CommentSchema = z16.looseObject({
-  id: z16.number(),
+var UserSchema = z15.looseObject({ id: z15.number(), login: z15.string(), type: z15.string() });
+var CommentSchema = z15.looseObject({
+  id: z15.number(),
   user: UserSchema,
-  issue_url: z16.string().optional(),
-  pull_request_url: z16.string().optional(),
-  body: z16.string()
+  issue_url: z15.string().optional(),
+  pull_request_url: z15.string().optional(),
+  body: z15.string()
 });
 var GitHubReviewVerifier = class {
   props;
@@ -1608,10 +1490,10 @@ var GitHubReviewVerifier = class {
     if (evidence.kind === "commit") return this.reaches(evidence.sha, headSha);
     if (evidence.kind === "check_run") {
       if (evidence.commit_sha !== headSha) return false;
-      const check = z16.looseObject({
-        head_sha: z16.string(),
-        status: z16.string(),
-        conclusion: z16.string().nullable()
+      const check = z15.looseObject({
+        head_sha: z15.string(),
+        status: z15.string(),
+        conclusion: z15.string().nullable()
       }).parse(await this.api.get(`/repos/${this.props.repo}/check-runs/${evidence.check_run_id}`));
       return check.head_sha === headSha && check.status === "completed" && check.conclusion === "success";
     }
@@ -1628,7 +1510,7 @@ var GitHubReviewVerifier = class {
     if (owners !== void 0)
       return owners.some((login) => login.toLowerCase() === comment.user.login.toLowerCase());
     if (this.props.requireMapping || comment.user.id === this.props.prAuthorId) return false;
-    const permission = z16.looseObject({ permission: z16.string() }).parse(
+    const permission = z15.looseObject({ permission: z15.string() }).parse(
       await this.api.get(
         `/repos/${this.props.repo}/collaborators/${encodeURIComponent(comment.user.login)}/permission`
       )
@@ -1638,14 +1520,14 @@ var GitHubReviewVerifier = class {
   async dismissal(evidence) {
     if (evidence.kind !== "thread_resolution" || evidence.author_id === this.props.prAuthorId)
       return false;
-    const result = z16.looseObject({
-      data: z16.looseObject({
-        node: z16.looseObject({
-          isResolved: z16.boolean(),
-          resolvedBy: z16.looseObject({ databaseId: z16.number(), actorType: z16.string() }).nullable(),
-          pullRequest: z16.looseObject({
-            number: z16.number(),
-            repository: z16.looseObject({ nameWithOwner: z16.string() })
+    const result = z15.looseObject({
+      data: z15.looseObject({
+        node: z15.looseObject({
+          isResolved: z15.boolean(),
+          resolvedBy: z15.looseObject({ databaseId: z15.number(), actorType: z15.string() }).nullable(),
+          pullRequest: z15.looseObject({
+            number: z15.number(),
+            repository: z15.looseObject({ nameWithOwner: z15.string() })
           })
         }).nullable()
       })
@@ -1661,12 +1543,12 @@ var GitHubReviewVerifier = class {
   /** True when `sha` is the head or an ancestor of it, so the head contains that commit. */
   async reaches(sha, headSha) {
     if (sha === headSha) return true;
-    const comparison = z16.looseObject({ status: z16.string() }).parse(await this.api.get(`/repos/${this.props.repo}/compare/${sha}...${headSha}`));
+    const comparison = z15.looseObject({ status: z15.string() }).parse(await this.api.get(`/repos/${this.props.repo}/compare/${sha}...${headSha}`));
     return ["ahead", "identical"].includes(comparison.status);
   }
   /** True when `ref` has `path` as a file with at least `line` lines. */
   async hasLine(path, line, ref) {
-    const file = z16.looseObject({ type: z16.string(), encoding: z16.string(), content: z16.string() }).parse(
+    const file = z15.looseObject({ type: z15.string(), encoding: z15.string(), content: z15.string() }).parse(
       await this.api.get(
         `/repos/${this.props.repo}/contents/${path.split("/").map(encodeURIComponent).join("/")}?ref=${ref}`
       )
@@ -1700,10 +1582,10 @@ var GitHubReviewVerifier = class {
 
 // src/code-review/review-planner.ts
 import { randomBytes } from "node:crypto";
-import { z as z18 } from "zod";
+import { z as z17 } from "zod";
 
 // src/code-review/review-contract.ts
-import { z as z17 } from "zod";
+import { z as z16 } from "zod";
 var InvalidReviewError = class extends Error {
   name = "InvalidReviewError";
 };
@@ -1761,8 +1643,8 @@ var ZodReviewContract = class {
   }
   schemas() {
     return {
-      full: z17.toJSONSchema(ReviewSchema, { target: "draft-07" }),
-      transport: z17.toJSONSchema(TransportReviewSchema, { target: "draft-07" })
+      full: z16.toJSONSchema(ReviewSchema, { target: "draft-07" }),
+      transport: z16.toJSONSchema(TransportReviewSchema, { target: "draft-07" })
     };
   }
   normalize(finding) {
@@ -1928,19 +1810,19 @@ var EvidenceReviewPlanner = class {
     return "APPROVED";
   }
 };
-var ValidatedEvidencePropsSchema = z18.strictObject({
-  verified: z18.array(z18.string()),
-  authorizedDecisions: z18.array(z18.string()),
-  dismissals: z18.array(z18.string())
+var ValidatedEvidencePropsSchema = z17.strictObject({
+  verified: z17.array(z17.string()),
+  authorizedDecisions: z17.array(z17.string()),
+  dismissals: z17.array(z17.string())
 });
 
 // src/code-review/review-codec.ts
 import { createHash } from "node:crypto";
-import { z as z19 } from "zod";
-var MarkerInputSchema = z19.strictObject({
-  body: z19.string(),
-  authorId: z19.number().int().positive(),
-  trustedAuthorIds: z19.array(z19.number().int().positive())
+import { z as z18 } from "zod";
+var MarkerInputSchema = z18.strictObject({
+  body: z18.string(),
+  authorId: z18.number().int().positive(),
+  trustedAuthorIds: z18.array(z18.number().int().positive())
 });
 var JsonReviewCodec = class {
   finding(record) {
@@ -2017,71 +1899,71 @@ ${this.finding(validated)}`;
 };
 
 // src/operations/review-operations.ts
-var ReviewOperationsLaunchPropsSchema = z20.strictObject({
-  cwd: z20.string().min(1).optional(),
+var ReviewOperationsLaunchPropsSchema = z19.strictObject({
+  cwd: z19.string().min(1).optional(),
   trustedRef: HeadShaSchema.optional(),
-  owners: z20.record(z20.string(), z20.array(z20.string().min(1))).default({}),
-  requireMapping: z20.boolean().default(false)
+  owners: z19.record(z19.string(), z19.array(z19.string().min(1))).default({}),
+  requireMapping: z19.boolean().default(false)
 });
 var ReviewOperationsPropsSchema = ReviewOperationsLaunchPropsSchema.extend({
-  cwd: z20.string().min(1),
-  env: z20.custom(
+  cwd: z19.string().min(1),
+  env: z19.custom(
     (value) => typeof value === "object" && value !== null && !Array.isArray(value)
   ).optional(),
-  policy: z20.custom(
+  policy: z19.custom(
     (value) => typeof value === "object" && value !== null && "repository" in value && "load" in value
   ).optional(),
-  api: z20.custom(
+  api: z19.custom(
     (value) => typeof value === "object" && value !== null && "get" in value && "graphql" in value
   ).optional()
 });
-var JsonValueSchema = z20.json();
-var schemaInput = z20.strictObject({ transport: z20.boolean().default(false) });
-var reviewInput = z20.strictObject({ review: JsonValueSchema });
+var JsonValueSchema = z19.json();
+var schemaInput = z19.strictObject({ transport: z19.boolean().default(false) });
+var reviewInput = z19.strictObject({ review: JsonValueSchema });
 var reviewOutput = ReviewSchema;
-var stateInput = z20.strictObject({ state: JsonValueSchema });
-var stateOutput = z20.string();
-var contextInput = z20.strictObject({
-  contextPath: z20.string().min(1).default("CODE-REVIEW.md")
+var stateInput = z19.strictObject({ state: JsonValueSchema });
+var stateOutput = z19.string();
+var contextInput = z19.strictObject({
+  contextPath: z19.string().min(1).default("CODE-REVIEW.md")
 });
-var contextOutput = z20.object({
+var contextOutput = z19.object({
   trustedRef: HeadShaSchema,
-  contextPath: z20.string(),
-  sources: z20.array(z20.object({ path: z20.string(), contents: z20.string() })),
-  missing: z20.array(z20.string())
+  contextPath: z19.string(),
+  sources: z19.array(z19.object({ path: z19.string(), contents: z19.string() })),
+  missing: z19.array(z19.string())
 });
-var planInput = z20.strictObject({
-  number: z20.number().int().positive(),
-  repo: z20.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
+var planInput = z19.strictObject({
+  number: z19.number().int().positive(),
+  repo: z19.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
   review: JsonValueSchema,
-  records: z20.array(JsonValueSchema)
+  records: z19.array(JsonValueSchema)
 });
-var renderInput = z20.strictObject({
+var renderInput = z19.strictObject({
   review: JsonValueSchema,
-  records: z20.array(FindingRecordSchema),
-  outcome: z20.string(),
-  problems: z20.array(z20.string())
+  records: z19.array(FindingRecordSchema),
+  outcome: z19.string(),
+  problems: z19.array(z19.string())
 });
-var renderOutput = z20.object({
-  headSha: z20.string(),
-  outcome: z20.string(),
-  problems: z20.array(z20.string()),
-  findings: z20.array(
-    z20.object({
-      id: z20.string(),
-      status: z20.string(),
-      path: z20.string(),
-      line: z20.number(),
-      body: z20.string()
+var renderOutput = z19.object({
+  headSha: z19.string(),
+  outcome: z19.string(),
+  problems: z19.array(z19.string()),
+  findings: z19.array(
+    z19.object({
+      id: z19.string(),
+      status: z19.string(),
+      path: z19.string(),
+      line: z19.number(),
+      body: z19.string()
     })
   )
 });
-var planOutput = z20.object({
+var planOutput = z19.object({
   review: ReviewSchema,
-  records: z20.array(FindingRecordSchema),
-  informational: z20.array(StoredFindingSchema),
-  outcome: z20.enum(["APPROVED", "CHANGES_NEEDED", "ESCALATE", "INCOMPLETE"]),
-  problems: z20.array(z20.string())
+  records: z19.array(FindingRecordSchema),
+  informational: z19.array(StoredFindingSchema),
+  outcome: z19.enum(["APPROVED", "CHANGES_NEEDED", "ESCALATE", "INCOMPLETE"]),
+  problems: z19.array(z19.string())
 });
 var MissingTrustedReviewRefError = class extends Error {
   name = "MissingTrustedReviewRefError";
@@ -2186,9 +2068,9 @@ var DefaultReviewOperations = class {
         planInput,
         planOutput,
         async ({ number, repo, review, records }) => {
-          const pullRequest = z20.looseObject({
-            head: z20.looseObject({ sha: HeadShaSchema }),
-            user: z20.looseObject({ id: z20.number().int().positive() })
+          const pullRequest = z19.looseObject({
+            head: z19.looseObject({ sha: HeadShaSchema }),
+            user: z19.looseObject({ id: z19.number().int().positive() })
           }).parse(await this.api.get(`/repos/${repo}/pulls/${number}`));
           const planner = new EvidenceReviewPlanner({
             verifier: new GitHubReviewVerifier({
@@ -2221,17 +2103,17 @@ var DefaultReviewOperations = class {
 // src/operations/tracker-entity-operations.ts
 import { existsSync as existsSync5, realpathSync as realpathSync5, statSync as statSync5 } from "node:fs";
 import { isAbsolute as isAbsolute4, relative as relative4, resolve as resolve6 } from "node:path";
-import { z as z25 } from "zod";
+import { z as z24 } from "zod";
 
 // src/tasks/evidence/evidence.ts
 import { realpathSync as realpathSync3 } from "node:fs";
 import { basename } from "node:path/posix";
-import { z as z21 } from "zod";
+import { z as z20 } from "zod";
 var mediaReference = /(!?)\[([^\]]*)\]\(\s*<?([^\s()<>]+)>?(?:\s+"[^"]*")?\s*\)/g;
 var absoluteTarget = /^[a-zA-Z][a-zA-Z0-9+.-]*:|^\/\/|^#/;
 var localPrefix = /^(?:\.\/)+/;
 var fenceRun2 = /^ {0,3}(`{3,}|~{3,})(.*)$/;
-var AttachmentSpecSchema = z21.string().min(1).transform((spec) => {
+var AttachmentSpecSchema = z20.string().min(1).transform((spec) => {
   const hash = spec.lastIndexOf("#");
   const path = hash > 0 ? spec.slice(0, hash) : spec;
   const caption = hash > 0 ? spec.slice(hash + 1).trim() : "";
@@ -2437,123 +2319,123 @@ A tracker body must stand on its own for an engineer on a fresh clone. Inline th
 var portableContextGuard = new RegexPortableContextGuard();
 
 // src/tasks/task-tracker/task-tracker.ts
-import { z as z22 } from "zod";
-var TrackerUserSchema = z22.object({
-  accountId: z22.string(),
-  displayName: z22.string()
+import { z as z21 } from "zod";
+var TrackerUserSchema = z21.object({
+  accountId: z21.string(),
+  displayName: z21.string()
 });
-var EntityMetadataSchema = z22.object({
-  tddId: z22.number().optional(),
-  epicId: z22.number().optional(),
-  notes: z22.string().optional(),
+var EntityMetadataSchema = z21.object({
+  tddId: z21.number().optional(),
+  epicId: z21.number().optional(),
+  notes: z21.string().optional(),
   /** Explicit body-format override read first by BodyFormatDetector (docs/bug-report-format.md). */
-  kind: z22.enum(["bug", "story"]).optional(),
+  kind: z21.enum(["bug", "story"]).optional(),
   /** Why a blocked-by edge leaves this ticket's epic, keyed by blocker id (docs/epic-boundaries.md). */
-  crossEpicReasons: z22.record(z22.string(), z22.string()).optional()
+  crossEpicReasons: z21.record(z21.string(), z21.string()).optional()
 }).passthrough();
-var CommentSchema2 = z22.object({
-  id: z22.string(),
-  body: z22.string(),
-  author: z22.string(),
-  createdAt: z22.string(),
-  updatedAt: z22.string()
+var CommentSchema2 = z21.object({
+  id: z21.string(),
+  body: z21.string(),
+  author: z21.string(),
+  createdAt: z21.string(),
+  updatedAt: z21.string()
 });
-var AttachmentSchema = z22.object({
-  id: z22.string(),
-  filename: z22.string(),
-  mimeType: z22.string(),
-  size: z22.number().optional(),
-  mediaUuid: z22.string().optional()
+var AttachmentSchema = z21.object({
+  id: z21.string(),
+  filename: z21.string(),
+  mimeType: z21.string(),
+  size: z21.number().optional(),
+  mediaUuid: z21.string().optional()
 });
-var TechnicalDesignSchema = z22.object({
-  id: z22.string(),
-  epicId: z22.string(),
-  url: z22.string().optional(),
-  body: z22.string(),
-  comments: z22.array(CommentSchema2),
+var TechnicalDesignSchema = z21.object({
+  id: z21.string(),
+  epicId: z21.string(),
+  url: z21.string().optional(),
+  body: z21.string(),
+  comments: z21.array(CommentSchema2),
   metadata: EntityMetadataSchema.default({}),
-  updatedAt: z22.string()
+  updatedAt: z21.string()
 });
-var TicketSchema = z22.object({
-  id: z22.string(),
-  size: z22.literal("ticket"),
-  status: z22.string(),
-  labels: z22.array(z22.string()),
-  title: z22.string(),
-  body: z22.string(),
-  comments: z22.array(CommentSchema2),
-  assignee: z22.string().nullable(),
-  attachments: z22.array(AttachmentSchema).default([]),
-  reporter: z22.string().nullable().default(null),
-  issueType: z22.string().default("unknown"),
-  blockedBy: z22.array(z22.string()).default([]),
-  blocking: z22.array(z22.string()).default([]),
+var TicketSchema = z21.object({
+  id: z21.string(),
+  size: z21.literal("ticket"),
+  status: z21.string(),
+  labels: z21.array(z21.string()),
+  title: z21.string(),
+  body: z21.string(),
+  comments: z21.array(CommentSchema2),
+  assignee: z21.string().nullable(),
+  attachments: z21.array(AttachmentSchema).default([]),
+  reporter: z21.string().nullable().default(null),
+  issueType: z21.string().default("unknown"),
+  blockedBy: z21.array(z21.string()).default([]),
+  blocking: z21.array(z21.string()).default([]),
   metadata: EntityMetadataSchema.default({}),
-  updatedAt: z22.string()
+  updatedAt: z21.string()
 });
-var EpicSchema = z22.object({
-  id: z22.string(),
-  size: z22.literal("epic"),
-  status: z22.string(),
-  labels: z22.array(z22.string()),
-  title: z22.string(),
-  body: z22.string(),
-  childIssues: z22.array(TicketSchema),
-  comments: z22.array(CommentSchema2),
+var EpicSchema = z21.object({
+  id: z21.string(),
+  size: z21.literal("epic"),
+  status: z21.string(),
+  labels: z21.array(z21.string()),
+  title: z21.string(),
+  body: z21.string(),
+  childIssues: z21.array(TicketSchema),
+  comments: z21.array(CommentSchema2),
   tdd: TechnicalDesignSchema.optional(),
   metadata: EntityMetadataSchema.default({}),
-  updatedAt: z22.string()
+  updatedAt: z21.string()
 });
-var CreateEpicInputSchema = z22.object({
-  title: z22.string(),
-  body: z22.string(),
-  labels: z22.array(z22.string()).default([]),
+var CreateEpicInputSchema = z21.object({
+  title: z21.string(),
+  body: z21.string(),
+  labels: z21.array(z21.string()).default([]),
   metadata: EntityMetadataSchema.partial().optional()
 });
-var CreateTicketInputSchema = z22.object({
-  title: z22.string(),
-  body: z22.string(),
+var CreateTicketInputSchema = z21.object({
+  title: z21.string(),
+  body: z21.string(),
   /** Absent for a standalone ticket: a ticket-sized RFC has no epic to parent to. */
-  epicId: z22.string().optional(),
-  labels: z22.array(z22.string()).default([]),
-  assignee: z22.string().optional(),
+  epicId: z21.string().optional(),
+  labels: z21.array(z21.string()).default([]),
+  assignee: z21.string().optional(),
   metadata: EntityMetadataSchema.partial().optional()
 });
-var CreateTechnicalDesignInputSchema = z22.object({
-  title: z22.string(),
-  body: z22.string(),
-  epicId: z22.string(),
+var CreateTechnicalDesignInputSchema = z21.object({
+  title: z21.string(),
+  body: z21.string(),
+  epicId: z21.string(),
   metadata: EntityMetadataSchema.partial().optional()
 });
-var UpdateEpicInputSchema = z22.object({
-  body: z22.string(),
-  title: z22.string().optional(),
-  labels: z22.array(z22.string()).optional()
+var UpdateEpicInputSchema = z21.object({
+  body: z21.string(),
+  title: z21.string().optional(),
+  labels: z21.array(z21.string()).optional()
 });
-var UpdateTicketInputSchema = z22.object({
-  body: z22.string(),
-  title: z22.string().optional(),
-  labels: z22.array(z22.string()).optional()
+var UpdateTicketInputSchema = z21.object({
+  body: z21.string(),
+  title: z21.string().optional(),
+  labels: z21.array(z21.string()).optional()
 });
-var UpdateInitiativeInputSchema = z22.object({
-  body: z22.string(),
-  title: z22.string().optional()
+var UpdateInitiativeInputSchema = z21.object({
+  body: z21.string(),
+  title: z21.string().optional()
 });
-var InitiativeSchema = z22.object({
-  id: z22.string(),
-  size: z22.literal("initiative"),
-  title: z22.string(),
-  body: z22.string(),
-  epics: z22.array(z22.object({ id: z22.string(), title: z22.string() })).default([])
+var InitiativeSchema = z21.object({
+  id: z21.string(),
+  size: z21.literal("initiative"),
+  title: z21.string(),
+  body: z21.string(),
+  epics: z21.array(z21.object({ id: z21.string(), title: z21.string() })).default([])
 });
-var CreateInitiativeInputSchema = z22.object({
-  title: z22.string(),
-  body: z22.string()
+var CreateInitiativeInputSchema = z21.object({
+  title: z21.string(),
+  body: z21.string()
 });
-var partialWriteErrorSchema = z22.object({
-  name: z22.literal("TaskTrackerPartialWriteError"),
-  id: z22.string().min(1),
-  message: z22.string()
+var partialWriteErrorSchema = z21.object({
+  name: z21.literal("TaskTrackerPartialWriteError"),
+  id: z21.string().min(1),
+  message: z21.string()
 });
 var TaskTrackerPartialWriteError = class extends Error {
   name = "TaskTrackerPartialWriteError";
@@ -2571,7 +2453,7 @@ var TaskTrackerPartialWriteError = class extends Error {
 };
 
 // src/operations/tracker-read-operations.ts
-import { z as z23 } from "zod";
+import { z as z22 } from "zod";
 
 // src/tasks/epic-boundary/epic-boundary.ts
 var TrackerRefFormatter = class {
@@ -3031,10 +2913,10 @@ var PrecedenceBodyFormatDetector = class {
 var bodyFormatDetector = new PrecedenceBodyFormatDetector();
 
 // src/operations/tracker-read-operations.ts
-var propsSchema = z23.object({
-  getTracker: z23.custom((value) => typeof value === "function"),
-  getPrHost: z23.custom((value) => typeof value === "function").optional(),
-  getConfig: z23.custom((value) => typeof value === "function").optional()
+var propsSchema = z22.object({
+  getTracker: z22.custom((value) => typeof value === "function"),
+  getPrHost: z22.custom((value) => typeof value === "function").optional(),
+  getConfig: z22.custom((value) => typeof value === "function").optional()
 });
 var sectionNames = [
   "problem-statement",
@@ -3052,73 +2934,73 @@ var sectionNames = [
   "reproduction-notes"
 ];
 var sectionNameSet = new Set(sectionNames);
-var sectionName = z23.string().refine(
+var sectionName = z22.string().refine(
   (value) => sectionNameSet.has(value),
   `unknown section \u2014 expected one of: ${sectionNames.join(", ")}`
 );
-var entityInput = z23.strictObject({ id: z23.string().min(1) });
+var entityInput = z22.strictObject({ id: z22.string().min(1) });
 var ticketInput = entityInput.extend({
   section: sectionName.optional()
 });
 var ticketResult = TicketSchema.passthrough();
-var epicResult = EpicSchema.extend({ childIssues: z23.array(ticketResult) }).passthrough();
+var epicResult = EpicSchema.extend({ childIssues: z22.array(ticketResult) }).passthrough();
 var initiativeResult = InitiativeSchema.extend({
-  epics: z23.array(z23.object({ id: z23.string(), title: z23.string() }).passthrough())
+  epics: z22.array(z22.object({ id: z22.string(), title: z22.string() }).passthrough())
 }).passthrough();
 var tddResult = TechnicalDesignSchema.passthrough();
-var sectionResult = z23.object({
-  id: z23.string(),
-  section: z23.string(),
-  format: z23.enum(["layered-body", "bug-report"]),
-  markdown: z23.string().nullable(),
-  items: z23.array(z23.object({ text: z23.string(), done: z23.boolean() })).optional()
+var sectionResult = z22.object({
+  id: z22.string(),
+  section: z22.string(),
+  format: z22.enum(["layered-body", "bug-report"]),
+  markdown: z22.string().nullable(),
+  items: z22.array(z22.object({ text: z22.string(), done: z22.boolean() })).optional()
 });
-var edgeResult = z23.object({
-  ticket: z23.string(),
-  ticketEpic: z23.string(),
-  blockedBy: z23.string(),
-  blockerEpic: z23.string().nullable(),
-  justification: z23.string().nullable()
+var edgeResult = z22.object({
+  ticket: z22.string(),
+  ticketEpic: z22.string(),
+  blockedBy: z22.string(),
+  blockerEpic: z22.string().nullable(),
+  justification: z22.string().nullable()
 });
-var planTicket = z23.object({
-  id: z23.string(),
-  status: z23.string(),
-  blockedBy: z23.array(z23.string()),
-  epicId: z23.string().optional()
+var planTicket = z22.object({
+  id: z22.string(),
+  status: z22.string(),
+  blockedBy: z22.array(z22.string()),
+  epicId: z22.string().optional()
 });
-var dependencyPlan = z23.object({
-  waves: z23.array(z23.array(planTicket)),
-  cycles: z23.array(z23.string())
+var dependencyPlan = z22.object({
+  waves: z22.array(z22.array(planTicket)),
+  cycles: z22.array(z22.string())
 });
 var TrackerDependencyPlanSchema = dependencyPlan.extend({
-  crossEpicEdges: z23.array(edgeResult),
-  warnings: z23.array(z23.string())
+  crossEpicEdges: z22.array(edgeResult),
+  warnings: z22.array(z22.string())
 });
-var TrackerReviewPlanSchema = z23.object({
-  epic: z23.object({ id: z23.string(), title: z23.string() }).optional(),
-  initiative: z23.object({ id: z23.string(), title: z23.string() }).optional(),
-  defaultBranch: z23.string(),
-  route: z23.enum(["simple", "complex", "incomplete"]),
-  reasons: z23.array(z23.string()),
-  missing: z23.array(z23.string()),
-  blocked: z23.array(
-    z23.object({
-      ticketId: z23.string(),
-      title: z23.string(),
-      wave: z23.number(),
-      blockedBy: z23.array(z23.string()),
-      pr: z23.object({
-        number: z23.number(),
-        url: z23.string(),
-        headRefName: z23.string(),
-        baseRefName: z23.string()
+var TrackerReviewPlanSchema = z22.object({
+  epic: z22.object({ id: z22.string(), title: z22.string() }).optional(),
+  initiative: z22.object({ id: z22.string(), title: z22.string() }).optional(),
+  defaultBranch: z22.string(),
+  route: z22.enum(["simple", "complex", "incomplete"]),
+  reasons: z22.array(z22.string()),
+  missing: z22.array(z22.string()),
+  blocked: z22.array(
+    z22.object({
+      ticketId: z22.string(),
+      title: z22.string(),
+      wave: z22.number(),
+      blockedBy: z22.array(z22.string()),
+      pr: z22.object({
+        number: z22.number(),
+        url: z22.string(),
+        headRefName: z22.string(),
+        baseRefName: z22.string()
       }).nullable()
     })
   ),
-  unblocksOnMerge: z23.array(z23.string()),
-  crossEpicEdges: z23.array(edgeResult),
-  warnings: z23.array(z23.string()),
-  cycles: z23.array(z23.string())
+  unblocksOnMerge: z22.array(z22.string()),
+  crossEpicEdges: z22.array(edgeResult),
+  warnings: z22.array(z22.string()),
+  cycles: z22.array(z22.string())
 });
 var DefaultTrackerReadOperations = class {
   props;
@@ -3133,7 +3015,7 @@ var DefaultTrackerReadOperations = class {
         ["read", "network"],
         ["ticket", "get"],
         ticketInput,
-        z23.union([ticketResult, sectionResult]),
+        z22.union([ticketResult, sectionResult]),
         (input) => this.getTicket(input)
       ),
       this.descriptor(
@@ -3142,7 +3024,7 @@ var DefaultTrackerReadOperations = class {
         ["read", "network"],
         ["ticket", "transitions"],
         entityInput,
-        z23.object({ id: z23.string(), transitions: z23.array(z23.string()) }),
+        z22.object({ id: z22.string(), transitions: z22.array(z22.string()) }),
         async ({ id }) => ({ id, transitions: await this.props.getTracker().listTransitions(id) })
       ),
       this.descriptor(
@@ -3150,8 +3032,8 @@ var DefaultTrackerReadOperations = class {
         "List users available for tracker assignment.",
         ["read", "network"],
         ["users", "get"],
-        z23.strictObject({}),
-        z23.array(TrackerUserSchema.passthrough()),
+        z22.strictObject({}),
+        z22.array(TrackerUserSchema.passthrough()),
         () => this.props.getTracker().getUsers()
       ),
       this.descriptor(
@@ -3330,65 +3212,65 @@ var PullRequestHostUnavailableError = class extends Error {
 // src/operations/ticket-lifecycle-operations.ts
 import { existsSync as existsSync4, realpathSync as realpathSync4, statSync as statSync4 } from "node:fs";
 import { isAbsolute as isAbsolute3, relative as relative3, resolve as resolve5 } from "node:path";
-import { z as z24 } from "zod";
-var propsSchema2 = z24.object({
-  getTracker: z24.custom((value) => typeof value === "function"),
-  cwd: z24.string().min(1),
-  trustedRoots: z24.array(z24.string().min(1)).default([])
+import { z as z23 } from "zod";
+var propsSchema2 = z23.object({
+  getTracker: z23.custom((value) => typeof value === "function"),
+  cwd: z23.string().min(1),
+  trustedRoots: z23.array(z23.string().min(1)).default([])
 });
-var idSchema = z24.string().min(1);
-var blockInput = z24.object({ ticketId: idSchema, blockerId: idSchema, reason: z24.string().optional() }).strict();
-var ticketPairInput = z24.object({ ticketId: idSchema, blockerId: idSchema }).strict();
-var statusInput = z24.object({ id: idSchema, status: z24.string().min(1) }).strict();
-var commentInput = z24.object({
+var idSchema = z23.string().min(1);
+var blockInput = z23.object({ ticketId: idSchema, blockerId: idSchema, reason: z23.string().optional() }).strict();
+var ticketPairInput = z23.object({ ticketId: idSchema, blockerId: idSchema }).strict();
+var statusInput = z23.object({ id: idSchema, status: z23.string().min(1) }).strict();
+var commentInput = z23.object({
   id: idSchema,
-  body: z24.string(),
-  attach: z24.array(z24.string().min(1)).default([])
+  body: z23.string(),
+  attach: z23.array(z23.string().min(1)).default([])
 }).strict();
-var labelInput = z24.object({
+var labelInput = z23.object({
   id: idSchema,
-  add: z24.array(z24.string()).default([]),
-  remove: z24.array(z24.string()).default([])
+  add: z23.array(z23.string()).default([]),
+  remove: z23.array(z23.string()).default([])
 }).strict().refine((input) => input.add.length > 0 || input.remove.length > 0, {
   message: "ticket label needs at least one --add or --remove"
 });
-var blockResult = z24.object({
+var blockResult = z23.object({
   ticketId: idSchema,
   blockerId: idSchema,
   ticketEpic: idSchema.nullable(),
   blockerEpic: idSchema.nullable(),
-  crossEpic: z24.boolean(),
-  reasonRecorded: z24.boolean(),
-  warnings: z24.array(z24.string())
+  crossEpic: z23.boolean(),
+  reasonRecorded: z23.boolean(),
+  warnings: z23.array(z23.string())
 });
-var blockPartial = z24.object({
+var blockPartial = z23.object({
   ticketId: idSchema,
   blockerId: idSchema,
-  completedSteps: z24.array(z24.string())
+  completedSteps: z23.array(z23.string())
 });
-var ticketPairResult = z24.object({ ticketId: idSchema, blockerId: idSchema });
-var statusResult = z24.object({ id: idSchema, status: z24.string() });
-var commentPartial = z24.object({
+var ticketPairResult = z23.object({ ticketId: idSchema, blockerId: idSchema });
+var statusResult = z23.object({ id: idSchema, status: z23.string() });
+var commentPartial = z23.object({
   id: idSchema,
-  attachments: z24.array(
-    AttachmentSchema.extend({ path: z24.string(), caption: z24.string(), referenced: z24.boolean() })
+  attachments: z23.array(
+    AttachmentSchema.extend({ path: z23.string(), caption: z23.string(), referenced: z23.boolean() })
   ),
-  body: z24.string(),
-  completedSteps: z24.array(z24.string())
+  body: z23.string(),
+  completedSteps: z23.array(z23.string())
 });
-var commentResult = z24.union([CommentSchema2, commentPartial]);
-var labelResult = z24.object({
+var commentResult = z23.union([CommentSchema2, commentPartial]);
+var labelResult = z23.object({
   id: idSchema,
-  added: z24.array(z24.string()),
-  removed: z24.array(z24.string())
+  added: z23.array(z23.string()),
+  removed: z23.array(z23.string())
 });
-var labelPartial = z24.object({
+var labelPartial = z23.object({
   id: idSchema,
-  added: z24.array(z24.string()),
-  removed: z24.array(z24.string()),
-  requestedAdd: z24.array(z24.string()),
-  requestedRemove: z24.array(z24.string()),
-  completedSteps: z24.array(z24.string())
+  added: z23.array(z23.string()),
+  removed: z23.array(z23.string()),
+  requestedAdd: z23.array(z23.string()),
+  requestedRemove: z23.array(z23.string()),
+  completedSteps: z23.array(z23.string())
 });
 var DefaultTicketLifecycleOperations = class {
   props;
@@ -3406,7 +3288,7 @@ var DefaultTicketLifecycleOperations = class {
         ["write", "network"],
         ["ticket", "block"],
         blockInput,
-        z24.union([blockResult, blockPartial]),
+        z23.union([blockResult, blockPartial]),
         (input) => this.block(input)
       ),
       this.descriptor(
@@ -3442,7 +3324,7 @@ var DefaultTicketLifecycleOperations = class {
         ["write", "network"],
         ["ticket", "label"],
         labelInput,
-        z24.union([labelPartial, labelResult]),
+        z23.union([labelPartial, labelResult]),
         (input) => this.updateLabels(input)
       )
     ];
@@ -3621,60 +3503,60 @@ var DefaultTicketLifecycleOperations = class {
 };
 
 // src/operations/tracker-entity-operations.ts
-var labelListSchema = z25.array(z25.string()).transform((labels) => [...new Set(labels.map((label) => label.trim()).filter(Boolean))]);
+var labelListSchema = z24.array(z24.string()).transform((labels) => [...new Set(labels.map((label) => label.trim()).filter(Boolean))]);
 var labelsSchema = labelListSchema.default([]);
-var createEpicInput = z25.object({
+var createEpicInput = z24.object({
   ...CreateEpicInputSchema.shape,
   labels: labelsSchema,
-  allowLocalPaths: z25.boolean().default(false)
+  allowLocalPaths: z24.boolean().default(false)
 }).strict();
-var updateEpicInput = z25.object({
+var updateEpicInput = z24.object({
   ...UpdateEpicInputSchema.shape,
   labels: labelListSchema.optional(),
-  allowLocalPaths: z25.boolean().default(false)
+  allowLocalPaths: z24.boolean().default(false)
 }).strict();
 var createInitiativeInput = CreateInitiativeInputSchema.extend({
-  allowLocalPaths: z25.boolean().default(false)
+  allowLocalPaths: z24.boolean().default(false)
 }).strict();
 var updateInitiativeInput = UpdateInitiativeInputSchema.extend({
-  allowLocalPaths: z25.boolean().default(false)
+  allowLocalPaths: z24.boolean().default(false)
 }).strict();
-var createTicketInput = z25.object({
+var createTicketInput = z24.object({
   ...CreateTicketInputSchema.shape,
   labels: labelsSchema,
-  allowLocalPaths: z25.boolean().default(false)
+  allowLocalPaths: z24.boolean().default(false)
 }).strict();
-var updateTicketInput = z25.object({
+var updateTicketInput = z24.object({
   ...UpdateTicketInputSchema.shape,
   labels: labelListSchema.optional(),
-  allowLocalPaths: z25.boolean().default(false),
-  attach: z25.array(z25.string().min(1)).default([])
+  allowLocalPaths: z24.boolean().default(false),
+  attach: z24.array(z24.string().min(1)).default([])
 }).strict();
 var createTddInput = CreateTechnicalDesignInputSchema.extend({
-  allowLocalPaths: z25.boolean().default(false)
+  allowLocalPaths: z24.boolean().default(false)
 }).strict();
-var entityId = z25.string().min(1);
-var linkInput = z25.object({ epicId: entityId, initiativeId: entityId }).strict();
-var partialTicketEdit = z25.object({
+var entityId = z24.string().min(1);
+var linkInput = z24.object({ epicId: entityId, initiativeId: entityId }).strict();
+var partialTicketEdit = z24.object({
   id: entityId,
-  attachments: z25.array(AttachmentSchema),
-  body: z25.string()
+  attachments: z24.array(AttachmentSchema),
+  body: z24.string()
 });
-var ticketEditResult = z25.union([TicketSchema, partialTicketEdit]);
-var partialTicketCreate = z25.object({ id: entityId, title: z25.string() });
-var ticketCreateResult = z25.union([TicketSchema, partialTicketCreate]);
-var partialEntityWrite = z25.object({
+var ticketEditResult = z24.union([TicketSchema, partialTicketEdit]);
+var partialTicketCreate = z24.object({ id: entityId, title: z24.string() });
+var ticketCreateResult = z24.union([TicketSchema, partialTicketCreate]);
+var partialEntityWrite = z24.object({
   id: entityId,
-  title: z25.string().optional(),
-  body: z25.string().optional()
+  title: z24.string().optional(),
+  body: z24.string().optional()
 });
-var partialTddCreate = z25.object({ id: entityId, epicId: entityId, body: z25.string() });
-var propsSchema3 = z25.object({
-  getTracker: z25.custom((value) => typeof value === "function"),
-  getPrHost: z25.custom((value) => typeof value === "function").optional(),
-  getConfig: z25.custom((value) => typeof value === "function").optional(),
-  cwd: z25.string().min(1),
-  trustedRoots: z25.array(z25.string().min(1)).default([])
+var partialTddCreate = z24.object({ id: entityId, epicId: entityId, body: z24.string() });
+var propsSchema3 = z24.object({
+  getTracker: z24.custom((value) => typeof value === "function"),
+  getPrHost: z24.custom((value) => typeof value === "function").optional(),
+  getConfig: z24.custom((value) => typeof value === "function").optional(),
+  cwd: z24.string().min(1),
+  trustedRoots: z24.array(z24.string().min(1)).default([])
 });
 var DefaultTrackerEntityOperations = class {
   props;
@@ -3702,7 +3584,7 @@ var DefaultTrackerEntityOperations = class {
         ["write", "network"],
         ["epic", "create"],
         createEpicInput,
-        z25.union([EpicSchema, partialEntityWrite]),
+        z24.union([EpicSchema, partialEntityWrite]),
         (input) => this.createEpic(input)
       ),
       this.descriptor(
@@ -3710,8 +3592,8 @@ var DefaultTrackerEntityOperations = class {
         "Update an epic description, title, or labels.",
         ["write", "network"],
         ["epic", "edit"],
-        z25.object({ id: entityId, ...updateEpicInput.shape }).strict(),
-        z25.union([EpicSchema, partialEntityWrite]),
+        z24.object({ id: entityId, ...updateEpicInput.shape }).strict(),
+        z24.union([EpicSchema, partialEntityWrite]),
         ({ id, ...input }) => this.editEpic(id, input)
       ),
       this.descriptor(
@@ -3720,7 +3602,7 @@ var DefaultTrackerEntityOperations = class {
         ["write", "network"],
         ["epic", "link-initiative"],
         linkInput,
-        z25.object({ epicId: entityId, initiativeId: entityId }),
+        z24.object({ epicId: entityId, initiativeId: entityId }),
         async ({ epicId, initiativeId }) => {
           await this.props.getTracker().linkEpicToInitiative(epicId, initiativeId);
           return { epicId, initiativeId };
@@ -3732,7 +3614,7 @@ var DefaultTrackerEntityOperations = class {
         ["write", "network"],
         ["initiative", "create"],
         createInitiativeInput,
-        z25.union([InitiativeSchema, partialEntityWrite]),
+        z24.union([InitiativeSchema, partialEntityWrite]),
         (input) => this.createInitiative(input)
       ),
       this.descriptor(
@@ -3740,8 +3622,8 @@ var DefaultTrackerEntityOperations = class {
         "Update an initiative description or title.",
         ["write", "network"],
         ["initiative", "edit"],
-        z25.object({ id: entityId, ...updateInitiativeInput.shape }).strict(),
-        z25.union([InitiativeSchema, partialEntityWrite]),
+        z24.object({ id: entityId, ...updateInitiativeInput.shape }).strict(),
+        z24.union([InitiativeSchema, partialEntityWrite]),
         ({ id, ...input }) => this.editInitiative(id, input)
       ),
       this.descriptor(
@@ -3758,7 +3640,7 @@ var DefaultTrackerEntityOperations = class {
         "Update a ticket and attach local evidence files.",
         ["write", "network"],
         ["ticket", "edit"],
-        z25.object({ id: entityId, ...updateTicketInput.shape }).strict(),
+        z24.object({ id: entityId, ...updateTicketInput.shape }).strict(),
         ticketEditResult,
         ({ id, ...input }) => this.editTicket(id, input)
       ),
@@ -3768,7 +3650,7 @@ var DefaultTrackerEntityOperations = class {
         ["write", "network"],
         ["tdd", "create"],
         createTddInput,
-        z25.union([TechnicalDesignSchema, partialTddCreate]),
+        z24.union([TechnicalDesignSchema, partialTddCreate]),
         (input) => this.createTdd(input)
       )
     ];
@@ -3957,13 +3839,13 @@ var DefaultTrackerEntityOperations = class {
 // src/operations/pr-operations.ts
 import { realpathSync as realpathSync6, statSync as statSync6 } from "node:fs";
 import { isAbsolute as isAbsolute5, relative as relative5, resolve as resolve7 } from "node:path";
-import { z as z28 } from "zod";
-
-// src/git/pr-template/pr-template.ts
 import { z as z27 } from "zod";
 
-// src/git/semantic-types.ts
+// src/git/pr-template/pr-template.ts
 import { z as z26 } from "zod";
+
+// src/git/semantic-types.ts
+import { z as z25 } from "zod";
 var semanticTypes = [
   "feat",
   "fix",
@@ -3977,24 +3859,24 @@ var semanticTypes = [
   "style",
   "revert"
 ];
-var SemanticTypeSchema = z26.enum(semanticTypes);
+var SemanticTypeSchema = z25.enum(semanticTypes);
 
 // src/git/pr-template/pr-template.ts
 var maxChangeLineLength = 256;
 var maxChangeLines = 5;
-var PullRequestTemplateSchema = z27.object({
-  type: z27.enum(semanticTypes),
-  scope: z27.string().min(1),
-  description: z27.string().min(1),
-  whatWasChanged: z27.array(z27.string().min(1).max(maxChangeLineLength)).min(1).max(maxChangeLines),
-  whyWasItChanged: z27.string().min(1),
-  otsMaterials: z27.string().min(1).optional(),
-  ticketId: z27.string().min(1).optional(),
-  ticketUrl: z27.url().optional(),
-  baseBranch: z27.string().min(1),
-  headBranch: z27.string().min(1),
-  reviewers: z27.array(z27.string()).default([]),
-  labels: z27.array(z27.string()).default([])
+var PullRequestTemplateSchema = z26.object({
+  type: z26.enum(semanticTypes),
+  scope: z26.string().min(1),
+  description: z26.string().min(1),
+  whatWasChanged: z26.array(z26.string().min(1).max(maxChangeLineLength)).min(1).max(maxChangeLines),
+  whyWasItChanged: z26.string().min(1),
+  otsMaterials: z26.string().min(1).optional(),
+  ticketId: z26.string().min(1).optional(),
+  ticketUrl: z26.url().optional(),
+  baseBranch: z26.string().min(1),
+  headBranch: z26.string().min(1),
+  reviewers: z26.array(z26.string()).default([]),
+  labels: z26.array(z26.string()).default([])
 });
 var DefaultPullRequestBuilder = class {
   build(input) {
@@ -4042,91 +3924,91 @@ var DefaultPullRequestBuilder = class {
 var pullRequestBuilder = new DefaultPullRequestBuilder();
 
 // src/operations/pr-operations.ts
-var propsSchema4 = z28.strictObject({
-  cwd: z28.string().min(1),
-  getHost: z28.custom((value) => typeof value === "function")
+var propsSchema4 = z27.strictObject({
+  cwd: z27.string().min(1),
+  getHost: z27.custom((value) => typeof value === "function")
 });
-var createInput = z28.strictObject({
+var createInput = z27.strictObject({
   type: SemanticTypeSchema,
-  scope: z28.string().min(1),
-  description: z28.string().min(1),
-  why: z28.string().min(1),
-  what: z28.array(z28.string().min(1).max(256)).min(1).max(5),
-  ots: z28.string().min(1).optional(),
-  base: z28.string().min(1),
-  head: z28.string().min(1),
-  ticketId: z28.string().min(1).optional(),
-  ticketUrl: z28.url().optional(),
-  reviewer: z28.array(z28.string()).default([]),
-  label: z28.array(z28.string()).default([]),
-  attach: z28.array(z28.string()).default([])
+  scope: z27.string().min(1),
+  description: z27.string().min(1),
+  why: z27.string().min(1),
+  what: z27.array(z27.string().min(1).max(256)).min(1).max(5),
+  ots: z27.string().min(1).optional(),
+  base: z27.string().min(1),
+  head: z27.string().min(1),
+  ticketId: z27.string().min(1).optional(),
+  ticketUrl: z27.url().optional(),
+  reviewer: z27.array(z27.string()).default([]),
+  label: z27.array(z27.string()).default([]),
+  attach: z27.array(z27.string()).default([])
 });
-var commentInput2 = z28.strictObject({
-  number: z28.number().int().positive(),
-  body: z28.string(),
-  attach: z28.array(z28.string()).default([])
+var commentInput2 = z27.strictObject({
+  number: z27.number().int().positive(),
+  body: z27.string(),
+  attach: z27.array(z27.string()).default([])
 });
-var listInput = z28.strictObject({ ticket: z28.array(z28.string().min(1)).min(1) });
-var reviewInput2 = z28.strictObject({
-  number: z28.number().int().positive(),
-  reviewer: z28.array(z28.string().min(1)).min(1)
+var listInput = z27.strictObject({ ticket: z27.array(z27.string().min(1)).min(1) });
+var reviewInput2 = z27.strictObject({
+  number: z27.number().int().positive(),
+  reviewer: z27.array(z27.string().min(1)).min(1)
 });
-var threadsInput = z28.strictObject({
-  number: z28.number().int().positive(),
-  trustedAuthors: z28.array(z28.string().min(1)).default([])
+var threadsInput = z27.strictObject({
+  number: z27.number().int().positive(),
+  trustedAuthors: z27.array(z27.string().min(1)).default([])
 });
-var threadReplyInput = z28.strictObject({
-  threadId: z28.string().min(1),
-  body: z28.string().min(1)
+var threadReplyInput = z27.strictObject({
+  threadId: z27.string().min(1),
+  body: z27.string().min(1)
 });
-var threadReplyResultSchema = z28.strictObject({ id: z28.string(), url: z28.string() });
-var threadCommentSchema = z28.strictObject({
-  id: z28.string(),
-  url: z28.string(),
-  authorLogin: z28.string(),
-  authorType: z28.enum(["User", "Bot"]),
-  body: z28.string(),
-  createdAt: z28.string()
+var threadReplyResultSchema = z27.strictObject({ id: z27.string(), url: z27.string() });
+var threadCommentSchema = z27.strictObject({
+  id: z27.string(),
+  url: z27.string(),
+  authorLogin: z27.string(),
+  authorType: z27.enum(["User", "Bot"]),
+  body: z27.string(),
+  createdAt: z27.string()
 });
-var reviewThreadSchema = z28.strictObject({
-  id: z28.string(),
-  path: z28.string(),
-  line: z28.number().nullable(),
-  originalLine: z28.number().nullable(),
-  isResolved: z28.boolean(),
-  isOutdated: z28.boolean(),
-  commentsTruncated: z28.boolean(),
-  comments: z28.array(threadCommentSchema),
+var reviewThreadSchema = z27.strictObject({
+  id: z27.string(),
+  path: z27.string(),
+  line: z27.number().nullable(),
+  originalLine: z27.number().nullable(),
+  isResolved: z27.boolean(),
+  isOutdated: z27.boolean(),
+  commentsTruncated: z27.boolean(),
+  comments: z27.array(threadCommentSchema),
   finding: FindingRecordSchema.nullable(),
-  markerError: z28.string().nullable()
+  markerError: z27.string().nullable()
 });
-var pullRequestThreadsSchema = z28.strictObject({
-  pullRequest: z28.strictObject({
-    number: z28.number(),
-    url: z28.string(),
-    title: z28.string(),
-    body: z28.string(),
-    headRefName: z28.string(),
-    headRefOid: z28.string(),
-    baseRefName: z28.string(),
-    authorLogin: z28.string()
+var pullRequestThreadsSchema = z27.strictObject({
+  pullRequest: z27.strictObject({
+    number: z27.number(),
+    url: z27.string(),
+    title: z27.string(),
+    body: z27.string(),
+    headRefName: z27.string(),
+    headRefOid: z27.string(),
+    baseRefName: z27.string(),
+    authorLogin: z27.string()
   }),
-  threads: z28.array(reviewThreadSchema)
+  threads: z27.array(reviewThreadSchema)
 });
-var createdSchema = z28.object({ number: z28.number().int().positive(), url: z28.string().url() });
-var commentResultSchema = z28.object({ url: z28.string() });
-var openPullRequestSchema = z28.object({
-  ticket: z28.string(),
-  number: z28.number(),
-  url: z28.string(),
-  headRefName: z28.string(),
-  baseRefName: z28.string(),
-  title: z28.string()
+var createdSchema = z27.object({ number: z27.number().int().positive(), url: z27.string().url() });
+var commentResultSchema = z27.object({ url: z27.string() });
+var openPullRequestSchema = z27.object({
+  ticket: z27.string(),
+  number: z27.number(),
+  url: z27.string(),
+  headRefName: z27.string(),
+  baseRefName: z27.string(),
+  title: z27.string()
 });
-var reviewerResultSchema = z28.object({
-  number: z28.number().int().positive(),
-  requested: z28.array(z28.string()),
-  failed: z28.array(z28.object({ login: z28.string(), error: z28.string() }))
+var reviewerResultSchema = z27.object({
+  number: z27.number().int().positive(),
+  requested: z27.array(z27.string()),
+  failed: z27.array(z27.object({ login: z27.string(), error: z27.string() }))
 });
 var PullRequestAttachmentPathError = class extends Error {
   name = "PullRequestAttachmentPathError";
@@ -4171,7 +4053,7 @@ var DefaultPrOperations = class {
         this.validateAttachments(input.attach);
         return this.getHost().commentOnPullRequest(input.number, input.body, { attach: input.attach });
       }),
-      this.descriptor("pr-list", "List open pull requests matched to ticket identifiers.", ["read", "network", "process"], ["pr", "list"], listInput, z28.array(openPullRequestSchema), (input) => this.getHost().listOpenPullRequestsForTickets(input.ticket)),
+      this.descriptor("pr-list", "List open pull requests matched to ticket identifiers.", ["read", "network", "process"], ["pr", "list"], listInput, z27.array(openPullRequestSchema), (input) => this.getHost().listOpenPullRequestsForTickets(input.ticket)),
       this.descriptor("pr-threads", "List a pull request's review threads with trusted finding markers.", ["read", "network", "process"], ["pr", "threads"], threadsInput, pullRequestThreadsSchema, (input) => this.getHost().listReviewThreads(input.number, { trustedAuthors: input.trustedAuthors })),
       this.descriptor("pr-thread-reply", "Reply in an existing pull request review thread.", ["write", "network", "process"], ["pr", "thread-reply"], threadReplyInput, threadReplyResultSchema, (input) => this.getHost().replyToReviewThread(input.threadId, input.body)),
       this.descriptor("pr-request-review", "Request reviewers for a pull request and preserve each outcome.", effects, ["pr", "request-review"], reviewInput2, reviewerResultSchema, async (input) => {
@@ -4235,7 +4117,7 @@ import { resolve as resolve11 } from "node:path";
 // src/git/git-executor/git-executor.ts
 import { execFile as execFile3 } from "node:child_process";
 import { promisify as promisify3 } from "node:util";
-import { z as z29 } from "zod";
+import { z as z28 } from "zod";
 
 // src/git/branch-namer/branch-namer.ts
 var BranchNamer = class {
@@ -4256,19 +4138,19 @@ var BranchNamer = class {
 var branchNamer = new BranchNamer();
 
 // src/git/git-executor/git-executor.ts
-var NodeGitExecutorPropsSchema = z29.object({
-  cwd: z29.string().min(1).optional(),
-  env: z29.record(z29.string(), z29.string().optional()).default(() => ({ ...process.env })),
-  execFile: z29.custom((value) => typeof value === "function").optional()
+var NodeGitExecutorPropsSchema = z28.object({
+  cwd: z28.string().min(1).optional(),
+  env: z28.record(z28.string(), z28.string().optional()).default(() => ({ ...process.env })),
+  execFile: z28.custom((value) => typeof value === "function").optional()
 });
-var PushSpecSchema = z29.object({
+var PushSpecSchema = z28.object({
   // A detached HEAD makes `rev-parse --abbrev-ref` yield the literal "HEAD", which would push a ref rather than a branch.
-  branch: z29.string().min(1, "branch is required").refine((branch) => branch !== "HEAD", {
+  branch: z28.string().min(1, "branch is required").refine((branch) => branch !== "HEAD", {
     message: "cannot push from a detached HEAD \u2014 check out a branch first"
   }),
-  remote: z29.string().min(1).default("origin"),
+  remote: z28.string().min(1).default("origin"),
   // Defaults true to match the CLI's `--no-set-upstream`, so a programmatic push tracks the branch too.
-  setUpstream: z29.boolean().default(true)
+  setUpstream: z28.boolean().default(true)
 });
 var NodeGitExecutor = class {
   execFile;
@@ -4383,21 +4265,21 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join as join5 } from "node:path";
 import { promisify as promisify4 } from "node:util";
-import { z as z30 } from "zod";
-var GhPullRequestHostPropsSchema = z30.object({
-  repo: z30.string().regex(/^[^/\s]+\/[^/\s]+$/, 'expected "owner/repo"'),
-  cwd: z30.string().min(1).optional(),
-  env: z30.custom(
+import { z as z29 } from "zod";
+var GhPullRequestHostPropsSchema = z29.object({
+  repo: z29.string().regex(/^[^/\s]+\/[^/\s]+$/, 'expected "owner/repo"'),
+  cwd: z29.string().min(1).optional(),
+  env: z29.custom(
     (value) => typeof value === "object" && value !== null && !Array.isArray(value)
   ).optional()
 });
-var GhPullRequestListSchema = z30.array(
-  z30.object({
-    number: z30.number(),
-    url: z30.string(),
-    headRefName: z30.string(),
-    baseRefName: z30.string(),
-    title: z30.string()
+var GhPullRequestListSchema = z29.array(
+  z29.object({
+    number: z29.number(),
+    url: z29.string(),
+    headRefName: z29.string(),
+    baseRefName: z29.string(),
+    title: z29.string()
   })
 );
 var reviewThreadsQuery = `query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
@@ -4423,44 +4305,44 @@ var replyToReviewThreadMutation = `mutation($id: ID!, $body: String!) {
     comment { id url }
   }
 }`;
-var GhReplyToReviewThreadSchema = z30.object({
-  data: z30.object({
-    addPullRequestReviewThreadReply: z30.object({
-      comment: z30.object({ id: z30.string(), url: z30.string() })
+var GhReplyToReviewThreadSchema = z29.object({
+  data: z29.object({
+    addPullRequestReviewThreadReply: z29.object({
+      comment: z29.object({ id: z29.string(), url: z29.string() })
     })
   })
 });
-var GhReviewThreadsPageSchema = z30.object({
-  data: z30.object({
-    repository: z30.object({
-      pullRequest: z30.object({
-        number: z30.number(),
-        url: z30.string(),
-        title: z30.string(),
-        body: z30.string(),
-        headRefName: z30.string(),
-        headRefOid: z30.string(),
-        baseRefName: z30.string(),
-        author: z30.object({ login: z30.string() }).nullable(),
-        reviewThreads: z30.object({
-          pageInfo: z30.object({ hasNextPage: z30.boolean(), endCursor: z30.string().nullable() }),
-          nodes: z30.array(
-            z30.object({
-              id: z30.string(),
-              isResolved: z30.boolean(),
-              isOutdated: z30.boolean(),
-              path: z30.string(),
-              line: z30.number().nullable(),
-              originalLine: z30.number().nullable(),
-              comments: z30.object({
-                totalCount: z30.number(),
-                nodes: z30.array(
-                  z30.object({
-                    id: z30.string(),
-                    url: z30.string(),
-                    body: z30.string(),
-                    createdAt: z30.string(),
-                    author: z30.object({ type: z30.string(), login: z30.string() }).nullable()
+var GhReviewThreadsPageSchema = z29.object({
+  data: z29.object({
+    repository: z29.object({
+      pullRequest: z29.object({
+        number: z29.number(),
+        url: z29.string(),
+        title: z29.string(),
+        body: z29.string(),
+        headRefName: z29.string(),
+        headRefOid: z29.string(),
+        baseRefName: z29.string(),
+        author: z29.object({ login: z29.string() }).nullable(),
+        reviewThreads: z29.object({
+          pageInfo: z29.object({ hasNextPage: z29.boolean(), endCursor: z29.string().nullable() }),
+          nodes: z29.array(
+            z29.object({
+              id: z29.string(),
+              isResolved: z29.boolean(),
+              isOutdated: z29.boolean(),
+              path: z29.string(),
+              line: z29.number().nullable(),
+              originalLine: z29.number().nullable(),
+              comments: z29.object({
+                totalCount: z29.number(),
+                nodes: z29.array(
+                  z29.object({
+                    id: z29.string(),
+                    url: z29.string(),
+                    body: z29.string(),
+                    createdAt: z29.string(),
+                    author: z29.object({ type: z29.string(), login: z29.string() }).nullable()
                   })
                 )
               })
@@ -4731,11 +4613,11 @@ import { dirname as dirname8 } from "node:path";
 import { existsSync as existsSync6, mkdirSync, readFileSync as readFileSync5, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname as dirname5, join as join6 } from "node:path";
-import { z as z31 } from "zod";
+import { z as z30 } from "zod";
 var pluginId = "flight-rules@flight-rules";
 var pluginKeyPattern = /^flight-rules(@.+)?$/;
-var SettingsSchema = z31.looseObject({
-  pluginConfigs: z31.record(z31.string(), z31.looseObject({ options: z31.record(z31.string(), z31.unknown()).optional() })).optional()
+var SettingsSchema = z30.looseObject({
+  pluginConfigs: z30.record(z30.string(), z30.looseObject({ options: z30.record(z30.string(), z30.unknown()).optional() })).optional()
 });
 var ClaudeSettingsSource = class {
   host = "claude";
@@ -4805,13 +4687,13 @@ var ClaudeSettingsSource = class {
 import { existsSync as existsSync7, mkdirSync as mkdirSync2, readFileSync as readFileSync6, writeFileSync as writeFileSync2 } from "node:fs";
 import { homedir as homedir2 } from "node:os";
 import { dirname as dirname6, join as join7 } from "node:path";
-import { z as z32 } from "zod";
-var PropsSchema = z32.object({
-  cwd: z32.string().min(1),
-  home: z32.string().min(1).default(homedir2),
-  untrackedCwd: z32.string().min(1).optional()
+import { z as z31 } from "zod";
+var PropsSchema = z31.object({
+  cwd: z31.string().min(1),
+  home: z31.string().min(1).default(homedir2),
+  untrackedCwd: z31.string().min(1).optional()
 });
-var SettingsSchema2 = z32.record(z32.string(), z32.unknown());
+var SettingsSchema2 = z31.record(z31.string(), z31.unknown());
 var InvalidSettingsError = class extends Error {
   name = "InvalidSettingsError";
 };
@@ -4854,22 +4736,22 @@ import { existsSync as existsSync8, lstatSync, mkdirSync as mkdirSync3, readFile
 import { homedir as homedir3 } from "node:os";
 import { dirname as dirname7, join as join8, resolve as resolve8 } from "node:path";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
-import { z as z33 } from "zod";
-var NativeHostSchema = z33.enum(["claude", "codex"]);
-var AgentInstallScopeSchema = z33.enum(["project", "user"]);
-var InstallationManifestSchema = z33.strictObject({
+import { z as z32 } from "zod";
+var NativeHostSchema = z32.enum(["claude", "codex"]);
+var AgentInstallScopeSchema = z32.enum(["project", "user"]);
+var InstallationManifestSchema = z32.strictObject({
   host: NativeHostSchema,
-  agents: z33.array(z33.strictObject({
-    name: z33.string().regex(/^[a-z][a-z0-9-]*$/),
-    sha256: z33.string().regex(/^[a-f0-9]{64}$/),
+  agents: z32.array(z32.strictObject({
+    name: z32.string().regex(/^[a-z][a-z0-9-]*$/),
+    sha256: z32.string().regex(/^[a-f0-9]{64}$/),
     registration: AgentRegistrationSchema
   })).min(1)
 }).refine((value) => new Set(value.agents.map((agent) => agent.name)).size === value.agents.length, "Duplicate agent names").refine((value) => value.agents.every((agent) => agent.name === agent.registration.name), "Registration name mismatch");
-var PropsSchema2 = z33.object({
-  root: z33.string().min(1),
-  cwd: z33.string().min(1),
-  home: z33.string().min(1).default(homedir3),
-  env: z33.record(z33.string(), z33.string().optional()).default({})
+var PropsSchema2 = z32.object({
+  root: z32.string().min(1),
+  cwd: z32.string().min(1),
+  home: z32.string().min(1).default(homedir3),
+  env: z32.record(z32.string(), z32.string().optional()).default({})
 });
 var NativeInstallationError = class extends Error {
   name = "NativeInstallationError";
@@ -4965,7 +4847,6 @@ var FileNativeInstallation = class _FileNativeInstallation {
 
 // src/shared/config-store.ts
 var configScopes = ["user", "project", "local", "file"];
-var userScopedKeys = /* @__PURE__ */ new Set(["ariadne.url", "ariadne.enabled"]);
 var ConfigStore = class {
   cwd;
   env;
@@ -5022,14 +4903,12 @@ var ConfigStore = class {
   }
   /**
    * The scope a write lands in when the caller names none: wherever the key
-   * is set now, else `user` for a person-level key such as `ariadne.url`,
-   * else the config file when one exists, else `local`.
+   * is set now, else the config file when one exists, else `local`.
    */
   defaultScopeFor(key) {
     const layers = this.layers();
     const owner = [...layers].reverse().find((layer) => key in layer.values);
     if (owner !== void 0) return owner.scope;
-    if (userScopedKeys.has(key)) return "user";
     return this.layer(layers, "file").present ? "file" : "local";
   }
   set(key, rawValues, scope) {
@@ -5119,9 +4998,8 @@ ${lines.join("\n")}
     const field = Object.entries(ConfigSchema.shape).find(([name]) => name === key)?.[1];
     if (field === void 0) return void 0;
     const isArray = field.safeParse([]).success && !field.safeParse("").success;
-    const isBoolean = field.safeParse(true).success && !field.safeParse("").success;
     const joined = rawValues.join(" ");
-    const value = isArray ? [...rawValues] : isBoolean && (joined === "true" || joined === "false") ? joined === "true" : joined;
+    const value = isArray ? [...rawValues] : joined;
     const result = field.safeParse(value);
     if (!result.success) {
       throw new Error(`Invalid value for ${key}: ${result.error.issues.map((i) => i.message).join("; ")}`);
@@ -5181,11 +5059,11 @@ var EvidenceLocation = class {
 };
 
 // src/shared/env.ts
-import { z as z34 } from "zod";
-var EnvSchema = z34.object({
-  githubToken: z34.string().optional(),
-  jiraToken: z34.string().optional(),
-  jiraEmail: z34.string().optional(),
+import { z as z33 } from "zod";
+var EnvSchema = z33.object({
+  githubToken: z33.string().optional(),
+  jiraToken: z33.string().optional(),
+  jiraEmail: z33.string().optional(),
   jiraHost: JiraHostSchema.optional()
 });
 var EnvLoader = class {
@@ -5207,1148 +5085,6 @@ var EnvLoader = class {
       ...this.overrides
     };
     return this.cachedEnv;
-  }
-};
-
-// src/version.ts
-var appVersion = typeof _appVersion === "undefined" ? "0.0.0-dev" : _appVersion;
-
-// src/shared/ariadne/review-packet.schema.ts
-import { z as z35 } from "zod";
-var packetLimits = {
-  title: 200,
-  objective: 600,
-  highlight: 200,
-  highlights: 5,
-  prs: 30,
-  focusAreas: 10,
-  rationale: 2e3,
-  anchors: 10,
-  path: 400,
-  reviewers: 10,
-  ticket: 100
-};
-var focusAreaKinds = ["design-pattern", "business-logic", "data-schema", "other"];
-var anchorSides = ["LEFT", "RIGHT"];
-var textSchema = (max) => z35.string().min(1, "must not be blank").max(max, `must be at most ${max} characters`);
-var oneLineTextSchema = (max) => textSchema(max).refine((value) => !/[\r\n]/.test(value), "must be one line");
-var PositiveIntSchema = z35.number().int().positive();
-var PacketIdSchema = AgentRecordIdSchema;
-var OperationIdSchema2 = z35.string().regex(/^[A-Za-z0-9_-]{16,80}$/, "must be 16\u201380 letters, digits, underscores or hyphens");
-var HeadShaSchema2 = z35.string().regex(/^[0-9a-f]{40}$/, "must be a 40-character lowercase hex commit sha");
-var GithubLoginSchema = z35.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/, "must be a GitHub login");
-var PacketAnchorSchema = z35.strictObject({
-  path: textSchema(packetLimits.path),
-  line: PositiveIntSchema,
-  startLine: optionalSchema(PositiveIntSchema),
-  side: z35.enum(anchorSides)
-}).refine((anchor) => anchor.startLine === void 0 || anchor.startLine < anchor.line, {
-  path: ["startLine"],
-  message: "must be before line"
-});
-var SignOffTimeSchema = z35.string().regex(/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,3})?Z$/, "must be an ISO 8601 UTC time ending in Z").refine((value) => {
-  const [year = 0, month = 0, day = 0] = value.slice(0, 10).split("-").map(Number);
-  const date = new Date(Date.UTC(year, month - 1, day));
-  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
-}, "must be a real calendar date");
-var FocusAreaSchema = z35.strictObject({
-  id: AgentRecordIdSchema,
-  kind: z35.enum(focusAreaKinds),
-  title: oneLineTextSchema(packetLimits.title),
-  rationale: textSchema(packetLimits.rationale),
-  anchors: z35.array(PacketAnchorSchema).max(packetLimits.anchors, `up to ${packetLimits.anchors} anchors`)
-});
-var PacketPrSchema = z35.strictObject({
-  repo: z35.string().regex(/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9_.-]{1,100}$/, "must be owner/name"),
-  number: PositiveIntSchema,
-  headSha: HeadShaSchema2,
-  title: oneLineTextSchema(packetLimits.title),
-  ticket: optionalSchema(oneLineTextSchema(packetLimits.ticket)),
-  signOff: z35.strictObject({ at: SignOffTimeSchema, headSha: HeadShaSchema2 }).nullable().optional(),
-  focusAreas: z35.array(FocusAreaSchema).max(packetLimits.focusAreas, `up to ${packetLimits.focusAreas} focus areas per PR`)
-});
-var PacketInputSchema = z35.strictObject({
-  id: PacketIdSchema,
-  title: oneLineTextSchema(packetLimits.title),
-  overview: z35.strictObject({
-    objective: textSchema(packetLimits.objective),
-    highlights: z35.array(oneLineTextSchema(packetLimits.highlight)).min(1, "at least 1 highlight").max(packetLimits.highlights, `up to ${packetLimits.highlights} highlights`)
-  }),
-  prs: z35.array(PacketPrSchema).min(1, "at least 1 PR").max(packetLimits.prs, `up to ${packetLimits.prs} PRs`),
-  reviewers: z35.array(GithubLoginSchema).min(1, "at least 1 reviewer").max(packetLimits.reviewers, `up to ${packetLimits.reviewers} reviewers`)
-});
-var PacketUpdateSchema = z35.strictObject({
-  expectedRevision: z35.number().int().nonnegative(),
-  operationId: OperationIdSchema2,
-  packet: PacketInputSchema.omit({ id: true })
-});
-var GithubSnapshotSchema = z35.looseObject({ id: z35.union([z35.string(), z35.number()]), login: z35.string() });
-var PacketSchema = z35.looseObject({
-  id: z35.string(),
-  authorId: z35.string(),
-  title: z35.string(),
-  overview: z35.looseObject({ objective: z35.string(), highlights: z35.array(z35.string()) }),
-  prs: z35.array(z35.looseObject({ repo: z35.string(), number: z35.number() })),
-  reviewers: z35.array(z35.looseObject({ id: z35.string(), github: GithubSnapshotSchema })),
-  status: z35.enum(["open", "closed"]),
-  revision: z35.number().int(),
-  createdAt: z35.string(),
-  updatedAt: z35.string()
-});
-var ReviewerSchema = z35.looseObject({ id: z35.string(), name: z35.string(), github: GithubSnapshotSchema });
-var PacketResponseSchema = z35.looseObject({ packet: PacketSchema }).transform((response) => response.packet);
-var ReviewerListResponseSchema = z35.looseObject({ reviewers: z35.array(ReviewerSchema) });
-
-// src/shared/ariadne/ariadne-transport.ts
-var FetchAriadneTransport = class {
-  async send(request) {
-    const response = await fetch(request.url, {
-      method: request.method,
-      headers: request.headers,
-      ...request.body !== void 0 ? { body: request.body } : {},
-      signal: AbortSignal.timeout(request.timeoutMs)
-    });
-    return { status: response.status, body: await response.text() };
-  }
-};
-
-// src/shared/ariadne/ariadne-client.ts
-var AriadneError = class extends Error {
-  failure;
-  status;
-  code;
-  constructor(props) {
-    super(props.message, props.cause === void 0 ? void 0 : { cause: props.cause });
-    this.name = "AriadneError";
-    this.failure = props.failure;
-    this.status = props.status;
-    this.code = props.code;
-  }
-};
-var ariadneTimeoutMs = 5e3;
-var ariadneAttempts = 2;
-var AriadneClient = class {
-  baseUrl;
-  token;
-  transport;
-  timeoutMs;
-  constructor(props) {
-    this.baseUrl = props.baseUrl.replace(/\/+$/, "");
-    this.token = props.token;
-    this.transport = props.transport ?? new FetchAriadneTransport();
-    this.timeoutMs = props.timeoutMs ?? ariadneTimeoutMs;
-  }
-  /** POST /v1/agents/heartbeat: creates or updates the session. */
-  async heartbeat(input) {
-    const body = this.validate(HeartbeatInputSchema, input, "heartbeat");
-    return this.request("POST", "/v1/agents/heartbeat", HeartbeatResponseSchema, body);
-  }
-  /** POST /v1/agents/items: 404 `session_not_found` until the session has a heartbeat. */
-  async postItem(input) {
-    const body = this.validate(ItemInputSchema, input, "item");
-    return this.request("POST", "/v1/agents/items", ItemResponseSchema, body);
-  }
-  /** POST /v1/agents/activity: 404 `session_not_found` until the session has a heartbeat. */
-  async postActivity(input) {
-    const body = this.validate(ActivityInputSchema, input, "activity");
-    return this.request("POST", "/v1/agents/activity", ActivityResponseSchema, body);
-  }
-  /** GET /v1/agents/items?session=…: every item of the session, open and resolved, oldest first. */
-  async listItems(session) {
-    const id = this.validate(AgentSessionIdSchema, session, "session");
-    return this.request(
-      "GET",
-      `/v1/agents/items?session=${encodeURIComponent(id)}`,
-      ItemListResponseSchema
-    );
-  }
-  /** POST /v1/review-packets: ids are global; replaying an id and body is idempotent, a different body is 409 `packet_exists`, another author's id is 409 `packet_id_taken`. */
-  async createPacket(input) {
-    const body = this.validate(PacketInputSchema, input, "packet");
-    return this.request("POST", "/v1/review-packets", PacketResponseSchema, body);
-  }
-  /** PUT /v1/review-packets/{id}: a stale `expectedRevision` is 409 `revision_conflict`; a repeated `operationId` is replayed. */
-  async updatePacket(id, input) {
-    const packetId = this.validate(PacketIdSchema, id, "packet id");
-    const body = this.validate(PacketUpdateSchema, input, "packet update");
-    return this.request(
-      "PUT",
-      `/v1/review-packets/${encodeURIComponent(packetId)}`,
-      PacketResponseSchema,
-      body
-    );
-  }
-  /** GET /v1/review-packets/{id}. */
-  async getPacket(id) {
-    const packetId = this.validate(PacketIdSchema, id, "packet id");
-    return this.request(
-      "GET",
-      `/v1/review-packets/${encodeURIComponent(packetId)}`,
-      PacketResponseSchema
-    );
-  }
-  /** GET /v1/review-packets/reviewers: active members with a linked GitHub login. */
-  async listReviewers() {
-    return this.request("GET", "/v1/review-packets/reviewers", ReviewerListResponseSchema);
-  }
-  validate(schema, input, what) {
-    const result = schema.safeParse(input);
-    if (result.success) return result.data;
-    const detail = result.error.issues.map((issue) => `${issue.path.join(".") || what}: ${issue.message}`).join("; ");
-    throw new AriadneError({ failure: "invalid-input", message: `invalid ${what}: ${detail}` });
-  }
-  async request(method, path, schema, body) {
-    const request = {
-      method,
-      url: `${this.baseUrl}${path}`,
-      headers: {
-        Accept: "application/json",
-        "User-Agent": `flight-rules/${appVersion}`,
-        ...this.token !== void 0 ? { Authorization: `Bearer ${this.token}` } : {},
-        ...body !== void 0 ? { "Content-Type": "application/json" } : {}
-      },
-      ...body !== void 0 ? { body: JSON.stringify(body) } : {},
-      timeoutMs: this.timeoutMs
-    };
-    const response = await this.send(request);
-    if (response.status < 200 || response.status > 299) throw this.httpError(response);
-    let json;
-    try {
-      json = JSON.parse(response.body);
-    } catch (err) {
-      throw new AriadneError({
-        failure: "bad-response",
-        message: `${method} ${path} returned a body that is not JSON`,
-        cause: err
-      });
-    }
-    const parsed = schema.safeParse(json);
-    if (!parsed.success) {
-      throw new AriadneError({
-        failure: "bad-response",
-        message: `${method} ${path} returned an unexpected shape: ${parsed.error.issues.map((i) => i.path.join(".")).join(", ")}`
-      });
-    }
-    return parsed.data;
-  }
-  async send(request) {
-    let lastError;
-    const attempts = request.method === "GET" ? ariadneAttempts : 1;
-    for (let attempt = 1; attempt <= attempts; attempt++) {
-      try {
-        const response = await this.transport.send(request);
-        if (response.status < 500 || attempt === attempts) return response;
-      } catch (err) {
-        lastError = err;
-      }
-    }
-    throw new AriadneError({
-      failure: "network",
-      message: `no response from ${this.baseUrl} after ${attempts} attempt${attempts === 1 ? "" : "s"} (${this.describeNetworkError(lastError)})`,
-      cause: lastError
-    });
-  }
-  describeNetworkError(err) {
-    if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) {
-      return `timed out after ${this.timeoutMs / 1e3} s`;
-    }
-    const cause = err instanceof Error && err.cause instanceof Error ? `: ${err.cause.message}` : "";
-    return err instanceof Error ? `${err.message}${cause}` : String(err);
-  }
-  httpError(response) {
-    let parsed;
-    try {
-      const result = AgentErrorBodySchema.safeParse(JSON.parse(response.body));
-      parsed = result.success ? result.data : void 0;
-    } catch {
-      parsed = void 0;
-    }
-    const code = parsed?.error;
-    const reason = parsed?.message ?? (code === void 0 ? "no error body" : "");
-    return new AriadneError({
-      failure: "http",
-      status: response.status,
-      ...code !== void 0 ? { code } : {},
-      message: [`${response.status}`, code, reason].filter((part) => part !== void 0 && part !== "").join(" ")
-    });
-  }
-};
-
-// src/shared/ariadne/board-session-store.ts
-import { z as z36 } from "zod";
-
-// src/shared/ariadne/board-state-files.ts
-import { existsSync as existsSync10, mkdirSync as mkdirSync5, readFileSync as readFileSync9, readdirSync as readdirSync3, rmSync, statSync as statSync7, writeFileSync as writeFileSync5 } from "node:fs";
-import { homedir as homedir4 } from "node:os";
-import { join as join10 } from "node:path";
-var stateIdPattern = /^[A-Za-z0-9_-]{1,80}$/;
-var BoardStateFiles = class {
-  now;
-  env;
-  home;
-  constructor(props = {}) {
-    this.env = props.env ?? process.env;
-    this.home = props.home ?? homedir4();
-    this.now = props.now ?? Date.now;
-  }
-  root() {
-    const stateHome = this.env["XDG_STATE_HOME"];
-    const base = stateHome !== void 0 && stateHome !== "" ? stateHome : join10(this.home, ".local", "state");
-    return join10(base, "flight-rules", "board");
-  }
-  read(folder, id, schema) {
-    const path = this.pathFor(folder, id);
-    if (path === void 0 || !existsSync10(path)) return void 0;
-    try {
-      const parsed = schema.safeParse(JSON.parse(readFileSync9(path, "utf-8")));
-      return parsed.success ? parsed.data : void 0;
-    } catch {
-      return void 0;
-    }
-  }
-  write(folder, id, value) {
-    const path = this.pathFor(folder, id);
-    if (path === void 0) return;
-    mkdirSync5(this.folder(folder), { recursive: true, mode: 448 });
-    writeFileSync5(path, JSON.stringify(value), { mode: 384 });
-  }
-  /** Writes a file only if none exists, atomically; returns whether it wrote. */
-  create(folder, id, value) {
-    const path = this.pathFor(folder, id);
-    if (path === void 0) return false;
-    mkdirSync5(this.folder(folder), { recursive: true, mode: 448 });
-    try {
-      writeFileSync5(path, JSON.stringify(value), { mode: 384, flag: "wx" });
-      return true;
-    } catch {
-      return false;
-    }
-  }
-  remove(folder, id) {
-    const path = this.pathFor(folder, id);
-    if (path !== void 0) rmSync(path, { force: true });
-  }
-  /** Deletes a folder's files last written more than `maxAgeMs` ago. */
-  prune(folder, maxAgeMs) {
-    const dir = this.folder(folder);
-    if (!existsSync10(dir)) return;
-    const cutoff = this.now() - maxAgeMs;
-    for (const name of readdirSync3(dir)) {
-      const path = join10(dir, name);
-      try {
-        if (statSync7(path).mtimeMs < cutoff) rmSync(path, { force: true });
-      } catch {
-        continue;
-      }
-    }
-  }
-  folder(folder) {
-    return folder === void 0 ? this.root() : join10(this.root(), folder);
-  }
-  pathFor(folder, id) {
-    return stateIdPattern.test(id) ? join10(this.folder(folder), `${id}.json`) : void 0;
-  }
-};
-
-// src/shared/ariadne/board-session-store.ts
-var HeartbeatRecordSchema = z36.object({
-  session: z36.string(),
-  step: z36.string(),
-  state: z36.enum(agentStates),
-  ticket: z36.string().optional(),
-  repo: z36.string().optional(),
-  branch: z36.string().optional(),
-  skill: z36.string().optional(),
-  detail: z36.string().optional()
-});
-var SessionRecordSchema = z36.object({
-  heartbeat: HeartbeatRecordSchema,
-  /** When a skill last posted this heartbeat. */
-  recordedAt: z36.number(),
-  /** When any heartbeat for the session was last sent, by a skill or the hook. */
-  sentAt: z36.number()
-});
-var InferredRecordSchema = z36.object({
-  heartbeat: HeartbeatRecordSchema,
-  /** When the hook last sent this inferred heartbeat. */
-  sentAt: z36.number()
-});
-var ThreadRecordSchema = z36.object({
-  /** The board session a skill last posted to by default from this Claude Code session. */
-  board: z36.string().optional(),
-  /** When the hook last spawned a branch lookup for this Claude Code session's main thread. */
-  branchCheckedAt: z36.number().optional()
-});
-var ThreadSkillRecordSchema = z36.object({ skill: z36.string() });
-var inferredFolder = "inferred";
-var threadsFolder = "threads";
-var threadSkillsFolder = "thread-skills";
-var unsafeSessionCharacters = /[^A-Za-z0-9_-]/g;
-var maxSessionLength = 80;
-var TicketSessionKey = class {
-  key(claudeSession, ticket) {
-    const prefix = claudeSession.trim().replace(unsafeSessionCharacters, "_");
-    if (prefix === "" || ticket === "") return void 0;
-    return `${prefix.slice(0, Math.max(0, maxSessionLength - ticket.length - 1))}-${ticket}`;
-  }
-};
-var ticketSessionKey = new TicketSessionKey();
-var BoardSessionStore = class {
-  files;
-  now;
-  constructor(props = {}) {
-    this.files = new BoardStateFiles(props);
-    this.now = this.files.now;
-  }
-  dir() {
-    return this.files.root();
-  }
-  read(session) {
-    return this.files.read(void 0, session, SessionRecordSchema);
-  }
-  /** Remembers a heartbeat a skill just sent. */
-  record(heartbeat) {
-    const now = this.now();
-    this.files.write(void 0, heartbeat.session, { heartbeat: this.compact(heartbeat), recordedAt: now, sentAt: now });
-  }
-  /**
-   * The skill heartbeat a skill recorded for the session within `maxAgeMs`,
-   * whatever its state; an older record counts as none.
-   */
-  recent(session, maxAgeMs) {
-    const record = this.read(session);
-    return record !== void 0 && this.now() - record.recordedAt <= maxAgeMs ? record.heartbeat : void 0;
-  }
-  /**
-   * Remembers a placeholder heartbeat only where no skill has recorded a
-   * recent one: a fresh record is never replaced, and a missing file is
-   * created atomically, so a skill's own heartbeat landing at the same
-   * moment from another process wins. Returns whether it was remembered.
-   */
-  recordIfAbsent(heartbeat, maxAgeMs) {
-    if (this.recent(heartbeat.session, maxAgeMs) !== void 0) return false;
-    const now = this.now();
-    const record = { heartbeat: this.compact(heartbeat), recordedAt: now, sentAt: now };
-    if (this.read(heartbeat.session) === void 0) return this.files.create(void 0, heartbeat.session, record);
-    this.files.write(void 0, heartbeat.session, record);
-    return true;
-  }
-  /**
-   * Claims the next liveness heartbeat for a session: returns its record and
-   * marks it sent, or returns undefined when there is nothing to keep alive.
-   * That is when no skill has recorded one, the record is older than
-   * `maxAgeMs`, the run aborted, or one was sent less than `intervalMs` ago.
-   */
-  claim(session, intervalMs, maxAgeMs) {
-    const record = this.read(session);
-    if (record === void 0) return void 0;
-    const now = this.now();
-    if (record.heartbeat.state === "abort") return void 0;
-    if (now - record.recordedAt > maxAgeMs) return void 0;
-    if (now - record.sentAt < intervalMs) return void 0;
-    const claimed = { ...record, sentAt: now };
-    this.files.write(void 0, session, claimed);
-    return claimed;
-  }
-  /** Whether a skill has posted to this session within `maxAgeMs`, whatever its state. */
-  hasSkillRecord(session, maxAgeMs) {
-    const record = this.read(session);
-    return record !== void 0 && this.now() - record.recordedAt <= maxAgeMs;
-  }
-  /** Whether a skill record is one the hook keeps alive: not aborted and within `maxAgeMs`. */
-  isLive(session, maxAgeMs) {
-    const record = this.read(session);
-    return record !== void 0 && record.heartbeat.state !== "abort" && this.now() - record.recordedAt <= maxAgeMs;
-  }
-  readInferred(session) {
-    return this.files.read(inferredFolder, session, InferredRecordSchema);
-  }
-  /**
-   * Claims a liveness heartbeat the hook inferred: stores it and returns true,
-   * or returns false when one was sent for the session less than `intervalMs` ago.
-   */
-  claimInferred(heartbeat, intervalMs) {
-    const now = this.now();
-    const previous = this.readInferred(heartbeat.session);
-    if (previous !== void 0 && now - previous.sentAt < intervalMs) return false;
-    this.files.write(inferredFolder, heartbeat.session, { heartbeat: this.compact(heartbeat), sentAt: now });
-    return true;
-  }
-  /** Remembers that a skill posted to `board` by default from this Claude Code session. */
-  pointThread(claudeSession, board) {
-    this.files.write(threadsFolder, claudeSession, { ...this.thread(claudeSession), board });
-  }
-  /** The board session a skill last posted to by default from this Claude Code session. */
-  threadSession(claudeSession) {
-    return this.thread(claudeSession)?.board;
-  }
-  /** At most one main-thread branch lookup per `intervalMs` per Claude Code session. */
-  claimBranchCheck(claudeSession, intervalMs) {
-    const now = this.now();
-    const thread = this.thread(claudeSession);
-    if (thread?.branchCheckedAt !== void 0 && now - thread.branchCheckedAt < intervalMs) return false;
-    this.files.write(threadsFolder, claudeSession, { ...thread, branchCheckedAt: now });
-    return true;
-  }
-  /** Remembers the skill this Claude Code session's main thread just loaded. */
-  recordThreadSkill(claudeSession, skill) {
-    if (this.threadSkill(claudeSession) === skill) return;
-    this.files.write(threadSkillsFolder, claudeSession, { skill });
-  }
-  /** The skill this Claude Code session's main thread last loaded, if any. */
-  threadSkill(claudeSession) {
-    return this.files.read(threadSkillsFolder, claudeSession, ThreadSkillRecordSchema)?.skill;
-  }
-  /** Deletes inferred heartbeats and thread records untouched for `maxAgeMs`. */
-  prune(maxAgeMs) {
-    this.files.prune(inferredFolder, maxAgeMs);
-    this.files.prune(threadsFolder, maxAgeMs);
-    this.files.prune(threadSkillsFolder, maxAgeMs);
-  }
-  thread(claudeSession) {
-    return this.files.read(threadsFolder, claudeSession, ThreadRecordSchema);
-  }
-  compact(heartbeat) {
-    const { session, step, state } = heartbeat;
-    const optional = Object.fromEntries(
-      ["ticket", "repo", "branch", "skill", "detail"].map((key) => [key, heartbeat[key]]).filter(([, value]) => value !== void 0 && value !== "")
-    );
-    return { session, step, state, ...optional };
-  }
-};
-
-// src/shared/ariadne/ariadne-board.ts
-var claudeSessionEnv = "CLAUDE_CODE_SESSION_ID";
-var bootstrapStep = "started";
-var bootstrapRecoveryMs = 60 * 6e4;
-var personalScopes = /* @__PURE__ */ new Set(["user", "local"]);
-var scopeLabels = {
-  user: "user settings",
-  project: "project settings",
-  local: "local settings",
-  file: "the flight-rules config file"
-};
-var urlKey = "ariadne.url";
-var enabledKey = "ariadne.enabled";
-var AriadneBoard = class {
-  readLayers;
-  tokens;
-  env;
-  transport;
-  timeoutMs;
-  sessions;
-  constructor(props) {
-    this.readLayers = props.readLayers;
-    this.tokens = props.tokens;
-    this.env = props.env ?? process.env;
-    this.transport = props.transport;
-    this.timeoutMs = props.timeoutMs;
-    this.sessions = props.sessions;
-  }
-  /**
-   * `ariadne.url` (default: production) and `ariadne.enabled` (default:
-   * true), read only from the user and local layers, local winning. Project
-   * and file layers are ignored with a notice. A URL that is not https (or
-   * http on localhost) leaves `url` undefined, so nothing is ever sent to it.
-   */
-  settings() {
-    const notices = [];
-    let rawUrl;
-    let rawEnabled;
-    for (const layer of this.readLayers()) {
-      for (const key of [urlKey, enabledKey]) {
-        if (!(key in layer.values)) continue;
-        const value = layer.values[key];
-        if (!personalScopes.has(layer.scope)) {
-          notices.push(`ignored ${key} from ${scopeLabels[layer.scope]}; set it in user scope`);
-          continue;
-        }
-        if (value === void 0 || value === null || value === "") continue;
-        if (key === urlKey) rawUrl = { value, scope: layer.scope };
-        else rawEnabled = { value, scope: layer.scope };
-      }
-    }
-    let url = defaultAriadneUrl;
-    if (rawUrl !== void 0) {
-      const parsed = AriadneUrlSchema.safeParse(rawUrl.value);
-      url = parsed.success ? parsed.data : void 0;
-      if (!parsed.success) {
-        notices.push(
-          `ignored ${urlKey} from ${scopeLabels[rawUrl.scope]}: ${parsed.error.issues.map((i) => i.message).join("; ")}; nothing is sent until it is fixed`
-        );
-      }
-    }
-    let enabled = true;
-    if (rawEnabled !== void 0) {
-      const value = rawEnabled.value;
-      if (value === true || value === "true") enabled = true;
-      else if (value === false || value === "false") enabled = false;
-      else {
-        enabled = false;
-        notices.push(
-          `ignored ${enabledKey} from ${scopeLabels[rawEnabled.scope]}: expected true or false; reporting is off until it is fixed`
-        );
-      }
-    }
-    return { url, enabled, notices };
-  }
-  /**
-   * The session a call reports to without `--session`: with a Jira ticket,
-   * `<Claude Code session id>-<TICKET>`, the same row the heartbeat hook
-   * keeps alive for a sub-agent on that ticket; without one, the Claude Code
-   * session id. Undefined outside a Claude Code session.
-   */
-  defaultSession(ticket) {
-    const value = this.env[claudeSessionEnv]?.trim();
-    if (value === void 0 || value === "") return void 0;
-    const key = ticket !== void 0 ? TicketKeySchema.safeParse(ticket) : void 0;
-    return key?.success === true ? ticketSessionKey.key(value, key.data) : value;
-  }
-  /**
-   * Whether a post would be sent: a token, enabled and a valid URL. Read by
-   * the hooks before they start a child process; never touches the network.
-   * The token is checked first because it is cheap, and reading the config
-   * layers is not, so a machine without a token pays for neither.
-   */
-  reportable() {
-    try {
-      if (this.tokens.resolve() === void 0) return false;
-      const settings = this.settings();
-      return settings.enabled && settings.url !== void 0;
-    } catch {
-      return false;
-    }
-  }
-  /**
-   * Posts a heartbeat and remembers it for the session, so the heartbeat
-   * hook can keep the session alive with the same ticket and step.
-   */
-  async heartbeat(input, options = {}) {
-    return this.call(
-      options,
-      input.session,
-      async (client, session) => {
-        const sent = { ...input, session };
-        try {
-          const response = await client.heartbeat(sent);
-          this.remember(sent, input.session === void 0);
-          return response;
-        } catch (err) {
-          if (!(err instanceof AriadneError) || err.failure !== "invalid-input")
-            this.remember(sent, input.session === void 0);
-          throw err;
-        }
-      },
-      input.ticket
-    );
-  }
-  /**
-   * Re-sends the last heartbeat a skill posted for `session`, without
-   * refreshing when it was recorded, or else the one the heartbeat hook
-   * inferred for it. The heartbeat hook's liveness ping; a skill's heartbeat
-   * always wins, so its step is never overwritten.
-   */
-  async replay(session, options = {}) {
-    const record = this.sessions?.read(session) ?? this.sessions?.readInferred(session);
-    if (record === void 0) return { status: "skipped", reason: "nothing-recorded" };
-    return this.call(
-      options,
-      session,
-      (client) => client.heartbeat(record.heartbeat),
-      record.heartbeat.ticket
-    );
-  }
-  /**
-   * Posts an item. A session that has never sent a heartbeat (or has aged
-   * out) gets one first, with step `started`, state `nominal` and the
-   * reporting skill when one is named, and the item is posted again. A live
-   * session's step is never overwritten this way.
-   */
-  async item(input, options = {}) {
-    return this.call(
-      options,
-      input.session,
-      (client, session) => this.withSession(
-        client,
-        {
-          session,
-          ticket: input.ticket,
-          skill: options.skill,
-          defaulted: input.session === void 0,
-          bootstrapMissingSession: options.bootstrapMissingSession !== false
-        },
-        () => client.postItem({ ...input, session })
-      ),
-      input.ticket
-    );
-  }
-  /** Posts one activity line, creating the session first as `item` does. */
-  async activity(input, options = {}) {
-    return this.call(
-      options,
-      input.session,
-      (client, session) => this.withSession(
-        client,
-        {
-          session,
-          ticket: input.ticket,
-          skill: options.skill,
-          defaulted: input.session === void 0,
-          bootstrapMissingSession: options.bootstrapMissingSession !== false
-        },
-        () => client.postActivity({ ...input, session })
-      ),
-      input.ticket
-    );
-  }
-  /**
-   * Every item of one of the caller's sessions, open and resolved, with any
-   * chosen option. Without `session`, `ticket` picks the default session a
-   * post on that ticket uses.
-   */
-  async items(session, options = {}, ticket) {
-    return this.call(options, session, (client, id) => client.listItems(id), ticket);
-  }
-  /**
-   * Remembering is best effort: a full disk must not fail a report. A
-   * heartbeat sent to the default session also becomes the Claude Code
-   * session's current skill session, which the heartbeat hook keeps alive.
-   */
-  remember(heartbeat, defaulted) {
-    try {
-      this.sessions?.record(heartbeat);
-      const claudeSession = this.defaultSession();
-      if (defaulted && claudeSession !== void 0 && claudeSession !== heartbeat.session) {
-        this.sessions?.pointThread(claudeSession, heartbeat.session);
-      }
-    } catch {
-      return;
-    }
-  }
-  /**
-   * Runs `post`, first creating the session when the API has none. A skill
-   * heartbeat recorded for the session in the last hour, such as one that
-   * failed in transit, creates it with its own step and state. Otherwise the
-   * session starts as `started`, and when a skill is named that placeholder
-   * is remembered as the skill's heartbeat, so the heartbeat hook keeps it
-   * alive and never replaces its skill with an agent type it infers. The
-   * placeholder never replaces a heartbeat a skill recorded meanwhile.
-   */
-  async withSession(client, target, post) {
-    try {
-      return await post();
-    } catch (err) {
-      if (!(err instanceof AriadneError) || err.code !== "session_not_found") throw err;
-      if (!target.bootstrapMissingSession) throw err;
-    }
-    const { session, ticket, skill, defaulted } = target;
-    const recorded = this.bestEffort(() => this.sessions?.recent(session, bootstrapRecoveryMs));
-    if (recorded !== void 0) {
-      await client.heartbeat(recorded);
-      return post();
-    }
-    const named = skill !== void 0 && skill !== "";
-    const heartbeat = {
-      session,
-      ticket,
-      step: bootstrapStep,
-      state: "nominal",
-      ...named ? { skill } : {}
-    };
-    await client.heartbeat(heartbeat);
-    if (named) this.rememberPlaceholder(heartbeat, defaulted);
-    return post();
-  }
-  rememberPlaceholder(heartbeat, defaulted) {
-    const remembered = this.bestEffort(
-      () => this.sessions?.recordIfAbsent(heartbeat, bootstrapRecoveryMs)
-    );
-    const claudeSession = this.defaultSession();
-    if (remembered === true && defaulted && claudeSession !== void 0 && claudeSession !== heartbeat.session) {
-      this.bestEffort(() => this.sessions?.pointThread(claudeSession, heartbeat.session));
-    }
-  }
-  /** Local state is best effort: a full or unreadable disk must not fail a report. */
-  bestEffort(run2) {
-    try {
-      return run2();
-    } catch {
-      return void 0;
-    }
-  }
-  async call(options, requestedSession, run2, ticket) {
-    let settings;
-    try {
-      settings = this.settings();
-    } catch (err) {
-      return { status: "failed", message: err instanceof Error ? err.message : String(err) };
-    }
-    const noted = (outcome) => settings.notices.length > 0 ? { ...outcome, notices: settings.notices } : outcome;
-    const url = settings.url;
-    if (!settings.enabled) return noted({ status: "skipped", reason: "disabled" });
-    if (url === void 0) return noted({ status: "skipped", reason: "invalid-url" });
-    if (ticket !== void 0 && ticket !== "" && !TicketKeySchema.safeParse(ticket).success) {
-      return {
-        status: "skipped",
-        reason: "not-jira-ticket",
-        notices: [
-          ...settings.notices,
-          `skipped: ${ticket} is not a Jira issue key, and Ariadne tracks only Jira tickets`
-        ]
-      };
-    }
-    let token;
-    try {
-      token = this.tokens.resolve()?.token;
-    } catch (err) {
-      return noted({ status: "failed", message: err instanceof Error ? err.message : String(err) });
-    }
-    if (token === void 0 && options.strict !== true)
-      return noted({ status: "skipped", reason: "no-token" });
-    const session = requestedSession ?? this.defaultSession(ticket);
-    if (session === void 0) {
-      return noted({
-        status: "failed",
-        message: `no session id: pass --session, or run inside Claude Code so ${claudeSessionEnv} is set`
-      });
-    }
-    const client = new AriadneClient({
-      baseUrl: url,
-      token,
-      ...this.transport !== void 0 ? { transport: this.transport } : {},
-      ...this.timeoutMs !== void 0 ? { timeoutMs: this.timeoutMs } : {}
-    });
-    try {
-      return noted({ status: "posted", value: await run2(client, session) });
-    } catch (err) {
-      return noted({
-        status: "failed",
-        message: this.redact(this.describe(err, url, token !== void 0), token)
-      });
-    }
-  }
-  describe(err, url, hasToken) {
-    if (!(err instanceof AriadneError)) return err instanceof Error ? err.message : String(err);
-    if (err.status === 401 && err.code === "agent_token_expired") {
-      return "Ariadne agent token expired (401 agent_token_expired) \u2014 create a new one in Ariadne \u203A Settings \u203A Connections and run `flight-rules board login`";
-    }
-    if (err.status === 401) {
-      return hasToken ? "Ariadne agent token not recognised (401 unauthorized); it may be revoked or mistyped. Create a new one in Ariadne \u203A Settings \u203A Connections and set ARIADNE_AGENT_TOKEN or run `flight-rules board login`" : "no Ariadne token (401 unauthorized). Set ARIADNE_AGENT_TOKEN, or run `flight-rules board login` with an agent token from Ariadne \u203A Settings \u203A Connections";
-    }
-    if (err.code === "agents_opt_in_required") {
-      return "Agents reporting is off for you (403 agents_opt_in_required). Turn on Agents in Ariadne \u203A Settings \u203A Connections";
-    }
-    if (err.failure === "network") return `could not reach Ariadne at ${url}: ${err.message}`;
-    return `Ariadne ${err.failure === "http" ? "returned" : "request failed:"} ${err.message}`;
-  }
-  /** Belt and braces: no message may ever carry the token. */
-  redact(message, token) {
-    return token === void 0 || token === "" ? message : message.split(token).join("[redacted]");
-  }
-};
-
-// src/shared/ariadne/ariadne-packets.ts
-import { randomUUID } from "node:crypto";
-
-// src/shared/ariadne/packet-id-generator.ts
-import { randomBytes as randomBytes2 } from "node:crypto";
-var maxSlugLength = 60;
-var fallbackSlug = "packet";
-var suffixPattern = /-[0-9a-f]{8}$/;
-var RandomPacketIdGenerator = class {
-  generate(title) {
-    return `${this.slug(title)}-${this.suffix()}`;
-  }
-  regenerate(id) {
-    const slug = this.trim(id.replace(suffixPattern, ""));
-    const previous = id.slice(-8);
-    let suffix = this.suffix();
-    while (suffix === previous) suffix = this.suffix();
-    return `${slug === "" ? fallbackSlug : slug}-${suffix}`;
-  }
-  slug(title) {
-    const kebab = this.trim(title.toLowerCase().replace(/[^a-z0-9]+/g, "-"));
-    return kebab === "" ? fallbackSlug : kebab;
-  }
-  trim(text) {
-    return text.slice(0, maxSlugLength).replace(/^-+|-+$/g, "");
-  }
-  suffix() {
-    return randomBytes2(4).toString("hex");
-  }
-};
-var packetIdGenerator = new RandomPacketIdGenerator();
-
-// src/shared/ariadne/ariadne-packets.ts
-var AriadnePacketError = class extends Error {
-  name = "AriadnePacketError";
-};
-var personalScopes2 = /* @__PURE__ */ new Set(["user", "local"]);
-var urlKey2 = "ariadne.url";
-var AriadnePackets = class {
-  readLayers;
-  tokens;
-  transport;
-  timeoutMs;
-  constructor(props) {
-    this.readLayers = props.readLayers;
-    this.tokens = props.tokens;
-    this.transport = props.transport;
-    this.timeoutMs = props.timeoutMs;
-  }
-  /**
-   * Publishes a packet, generating its id from the title when the file has none.
-   */
-  async create(packet) {
-    const first = this.withId(packet);
-    return this.call((client) => client.createPacket(first.packet));
-  }
-  async update(id, input) {
-    const operationId = input.operationId ?? randomUUID().replaceAll("-", "");
-    return this.call(
-      (client) => client.updatePacket(id, {
-        expectedRevision: input.expectedRevision,
-        operationId,
-        packet: input.packet
-      })
-    );
-  }
-  async get(id) {
-    return this.call((client) => client.getPacket(id));
-  }
-  async reviewers() {
-    return this.call((client) => client.listReviewers());
-  }
-  /** The packet carrying an id: the file's own, or one generated from its title. Anything else is left for validation to reject. */
-  withId(packet) {
-    if (typeof packet !== "object" || packet === null || Array.isArray(packet))
-      return { packet, id: "" };
-    const fields = { ...packet };
-    if (typeof fields["id"] === "string") return { packet: fields, id: fields["id"] };
-    if (fields["id"] === void 0 && typeof fields["title"] === "string") {
-      const id = packetIdGenerator.generate(fields["title"]);
-      return { packet: { ...fields, id }, id };
-    }
-    return { packet: fields, id: "" };
-  }
-  /**
-   * `ariadne.url` (default: production) read only from the user and local
-   * layers, local winning. A URL that is not https (or http on localhost)
-   * throws, so the token never goes to it.
-   */
-  url() {
-    let raw;
-    for (const layer of this.readLayers()) {
-      if (!personalScopes2.has(layer.scope)) continue;
-      const value = layer.values[urlKey2];
-      if (value !== void 0 && value !== null && value !== "") raw = value;
-    }
-    if (raw === void 0) return defaultAriadneUrl;
-    const parsed = AriadneUrlSchema.safeParse(raw);
-    if (parsed.success) return parsed.data;
-    throw new AriadnePacketError(
-      `ariadne.url is invalid (${parsed.error.issues.map((i) => i.message).join("; ")}); fix it with \`flight-rules config set ariadne.url <https url> --scope user\``
-    );
-  }
-  token() {
-    const resolved = this.tokens.resolve();
-    if (resolved !== void 0) return resolved.token;
-    throw new AriadnePacketError(
-      "no Ariadne token; set ARIADNE_AGENT_TOKEN, or run `flight-rules board login` with an agent token from Ariadne \u203A Settings \u203A Connections"
-    );
-  }
-  async call(run2) {
-    const url = this.url();
-    const token = this.token();
-    const client = new AriadneClient({
-      baseUrl: url,
-      token,
-      ...this.transport !== void 0 ? { transport: this.transport } : {},
-      ...this.timeoutMs !== void 0 ? { timeoutMs: this.timeoutMs } : {}
-    });
-    try {
-      return await run2(client);
-    } catch (err) {
-      throw new AriadnePacketError(this.redact(this.describe(err, url), token), { cause: err });
-    }
-  }
-  describe(err, url) {
-    if (!(err instanceof AriadneError)) return err instanceof Error ? err.message : String(err);
-    if (err.failure === "invalid-input")
-      return `${err.message}; fix the packet file and retry, nothing was sent`;
-    if (err.failure === "network") {
-      return `could not reach Ariadne at ${url}: ${err.message}; check the network and \`ariadne.url\`, then retry`;
-    }
-    if (err.status === 401 && err.code === "agent_token_expired") {
-      return "Ariadne agent token expired (401 agent_token_expired); create a new one in Ariadne \u203A Settings \u203A Connections and run `flight-rules board login`";
-    }
-    if (err.status === 401) {
-      return "Ariadne did not accept the token (401 unauthorized); it may be revoked or mistyped. Create a new one in Ariadne \u203A Settings \u203A Connections and set ARIADNE_AGENT_TOKEN or run `flight-rules board login`";
-    }
-    if (err.code === "agents_opt_in_required") {
-      return "Agents access is off for you (403 agents_opt_in_required); turn on Agents in Ariadne \u203A Settings \u203A Connections and retry";
-    }
-    if (err.code === "revision_conflict") {
-      return "the packet changed since you read it (409 revision_conflict); re-read with `flight-rules packet get <id>` and retry";
-    }
-    if (err.code === "packet_exists") {
-      return "a packet with this id already exists with different content (409 packet_exists); use `flight-rules packet update <id>` to revise it, or choose a new id";
-    }
-    if (err.code === "packet_id_taken") {
-      return "the packet id is taken by another author (409 packet_id_taken); choose a different id, or get one with `flight-rules packet new-id --title <title>`";
-    }
-    if (err.code === "reviewer_not_found") {
-      return `a reviewer is not an active Ariadne member with a linked GitHub login (422 reviewer_not_found): ${err.message}; list valid logins with \`flight-rules packet reviewers\``;
-    }
-    if (err.failure === "http")
-      return `Ariadne returned ${err.message}; check the packet and retry`;
-    return `Ariadne request failed: ${err.message}`;
-  }
-  /** Belt and braces: no message may ever carry the token. */
-  redact(message, token) {
-    return token === "" ? message : message.split(token).join("[redacted]");
-  }
-};
-
-// src/shared/ariadne/ariadne-token-store.ts
-import { chmodSync, existsSync as existsSync11, mkdirSync as mkdirSync6, readFileSync as readFileSync10, rmSync as rmSync2, writeFileSync as writeFileSync6 } from "node:fs";
-import { homedir as homedir5 } from "node:os";
-import { dirname as dirname11, join as join11 } from "node:path";
-var agentTokenPattern = /^ariadne_agent_[0-9a-f]{16}_[A-Za-z0-9_-]{43}$/;
-var ariadneTokenEnvNames = ["ARIADNE_AGENT_TOKEN", "ARIADNE_TOKEN"];
-var AriadneTokenStore = class {
-  env;
-  home;
-  constructor(props = {}) {
-    this.env = props.env ?? process.env;
-    this.home = props.home ?? homedir5();
-  }
-  isAgentToken(value) {
-    return agentTokenPattern.test(value);
-  }
-  /** `$XDG_CONFIG_HOME/flight-rules/ariadne-token`, else `~/.config/flight-rules/ariadne-token`. */
-  path() {
-    const configHome = this.env["XDG_CONFIG_HOME"];
-    const base = configHome !== void 0 && configHome !== "" ? configHome : join11(this.home, ".config");
-    return join11(base, "flight-rules", "ariadne-token");
-  }
-  resolve() {
-    for (const name of ariadneTokenEnvNames) {
-      const value2 = this.env[name]?.trim();
-      if (value2 !== void 0 && value2 !== "") return { token: value2, source: name };
-    }
-    const path = this.path();
-    if (!existsSync11(path)) return void 0;
-    const value = readFileSync10(path, "utf-8").trim();
-    return value === "" ? void 0 : { token: value, source: "file" };
-  }
-  /** The environment variable that would win over a saved file, if one is set. */
-  shadowingEnv() {
-    return ariadneTokenEnvNames.find((name) => (this.env[name]?.trim() ?? "") !== "");
-  }
-  /** Saves an agent token with mode 0600 and returns the path. Rejects anything that is not one. */
-  save(token) {
-    const value = token.trim();
-    if (!this.isAgentToken(value)) {
-      throw new Error(
-        "That is not an Ariadne agent token (expected ariadne_agent_<16 hex>_<43 characters>). Create one in Ariadne \u203A Settings \u203A Connections."
-      );
-    }
-    const path = this.path();
-    mkdirSync6(dirname11(path), { recursive: true, mode: 448 });
-    writeFileSync6(path, `${value}
-`, { mode: 384 });
-    chmodSync(path, 384);
-    return path;
-  }
-  /** Deletes the saved token; returns whether one existed. */
-  remove() {
-    const path = this.path();
-    if (!existsSync11(path)) return false;
-    rmSync2(path);
-    return true;
-  }
-};
-
-// src/shared/ariadne/board-agent-store.ts
-import { existsSync as existsSync12, readdirSync as readdirSync4 } from "node:fs";
-import { join as join12 } from "node:path";
-import { z as z37 } from "zod";
-var DispatchRecordSchema = z37.object({
-  /** The Jira key the dispatch named, or null when it named none. */
-  ticket: z37.string().nullable(),
-  description: z37.string(),
-  /** The dispatching Claude Code session. */
-  session: z37.string(),
-  /** A digest of the prompt, so a sub-agent found only through its transcript still finds its dispatch. */
-  promptDigest: z37.string().optional(),
-  at: z37.number()
-});
-var AgentRecordSchema = z37.object({
-  /** The Jira key the sub-agent works on, or null once resolved to none. */
-  ticket: z37.string().nullable(),
-  description: z37.string().optional(),
-  agentType: z37.string().optional(),
-  toolUseId: z37.string().optional(),
-  /** The Claude Code session the sub-agent runs in. */
-  session: z37.string(),
-  at: z37.number()
-});
-var AgentSkillRecordSchema = z37.object({ skill: z37.string() });
-var dispatchFolder = "dispatch";
-var agentsFolder = "agents";
-var agentSkillsFolder = "agent-skills";
-var BoardAgentStore = class {
-  files;
-  constructor(props = {}) {
-    this.files = new BoardStateFiles(props);
-  }
-  now() {
-    return this.files.now();
-  }
-  recordDispatch(toolUseId, record) {
-    this.files.write(dispatchFolder, toolUseId, record);
-  }
-  readDispatch(toolUseId) {
-    return this.files.read(dispatchFolder, toolUseId, DispatchRecordSchema);
-  }
-  /** The dispatch in `session` whose prompt has this digest; reads every dispatch file, so only a fallback uses it. */
-  findDispatchByPrompt(session, promptDigest) {
-    const dir = join12(this.files.root(), dispatchFolder);
-    if (!existsSync12(dir)) return void 0;
-    for (const name of readdirSync4(dir)) {
-      if (!name.endsWith(".json")) continue;
-      const record = this.readDispatch(name.slice(0, -".json".length));
-      if (record?.session === session && record.promptDigest === promptDigest) return record;
-    }
-    return void 0;
-  }
-  removeDispatch(toolUseId) {
-    this.files.remove(dispatchFolder, toolUseId);
-  }
-  recordAgent(agentId, record) {
-    this.files.write(agentsFolder, agentId, record);
-  }
-  readAgent(agentId) {
-    return this.files.read(agentsFolder, agentId, AgentRecordSchema);
-  }
-  removeAgent(agentId) {
-    this.files.remove(agentsFolder, agentId);
-    this.files.remove(agentSkillsFolder, agentId);
-  }
-  /** Remembers the skill a sub-agent just loaded; rewrites nothing when it is unchanged. */
-  recordAgentSkill(agentId, skill) {
-    if (this.readAgentSkill(agentId) === skill) return;
-    this.files.write(agentSkillsFolder, agentId, { skill });
-  }
-  readAgentSkill(agentId) {
-    return this.files.read(agentSkillsFolder, agentId, AgentSkillRecordSchema)?.skill;
-  }
-  /** Deletes dispatch and sub-agent records untouched for `maxAgeMs`. */
-  prune(maxAgeMs) {
-    this.files.prune(dispatchFolder, maxAgeMs);
-    this.files.prune(agentsFolder, maxAgeMs);
-    this.files.prune(agentSkillsFolder, maxAgeMs);
   }
 };
 
@@ -6402,14 +5138,14 @@ ${block}`;
 };
 
 // src/tasks/github-task-tracker/github-task-tracker.ts
-import { z as z39 } from "zod";
+import { z as z35 } from "zod";
 
 // src/tasks/task-tracker/unsupported-tracker-operation-error.ts
-import { z as z38 } from "zod";
-var UnsupportedTrackerOperationPropsSchema = z38.object({
-  tracker: z38.string().min(1),
-  operation: z38.string().min(1),
-  remedy: z38.string().min(1).optional()
+import { z as z34 } from "zod";
+var UnsupportedTrackerOperationPropsSchema = z34.object({
+  tracker: z34.string().min(1),
+  operation: z34.string().min(1),
+  remedy: z34.string().min(1).optional()
 });
 var UnsupportedTrackerOperationError = class extends Error {
   tracker;
@@ -6426,9 +5162,9 @@ var UnsupportedTrackerOperationError = class extends Error {
 };
 
 // src/tasks/github-task-tracker/github-task-tracker.ts
-var IssueRefSchema = z39.object({ number: z39.number() });
-var IssueRefListSchema = z39.array(IssueRefSchema);
-var ParentNotFoundSchema = z39.object({ status: z39.literal(404) });
+var IssueRefSchema = z35.object({ number: z35.number() });
+var IssueRefListSchema = z35.array(IssueRefSchema);
+var ParentNotFoundSchema = z35.object({ status: z35.literal(404) });
 var GitHubTaskTracker = class {
   octokit;
   gql;
@@ -7016,12 +5752,12 @@ var GitHubTaskTracker = class {
 };
 
 // src/tasks/jira-task-tracker/jira-task-tracker.ts
-import { readFileSync as readFileSync11 } from "node:fs";
+import { readFileSync as readFileSync9 } from "node:fs";
 import { basename as basename3 } from "node:path";
-import { z as z43 } from "zod";
+import { z as z39 } from "zod";
 
 // src/tasks/jira-task-tracker/jira-client.ts
-import { z as z40 } from "zod";
+import { z as z36 } from "zod";
 
 // src/tasks/jira-task-tracker/jira-api-error.ts
 var JiraApiError = class extends Error {
@@ -7044,11 +5780,11 @@ var defaultRetryAfterSeconds = 2;
 var maxBackoffMs = 3e4;
 var attachmentXsrfHeader = "no-check";
 var redirectStatuses = /* @__PURE__ */ new Set([301, 302, 303, 307, 308]);
-var JiraErrorBodySchema = z40.object({
-  errorMessages: z40.array(z40.string()).optional(),
+var JiraErrorBodySchema = z36.object({
+  errorMessages: z36.array(z36.string()).optional(),
   // Caught per-field so an off-contract `errors` map cannot discard a valid sibling `errorMessages`.
-  errors: z40.record(z40.string(), z40.string()).optional().catch(void 0),
-  message: z40.string().optional()
+  errors: z36.record(z36.string(), z36.string()).optional().catch(void 0),
+  message: z36.string().optional()
 });
 var JiraClient = class {
   baseUrl;
@@ -7135,13 +5871,13 @@ var JiraClient = class {
 };
 
 // src/tasks/jira-task-tracker/confluence-client.ts
-import { z as z41 } from "zod";
+import { z as z37 } from "zod";
 var maxRetries2 = 4;
 var defaultRetryAfterSeconds2 = 2;
 var maxBackoffMs2 = 3e4;
-var ConfluenceErrorBodySchema = z41.object({
-  errors: z41.array(z41.object({ title: z41.string().optional(), detail: z41.string().optional() })).optional().catch(void 0),
-  message: z41.string().optional()
+var ConfluenceErrorBodySchema = z37.object({
+  errors: z37.array(z37.object({ title: z37.string().optional(), detail: z37.string().optional() })).optional().catch(void 0),
+  message: z37.string().optional()
 });
 var ConfluenceClient = class {
   siteBaseUrl;
@@ -7216,14 +5952,14 @@ import { fromMarkdown } from "mdast-util-from-markdown";
 import { gfmFromMarkdown } from "mdast-util-gfm";
 import { gfm } from "micromark-extension-gfm";
 import { decodeString } from "micromark-util-decode-string";
-import { z as z42 } from "zod";
-var MediaRefSchema = z42.object({
-  mediaUuid: z42.string().min(1),
-  collection: z42.string().default(""),
-  width: z42.number().int().positive().optional(),
-  height: z42.number().int().positive().optional()
+import { z as z38 } from "zod";
+var MediaRefSchema = z38.object({
+  mediaUuid: z38.string().min(1),
+  collection: z38.string().default(""),
+  width: z38.number().int().positive().optional(),
+  height: z38.number().int().positive().optional()
 });
-var MediaLookupSchema = z42.record(z42.string(), MediaRefSchema);
+var MediaLookupSchema = z38.record(z38.string(), MediaRefSchema);
 var attachmentPrefix = /^attachment:/;
 var externalTarget = /^[a-zA-Z][a-zA-Z0-9+.-]*:|^\/\//;
 var detailsOpen2 = /^<details>/;
@@ -8216,13 +6952,13 @@ var deliveryLinkOutward = "implements";
 var tddMetadataPropertyKey = "flight-rules-metadata";
 var mediaFilePath = /^\/file\/([0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12})\/binary$/;
 var mediaLocationBase = "https://media.invalid/";
-var JiraUploadedAttachmentSchema = z43.object({
-  id: z43.union([z43.string(), z43.number()]).transform(String),
-  filename: z43.string(),
-  mimeType: z43.string(),
-  size: z43.number().optional()
+var JiraUploadedAttachmentSchema = z39.object({
+  id: z39.union([z39.string(), z39.number()]).transform(String),
+  filename: z39.string(),
+  mimeType: z39.string(),
+  size: z39.number().optional()
 });
-var JiraUploadedAttachmentsSchema = z43.array(JiraUploadedAttachmentSchema);
+var JiraUploadedAttachmentsSchema = z39.array(JiraUploadedAttachmentSchema);
 var JiraTaskTracker = class {
   client;
   confluence;
@@ -8536,7 +7272,7 @@ var JiraTaskTracker = class {
    */
   async addAttachment(ticketId, filePath) {
     const filename = basename3(filePath);
-    const file = new File([readFileSync11(filePath)], filename, {
+    const file = new File([readFileSync9(filePath)], filename, {
       type: this.mimeTypes.forFilename(filename)
     });
     const uploaded = JiraUploadedAttachmentsSchema.parse(
@@ -8824,20 +7560,20 @@ var JiraTaskTracker = class {
 // src/tasks/tool-probe/tool-probe.ts
 import { execFile as execFile5 } from "node:child_process";
 import { promisify as promisify5 } from "node:util";
-import { z as z45 } from "zod";
+import { z as z41 } from "zod";
 
 // src/tasks/readiness/probe-diagnostics.ts
-import { z as z44 } from "zod";
-var ProbeDiagnosticsPropsSchema = z44.object({ env: z44.record(z44.string(), z44.string().optional()) });
-var ErrorFactsSchema = z44.object({
-  code: z44.union([z44.string(), z44.number()]).nullable().optional(),
-  status: z44.number().optional(),
-  statusCode: z44.number().optional(),
-  killed: z44.boolean().optional(),
-  name: z44.string().optional(),
-  message: z44.string().optional(),
-  stderr: z44.string().optional(),
-  cause: z44.unknown().optional()
+import { z as z40 } from "zod";
+var ProbeDiagnosticsPropsSchema = z40.object({ env: z40.record(z40.string(), z40.string().optional()) });
+var ErrorFactsSchema = z40.object({
+  code: z40.union([z40.string(), z40.number()]).nullable().optional(),
+  status: z40.number().optional(),
+  statusCode: z40.number().optional(),
+  killed: z40.boolean().optional(),
+  name: z40.string().optional(),
+  message: z40.string().optional(),
+  stderr: z40.string().optional(),
+  cause: z40.unknown().optional()
 });
 var RedactedProbeDiagnostics = class {
   secrets;
@@ -8900,7 +7636,7 @@ var RedactedProbeDiagnostics = class {
 // src/tasks/tool-probe/tool-probe.ts
 var minimumGhVersion = [2, 99, 0];
 var ghVersionLine = /gh version (\d+)\.(\d+)\.(\d+)/;
-var NodeToolProbePropsSchema = z45.object({ cwd: z45.string().optional(), env: z45.record(z45.string(), z45.string().optional()).optional(), timeoutMs: z45.int().positive().max(6e4).default(1e4) });
+var NodeToolProbePropsSchema = z41.object({ cwd: z41.string().optional(), env: z41.record(z41.string(), z41.string().optional()).optional(), timeoutMs: z41.int().positive().max(6e4).default(1e4) });
 var NodeToolProbe = class {
   execFile;
   env;
@@ -9002,7 +7738,7 @@ var NodeToolProbe = class {
 var nodeToolProbe = new NodeToolProbe();
 
 // src/tasks/readiness/repository-readiness.ts
-import { z as z49 } from "zod";
+import { z as z45 } from "zod";
 
 // src/tasks/readiness/workflow-preflight.ts
 import { execFile as execFile6 } from "node:child_process";
@@ -9010,27 +7746,27 @@ import { access, realpath } from "node:fs/promises";
 import { constants } from "node:fs";
 import { resolve as resolve9 } from "node:path";
 import { promisify as promisify6 } from "node:util";
-import { z as z48 } from "zod";
+import { z as z44 } from "zod";
 
 // src/orchestration/orchestration-policy.ts
 import { isDeepStrictEqual } from "node:util";
-import { z as z47 } from "zod";
+import { z as z43 } from "zod";
 
 // src/agents/agent-emitter/agent-emitter.schema.ts
-import { z as z46 } from "zod";
-var ModelBindingsSchema = z46.strictObject({
-  standard: z46.string().trim().min(1),
-  escalated: z46.string().trim().min(1),
-  expert: z46.string().trim().min(1)
+import { z as z42 } from "zod";
+var ModelBindingsSchema = z42.strictObject({
+  standard: z42.string().trim().min(1),
+  escalated: z42.string().trim().min(1),
+  expert: z42.string().trim().min(1)
 });
-var AgentDefinitionSchema = z46.strictObject({
+var AgentDefinitionSchema = z42.strictObject({
   frontmatter: AgentRegistrationSchema,
-  body: z46.string().refine((body) => body.trim() !== "", "agent prompt must not be empty")
+  body: z42.string().refine((body) => body.trim() !== "", "agent prompt must not be empty")
 });
 
 // src/orchestration/orchestration-policy.ts
-var RegistryOrchestrationPolicyPropsSchema = z47.strictObject({
-  agents: z47.array(AgentDefinitionSchema).min(1).refine(
+var RegistryOrchestrationPolicyPropsSchema = z43.strictObject({
+  agents: z43.array(AgentDefinitionSchema).min(1).refine(
     (agents) => new Set(agents.map((agent) => agent.frontmatter.name)).size === agents.length,
     "duplicate agent name"
   )
@@ -9184,10 +7920,10 @@ var RegistryOrchestrationPolicy = class {
 };
 
 // src/tasks/readiness/workflow-preflight.ts
-var WorkflowPreflightPropsSchema = z48.object({
-  cwd: z48.string(),
-  env: z48.record(z48.string(), z48.string().optional()),
-  timeoutMs: z48.int().positive().max(6e4).default(1e4)
+var WorkflowPreflightPropsSchema = z44.object({
+  cwd: z44.string(),
+  env: z44.record(z44.string(), z44.string().optional()),
+  timeoutMs: z44.int().positive().max(6e4).default(1e4)
 });
 var NodeWorkflowPreflight = class {
   cwd;
@@ -9391,10 +8127,10 @@ var NodeWorkflowPreflight = class {
 };
 
 // src/tasks/readiness/repository-readiness.ts
-var RepositoryReadinessPropsSchema = z49.object({
-  cwd: z49.string().optional(),
-  env: z49.record(z49.string(), z49.string().optional()).optional(),
-  timeoutMs: z49.int().positive().max(6e4).default(1e4)
+var RepositoryReadinessPropsSchema = z45.object({
+  cwd: z45.string().optional(),
+  env: z45.record(z45.string(), z45.string().optional()).optional(),
+  timeoutMs: z45.int().positive().max(6e4).default(1e4)
 });
 var NodeRepositoryReadiness = class {
   cwd;
@@ -9575,16 +8311,16 @@ var NodeRepositoryReadiness = class {
 };
 
 // src/flight-rules/flight-rules.schema.ts
-import { z as z52 } from "zod";
+import { z as z48 } from "zod";
 
 // src/operations/git-config-operations.ts
-import { existsSync as existsSync13, lstatSync as lstatSync2, realpathSync as realpathSync8 } from "node:fs";
-import { dirname as dirname13, isAbsolute as isAbsolute6, join as join14, parse, relative as relative6, resolve as resolve10, sep as sep3 } from "node:path";
-import { z as z51 } from "zod";
+import { existsSync as existsSync10, lstatSync as lstatSync2, realpathSync as realpathSync8 } from "node:fs";
+import { dirname as dirname12, isAbsolute as isAbsolute6, join as join11, parse, relative as relative6, resolve as resolve10, sep as sep3 } from "node:path";
+import { z as z47 } from "zod";
 
 // src/git/commit-message-builder/commit-message-builder.ts
-import { readFileSync as readFileSync12 } from "node:fs";
-import { dirname as dirname12, join as join13 } from "node:path";
+import { readFileSync as readFileSync10 } from "node:fs";
+import { dirname as dirname11, join as join10 } from "node:path";
 
 // src/shared/attribution-stripper/attribution-stripper.ts
 var trailerText = String.raw`(?:Co-Authored-By:[^\n"']*(?:Claude|anthropic\.com)[^\n"']*|Claude-Session:[^\n"']*|https://claude\.ai/code/session_[A-Za-z0-9_-]+)`;
@@ -9615,25 +8351,25 @@ ${line.trim()}`) === "";
 };
 
 // src/git/commit-message-builder/commit-message.schema.ts
-import { z as z50 } from "zod";
-var CommitMessageInputSchema = z50.object({
+import { z as z46 } from "zod";
+var CommitMessageInputSchema = z46.object({
   type: SemanticTypeSchema,
   // Bare issue numbers make one-character scopes legitimate; 32 clears a 10-character tracker key plus a six-digit number.
-  scope: z50.string().min(1).max(32),
-  description: z50.string().min(2).max(50),
-  body: z50.string().optional(),
-  model: z50.string().max(72).optional(),
-  footers: z50.array(z50.string().regex(/^[a-zA-Z0-9-]+(: |=).*$/)).default([])
+  scope: z46.string().min(1).max(32),
+  description: z46.string().min(2).max(50),
+  body: z46.string().optional(),
+  model: z46.string().max(72).optional(),
+  footers: z46.array(z46.string().regex(/^[a-zA-Z0-9-]+(: |=).*$/)).default([])
 });
-var CommitMessageHeaderSchema = z50.preprocess(
+var CommitMessageHeaderSchema = z46.preprocess(
   (arg) => {
-    return z50.string({ error: "Git Commit headers should be 72 characters or less" }).max(72).parse(arg);
+    return z46.string({ error: "Git Commit headers should be 72 characters or less" }).max(72).parse(arg);
   },
-  z50.templateLiteral([SemanticTypeSchema, "(", z50.string(), "): ", z50.string()])
+  z46.templateLiteral([SemanticTypeSchema, "(", z46.string(), "): ", z46.string()])
 );
-var CommitMessageBuilderPropsSchema = z50.object({
-  binPath: z50.string().min(1),
-  agentEnv: z50.string().optional()
+var CommitMessageBuilderPropsSchema = z46.object({
+  binPath: z46.string().min(1),
+  agentEnv: z46.string().optional()
 });
 
 // src/git/commit-message-builder/commit-message-builder.ts
@@ -9671,8 +8407,8 @@ var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
   }
   static readPluginVersion(binPath) {
     try {
-      const pkgPath = join13(dirname12(binPath), "..", "package.json");
-      const parsed = JSON.parse(readFileSync12(pkgPath, "utf-8"));
+      const pkgPath = join10(dirname11(binPath), "..", "package.json");
+      const parsed = JSON.parse(readFileSync10(pkgPath, "utf-8"));
       if (typeof parsed === "object" && parsed !== null && "version" in parsed && typeof parsed.version === "string") {
         return parsed.version;
       }
@@ -9690,36 +8426,36 @@ var DefaultCommitMessageBuilder = class _DefaultCommitMessageBuilder {
 };
 
 // src/operations/git-config-operations.ts
-var ConfigScopeSchema = z51.enum(configScopes);
-var ConfigSetInputSchema = z51.object({
-  key: z51.string().min(1),
-  values: z51.array(z51.string()).min(1),
+var ConfigScopeSchema = z47.enum(configScopes);
+var ConfigSetInputSchema = z47.object({
+  key: z47.string().min(1),
+  values: z47.array(z47.string()).min(1),
   scope: ConfigScopeSchema.optional()
 }).strict();
-var ConfigUnsetInputSchema = z51.object({ key: z51.string().min(1), scope: ConfigScopeSchema.optional() }).strict();
+var ConfigUnsetInputSchema = z47.object({ key: z47.string().min(1), scope: ConfigScopeSchema.optional() }).strict();
 var GitCommitInputSchema = CommitMessageInputSchema.extend({
-  files: z51.array(z51.string()).default([])
+  files: z47.array(z47.string()).default([])
 }).strict();
-var GitCheckoutInputSchema = z51.object({
-  type: z51.string().min(1),
-  scope: z51.string().min(1),
-  description: z51.string().optional(),
-  from: z51.string().optional()
+var GitCheckoutInputSchema = z47.object({
+  type: z47.string().min(1),
+  scope: z47.string().min(1),
+  description: z47.string().optional(),
+  from: z47.string().optional()
 }).strict();
-var GitPushInputSchema = z51.object({ remote: z51.string().min(1).default("origin"), setUpstream: z51.boolean().default(true) }).strict();
-var CommitMessageOutputSchema = z51.object({ message: z51.string() });
-var BranchNameInputSchema = z51.object({ type: z51.string().min(1), scope: z51.string().min(1), description: z51.string().optional() }).strict();
-var ConfigOperationPolicySchema = z51.object({
-  scopes: z51.array(ConfigScopeSchema).default(["project", "local"]),
-  roots: z51.array(z51.string().min(1)).default([])
+var GitPushInputSchema = z47.object({ remote: z47.string().min(1).default("origin"), setUpstream: z47.boolean().default(true) }).strict();
+var CommitMessageOutputSchema = z47.object({ message: z47.string() });
+var BranchNameInputSchema = z47.object({ type: z47.string().min(1), scope: z47.string().min(1), description: z47.string().optional() }).strict();
+var ConfigOperationPolicySchema = z47.object({
+  scopes: z47.array(ConfigScopeSchema).default(["project", "local"]),
+  roots: z47.array(z47.string().min(1)).default([])
 }).strict();
-var GitConfigOperationsPropsSchema = z51.object({
-  cwd: z51.string().min(1),
-  configStore: z51.custom((value) => typeof value === "object" && value !== null),
-  git: z51.custom((value) => typeof value === "object" && value !== null),
+var GitConfigOperationsPropsSchema = z47.object({
+  cwd: z47.string().min(1),
+  configStore: z47.custom((value) => typeof value === "object" && value !== null),
+  git: z47.custom((value) => typeof value === "object" && value !== null),
   configPolicy: ConfigOperationPolicySchema.default({ scopes: ["project", "local"], roots: [] }),
-  binPath: z51.string().default(process.argv[1] ?? ""),
-  agentEnv: z51.string().optional()
+  binPath: z47.string().default(process.argv[1] ?? ""),
+  agentEnv: z47.string().optional()
 });
 var LaunchConfigOperationDeniedError = class extends Error {
   name = "LaunchConfigOperationDeniedError";
@@ -9742,11 +8478,11 @@ var DefaultGitConfigOperations = class {
         ["write", "process"],
         ["config", "set"],
         ConfigSetInputSchema,
-        z51.object({
-          key: z51.string(),
+        z47.object({
+          key: z47.string(),
           scope: ConfigScopeSchema,
-          path: z51.string(),
-          warning: z51.string().optional()
+          path: z47.string(),
+          warning: z47.string().optional()
         }),
         (input) => this.setConfig(input)
       ),
@@ -9756,7 +8492,7 @@ var DefaultGitConfigOperations = class {
         ["write", "process"],
         ["config", "unset"],
         ConfigUnsetInputSchema,
-        z51.object({ key: z51.string(), scope: ConfigScopeSchema, path: z51.string() }),
+        z47.object({ key: z47.string(), scope: ConfigScopeSchema, path: z47.string() }),
         (input) => this.unsetConfig(input)
       ),
       this.descriptor(
@@ -9765,7 +8501,7 @@ var DefaultGitConfigOperations = class {
         ["write", "process"],
         ["git", "commit"],
         GitCommitInputSchema,
-        z51.object({ sha: z51.string(), message: z51.string() }),
+        z47.object({ sha: z47.string(), message: z47.string() }),
         (input) => this.commit(input)
       ),
       this.descriptor(
@@ -9774,10 +8510,10 @@ var DefaultGitConfigOperations = class {
         ["write", "process"],
         ["git", "checkout"],
         GitCheckoutInputSchema,
-        z51.object({
-          branch: z51.string(),
-          from: z51.string().nullable(),
-          renamedFrom: z51.string().nullable()
+        z47.object({
+          branch: z47.string(),
+          from: z47.string().nullable(),
+          renamedFrom: z47.string().nullable()
         }),
         (input) => this.checkout(input)
       ),
@@ -9787,7 +8523,7 @@ var DefaultGitConfigOperations = class {
         ["write", "network", "process"],
         ["git", "push"],
         GitPushInputSchema,
-        z51.object({ branch: z51.string(), remote: z51.string(), setUpstream: z51.boolean() }),
+        z47.object({ branch: z47.string(), remote: z47.string(), setUpstream: z47.boolean() }),
         (input) => this.push(input)
       ),
       this.descriptor(
@@ -9805,7 +8541,7 @@ var DefaultGitConfigOperations = class {
         ["read", "process"],
         ["branch-name"],
         BranchNameInputSchema,
-        z51.object({ branch: z51.string() }),
+        z47.object({ branch: z47.string() }),
         (input) => ({
           branch: branchNamer.name({
             type: input.type,
@@ -9855,9 +8591,9 @@ var DefaultGitConfigOperations = class {
     const path = this.props.configStore.pathFor(scope);
     const absolutePath = isAbsolute6(path) ? path : resolve10(this.props.cwd, path);
     this.rejectDanglingSymlinks(absolutePath);
-    let existingPath = existsSync13(absolutePath) ? absolutePath : dirname13(absolutePath);
-    while (!existsSync13(existingPath)) {
-      const parent = dirname13(existingPath);
+    let existingPath = existsSync10(absolutePath) ? absolutePath : dirname12(absolutePath);
+    while (!existsSync10(existingPath)) {
+      const parent = dirname12(existingPath);
       if (parent === existingPath)
         throw new LaunchConfigOperationDeniedError(
           `Configuration path has no existing parent: ${path}`
@@ -9865,7 +8601,7 @@ var DefaultGitConfigOperations = class {
       existingPath = parent;
     }
     const resolvedExistingPath = realpathSync8(existingPath);
-    const target = existsSync13(absolutePath) ? resolvedExistingPath : resolve10(resolvedExistingPath, relative6(existingPath, absolutePath));
+    const target = existsSync10(absolutePath) ? resolvedExistingPath : resolve10(resolvedExistingPath, relative6(existingPath, absolutePath));
     if (!this.allowedRoots.some((root) => {
       const rel = relative6(root, target);
       return rel === "" || !rel.startsWith("..") && !isAbsolute6(rel);
@@ -9879,7 +8615,7 @@ var DefaultGitConfigOperations = class {
     const root = parse(path).root;
     let current = root;
     for (const part of path.slice(root.length).split(sep3).filter(Boolean)) {
-      current = join14(current, part);
+      current = join11(current, part);
       try {
         if (!lstatSync2(current).isSymbolicLink()) continue;
       } catch {
@@ -9929,217 +8665,18 @@ var DefaultGitConfigOperations = class {
 };
 
 // src/flight-rules/flight-rules.schema.ts
-var FlightRulesPropsSchema = z52.object({
-  cwd: z52.string().optional().describe("Directory used for config discovery; defaults to process.cwd()"),
-  env: z52.record(z52.string(), z52.string().optional()).optional().describe("Live environment record; defaults to process.env"),
-  configPath: z52.string().optional().describe("Explicit config file, taking precedence over FLIGHT_RULES_CONFIG and discovery"),
+var FlightRulesPropsSchema = z48.object({
+  cwd: z48.string().optional().describe("Directory used for config discovery; defaults to process.cwd()"),
+  env: z48.record(z48.string(), z48.string().optional()).optional().describe("Live environment record; defaults to process.env"),
+  configPath: z48.string().optional().describe("Explicit config file, taking precedence over FLIGHT_RULES_CONFIG and discovery"),
   host: NativeHostSchema.optional().describe(
     "Explicit configuration host; otherwise FLIGHT_RULES_HOST, the native package host, or Claude for compatibility"
   ),
-  configWritePolicy: z52.object({
-    scopes: z52.array(ConfigScopeSchema).optional(),
-    roots: z52.array(z52.string().min(1)).optional()
+  configWritePolicy: z48.object({
+    scopes: z48.array(ConfigScopeSchema).optional(),
+    roots: z48.array(z48.string().min(1)).optional()
   }).strict().optional()
 });
-
-// src/operations/ariadne-operations.ts
-import { z as z53 } from "zod";
-var BoardResultSchema = (value) => z53.discriminatedUnion("status", [
-  z53.object({
-    status: z53.literal("skipped"),
-    reason: z53.enum([
-      "disabled",
-      "no-token",
-      "invalid-url",
-      "not-jira-ticket",
-      "nothing-recorded"
-    ]),
-    notices: z53.array(z53.string()).optional()
-  }),
-  z53.object({
-    status: z53.literal("failed"),
-    message: z53.string(),
-    notices: z53.array(z53.string()).optional()
-  }),
-  z53.object({ status: z53.literal("ok"), value, notices: z53.array(z53.string()).optional() })
-]);
-var packetInput = z53.unknown();
-var packetIdInput = z53.strictObject({ title: z53.string() });
-var packetUpdateInput = z53.strictObject({
-  id: z53.string().min(1),
-  packet: z53.unknown(),
-  expectedRevision: z53.number().int().nonnegative()
-});
-var packetOutput = PacketSchema;
-var reviewersOutput = ReviewerListResponseSchema;
-var AriadneOperationsPropsSchema = z53.object({
-  getBoard: z53.custom((value) => typeof value === "function"),
-  getPackets: z53.custom((value) => typeof value === "function")
-});
-var inputSchemas = {
-  heartbeat: z53.object({
-    input: HeartbeatInputSchema.omit({ session: true }).extend({
-      session: z53.string().optional(),
-      ticket: z53.string().optional(),
-      step: z53.string(),
-      repo: z53.string().optional(),
-      branch: z53.string().optional(),
-      skill: z53.string().optional(),
-      detail: z53.string().optional()
-    }),
-    options: z53.object({ strict: z53.boolean().optional(), skill: z53.string().optional() }).optional()
-  }),
-  item: z53.object({
-    input: ItemInputSchema.omit({ session: true }).extend({
-      session: z53.string().optional(),
-      ticket: z53.string().optional(),
-      title: z53.string(),
-      detail: z53.string().optional(),
-      options: z53.array(z53.string()).optional(),
-      id: z53.string().optional()
-    }),
-    options: z53.object({ strict: z53.boolean().optional(), skill: z53.string().optional() }).optional()
-  }),
-  activity: z53.object({
-    input: ActivityInputSchema.omit({ session: true }).extend({
-      session: z53.string().optional(),
-      ticket: z53.string().optional(),
-      text: z53.string(),
-      id: z53.string().optional()
-    }),
-    options: z53.object({ strict: z53.boolean().optional(), skill: z53.string().optional() }).optional()
-  }),
-  items: z53.strictObject({
-    session: z53.string().optional(),
-    ticket: z53.string().optional(),
-    strict: z53.boolean().optional()
-  })
-};
-var DefaultAriadneOperations = class {
-  props;
-  constructor(props) {
-    this.props = AriadneOperationsPropsSchema.parse(props);
-  }
-  operations() {
-    return [
-      this.descriptor(
-        "board-post-heartbeat",
-        "Report a run heartbeat to Ariadne.",
-        ["write", "network"],
-        ["board", "post", "heartbeat"],
-        inputSchemas.heartbeat,
-        BoardResultSchema(HeartbeatResponseSchema),
-        ({ input, options }) => this.mapBoard(this.props.getBoard().heartbeat(input, this.boardOptions(options)))
-      ),
-      this.descriptor(
-        "board-post-item",
-        "Post a question or request to an Ariadne run.",
-        ["write", "network"],
-        ["board", "post", "item"],
-        inputSchemas.item,
-        BoardResultSchema(ItemResponseSchema),
-        ({ input, options }) => this.mapBoard(
-          this.props.getBoard().item(input, {
-            ...this.boardOptions(options),
-            bootstrapMissingSession: false
-          })
-        )
-      ),
-      this.descriptor(
-        "board-post-activity",
-        "Add activity to an Ariadne run.",
-        ["write", "network"],
-        ["board", "post", "activity"],
-        inputSchemas.activity,
-        BoardResultSchema(ActivityResponseSchema),
-        ({ input, options }) => this.mapBoard(
-          this.props.getBoard().activity(input, {
-            ...this.boardOptions(options),
-            bootstrapMissingSession: false
-          })
-        )
-      ),
-      this.descriptor(
-        "board-items",
-        "List items for an Ariadne run.",
-        ["read", "network"],
-        ["board", "items"],
-        inputSchemas.items,
-        BoardResultSchema(ItemListResponseSchema),
-        ({ session, ticket, strict }) => this.mapBoard(
-          this.props.getBoard().items(session, strict === void 0 ? {} : { strict }, ticket)
-        )
-      ),
-      this.descriptor(
-        "packet-create",
-        "Publish a validated Ariadne review packet.",
-        ["write", "network"],
-        ["packet", "create"],
-        z53.strictObject({ packet: packetInput }),
-        packetOutput,
-        ({ packet }) => this.props.getPackets().create(packet)
-      ),
-      this.descriptor(
-        "packet-new-id",
-        "Generate a reusable Ariadne review packet id.",
-        [],
-        ["packet", "new-id"],
-        packetIdInput,
-        z53.object({ id: z53.string() }),
-        ({ title }) => ({ id: packetIdGenerator.generate(title) })
-      ),
-      this.descriptor(
-        "packet-update",
-        "Replace a review packet at its expected revision.",
-        ["write", "network"],
-        ["packet", "update"],
-        packetUpdateInput,
-        packetOutput,
-        ({ id, packet, expectedRevision }) => this.props.getPackets().update(id, { packet, expectedRevision })
-      ),
-      this.descriptor(
-        "packet-get",
-        "Read an Ariadne review packet and its revision.",
-        ["read", "network"],
-        ["packet", "get"],
-        z53.object({ id: z53.string().min(1) }),
-        packetOutput,
-        ({ id }) => this.props.getPackets().get(id)
-      ),
-      this.descriptor(
-        "packet-reviewers",
-        "List Ariadne members who can review packets.",
-        ["read", "network"],
-        ["packet", "reviewers"],
-        z53.strictObject({}),
-        reviewersOutput,
-        () => this.props.getPackets().reviewers()
-      )
-    ];
-  }
-  boardOptions(options) {
-    return {
-      ...options?.strict === void 0 ? {} : { strict: options.strict },
-      ...options?.skill === void 0 ? {} : { skill: options.skill }
-    };
-  }
-  async mapBoard(outcome) {
-    const result = await outcome;
-    if (result.status === "posted") return { ...result, status: "ok" };
-    return result;
-  }
-  descriptor(id, description, effects, path, inputSchema, outputSchema, handler) {
-    return {
-      id,
-      description,
-      effects,
-      cli: { path, aliases: [] },
-      inputSchema,
-      outputSchema,
-      handler
-    };
-  }
-};
 
 // src/flight-rules/flight-rules.ts
 var DefaultFlightRules = class {
@@ -10298,47 +8835,18 @@ var DefaultFlightRules = class {
       cwd: this.cwd
     });
   }
-  ariadneOperations() {
-    return new DefaultAriadneOperations({
-      getBoard: () => this.board(),
-      getPackets: () => this.packets()
-    });
-  }
-  board() {
-    return new AriadneBoard({
-      readLayers: () => this.configStore().layers(),
-      tokens: this.ariadneTokens(),
-      env: this.env,
-      sessions: this.boardSessions()
-    });
-  }
-  packets() {
-    return new AriadnePackets({
-      readLayers: () => this.configStore().layers(),
-      tokens: this.ariadneTokens()
-    });
-  }
-  ariadneTokens() {
-    return new AriadneTokenStore({ env: this.env });
-  }
-  boardSessions() {
-    return new BoardSessionStore({ env: this.env });
-  }
-  boardAgents() {
-    return new BoardAgentStore({ env: this.env });
-  }
 };
 
 // src/sdk/instruction-catalog-core.ts
-import { existsSync as existsSync14, readFileSync as readFileSync14, readdirSync as readdirSync6, realpathSync as realpathSync9, statSync as statSync8 } from "node:fs";
-import { basename as basename5, dirname as dirname14, isAbsolute as isAbsolute7, join as join16, relative as relative7, resolve as resolve12, sep as sep4 } from "node:path";
+import { existsSync as existsSync11, readFileSync as readFileSync12, readdirSync as readdirSync4, realpathSync as realpathSync9, statSync as statSync7 } from "node:fs";
+import { basename as basename5, dirname as dirname13, isAbsolute as isAbsolute7, join as join13, relative as relative7, resolve as resolve12, sep as sep4 } from "node:path";
 import { fileURLToPath as fileURLToPath4 } from "node:url";
-import { z as z55 } from "zod";
+import { z as z50 } from "zod";
 
 // src/agents/agent-registry/agent-registry.ts
-import { readFileSync as readFileSync13, readdirSync as readdirSync5 } from "node:fs";
-import { basename as basename4, join as join15 } from "node:path";
-import { z as z54 } from "zod";
+import { readFileSync as readFileSync11, readdirSync as readdirSync3 } from "node:fs";
+import { basename as basename4, join as join12 } from "node:path";
+import { z as z49 } from "zod";
 
 // src/agents/agent-frontmatter/agent-frontmatter.ts
 import { parse as parseYaml4 } from "yaml";
@@ -10362,21 +8870,21 @@ var agentFrontmatterParser = new YamlAgentFrontmatterParser();
 
 // src/agents/agent-registry/agent-registry.ts
 var AgentNameSchema = AgentFrontmatterSchema.shape.name;
-var AgentVariantSchema = z54.strictObject({
+var AgentVariantSchema = z49.strictObject({
   name: AgentNameSchema,
   extends: AgentNameSchema,
   description: AgentFrontmatterSchema.shape.description,
   model: ModelTierSchema,
-  modelReason: z54.string().trim().min(1).optional()
+  modelReason: z49.string().trim().min(1).optional()
 });
-var AgentVariantsSchema = z54.array(AgentVariantSchema);
+var AgentVariantsSchema = z49.array(AgentVariantSchema);
 var InvalidAgentDefinitionError = class extends Error {
   name = "InvalidAgentDefinitionError";
 };
 var FileAgentRegistry = class {
   load(directory) {
-    const agents = readdirSync5(directory, { withFileTypes: true }).filter((entry) => entry.isFile() && entry.name.endsWith(".md")).sort((a, b) => a.name.localeCompare(b.name)).map((entry) => {
-      const markdown = readFileSync13(join15(directory, entry.name), "utf8");
+    const agents = readdirSync3(directory, { withFileTypes: true }).filter((entry) => entry.isFile() && entry.name.endsWith(".md")).sort((a, b) => a.name.localeCompare(b.name)).map((entry) => {
+      const markdown = readFileSync11(join12(directory, entry.name), "utf8");
       const frontmatter = AgentRegistrationSchema.parse(agentFrontmatterParser.parse(markdown));
       const body = markdown.replace(/^---\r?\n[\s\S]*?^---(?:\r?\n|$)/m, "");
       if (frontmatter.name !== basename4(entry.name, ".md") || body.trim() === "") {
@@ -10386,7 +8894,7 @@ var FileAgentRegistry = class {
     });
     const canonical = new Map(agents.map((agent) => [agent.frontmatter.name, agent]));
     const names = new Set(canonical.keys());
-    const variants = AgentVariantsSchema.parse(JSON.parse(readFileSync13(join15(directory, "variants.json"), "utf8")));
+    const variants = AgentVariantsSchema.parse(JSON.parse(readFileSync11(join12(directory, "variants.json"), "utf8")));
     for (const variant of variants) {
       const base = canonical.get(variant.extends);
       if (base === void 0 || names.has(variant.name)) {
@@ -10408,11 +8916,11 @@ var FileAgentRegistry = class {
 };
 
 // src/sdk/instruction-catalog-core.ts
-var CatalogPropsSchema = z55.strictObject({
-  moduleUrl: z55.string().min(1),
-  env: z55.record(z55.string(), z55.string().optional())
+var CatalogPropsSchema = z50.strictObject({
+  moduleUrl: z50.string().min(1),
+  env: z50.record(z50.string(), z50.string().optional())
 });
-var ResourceNameSchema = z55.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
+var ResourceNameSchema = z50.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
 var UnknownInstructionError = class extends Error {
   name = "UnknownInstructionError";
 };
@@ -10427,10 +8935,10 @@ var ModulePackageHomeLocator = class {
     const parsed = CatalogPropsSchema.parse({ ...props, env: { ...props.env } });
     const override = parsed.env["FLIGHT_RULES_HOME"]?.trim();
     if (override) return override;
-    const moduleDirectory = dirname14(fileURLToPath4(parsed.moduleUrl));
+    const moduleDirectory = dirname13(fileURLToPath4(parsed.moduleUrl));
     if (basename5(moduleDirectory) === "sdk") return resolve12(moduleDirectory, "../..");
-    const bindingParent = dirname14(moduleDirectory);
-    if (basename5(bindingParent) === "sdk" && basename5(dirname14(bindingParent)) === "src") {
+    const bindingParent = dirname13(moduleDirectory);
+    if (basename5(bindingParent) === "sdk" && basename5(dirname13(bindingParent)) === "src") {
       return resolve12(moduleDirectory, "../../..");
     }
     return resolve12(moduleDirectory, "..");
@@ -10450,22 +8958,22 @@ var FileInstructionCatalog = class {
       "agents",
       "resources/agents"
     ]);
-    this.safePath(join16(this.agentDir, "variants.json"), this.agentDir);
+    this.safePath(join13(this.agentDir, "variants.json"), this.agentDir);
     this.agents = new Map(
       new FileAgentRegistry().load(this.agentDir).map((agent) => [agent.frontmatter.name, agent])
     );
   }
   listSkills() {
-    return readdirSync6(this.skillDir, { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile() && entry.name === "SKILL.md").map((entry) => relative7(this.skillDir, join16(entry.parentPath, entry.name)).split(sep4)[0]).filter((name) => name !== void 0).sort();
+    return readdirSync4(this.skillDir, { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile() && entry.name === "SKILL.md").map((entry) => relative7(this.skillDir, join13(entry.parentPath, entry.name)).split(sep4)[0]).filter((name) => name !== void 0).sort();
   }
   loadSkill(name) {
     const parsed = ResourceNameSchema.safeParse(name);
     if (!parsed.success) throw new UnsafeInstructionPathError(`Invalid skill name: ${name}`);
-    const path = join16(this.skillDir, parsed.data, "SKILL.md");
+    const path = join13(this.skillDir, parsed.data, "SKILL.md");
     return {
       name: parsed.data,
       path: this.safePath(path, this.skillDir),
-      contents: readFileSync14(this.safePath(path, this.skillDir), "utf8")
+      contents: readFileSync12(this.safePath(path, this.skillDir), "utf8")
     };
   }
   listAgents() {
@@ -10479,7 +8987,7 @@ var FileInstructionCatalog = class {
     return agent;
   }
   findResourceDirectory(home, candidates) {
-    if (!existsSync14(home) || !statSync8(home).isDirectory()) {
+    if (!existsSync11(home) || !statSync7(home).isDirectory()) {
       throw new InstructionsUnavailableError(
         `The flight-rules installation directory is unavailable: ${home}`
       );
@@ -10487,7 +8995,7 @@ var FileInstructionCatalog = class {
     const installationRoot = realpathSync9(home);
     for (const candidate of candidates) {
       const path = resolve12(installationRoot, candidate);
-      if (!existsSync14(path) || !statSync8(path).isDirectory()) continue;
+      if (!existsSync11(path) || !statSync7(path).isDirectory()) continue;
       const realPath = realpathSync9(path);
       const relativePath = relative7(installationRoot, realPath);
       if (relativePath === ".." || relativePath.startsWith(`..${sep4}`) || isAbsolute7(relativePath)) {
@@ -10500,7 +9008,7 @@ var FileInstructionCatalog = class {
     throw new InstructionsUnavailableError(`Canonical resources are unavailable under ${home}`);
   }
   safePath(path, root) {
-    if (!isAbsolute7(path) || !existsSync14(path) || !statSync8(path).isFile())
+    if (!isAbsolute7(path) || !existsSync11(path) || !statSync7(path).isFile())
       throw new UnknownInstructionError(`Unknown instruction resource: ${path}`);
     const realPath = realpathSync9(path);
     const relativePath = relative7(root, realPath);
@@ -10514,20 +9022,20 @@ var FileInstructionCatalog = class {
 };
 
 // src/mcp/mcp-server.ts
-var McpLaunchPropsSchema = z56.strictObject({
-  cwd: z56.string().min(1),
-  env: z56.record(z56.string(), z56.string().optional()),
-  allowedOperationIds: z56.array(z56.string()).default([]),
-  allowedEffects: z56.array(z56.enum(["read", "write", "network", "process"])).default(["read", "process", "network"]),
-  allowedConfigScopes: z56.array(z56.enum(configScopes)).default([]),
+var McpLaunchPropsSchema = z51.strictObject({
+  cwd: z51.string().min(1),
+  env: z51.record(z51.string(), z51.string().optional()),
+  allowedOperationIds: z51.array(z51.string()).default([]),
+  allowedEffects: z51.array(z51.enum(["read", "write", "network", "process"])).default(["read", "process", "network"]),
+  allowedConfigScopes: z51.array(z51.enum(configScopes)).default([]),
   ...ReviewOperationsLaunchPropsSchema.pick({
     trustedRef: true,
     owners: true,
     requireMapping: true
   }).shape
 });
-var resourceId = z56.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
-var LaunchBoundQaFileSystemPropsSchema = z56.object({ root: z56.string().min(1) });
+var resourceId = z51.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
+var LaunchBoundQaFileSystemPropsSchema = z51.object({ root: z51.string().min(1) });
 var LaunchCheckoutChangedError = class extends Error {
   name = "LaunchCheckoutChangedError";
 };
@@ -10542,21 +9050,21 @@ var LaunchBoundQaFileSystem = class {
   }
   exists(path) {
     if (!this.isInsideLaunch(path)) return false;
-    return existsSync15(path);
+    return existsSync12(path);
   }
   isFile(path) {
     this.requireInsideLaunch(path);
-    return existsSync15(path) && statSync9(path).isFile();
+    return existsSync12(path) && statSync8(path).isFile();
   }
   readFile(path) {
     this.requireInsideLaunch(path);
-    return readFileSync15(path, "utf8");
+    return readFileSync13(path, "utf8");
   }
   isInsideLaunch(path) {
     const absolute = resolve13(path);
     let existing = absolute;
-    while (!existsSync15(existing)) {
-      const parent = dirname15(existing);
+    while (!existsSync12(existing)) {
+      const parent = dirname14(existing);
       if (parent === existing) return false;
       existing = parent;
     }
@@ -10584,7 +9092,7 @@ var FlightRulesMcpServer = class {
   constructor(props) {
     this.props = McpLaunchPropsSchema.parse(props);
     this.cwd = realpathSync10(this.props.cwd);
-    const directory = statSync9(this.cwd);
+    const directory = statSync8(this.cwd);
     this.launchDevice = directory.dev;
     this.launchInode = directory.ino;
     this.qaFileSystem = new LaunchBoundQaFileSystem({ root: this.cwd });
@@ -10599,7 +9107,7 @@ var FlightRulesMcpServer = class {
     const server = new McpServer({ name: "flight-rules", version: "1.0.0" });
     for (const operation of registry.list()) {
       const descriptor = this.findOperation(operation.id);
-      if (!(descriptor.inputSchema instanceof z56.ZodObject)) {
+      if (!(descriptor.inputSchema instanceof z51.ZodObject)) {
         throw new Error(`MCP operation input must be an object schema: ${operation.id}`);
       }
       server.registerTool(
@@ -10730,7 +9238,6 @@ var FlightRulesMcpServer = class {
         cwd
       }).operations(),
       ...new DefaultPrOperations({ cwd, getHost: () => core.prHost() }).operations(),
-      ...core.ariadneOperations().operations(),
       ...core.gitConfigOperations({ scopes: this.props.allowedConfigScopes, roots: [cwd] }).operations(),
       ...core.reviewOperations({
         cwd,
@@ -10747,7 +9254,7 @@ var FlightRulesMcpServer = class {
   }
   /** Pathnames can be reused after a rename; the launch grant belongs to the original directory. */
   requireOriginalLaunchCheckout() {
-    const directory = existsSync15(this.cwd) ? statSync9(this.cwd) : void 0;
+    const directory = existsSync12(this.cwd) ? statSync8(this.cwd) : void 0;
     if (directory === void 0 || realpathSync10(this.cwd) !== this.cwd || directory.dev !== this.launchDevice || directory.ino !== this.launchInode) {
       throw new LaunchCheckoutChangedError(
         `The launch checkout was moved or replaced: ${this.cwd}`
@@ -10756,12 +9263,12 @@ var FlightRulesMcpServer = class {
   }
   validateLocalPaths(id, input) {
     if (id !== "qa-instructions") return;
-    const parsedInput = z56.object({ from: z56.string().optional() }).safeParse(input);
+    const parsedInput = z51.object({ from: z51.string().optional() }).safeParse(input);
     if (!parsedInput.success) return;
     const from = parsedInput.data.from;
     if (typeof from !== "string") return;
     const candidate = isAbsolute8(from) ? from : resolve13(this.cwd, from);
-    if (!existsSync15(candidate)) throw new Error(`QA instructions path does not exist: ${from}`);
+    if (!existsSync12(candidate)) throw new Error(`QA instructions path does not exist: ${from}`);
     const realPath = realpathSync10(candidate);
     const relativePath = relative8(this.cwd, realPath);
     if (relativePath === ".." || relativePath.startsWith(`..${sep5}`) || isAbsolute8(relativePath)) {
@@ -10774,10 +9281,10 @@ var FlightRulesMcpServer = class {
 
 // src/mcp/stdio.ts
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
-import { z as z57 } from "zod";
+import { z as z52 } from "zod";
 var StdioLaunchPropsSchema = McpLaunchPropsSchema.extend({
-  cwd: z57.string().min(1).default(process.cwd()),
-  env: z57.record(z57.string(), z57.string().optional()).default(() => ({ ...process.env }))
+  cwd: z52.string().min(1).default(process.cwd()),
+  env: z52.record(z52.string(), z52.string().optional()).default(() => ({ ...process.env }))
 });
 var StdioFlightRulesMcpTransport = class {
   launch;
