@@ -196,11 +196,6 @@ describe("injected core", () => {
       installation: vi.fn(),
       mainCheckout: vi.fn(),
       evidence: vi.fn(),
-      board: vi.fn(),
-      packets: vi.fn(),
-      ariadneTokens: vi.fn(),
-      boardSessions: vi.fn(),
-      boardAgents: vi.fn(),
     };
     const output = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     try {

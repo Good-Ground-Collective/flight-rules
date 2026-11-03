@@ -435,9 +435,8 @@ try {
       try {
         await client.connect(transport);
         const { tools } = await client.listTools();
-        assert.equal(tools.length, 62, binary + ' (' + mode + ')');
+        assert.equal(tools.length, 53, binary + ' (' + mode + ')');
         assert.ok(tools.some(({ name }) => name === 'ticket-create'));
-        assert.ok(tools.some(({ name }) => name === 'packet-reviewers'));
         for (const tool of tools) {
           const validInput = sampleValue(tool.inputSchema);
           if (tool.name === 'ticket-label') validInput.add = ['fixture'];
@@ -544,7 +543,7 @@ console.log(JSON.stringify({ routeContractCalls, eofResults }));
     },
     claudeAgentWorker: JSON.parse(claudeAgentProof),
     mcpClients: {
-      toolsPerBinary: 62,
+      toolsPerBinary: 53,
       packedAndRelocatedClis: relocatedArgs.length,
       validAndInvalidInputsPerRoute: true,
       ...mcpMetrics,

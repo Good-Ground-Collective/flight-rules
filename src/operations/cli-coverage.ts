@@ -181,18 +181,6 @@ export class ManifestCliRouteCoverage implements CliRouteCoverage {
   }
 }
 
-const pendingRoutes = [
-  "board post heartbeat",
-  "board post item",
-  "board post activity",
-  "board items",
-  "packet create",
-  "packet new-id",
-  "packet update",
-  "packet get",
-  "packet reviewers",
-];
-
 const excludedRoutes = [
   {
     path: ["mcp"],
@@ -204,21 +192,6 @@ const excludedRoutes = [
     path: ["hook", "pre-bash"],
     aliases: ["guard-commit"],
     reason: "Consumes Claude hook payloads and governs host shell commands.",
-  },
-  {
-    path: ["hook", "board-heartbeat"],
-    aliases: [],
-    reason: "Consumes Claude PostToolUse payloads and runs as a host hook.",
-  },
-  {
-    path: ["hook", "agent-dispatch"],
-    aliases: [],
-    reason: "Consumes Claude PreToolUse agent payloads for local session tracking.",
-  },
-  {
-    path: ["hook", "agent-stop"],
-    aliases: [],
-    reason: "Consumes Claude SubagentStop payloads and reports host lifecycle events.",
   },
   {
     path: ["hook", "subagent-status"],
@@ -235,12 +208,6 @@ const excludedRoutes = [
     aliases: [],
     reason: "Installs native Codex agent registrations into host-owned directories.",
   },
-  {
-    path: ["board", "login"],
-    aliases: [],
-    reason: "Provisions a machine-local Ariadne credential from interactive input.",
-  },
-  { path: ["board", "logout"], aliases: [], reason: "Removes a machine-local Ariadne credential." },
 ];
 
 /** Records domain migration states and the local MCP transport launcher. */
@@ -300,40 +267,11 @@ export const cliRouteCoverage: CliRouteCoverage = new ManifestCliRouteCoverage({
       ["pr threads", "pr-threads"],
       ["pr thread-reply", "pr-thread-reply"],
       ["pr request-review", "pr-request-review"],
-      ["board post heartbeat", "board-post-heartbeat"],
-      ["board post item", "board-post-item"],
-      ["board post activity", "board-post-activity"],
-      ["board items", "board-items"],
-      ["packet create", "packet-create"],
-      ["packet new-id", "packet-new-id"],
-      ["packet update", "packet-update"],
-      ["packet get", "packet-get"],
-      ["packet reviewers", "packet-reviewers"],
     ].map(([path, operationId]) => ({
       status: "supported" as const,
       route: { path: (path ?? "").split(" "), aliases: [] },
       operationId: operationId ?? "",
     })),
-    ...pendingRoutes
-      .filter(
-        (path) =>
-          !new Set([
-            "board post heartbeat",
-            "board post item",
-            "board post activity",
-            "board items",
-            "packet create",
-            "packet new-id",
-            "packet update",
-            "packet get",
-            "packet reviewers",
-          ]).has(path),
-      )
-      .map((path) => ({
-        status: "pending-migration" as const,
-        route: { path: path.split(" "), aliases: [] },
-        operationId: `cli-${path.replaceAll(" ", "-")}`,
-      })),
     ...excludedRoutes.map((route) => ({
       status: "excluded" as const,
       route,

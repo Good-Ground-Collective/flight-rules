@@ -37,7 +37,6 @@ Human questions require invocation-level `allowHumanQuestions: true` and availab
 - The **working tree is clean**. Checked once, here, before any mutation.
 - Before the first repository or tracker mutation, run `flight-rules check --workflow execute-wave` and require `"ok": true` for the workflow’s environment checks. Resolve failed required checks before continuing. Use the native harness for permissions and worker dispatch; no runtime evidence file is required.
 - Config carries a **`repo`** field (`owner/repo`). `execute-work` needs it to open each PR, and discovering it missing on ticket four means three PRs and a broken run. Settle it now.
-- **Ariadne reporting is optional.** The `flight-rules board` lines below report the wave to Ariadne's Agents page and read answers people gave there. When Ariadne is not configured, or the node is not a Jira key, they print nothing and exit 0. Treat empty output as "no answer". Never let a post change the run. Answers come only from people in Ariadne; this skill reads them and never answers an item itself.
 
 ## Process
 
@@ -81,12 +80,7 @@ the wave branches from it.
 
 If the base branch is not the repo's default branch, say so and confirm before
 continuing. Draining a wave onto a feature branch is legitimate but rarely what
-someone means. Post that closed question to Ariadne too, and take whichever
-answer comes first, in chat or in `chosenOption` from `flight-rules board items --ticket <node id> --json`:
-
-```bash
-flight-rules board post item --skill flight-rules:execute-wave --kind question --ticket <node id> --title "Drain the wave onto <base branch>, not the default branch?" --option Continue --option Stop
-```
+someone means.
 
 ### 3. Plan the graph
 
@@ -167,20 +161,8 @@ and the user needs to know which one they have:
 
 ### 5. Confirm before spending
 
-First read the wave gate the previous run left in Ariadne (step 10):
-
-```bash
-flight-rules board items --session wave-<node id> --json
-```
-
-Take the newest `wave-gate` item, and remember how many `wave-gate` items there are (zero when nothing prints) for step 10. If its `chosenOption` is `Start wave` and its `detail` lists exactly the tickets you selected, that answer is the go-ahead: say so and start draining without asking. `Review wave` means stop and tell the user they asked to review first. Otherwise there is no answer yet, so continue below.
-
 Show the user the wave: each ticket id, its title, and the count. List what you
-dropped and why. Then ask for a go-ahead. Post the same closed question to Ariadne, and take whichever answer comes first, in chat or in `chosenOption` from `flight-rules board items --ticket <node id> --json`:
-
-```bash
-flight-rules board post item --skill flight-rules:execute-wave --kind question --ticket <node id> --title "Start <count> tickets under <node id>?" --option Start --option Stop
-```
+dropped and why. Then ask for a go-ahead.
 
 **Past five tickets, make the cost explicit** before asking. Each ticket runs an
 implement/verify loop of up to three iterations with two agents per iteration,
@@ -273,7 +255,7 @@ Read `route`, `reasons`, `missing`, `blocked` and `unblocksOnMerge`. Each `block
 
 The route is `incomplete` if any blocked ticket has no open PR. Otherwise it is `complex` if the PR set spans more than one wave, if any PR's base is not the default branch, or if it has more than 4 PRs, and `simple` if none of those hold.
 
-- **`incomplete`:** report the tickets in `missing` as "in review with no open PR found" and stop routing. Request nothing and do not offer a packet until those PRs exist.
+- **`incomplete`:** report the tickets in `missing` as "in review with no open PR found" and stop routing. Request nothing until those PRs exist.
 - **`simple`:** ask the human once, for the whole set, which reviewer logins to request. Nothing is requested before they answer. Then, for each blocked PR that has a `pr`:
 
   ```bash
@@ -281,20 +263,11 @@ The route is `incomplete` if any blocked ticket has no open PR. Otherwise it is 
   ```
 
   Pass `--reviewer` once per login. Record `requested` and `failed` for each PR. If a call exits non-zero, carry on with the remaining PRs and logins, then list every failed login and its PR in the report. Never fall back to raw `gh pr edit`.
-- **`complex`:** show the `reasons` and the ordered PR list from `blocked`, then offer to invoke the `author-review-packet` skill with the review-plan payload so the author can build a sequenced Review Packet. If the human declines, offer the simple path above, or stop, as they choose.
-
-Ariadne board items need a Jira-style ticket key, so this step posts no board item on GitHub-tracked repos.
+- **`complex`:** show the `reasons` and the ordered PR list from `blocked`, then ask the human which reviewer logins to request for each PR, in wave order, and request them with the same `pr request-review` command as the simple path, or stop, as they choose.
 
 ### 10. Report
 
-First post the wave gate, so a person can approve the next wave in Ariadne. Run it under the node's own session, `wave-<node id>`, so the next run finds it in step 5. Take `<n>` from the count of `wave-gate` items step 5 read, plus one. Write `<waves[1] ids>` as the ticket ids that unblock on merge, comma-separated:
-
-```bash
-flight-rules board post heartbeat --session wave-<node id> --ticket <node id> --step "wave gate" --state hold --skill flight-rules:execute-wave
-flight-rules board post item --skill flight-rules:execute-wave --session wave-<node id> --kind wave-gate --ticket <node id> --id wave-<node id>-<n> --title "<k> PRs open for review; <m> tickets can start once they merge" --detail "<waves[1] ids>" --option "Start wave" --option "Review wave"
-```
-
-Then give the user, in this order:
+Give the user, in this order:
 
 - **The node** — epic or initiative, id and title, and which you resolved it as. For an initiative, the in-flight epic and how it was picked, and any second epic you opened with the outside block that justified it.
 - **Wave size** — how many tickets were startable, out of how many open.
@@ -303,7 +276,7 @@ Then give the user, in this order:
 - **Every `charterConcerns` and `openQuestions`** raised across every ticket, verbatim and unanswered.
 - **Cross-epic edges** — every entry in `crossEpicEdges`, with its justification or "no justification recorded".
 - **What unblocks on merge** — read `waves[1]` from the plan and name those tickets. This is what the user gets by reviewing, and it is the reason to stop here rather than push on.
-- **Review routing** — the block from step 9: the route taken (`simple`, `complex` or `incomplete`), reasons, per-PR request results or the packet id, every failed login with its PR, and tickets in review with no open PR found.
+- **Review routing** — the block from step 9: the route taken (`simple`, `complex` or `incomplete`), reasons, per-PR request results, every failed login with its PR, and tickets in review with no open PR found.
 - **The next step, plainly:** review and merge these PRs, then run this skill again on the same id.
 
 ## Guardrails

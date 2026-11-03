@@ -158,7 +158,7 @@ describe("NativePluginCompiler", () => {
     }
     expect(parseToml(readFileSync(join(result.directory, ".codex/config.toml"), "utf8"))).toEqual({ agents: { enabled: true } });
     expect(JSON.parse(readFileSync(join(result.directory, "diagnostics.json"), "utf8"))).toEqual(result.diagnostics);
-    expect(result.diagnostics).toContain("Claude commit and Ariadne hooks are omitted; Codex gets only the sub-agent status hooks, which run once trusted through /hooks.");
+    expect(result.diagnostics).toContain("Claude commit hooks are omitted; Codex gets only the sub-agent status hooks, which run once trusted through /hooks.");
     const reasoning = "adapters/codex/reasoning-tiers.json";
     expect(readFileSync(join(result.directory, reasoning), "utf8")).toBe(readFileSync(join(sourceDir, reasoning), "utf8"));
   });

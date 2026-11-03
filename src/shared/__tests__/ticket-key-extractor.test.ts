@@ -41,7 +41,7 @@ describe("TicketKeyExtractor", () => {
   it("finds a key in a branch or directory name", () => {
     expect(extractor.firstKey("feat/FRT-77-search")).toBe("FRT-77");
     expect(extractor.firstKey("FRT-42-login")).toBe("FRT-42");
-    expect(extractor.firstKey("ariadne-agent-hook")).toBeUndefined();
+    expect(extractor.firstKey("status-agent-hook")).toBeUndefined();
   });
 
   it("finds a key after a hyphenated clone name, but not inside an upper-case chain", () => {

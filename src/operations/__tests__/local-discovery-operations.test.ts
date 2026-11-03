@@ -222,11 +222,6 @@ describe("local discovery operations", () => {
       configStore: () => core.configStore(),
       installation: () => core.installation(),
       evidence: () => core.evidence(),
-      board: () => core.board(),
-      packets: () => core.packets(),
-      ariadneTokens: () => core.ariadneTokens(),
-      boardSessions: () => core.boardSessions(),
-      boardAgents: () => core.boardAgents(),
       reviewOperations: () => core.reviewOperations(),
     };
     const program = buildProgram(
@@ -322,11 +317,6 @@ describe("local discovery operations", () => {
       configStore: () => core.configStore(),
       installation: () => core.installation(),
       evidence: () => core.evidence(),
-      board: () => core.board(),
-      packets: () => core.packets(),
-      ariadneTokens: () => core.ariadneTokens(),
-      boardSessions: () => core.boardSessions(),
-      boardAgents: () => core.boardAgents(),
       reviewOperations: () => core.reviewOperations(),
     };
     const program = buildProgram(
@@ -442,11 +432,6 @@ describe("local discovery operations", () => {
         parityCore.reviewOperations(props),
       installation: () => parityCore.installation(),
       evidence: () => parityCore.evidence(),
-      board: () => parityCore.board(),
-      packets: () => parityCore.packets(),
-      ariadneTokens: () => parityCore.ariadneTokens(),
-      boardSessions: () => parityCore.boardSessions(),
-      boardAgents: () => parityCore.boardAgents(),
     };
     const program = buildProgram(
       (override) => parityCore.tracker(override),
@@ -596,11 +581,6 @@ describe("local discovery operations", () => {
       configStore: () => linkedCore.configStore(),
       installation: () => linkedCore.installation(),
       evidence: () => linkedCore.evidence(),
-      board: () => linkedCore.board(),
-      packets: () => linkedCore.packets(),
-      ariadneTokens: () => linkedCore.ariadneTokens(),
-      boardSessions: () => linkedCore.boardSessions(),
-      boardAgents: () => linkedCore.boardAgents(),
       reviewOperations: () => linkedCore.reviewOperations(),
     };
     const program = buildProgram(

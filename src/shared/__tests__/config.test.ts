@@ -20,6 +20,19 @@ const setupFixture = (content: string): string => {
 };
 
 describe("readConfig", () => {
+  it("ignores legacy ariadne keys left in an existing config", () => {
+    const filePath = setupFixture(`---
+tracker: github
+repo: acme/my-project
+ariadne.url: https://ariadne.example.com
+ariadne.enabled: false
+---
+`);
+    const config = readConfig(filePath);
+    expect(config.repo).toBe("acme/my-project");
+    expect(config).not.toHaveProperty("ariadne.url");
+  });
+
   it("parses a valid github config", () => {
     const filePath = setupFixture(`---
 tracker: github

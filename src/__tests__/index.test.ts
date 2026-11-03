@@ -47,7 +47,6 @@ describe("public library surface", () => {
         "CreateInitiativeInputSchema",
         "CreateTechnicalDesignInputSchema",
         "CreateTicketInputSchema",
-        "DefaultAriadneOperations",
         "DefaultCommitMessageBuilder",
         "DefaultFlightRules",
         "DefaultGitConfigOperations",
