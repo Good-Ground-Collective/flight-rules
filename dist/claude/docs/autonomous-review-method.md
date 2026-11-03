@@ -18,7 +18,7 @@ A language charter's mandates apply only to the files its globs match.
 Do not assume a factory verifier has run. When verification was supplied,
 confirm relevant evidence; when it was not, do not claim acceptance criteria passed.
 
-More than 10,000 changed lines, an unread diff, missing required state or an
+More than 20,000 changed lines, an unread diff, missing required state or an
 unavailable source needed for a claim yields INCOMPLETE with a retry/repair
 step. Review only the PR's unique diff when its base is another feature branch.
 Do not execute PR-head dependency installation or lint configuration while

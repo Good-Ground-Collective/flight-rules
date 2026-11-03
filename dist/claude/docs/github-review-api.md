@@ -57,7 +57,7 @@ To measure size for the too-big guard, count added/removed lines:
 gh pr diff [PR] | grep -cE '^[+-]'
 ```
 
-If the count exceeds **10000**, stop and ask the author to split the PR.
+If the count exceeds **20000**, stop and ask the author to split the PR.
 `autonomous-code-review` handles this case differently — see §6.
 
 ## 4. Create the PENDING review

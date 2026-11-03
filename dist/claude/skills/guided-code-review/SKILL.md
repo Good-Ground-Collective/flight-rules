@@ -72,7 +72,7 @@ Differences from the normal flow:
 
 Then run two guards **before** any analysis:
 
-- **Too-big guard.** If the diff exceeds ~10,000 changed lines (reference §3),
+- **Too-big guard.** If the diff exceeds ~20,000 changed lines (reference §3),
   stop. Explain that a partial review would be unreliable and ask the author to
   split the PR into smaller ones. Do not proceed.
 - **Stacked-PR detection.** If the PR's base branch is not the repo's default
@@ -274,7 +274,7 @@ suggested fix, and any relevant snippets or file:line references>
 ## Error handling
 
 - **No PR found / ambiguous** → ask the user for the PR number or URL.
-- **Diff too big (>~10k lines)** → stop, explain, request a smaller PR.
+- **Diff too big (>~20k lines)** → stop, explain, request a smaller PR.
 - **`gh` not authenticated or the post fails** → report the error. Your findings
   are still held in the session, so offer to retry the post without re-running
   the analysis.
