@@ -438,7 +438,7 @@ describe("GitHeadReader", () => {
 describe("hook subagent-status", () => {
   const run = async (stdin: string, args: string[], recorder: SubagentStatusRecorder): Promise<string> => {
     const output = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-    await createHookCommand(undefined, () => Promise.resolve(stdin), undefined, () => recorder)
+    await createHookCommand(undefined, () => Promise.resolve(stdin), () => recorder)
       .exitOverride()
       .parseAsync(["subagent-status", ...args], { from: "user" });
     return output.mock.calls.map(([chunk]) => String(chunk)).join("");

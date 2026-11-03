@@ -3,7 +3,7 @@ import { closeSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, re
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { z } from "zod";
-import { TicketKeyExtractor } from "../../shared/ariadne/ticket-key-extractor.js";
+import { TicketKeyExtractor } from "../../shared/ticket-key-extractor.js";
 
 export const SubagentHarnessSchema = z.enum(["claude-code", "codex"]);
 export type SubagentHarness = z.infer<typeof SubagentHarnessSchema>;

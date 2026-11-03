@@ -233,13 +233,12 @@ describe("shared operations", () => {
           cwd: process.cwd(),
           getHost: () => core.prHost(),
         }).operations(),
-        ...(core.ariadneOperations?.().operations() ?? []),
       ],
       policy: new LaunchOperationAccessPolicy({ allowedEffects: ["read", "process", "network"] }),
     });
     const routes = cliRouteCoverage.check(program, registry);
-    expect(routes).toHaveLength(72);
-    expect(cliRouteCoverage.list().filter((item) => item.status === "supported")).toHaveLength(62);
+    expect(routes).toHaveLength(58);
+    expect(cliRouteCoverage.list().filter((item) => item.status === "supported")).toHaveLength(53);
     expect(
       cliRouteCoverage.list().filter((item) => item.status === "pending-migration"),
     ).toHaveLength(0);
@@ -247,16 +246,11 @@ describe("shared operations", () => {
       { path: ["hook", "pre-bash"], aliases: ["guard-commit"] },
     ]);
     const excluded = cliRouteCoverage.list().filter((item) => item.status === "excluded");
-    expect(excluded).toHaveLength(10);
+    expect(excluded).toHaveLength(5);
     expect(excluded.map((item) => item.route.path.join(" ")).sort()).toEqual(
       [
         "agents install",
         "agents status",
-        "board login",
-        "board logout",
-        "hook agent-dispatch",
-        "hook agent-stop",
-        "hook board-heartbeat",
         "hook pre-bash",
         "hook subagent-status",
         "mcp",
@@ -320,15 +314,6 @@ describe("shared operations", () => {
       "pr-threads",
       "pr-thread-reply",
       "pr-request-review",
-      "board-post-heartbeat",
-      "board-post-item",
-      "board-post-activity",
-      "board-items",
-      "packet-create",
-      "packet-new-id",
-      "packet-update",
-      "packet-get",
-      "packet-reviewers",
     ]);
   });
 

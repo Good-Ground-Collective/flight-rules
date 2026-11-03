@@ -14,8 +14,6 @@ import {
 import { DocCharterCatalog } from "../bundled-docs/charter-catalog/charter-catalog.js";
 import { createReviewCommand } from "../code-review/commands/command.js";
 import type { Config } from "../shared/config.js";
-import { createBoardCommand } from "../shared/commands/board/command.js";
-import { createPacketCommand } from "../shared/commands/packet/command.js";
 import { createEpicCommand } from "../tasks/commands/epic/command.js";
 import { createInitiativeCommand } from "../tasks/commands/initiative/command.js";
 import { createTicketCommand } from "../tasks/commands/ticket/command.js";
@@ -23,8 +21,6 @@ import { createTddCommand } from "../tasks/commands/tdd/command.js";
 import { createUsersCommand } from "../tasks/commands/users/command.js";
 import { GitRepositoryPaths } from "../bundled-docs/charter-catalog/repository-paths.js";
 import { createHookCommand } from "../hooks/commands/hook/command.js";
-import { DetachedHeartbeatSender } from "../hooks/board-heartbeat/board-heartbeat.js";
-import { BoardHookKit, GitBranchReader } from "../hooks/board-heartbeat/board-hook-kit.js";
 import type { TaskTracker } from "../tasks/task-tracker/task-tracker.js";
 import { createGitCommand } from "../git/commands/commit/command.js";
 import {
@@ -39,7 +35,6 @@ import { cliRouteCoverage } from "../operations/cli-coverage.js";
 import { DefaultTrackerEntityOperations } from "../operations/tracker-entity-operations.js";
 import { createMcpCommand } from "../mcp/command.js";
 import { DefaultPrOperations } from "../operations/pr-operations.js";
-import { DefaultAriadneOperations } from "../operations/ariadne-operations.js";
 
 export function buildProgram(
   getTracker: (overrideTracker?: string) => TaskTracker,
@@ -57,12 +52,6 @@ export function buildProgram(
     | "reviewOperations"
     | "installation"
     | "evidence"
-    | "board"
-    | "packets"
-    | "ariadneTokens"
-    | "boardSessions"
-    | "boardAgents"
-    | "ariadneOperations"
   > = createFlightRules(),
 ): Command {
   const launchCwd = process.cwd();
@@ -82,21 +71,7 @@ export function buildProgram(
   const prHost = (): PullRequestHost => getPrHost(overrideTracker);
 
   program.addCommand(createAgentsCommand(() => services.installation()));
-  const boardHooks = (): BoardHookKit =>
-    new BoardHookKit({
-      sessions: services.boardSessions(),
-      agents: services.boardAgents(),
-      board: () => services.board(),
-    });
-  program.addCommand(
-    createHookCommand(undefined, undefined, {
-      heartbeatHook: () => boardHooks().heartbeatHook(),
-      dispatchHook: () => boardHooks().dispatchHook(),
-      sender: () => new DetachedHeartbeatSender(),
-      board: () => services.board(),
-      branch: () => new GitBranchReader(),
-    }),
-  );
+  program.addCommand(createHookCommand());
   const docOperation = new DocOperation({ getResolver: () => services.docs() });
   const localOperations = new DefaultLocalDiscoveryOperations({
     cwd: launchCwd,
@@ -132,13 +107,6 @@ export function buildProgram(
         cwd: launchCwd,
       }).operations(),
       ...new DefaultPrOperations({ cwd: launchCwd, getHost: prHost }).operations(),
-      ...(
-        services.ariadneOperations?.() ??
-        new DefaultAriadneOperations({
-          getBoard: () => services.board(),
-          getPackets: () => services.packets(),
-        })
-      ).operations(),
     ],
     policy: new LaunchOperationAccessPolicy({
       allowedEffects: ["read", "write", "process", "network"],
@@ -176,15 +144,6 @@ export function buildProgram(
         }),
     }),
   );
-  program.addCommand(
-    createBoardCommand(
-      () => services.board(),
-      () => services.ariadneTokens(),
-      undefined,
-      operationRegistry,
-    ),
-  );
-  program.addCommand(createPacketCommand(() => services.packets(), operationRegistry));
   program.addCommand(createMcpCommand());
   cliRouteCoverage.check(program, operationRegistry);
   return program;

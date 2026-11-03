@@ -1,4 +1,9 @@
-import { TicketKeySchema } from "./ariadne.schema.js";
+import { z } from "zod";
+
+const TicketKeySchema = z
+  .string()
+  .transform((value) => value.trim().toUpperCase())
+  .pipe(z.string().regex(/^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,8}$/));
 
 /**
  * A Jira-shaped key anywhere in free text; validated again with TicketKeySchema.

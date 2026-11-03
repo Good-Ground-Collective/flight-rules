@@ -15,11 +15,6 @@ import type { HostSettingsSource } from "../shared/host-settings/host-settings-s
 import { WorktreeLocator } from "../git/worktree-locator/worktree-locator.js";
 import { EvidenceLocation } from "../tasks/evidence/evidence-location.js";
 import { EnvLoader } from "../shared/env.js";
-import { AriadneBoard } from "../shared/ariadne/ariadne-board.js";
-import { AriadnePackets } from "../shared/ariadne/ariadne-packets.js";
-import { AriadneTokenStore } from "../shared/ariadne/ariadne-token-store.js";
-import { BoardAgentStore } from "../shared/ariadne/board-agent-store.js";
-import { BoardSessionStore } from "../shared/ariadne/board-session-store.js";
 import { GitHubTaskTracker } from "../tasks/github-task-tracker/github-task-tracker.js";
 import { JiraTaskTracker } from "../tasks/jira-task-tracker/jira-task-tracker.js";
 import type { TaskTracker } from "../tasks/task-tracker/task-tracker.js";
@@ -48,10 +43,6 @@ import {
 } from "../operations/review-operations.js";
 import { DefaultTrackerEntityOperations } from "../operations/tracker-entity-operations.js";
 import type { TrackerEntityOperations } from "../operations/tracker-entity-operations.js";
-import {
-  DefaultAriadneOperations,
-  type AriadneOperations,
-} from "../operations/ariadne-operations.js";
 
 export interface FlightRules {
   installation(): NativeInstallation;
@@ -71,15 +62,6 @@ export interface FlightRules {
   gitConfigOperations(policy?: ConfigOperationPolicy): GitConfigOperations;
   reviewOperations(props?: ReviewOperationsLaunchProps): ReviewOperations;
   trackerEntityOperations(): TrackerEntityOperations;
-  ariadneOperations?(): AriadneOperations;
-  /** Ariadne's Agents page reporter; reads only the `ariadne.*` keys from user and local scope, so it works without a valid tracker config. */
-  board(): AriadneBoard;
-  packets(): AriadnePackets;
-  ariadneTokens(): AriadneTokenStore;
-  /** The last heartbeat each session's skill posted, outside every repo; read by the heartbeat hook. */
-  boardSessions(): BoardSessionStore;
-  /** Which Jira ticket each sub-agent works on, outside every repo; written and read by the board hooks. */
-  boardAgents(): BoardAgentStore;
 }
 
 /** Constructs services on demand so config and credentials are only required by their consumers. */
@@ -272,41 +254,6 @@ export class DefaultFlightRules implements FlightRules {
       getConfig: () => this.config(),
       cwd: this.cwd,
     });
-  }
-
-  ariadneOperations(): AriadneOperations {
-    return new DefaultAriadneOperations({
-      getBoard: () => this.board(),
-      getPackets: () => this.packets(),
-    });
-  }
-
-  board(): AriadneBoard {
-    return new AriadneBoard({
-      readLayers: () => this.configStore().layers(),
-      tokens: this.ariadneTokens(),
-      env: this.env,
-      sessions: this.boardSessions(),
-    });
-  }
-
-  packets(): AriadnePackets {
-    return new AriadnePackets({
-      readLayers: () => this.configStore().layers(),
-      tokens: this.ariadneTokens(),
-    });
-  }
-
-  ariadneTokens(): AriadneTokenStore {
-    return new AriadneTokenStore({ env: this.env });
-  }
-
-  boardSessions(): BoardSessionStore {
-    return new BoardSessionStore({ env: this.env });
-  }
-
-  boardAgents(): BoardAgentStore {
-    return new BoardAgentStore({ env: this.env });
   }
 }
 
