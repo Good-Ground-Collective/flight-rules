@@ -47,6 +47,7 @@ export interface OperationCatalog {
 }
 
 export interface OperationRegistry extends OperationCatalog {
+  admitted(): OperationSummary[];
   invoke(id: string, input: unknown): Promise<OperationEnvelope>;
 }
 
@@ -161,6 +162,15 @@ export class MapOperationRegistry implements OperationRegistry {
       effects: [...effects],
       cli: { path: [...cli.path], aliases: [...cli.aliases] },
     }));
+  }
+
+  admitted(): OperationSummary[] {
+    const admitted = new Set(
+      [...this.operations.values()]
+        .filter((operation) => this.policy.allows(operation))
+        .map(({ id }) => id),
+    );
+    return this.list().filter(({ id }) => admitted.has(id));
   }
 
   async invoke(id: string, input: unknown): Promise<OperationEnvelope> {
