@@ -26,6 +26,7 @@ import {
   FreshQuestionAccess,
   InvalidSkillResumeError,
   PendingPauseRegistry,
+  RecoverableDispatchInputError,
   SharedSkillToolHandlers,
   SkillConfigurationError,
   SkillExecution,
@@ -310,7 +311,9 @@ export class LangChainDeepAgentsSkillRuntime implements DeepAgentsSkillRuntimeCo
         "Runtime evidence belongs to a different caller context.",
       );
     const grants = this.toolGrants(context);
-    const run = new SkillExecution({ ignores: isGraphInterrupt });
+    const run = new SkillExecution({
+      ignores: (cause) => isGraphInterrupt(cause) || cause instanceof RecoverableDispatchInputError,
+    });
     let propagatingSiblingQuestion = false;
     const handlers = new SharedSkillToolHandlers({
       context,

@@ -2,6 +2,7 @@ import { fileURLToPath } from "node:url";
 import {
   AIMessage,
   HumanMessage,
+  ToolMessage,
   type AIMessageChunk,
   type BaseMessage,
 } from "@langchain/core/messages";
@@ -53,6 +54,7 @@ const workers: DeepAgentsWorkerRuntimeContract = {
 
 class ScriptedSkillModel extends BaseChatModel {
   readonly prompts: string[] = [];
+  readonly toolMessages: string[] = [];
   private readonly firstTool: string;
   private readonly concurrentTool: string | undefined;
   private readonly nestedTool: string | undefined;
@@ -60,6 +62,7 @@ class ScriptedSkillModel extends BaseChatModel {
   private readonly operationId: string;
   private readonly operationIds: readonly string[];
   private readonly dispatchAgents: readonly string[];
+  private readonly dispatchCalls: readonly { agent: string; input: Record<string, unknown> }[];
   private readonly turns: readonly (readonly string[])[] | undefined;
   private readonly beforeResponse: (() => Promise<void>) | undefined;
   private readonly onStart: (() => void) | undefined;
@@ -72,6 +75,7 @@ class ScriptedSkillModel extends BaseChatModel {
     operationId?: string;
     operationIds?: readonly string[];
     dispatchAgents?: readonly string[];
+    dispatchCalls?: readonly { agent: string; input: Record<string, unknown> }[];
     turns?: readonly (readonly string[])[];
     beforeResponse?: () => Promise<void>;
     onStart?: () => void;
@@ -84,6 +88,7 @@ class ScriptedSkillModel extends BaseChatModel {
     this.operationId = props.operationId ?? "test-read";
     this.operationIds = props.operationIds ?? [];
     this.dispatchAgents = props.dispatchAgents ?? [];
+    this.dispatchCalls = props.dispatchCalls ?? [];
     this.turns = props.turns;
     this.beforeResponse = props.beforeResponse;
     this.onStart = props.onStart;
@@ -114,6 +119,9 @@ class ScriptedSkillModel extends BaseChatModel {
     await this.beforeResponse?.();
     const human = messages.find((message) => HumanMessage.isInstance(message))?.content;
     this.prompts.push(typeof human === "string" ? human : JSON.stringify(human));
+    for (const message of messages) {
+      if (ToolMessage.isInstance(message)) this.toolMessages.push(String(message.content));
+    }
     const nestedSkill = typeof human === "string" && human.includes('"nested":true');
     const name =
       nestedSkill && this.nestedTool !== undefined
@@ -148,9 +156,12 @@ class ScriptedSkillModel extends BaseChatModel {
                     ? { siblingSkill: "guided-code-review", input: { nested: true } }
                     : toolName === "flight_rules_dispatch"
                       ? {
-                          agent: this.dispatchAgents[index] ?? "code-implementation",
+                          agent:
+                            this.dispatchCalls[this.toolCalls]?.agent ??
+                            this.dispatchAgents[index] ??
+                            "code-implementation",
                           dispatchId: "dependent-worker",
-                          input: {},
+                          input: this.dispatchCalls[this.toolCalls]?.input ?? {},
                         }
                       : toolName === "unused_read"
                         ? {}
@@ -344,6 +355,78 @@ describe("Deep Agents skill runtime", () => {
       "code-implementation",
       "code-verifier",
     ]);
+  });
+
+  describe("recoverable dispatch input", () => {
+    const completedReport = { summary: "Done", filesChanged: [], testsRun: [], approach: "Fixture" };
+    const observeRegistration: DeepAgentsSkillRuntimeObserver = async (caller, registration) => ({
+      ...snapshot(),
+      context: caller,
+      agent: registration?.frontmatter.name ?? null,
+    });
+    const dispatchWith = (rejectRemediate: boolean) =>
+      vi.fn<DeepAgentsWorkerRuntimeContract["dispatch"]>(async (request) =>
+        rejectRemediate && request.input.mode === "remediate"
+          ? {
+              status: "failed",
+              dispatchId: request.id,
+              agent: request.agent,
+              context: request.context,
+              failure: { code: "INVALID_REPORT", message: "Invalid mode", remedy: "Fix" },
+            }
+          : {
+              status: "completed",
+              dispatchId: request.id,
+              agent: request.agent,
+              context: request.context,
+              report: completedReport,
+            },
+      );
+
+    it("returns a rejected mode to the model and lets it redispatch", async () => {
+      const dispatch = dispatchWith(true);
+      const model = new ScriptedSkillModel({
+        firstTool: "flight_rules_dispatch",
+        turns: [["flight_rules_dispatch"], ["flight_rules_dispatch"]],
+        dispatchCalls: [
+          { agent: "code-implementation", input: { mode: "remediate" } },
+          { agent: "code-implementation", input: { mode: "implement" } },
+        ],
+      });
+
+      const result = await runtime(model, observeRegistration, vi.fn(), {
+        workers: { dispatch, dispatchMany: async () => [] },
+      }).invoke("guided-code-review", context, {});
+
+      expect(result.status).toBe("completed");
+      expect(JSON.stringify(result)).not.toContain("TOOL_FAILED");
+      expect(model.toolMessages.join("\n")).toContain(
+        "Invalid mode for worker code-implementation. Valid modes: implement",
+      );
+      expect(dispatch.mock.calls.map(([request]) => request.input.mode)).toEqual([
+        "remediate",
+        "implement",
+      ]);
+    });
+
+    it("returns the dispatchable workers for an unknown worker and continues", async () => {
+      const dispatch = dispatchWith(false);
+      const model = new ScriptedSkillModel({
+        firstTool: "flight_rules_dispatch",
+        turns: [["flight_rules_dispatch"], []],
+        dispatchCalls: [{ agent: "no-such-worker", input: { mode: "implement" } }],
+      });
+
+      const result = await runtime(model, observeRegistration, vi.fn(), {
+        workers: { dispatch, dispatchMany: async () => [] },
+      }).invoke("guided-code-review", context, {});
+
+      expect(result.status).toBe("completed");
+      expect(model.toolMessages.join("\n")).toMatch(
+        /Unknown worker: no-such-worker\. Dispatchable workers: .*code-implementation/,
+      );
+      expect(dispatch).not.toHaveBeenCalled();
+    });
   });
 
   it("rejects dispatch when worker evidence names a different registration", async () => {
