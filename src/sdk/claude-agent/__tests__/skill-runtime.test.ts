@@ -1006,4 +1006,118 @@ describe("Claude Agent skill runtime", () => {
         }),
     ).toThrow("standard");
   });
+
+  describe("recoverable dispatch shape", () => {
+    const observe: ClaudeAgentSkillRuntimeObserver = async (caller, registration) => ({
+      ...snapshot(),
+      context: caller,
+      agent: registration?.frontmatter.name ?? null,
+    });
+    const rejectingWorkers = () => {
+      const dispatch = vi.fn<WorkerRuntimeContract["dispatch"]>(async (request) =>
+        request.input.mode === "implement" ?
+          completedDispatch(request)
+        : {
+            status: "failed" as const,
+            dispatchId: request.id,
+            agent: request.agent,
+            context: request.context,
+            failure: {
+              code: "INVALID_REPORT" as const,
+              message: "Invalid mode",
+              remedy: "Choose a report mode",
+            },
+          },
+      );
+      return {
+        dispatch,
+        workers: { dispatch, dispatchMany: async () => [] },
+      };
+    };
+    const dispatchWith = (agent: string, input: Record<string, unknown>, dispatchId: string) => ({
+      name: dispatchTool,
+      input: { agent, dispatchId, input },
+    });
+
+    it.each([{}, { mode: "remediate" }])(
+      "returns the valid modes for a rejected mode %j and completes after a corrected dispatch",
+      async (badInput) => {
+        const { dispatch, workers } = rejectingWorkers();
+        const { skills, scripted } = runtimeFor(
+          {
+            turns: [
+              [dispatchWith("code-implementation", badInput, "first")],
+              [dispatchWith("code-implementation", { mode: "implement" }, "second")],
+            ],
+          },
+          { observe, workers },
+        );
+
+        const result = await skills.invoke("guided-code-review", context, {});
+
+        expect(result.status).toBe("completed");
+        expect(scripted.outputs[0]).toMatchObject({ isError: true });
+        expect(scripted.outputs[0]?.text).toContain("implement");
+        expect(scripted.outputs[1]).toMatchObject({ isError: false });
+        expect(dispatch).toHaveBeenCalledTimes(2);
+      },
+    );
+
+    it("lists the dispatchable workers for an unknown worker and continues", async () => {
+      const { workers } = rejectingWorkers();
+      const { skills, scripted } = runtimeFor(
+        { turns: [[dispatchWith("no-such-worker", {}, "unknown")]] },
+        { observe, workers },
+      );
+
+      const result = await skills.invoke("guided-code-review", context, {});
+
+      expect(result.status).toBe("completed");
+      expect(scripted.outputs[0]).toMatchObject({ isError: true });
+      expect(scripted.outputs[0]?.text).toContain("Unknown worker: no-such-worker");
+      expect(scripted.outputs[0]?.text).toContain("code-implementation");
+    });
+
+    it("keeps an invalid report from a worker that ran terminal", async () => {
+      const dispatch = vi.fn<WorkerRuntimeContract["dispatch"]>(async (request) => ({
+        status: "failed" as const,
+        dispatchId: request.id,
+        agent: request.agent,
+        context: request.context,
+        failure: {
+          code: "INVALID_REPORT" as const,
+          message: "Bad report",
+          remedy: "Fix",
+        },
+      }));
+      const { skills } = runtimeFor(
+        {
+          turns: [[dispatchWith("code-implementation", { mode: "implement" }, "ran")]],
+        },
+        {
+          observe,
+          workers: { dispatch, dispatchMany: async () => [] },
+        },
+      );
+
+      const result = await skills.invoke("guided-code-review", context, {});
+
+      expect(result).toMatchObject({
+        status: "failed",
+        failure: { code: "TOOL_FAILED" },
+      });
+    });
+
+    it("lists each dispatchable worker's modes in the prompt", async () => {
+      const { skills, scripted } = runtimeFor({}, { observe });
+
+      await skills.invoke("guided-code-review", context, {});
+
+      const prompt = scripted.invocations[0]?.prompt ?? "";
+      expect(prompt).toContain("## Workers");
+      expect(prompt).toContain("`code-implementation` -> `implement`");
+      expect(prompt).toContain("`code-verifier` -> `verify | triage`");
+      expect(prompt).toContain("`research-agent` -> `internal | external | mixed`");
+    });
+  });
 });

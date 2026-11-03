@@ -1,7 +1,9 @@
+import { ToolMessage } from "@langchain/core/messages";
 import { createFilesystemMiddleware, createSubAgentMiddleware, StateBackend } from "deepagents";
 import { createMiddleware, type AnyAgentMiddleware, type StructuredTool } from "langchain";
 import type { AgentDefinition } from "../../agents/agent-registry/agent-registry.js";
 import type { RuntimeSnapshot } from "../../orchestration/orchestration.schema.js";
+import { RecoverableDispatchInputError } from "../skill-runtime-core.js";
 import {
   CapabilityToolDeniedError,
   WorkerCapabilitySchema,
@@ -24,6 +26,25 @@ const filesystemCapabilities = new Map<string, WorkerCapability>([
   ["execute", "shell"],
   ["task", "spawn"],
 ]);
+
+class RecoverableDispatchGuard {
+  static async run<T>(
+    call: { id?: string | undefined; name: string },
+    execution: () => Promise<T>,
+  ): Promise<T | ToolMessage> {
+    try {
+      return await execution();
+    } catch (cause) {
+      if (!(cause instanceof RecoverableDispatchInputError)) throw cause;
+      return new ToolMessage({
+        content: cause.message,
+        name: call.name,
+        status: "error",
+        tool_call_id: call.id ?? call.name,
+      });
+    }
+  }
+}
 
 export class InvalidDeepAgentsToolRegistrationError extends Error {
   override name = "InvalidDeepAgentsToolRegistrationError";
@@ -128,7 +149,9 @@ export class CapabilityScopedDeepAgentsToolPolicy implements DeepAgentsToolPolic
           const name = request.toolCall.name;
           const capability = filesystemCapabilities.get(name);
           if (allowedToolNames.has(name) && capability === undefined) {
-            return trackExecution(() => Promise.resolve(handler(request)));
+            return RecoverableDispatchGuard.run(request.toolCall, () =>
+              trackExecution(() => Promise.resolve(handler(request))),
+            );
           }
           if (
             capability !== undefined &&
@@ -136,7 +159,9 @@ export class CapabilityScopedDeepAgentsToolPolicy implements DeepAgentsToolPolic
             capability !== "shell" &&
             capability !== "spawn"
           ) {
-            return trackExecution(() => Promise.resolve(handler(request)));
+            return RecoverableDispatchGuard.run(request.toolCall, () =>
+              trackExecution(() => Promise.resolve(handler(request))),
+            );
           }
           const error = new CapabilityToolDeniedError({
             toolName: name,

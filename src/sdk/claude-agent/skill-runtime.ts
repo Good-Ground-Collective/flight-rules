@@ -33,6 +33,7 @@ import {
   SkillConfigurationError,
   SkillExecution,
   SkillOperationRoutes,
+  skillWorkerModes,
   skillAgentDefinitions,
   skillFailures,
   skillToolNames,
@@ -215,7 +216,9 @@ export class ClaudeAgentSkillRuntime implements ClaudeAgentSkillRuntimeContract 
       const operationsSection = new SkillOperationRoutes({
         operations: this.operations.admitted?.() ?? [],
       }).promptSection();
-      const prompt = `${instruction.contents}\n\n${operationsSection === "" ? "" : `${operationsSection}\n\n`}## Invocation context\n${JSON.stringify(caller)}\n\n## Invocation input\n${JSON.stringify(input)}`;
+      const workersSection = skillWorkerModes.promptSection(this.agents);
+      const sections = [operationsSection, workersSection].filter((section) => section !== "");
+      const prompt = `${instruction.contents}\n\n${sections.map((section) => `${section}\n\n`).join("")}## Invocation context\n${JSON.stringify(caller)}\n\n## Invocation input\n${JSON.stringify(input)}`;
       return await this.execute(run, prompt, {
         caller,
         invocationId,
