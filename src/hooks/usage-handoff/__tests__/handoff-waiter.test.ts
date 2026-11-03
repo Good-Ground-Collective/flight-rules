@@ -96,4 +96,57 @@ describe("HandoffWaiter", () => {
 
     expect(transport.calls.at(-1)).toMatch(/^send t1 .*Claude Code agent in t9 did not write a handback/);
   });
+
+  it("sends the resume message within one chunk after the wall clock jumps past the reset", async () => {
+    const transport = new RecordingTransport();
+    const done = new HandoffWaiter({ transport }).run({ origin: "t1", resetsAt: now + 3_600_000, harness: "claude-code" });
+
+    vi.setSystemTime(now + 3_600_000 + 30_000);
+    await vi.advanceTimersByTimeAsync(60_000);
+    await done;
+
+    expect(transport.calls).toEqual([expect.stringMatching(/^send t1 Usage has reset\. Continue/)]);
+  });
+
+  it("collects the handback within one chunk after the wall clock jumps past the reset", async () => {
+    const directory = realpathSync(mkdtempSync(join(tmpdir(), "flight-rules-waiter-")));
+    directories.push(directory);
+    const handback = join(directory, "handback.md");
+    const transport = new RecordingTransport();
+    transport.onWait = () => writeFileSync(handback, "done");
+    const done = new HandoffWaiter({ transport }).run({
+      origin: "t1",
+      standIn: "t9",
+      resetsAt: now + 3_600_000,
+      handback,
+      harness: "claude-code",
+    });
+
+    vi.setSystemTime(now + 3_600_000 + 30_000);
+    await vi.advanceTimersByTimeAsync(60_000);
+    await vi.advanceTimersByTimeAsync(5_000);
+    await done;
+
+    expect(transport.calls.at(-1)).toMatch(new RegExp(`^send t1 .*${handback}`));
+  });
+
+  it("does not accept a handback left over from an earlier window", async () => {
+    const directory = realpathSync(mkdtempSync(join(tmpdir(), "flight-rules-waiter-")));
+    directories.push(directory);
+    const handback = join(directory, "handback.md");
+    writeFileSync(handback, "old");
+    const transport = new RecordingTransport();
+    const done = new HandoffWaiter({ transport, maxHandbackWaits: 2 }).run({
+      origin: "t1",
+      standIn: "t9",
+      resetsAt: now,
+      handback,
+      harness: "claude-code",
+    });
+
+    await vi.advanceTimersByTimeAsync(30_000 + 10_000);
+    await done;
+
+    expect(transport.calls.at(-1)).toMatch(/^send t1 .*did not write a handback/);
+  });
 });

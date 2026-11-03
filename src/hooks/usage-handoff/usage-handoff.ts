@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { z } from "zod";
 import { ConfigStore } from "../../shared/config-store.js";
 import { usageHandoffMinResetMinutesSchema, usageHandoffThresholdSchema } from "../../shared/config.js";
@@ -26,7 +26,9 @@ export type UsageHandoffSettings = z.infer<typeof UsageHandoffSettingsSchema>;
 /** The Stop-hook reply shared by Claude Code and Codex: `block` keeps the agent going, `systemMessage` tells the user. */
 export type StopHookOutput = { decision: "block"; reason: string } | { systemMessage: string };
 
-const StopPayloadSchema = z.looseObject({ session_id: z.string().min(1), cwd: z.string().optional() });
+const StopPayloadSchema = z
+  .looseObject({ session_id: z.string().min(1), cwd: z.string().optional() })
+  .transform((payload) => ({ sessionId: payload.session_id, cwd: payload.cwd }));
 
 export const UsageHandoffHookPropsSchema = z.object({
   readers: z.custom<Record<UsageHarness, UsageReader>>().optional(),
@@ -79,7 +81,7 @@ export class UsageHandoffHook {
   async handle(harness: UsageHarness, payload: unknown): Promise<StopHookOutput | undefined> {
     const parsed = StopPayloadSchema.safeParse(payload);
     if (!parsed.success) return undefined;
-    const sessionId = parsed.data.session_id;
+    const sessionId = parsed.data.sessionId;
     const cwd = parsed.data.cwd ?? process.cwd();
 
     const record = this.store.read(harness, sessionId);
@@ -111,8 +113,10 @@ export class UsageHandoffHook {
       };
     }
 
-    this.store.write({ ...session, resetsAt: window.resetsAt, phase: "requested", standIn: null, waiter: null });
     const path = this.store.handoffPath(session.harness, session.sessionId);
+    rmSync(path, { force: true });
+    rmSync(this.store.handbackPath(session.harness, session.sessionId), { force: true });
+    this.store.write({ ...session, resetsAt: window.resetsAt, phase: "requested", standIn: null, waiter: null });
     return {
       decision: "block",
       reason: `${harnessLabel[session.harness]} is at ${Math.round(window.percent)}% of its ${window.kind} usage, which resets at ${this.iso(window.resetsAt)}. Before you stop, write a handoff note to ${path} so another agent can carry on from it: the remaining tasks, the branch, the ticket or PR, the current state of the work (what is done, what is half-done, what to run next), the working directory ${session.cwd}, and the reset time ${this.iso(window.resetsAt)}. Then stop without starting anything else.`,
@@ -142,6 +146,8 @@ export class UsageHandoffHook {
   private async deliverThroughHc(record: HandoffRecord, terminal: string, path: string): Promise<StopHookOutput> {
     const other = otherHarness[record.harness];
     const handback = this.store.handbackPath(record.harness, record.sessionId);
+    rmSync(handback, { force: true });
+    this.store.write({ ...record, phase: "delivering" });
     const space = await this.transport.spaceOf(terminal);
     const prompt = `A ${harnessLabel[record.harness]} session ran out of usage. Read ${path} and continue its remaining work in ${record.cwd}. When asked for a handback, write it to ${handback}.`;
 
@@ -156,21 +162,30 @@ export class UsageHandoffHook {
       throw new Error("The terminal is not in a Herdr space");
     }
 
-    const waiter = await this.transport.startWaiter(space, record.cwd, [
-      "handoff",
-      "wait",
-      "--origin",
-      terminal,
-      "--stand-in",
-      standIn,
-      "--at",
-      String(record.resetsAt),
-      "--handback",
-      handback,
-      "--harness",
-      record.harness,
-    ]);
-    this.store.write({ ...record, phase: "delivered", standIn, waiter });
+    const delivered = { ...record, phase: "delivered" as const, standIn };
+    this.store.write(delivered);
+    let waiter: string;
+    try {
+      waiter = await this.transport.startWaiter(space, record.cwd, [
+        "handoff",
+        "wait",
+        "--origin",
+        terminal,
+        "--stand-in",
+        standIn,
+        "--at",
+        String(record.resetsAt),
+        "--handback",
+        handback,
+        "--harness",
+        record.harness,
+      ]);
+    } catch {
+      return {
+        systemMessage: `Handed the work to ${harnessLabel[other]} in ${standIn}, but the waiter could not be started, so no handback will return here automatically. Handoff note: ${path}.`,
+      };
+    }
+    this.store.write({ ...delivered, waiter });
     return {
       systemMessage: `Handed the work to ${harnessLabel[other]} in ${standIn}. The handback returns here when usage resets at ${this.clock(record.resetsAt)}. Handoff note: ${path}.`,
     };

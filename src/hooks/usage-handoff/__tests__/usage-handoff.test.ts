@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -181,6 +181,77 @@ describe("UsageHandoffHook", () => {
     reader.windows = [{ kind: "session", percent: 99, resetsAt: hours(9) }];
 
     expect(await hook.handle("claude-code", session)).toMatchObject({ decision: "block" });
+  });
+
+  it("does not deliver an earlier window's note when the next window's note was never written", async () => {
+    const { hook, reader, transport, store, writeHandoff } = setup();
+    await hook.handle("claude-code", session);
+    writeHandoff();
+    await hook.handle("claude-code", session);
+
+    vi.setSystemTime(hours(4));
+    reader.windows = [{ kind: "session", percent: 99, resetsAt: hours(9) }];
+    expect(await hook.handle("claude-code", session)).toMatchObject({ decision: "block" });
+    transport.calls = [];
+
+    expect(await hook.handle("claude-code", session)).toBeUndefined();
+    expect(transport.calls).toEqual([]);
+    expect(existsSync(store.handoffPath("claude-code", "s1"))).toBe(false);
+  });
+
+  it("removes a stale handback before the waiter starts", async () => {
+    const { hook, store, writeHandoff } = setup();
+    const handback = store.handbackPath("claude-code", "s1");
+    mkdirSync(dirname(handback), { recursive: true });
+    writeFileSync(handback, "old");
+    await hook.handle("claude-code", session);
+    writeHandoff();
+    writeFileSync(handback, "old");
+
+    await hook.handle("claude-code", session);
+
+    expect(existsSync(handback)).toBe(false);
+  });
+
+  it("does not deliver again when an earlier delivery was interrupted", async () => {
+    const { hook, transport, store, writeHandoff } = setup();
+    await hook.handle("claude-code", session);
+    writeHandoff();
+    store.write({ harness: "claude-code", sessionId: "s1", resetsAt: hours(3), cwd: "/work", standIn: null, waiter: null, phase: "delivering" });
+
+    expect(await hook.handle("claude-code", session)).toBeUndefined();
+    expect(transport.calls).toEqual([]);
+  });
+
+  it("records the delivery as delivering before the first transport call", async () => {
+    const { hook, transport, store, writeHandoff } = setup();
+    await hook.handle("claude-code", session);
+    writeHandoff();
+    let phase: string | undefined;
+    transport.spaceOf = async () => {
+      phase = store.read("claude-code", "s1")?.phase;
+      return "sp1";
+    };
+
+    await hook.handle("claude-code", session);
+
+    expect(phase).toBe("delivering");
+  });
+
+  it("reports the work as handed over when the waiter fails to start after a successful send", async () => {
+    const { hook, transport, store, writeHandoff } = setup();
+    transport.idle = "t7";
+    transport.startWaiter = () => Promise.reject(new Error("no waiter"));
+    await hook.handle("claude-code", session);
+    const path = writeHandoff();
+
+    const output = await hook.handle("claude-code", session);
+
+    expect(store.read("claude-code", "s1")).toMatchObject({ phase: "delivered", standIn: "t7", waiter: null });
+    expect(output).toMatchObject({ systemMessage: expect.stringContaining(path) });
+    expect(output).toMatchObject({ systemMessage: expect.stringContaining("Handed the work") });
+    expect(JSON.stringify(output)).not.toContain("could not be delivered");
+    expect(await hook.handle("claude-code", session)).toBeUndefined();
   });
 
   it("does not block again when the agent never wrote the handoff file", async () => {

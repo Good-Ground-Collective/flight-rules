@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import { UsageHarnessSchema, type UsageHarness } from "./usage-snapshot.js";
 
-export const HandoffPhaseSchema = z.enum(["requested", "delivered", "written", "waiting", "declined"]);
+export const HandoffPhaseSchema = z.enum(["requested", "delivering", "delivered", "written", "waiting", "declined"]);
 
 /** What the hook has done for one session in one usage window. */
 export const HandoffRecordSchema = z.object({

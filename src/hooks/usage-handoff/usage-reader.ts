@@ -82,9 +82,11 @@ export class ClaudeCodeUsageReader implements UsageReader {
   }
 }
 
-const CodexAuthSchema = z.looseObject({
-  tokens: z.looseObject({ access_token: z.string().min(1), account_id: z.string().min(1) }),
-});
+const CodexAuthSchema = z
+  .looseObject({
+    tokens: z.looseObject({ access_token: z.string().min(1), account_id: z.string().min(1) }),
+  })
+  .transform((auth) => ({ tokens: { accessToken: auth.tokens.access_token, accountId: auth.tokens.account_id } }));
 
 const CodexWindowSchema = z
   .object({
@@ -163,8 +165,8 @@ export class CodexUsageReader implements UsageReader {
       const { tokens } = CodexAuthSchema.parse(JSON.parse(readFileSync(join(this.codexHome, "auth.json"), "utf-8")));
       const response = await fetch("https://chatgpt.com/backend-api/wham/usage", {
         headers: {
-          Authorization: `Bearer ${tokens.access_token}`,
-          "ChatGPT-Account-Id": tokens.account_id,
+          Authorization: `Bearer ${tokens.accessToken}`,
+          "ChatGPT-Account-Id": tokens.accountId,
           "User-Agent": "codex-cli",
         },
         signal: AbortSignal.timeout(requestTimeoutMs),

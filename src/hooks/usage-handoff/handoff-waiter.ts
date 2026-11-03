@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { z } from "zod";
 import type { AgentTransport } from "./agent-transport.js";
 import { UsageHarnessSchema, harnessLabel, otherHarness } from "./usage-snapshot.js";
@@ -6,6 +6,7 @@ import { UsageHarnessSchema, harnessLabel, otherHarness } from "./usage-snapshot
 export const HandoffWaiterPropsSchema = z.object({
   transport: z.custom<AgentTransport>(),
   resetSlackMs: z.number().min(0).default(30_000),
+  sleepChunkMs: z.number().positive().default(60_000),
   handbackPollMs: z.number().positive().default(5_000),
   maxHandbackWaits: z.number().int().positive().default(60),
 });
@@ -31,6 +32,7 @@ const resumeMessage = "Usage has reset. Continue the work you were doing before 
 export class HandoffWaiter {
   private readonly transport: AgentTransport;
   private readonly resetSlackMs: number;
+  private readonly sleepChunkMs: number;
   private readonly handbackPollMs: number;
   private readonly maxHandbackWaits: number;
 
@@ -38,12 +40,16 @@ export class HandoffWaiter {
     const valid = HandoffWaiterPropsSchema.parse(props);
     this.transport = valid.transport;
     this.resetSlackMs = valid.resetSlackMs;
+    this.sleepChunkMs = valid.sleepChunkMs;
     this.handbackPollMs = valid.handbackPollMs;
     this.maxHandbackWaits = valid.maxHandbackWaits;
   }
 
   async run(request: HandoffWaitRequest): Promise<void> {
-    await this.sleep(request.resetsAt + this.resetSlackMs - Date.now());
+    const target = request.resetsAt + this.resetSlackMs;
+    while (Date.now() < target) {
+      await this.sleep(Math.min(this.sleepChunkMs, target - Date.now()));
+    }
 
     if (request.standIn === undefined || request.handback === undefined) {
       await this.transport.send(request.origin, resumeMessage);
@@ -66,6 +72,7 @@ export class HandoffWaiter {
   }
 
   private async collectHandback(standIn: string, handback: string): Promise<boolean> {
+    rmSync(handback, { force: true });
     try {
       await this.transport.send(
         standIn,
