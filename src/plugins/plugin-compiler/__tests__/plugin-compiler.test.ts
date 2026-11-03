@@ -137,8 +137,7 @@ describe("NativePluginCompiler", () => {
     }
     const identity = JSON.parse(readFileSync(join(sourceDir, "adapters/plugin.json"), "utf8"));
     const { version } = JSON.parse(readFileSync(join(sourceDir, "package.json"), "utf8"));
-    const portable = JSON.parse(readFileSync(join(result.directory, "plugin.json"), "utf8"));
-    expect(portable).toEqual({ $schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json", ...identity, version });
+    expect(existsSync(join(result.directory, "plugin.json"))).toBe(false);
     const native = JSON.parse(readFileSync(join(result.directory, ".codex-plugin/plugin.json"), "utf8"));
     expect(native).toEqual({ ...identity, version, skills: "./skills/" });
     const hooks = readFileSync(join(result.directory, "hooks/hooks.json"), "utf8");

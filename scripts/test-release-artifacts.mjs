@@ -50,7 +50,7 @@ try {
   run("npm", ["run", "build"]);
   for (const path of stale) assert.equal(existsSync(join(repository, path)), false, `stale output remains: ${path}`);
   const artifacts = [...["bin", "dist", "contracts/code-review"].flatMap((path) => files(join(repository, path))), ".claude-plugin/marketplace.json", ".agents/plugins/marketplace.json"];
-  const manifests = ["dist/claude/.claude-plugin/plugin.json", "dist/codex/.codex-plugin/plugin.json", "dist/codex/plugin.json"];
+  const manifests = ["dist/claude/.claude-plugin/plugin.json", "dist/codex/.codex-plugin/plugin.json"];
   for (const path of manifests) assert.equal(JSON.parse(readFileSync(join(repository, path), "utf8")).version, version);
   for (const path of [".claude-plugin/marketplace.json", ".agents/plugins/marketplace.json"]) {
     assert.equal(JSON.parse(readFileSync(join(repository, path), "utf8")).version, undefined);

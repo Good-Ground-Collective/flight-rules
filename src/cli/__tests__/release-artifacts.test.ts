@@ -74,7 +74,7 @@ describe("release artifact ownership", () => {
     const directory = fixture();
     mkdirSync(join(directory, "scripts"));
     cpSync(join(root, "scripts/set-version.mjs"), join(directory, "scripts/set-version.mjs"));
-    const manifests = ["package.json", "dist/claude/.claude-plugin/plugin.json", "dist/codex/.codex-plugin/plugin.json", "dist/codex/plugin.json"];
+    const manifests = ["package.json", "dist/claude/.claude-plugin/plugin.json", "dist/codex/.codex-plugin/plugin.json"];
     for (const path of manifests) write(directory, path, JSON.stringify({ name: "flight-rules", version: "1.0.0" }));
     write(directory, "package-lock.json", JSON.stringify({ version: "1.0.0", packages: { "": { version: "1.0.0" } } }));
     const catalogs = [".claude-plugin/marketplace.json", ".agents/plugins/marketplace.json"];

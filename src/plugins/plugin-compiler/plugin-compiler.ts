@@ -174,18 +174,7 @@ export class NativePluginCompiler implements PluginCompiler {
         : { ...identity, version, skills: "./skills/" };
     writeFileSync(join(manifestDirectory, "plugin.json"), JSON.stringify(manifest, null, 2) + "\n");
     if (target === "codex") {
-      writeFileSync(
-        join(directory, "plugin.json"),
-        JSON.stringify(
-          {
-            $schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
-            ...identity,
-            version,
-          },
-          null,
-          2,
-        ) + "\n",
-      );
+      // No root agent-plugins plugin.json: Codex prefers it over .codex-plugin and loads no hooks from that format.
       writeFileSync(join(directory, ".codex", "config.toml"), "[agents]\nenabled = true\n");
       writeFileSync(
         join(directory, "diagnostics.json"),
