@@ -1,0 +1,50 @@
+{
+  "description": "Keep a status file per sub-agent under $XDG_STATE_HOME/flight-rules/agents so terminal multiplexers can show in-process sub-agents",
+  "hooks": {
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/bin/flight-rules.mjs\" hook subagent-status --harness codex",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/bin/flight-rules.mjs\" hook subagent-status --harness codex",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/bin/flight-rules.mjs\" hook subagent-status --harness codex",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/bin/flight-rules.mjs\" hook subagent-status --harness codex",
+            "timeout": 2
+          }
+        ]
+      }
+    ]
+  }
+}

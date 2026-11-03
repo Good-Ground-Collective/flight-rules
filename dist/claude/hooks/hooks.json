@@ -1,5 +1,5 @@
 {
-  "description": "Route commits through the flight-rules CLI in repos that use flight-rules, strip Claude Code's attribution trailers from commits and PR bodies, and, when Ariadne is configured, report Jira work to its Agents page: keep skill sessions alive, and show any sub-agent dispatched for a Jira ticket (or a main thread whose directory or branch names one) as running on that ticket",
+  "description": "Route commits through the flight-rules CLI in repos that use flight-rules, strip Claude Code's attribution trailers from commits and PR bodies, and, when Ariadne is configured, report Jira work to its Agents page: keep skill sessions alive, and show any sub-agent dispatched for a Jira ticket (or a main thread whose directory or branch names one) as running on that ticket; and keep a status file per sub-agent under $XDG_STATE_HOME/flight-rules/agents so terminal multiplexers can show in-process sub-agents",
   "hooks": {
     "PreToolUse": [
       {
@@ -49,6 +49,12 @@
             "command": "node",
             "args": ["${CLAUDE_PLUGIN_ROOT}/bin/flight-rules.mjs", "hook", "board-heartbeat"],
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/bin/flight-rules.mjs", "hook", "subagent-status", "--harness", "claude-code"],
+            "timeout": 5
           }
         ]
       }
@@ -61,6 +67,48 @@
             "command": "node",
             "args": ["${CLAUDE_PLUGIN_ROOT}/bin/flight-rules.mjs", "hook", "agent-stop"],
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/bin/flight-rules.mjs", "hook", "subagent-status", "--harness", "claude-code"],
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/bin/flight-rules.mjs", "hook", "subagent-status", "--harness", "claude-code"],
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "StopFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/bin/flight-rules.mjs", "hook", "subagent-status", "--harness", "claude-code"],
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/bin/flight-rules.mjs", "hook", "subagent-status", "--harness", "claude-code"],
+            "timeout": 2
           }
         ]
       }

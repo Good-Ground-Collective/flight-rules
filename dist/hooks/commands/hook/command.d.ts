@@ -5,6 +5,7 @@ import { DetachedHeartbeatSender } from "../../board-heartbeat/board-heartbeat.j
 import type { BoardHeartbeatHook, FinishedReport } from "../../board-heartbeat/board-heartbeat.js";
 import { GitBranchReader } from "../../board-heartbeat/board-hook-kit.js";
 import { PreBashHook } from "../../pre-bash/pre-bash.js";
+import { SubagentStatusRecorder } from "../../subagent-status/subagent-status.js";
 /** Hands work to a detached child process, so a hook never waits on the network. */
 export interface BoardHookSender {
     send(session: string): void;
@@ -35,4 +36,4 @@ export declare class DefaultBoardHookServices implements BoardHookServices {
     branch(): GitBranchReader;
     private hooks;
 }
-export declare function createHookCommand(getHandler?: () => PreBashHook, readStdin?: () => Promise<string>, boardServices?: BoardHookServices): Command;
+export declare function createHookCommand(getHandler?: () => PreBashHook, readStdin?: () => Promise<string>, boardServices?: BoardHookServices, getStatusRecorder?: () => SubagentStatusRecorder): Command;

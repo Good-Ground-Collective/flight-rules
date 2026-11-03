@@ -15772,7 +15772,7 @@ var recursive = /* @__PURE__ */ new WeakMap();
 var NONE = 0;
 var ASSUMED = 1;
 var PROVEN = 2;
-function isRecursive(inst, stack, resolve15) {
+function isRecursive(inst, stack, resolve16) {
   const cached2 = recursive.get(inst);
   if (cached2 !== void 0)
     return cached2 ? PROVEN : NONE;
@@ -15782,7 +15782,7 @@ function isRecursive(inst, stack, resolve15) {
   let result = NONE;
   const check2 = (child) => {
     if (result !== PROVEN && child?._zod) {
-      const answer = isRecursive(child, stack, resolve15);
+      const answer = isRecursive(child, stack, resolve16);
       if (answer > result)
         result = answer;
     }
@@ -15793,7 +15793,7 @@ function isRecursive(inst, stack, resolve15) {
       const desc = Object.getOwnPropertyDescriptor(sh, key);
       if (spread && !desc.enumerable)
         continue;
-      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve15) : NONE;
+      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve16) : NONE;
       if (child > answer)
         answer = child;
     }
@@ -15860,7 +15860,7 @@ function isRecursive(inst, stack, resolve15) {
       break;
     // `$ZodLazy` caches its inner on the def, so a resolved edge is followed exactly
     case "lazy": {
-      const inner = def._cachedInner ?? (resolve15 ? inst._zod.innerType : void 0);
+      const inner = def._cachedInner ?? (resolve16 ? inst._zod.innerType : void 0);
       merge3(inner ? isRecursive(inner, stack, false) : ASSUMED);
       break;
     }
@@ -32230,7 +32230,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.98.3";
+var appVersion = false ? "0.0.0-dev" : "1.99.0";
 
 // src/shared/ariadne/review-packet.schema.ts
 var packetLimits = {
@@ -38307,7 +38307,7 @@ var JiraClient = class {
       const retryAfterSeconds = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : defaultRetryAfterSeconds;
       const jitter = 0.7 + Math.random() * 0.6;
       const delayMs = Math.min(retryAfterSeconds * 1e3 * jitter, maxBackoffMs);
-      await new Promise((resolve15) => setTimeout(resolve15, delayMs));
+      await new Promise((resolve16) => setTimeout(resolve16, delayMs));
       return this.fetchWithRetry(url2, init, attempt + 1);
     }
     return res;
@@ -38359,7 +38359,7 @@ var ConfluenceClient = class {
       const retryAfterSeconds = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : defaultRetryAfterSeconds2;
       const jitter = 0.7 + Math.random() * 0.6;
       const delayMs = Math.min(retryAfterSeconds * 1e3 * jitter, maxBackoffMs2);
-      await new Promise((resolve15) => setTimeout(resolve15, delayMs));
+      await new Promise((resolve16) => setTimeout(resolve16, delayMs));
       return this.fetchWithRetry(url2, init, attempt + 1);
     }
     return res;
@@ -40967,10 +40967,10 @@ function resolveAll(constructs2, events, context) {
   const called = [];
   let index2 = -1;
   while (++index2 < constructs2.length) {
-    const resolve15 = constructs2[index2].resolveAll;
-    if (resolve15 && !called.includes(resolve15)) {
-      events = resolve15(events, context);
-      called.push(resolve15);
+    const resolve16 = constructs2[index2].resolveAll;
+    if (resolve16 && !called.includes(resolve16)) {
+      events = resolve16(events, context);
+      called.push(resolve16);
     }
   }
   return events;
@@ -47453,8 +47453,8 @@ var LayeredBodyAdfConverter = class {
   }
   /** Looks up a target's basename as an OWN entry, so inherited names (`constructor`, `__proto__`) never resolve. */
   mediaByName(target, media) {
-    const basename8 = target.slice(target.lastIndexOf("/") + 1);
-    return Object.hasOwn(media, basename8) ? media[basename8] : void 0;
+    const basename9 = target.slice(target.lastIndexOf("/") + 1);
+    return Object.hasOwn(media, basename9) ? media[basename9] : void 0;
   }
   /** The ADF block type an mdast node maps to, or `''` when it only degrades to literal text. */
   adfType(node3) {
@@ -53866,7 +53866,7 @@ var HiddenPrompt = class {
     const muted = new Writable({ write: (_chunk, _encoding, done) => done() });
     const prompt = createInterface({ input: process.stdin, output: muted, terminal: true });
     try {
-      return await new Promise((resolve15) => prompt.once("line", resolve15));
+      return await new Promise((resolve16) => prompt.once("line", resolve16));
     } finally {
       prompt.close();
       process.stderr.write("\n");
@@ -55241,6 +55241,404 @@ var PreBashHook = class {
   }
 };
 
+// src/hooks/subagent-status/subagent-status.ts
+import { randomBytes as randomBytes3 } from "node:crypto";
+import { closeSync as closeSync2, mkdirSync as mkdirSync7, openSync as openSync2, readFileSync as readFileSync18, readSync as readSync2, readdirSync as readdirSync5, renameSync, rmSync as rmSync3, statSync as statSync7, writeFileSync as writeFileSync8 } from "node:fs";
+import { homedir as homedir6 } from "node:os";
+import { basename as basename6, dirname as dirname15, isAbsolute as isAbsolute7, join as join16, resolve as resolve12 } from "node:path";
+var SubagentHarnessSchema = external_exports.enum(["claude-code", "codex"]);
+var SubagentStatusSchema = external_exports.enum(["working", "done", "error"]);
+var SubagentStatusRecordSchema = external_exports.looseObject({
+  v: external_exports.literal(1),
+  harness: SubagentHarnessSchema,
+  hc_terminal: external_exports.string().nullable(),
+  session_id: external_exports.string(),
+  agent_id: external_exports.string(),
+  agent_type: external_exports.string(),
+  description: external_exports.string(),
+  ticket: external_exports.string().nullable(),
+  status: SubagentStatusSchema,
+  cwd: external_exports.string(),
+  started_at: external_exports.string(),
+  updated_at: external_exports.string(),
+  ended_at: external_exports.string().nullable()
+});
+var subagentStatusMaxAgeMs = 24 * 60 * 6e4;
+var subagentTouchIntervalMs = 3e4;
+var maxDescriptionLength2 = 120;
+var transcriptHeadBytes2 = 64 * 1024;
+var failedTaskStatuses = /* @__PURE__ */ new Set(["failed", "error", "errored"]);
+var HookPayloadSchema = external_exports.looseObject({
+  hook_event_name: external_exports.string().optional(),
+  session_id: external_exports.string().min(1),
+  agent_id: external_exports.string().optional(),
+  agent_type: external_exports.string().optional(),
+  cwd: external_exports.string().optional(),
+  transcript_path: external_exports.string().nullable().optional(),
+  agent_transcript_path: external_exports.string().nullable().optional(),
+  description: external_exports.string().optional(),
+  prompt: external_exports.string().optional(),
+  status: external_exports.string().optional(),
+  error: external_exports.unknown().optional(),
+  background_tasks: external_exports.array(external_exports.looseObject({ id: external_exports.string().optional(), status: external_exports.string().optional(), description: external_exports.string().optional() })).optional()
+});
+var ClaudeSubagentMetaSchema = external_exports.looseObject({ agentType: external_exports.string().optional(), description: external_exports.string().optional() });
+var TranscriptLineSchema2 = external_exports.looseObject({
+  type: external_exports.string().optional(),
+  message: external_exports.looseObject({ role: external_exports.string().optional(), content: external_exports.unknown() }).optional()
+});
+var SubagentFileNameSchema = external_exports.string().transform((value) => value.replaceAll(/[^A-Za-z0-9._-]/g, "_"));
+var SubagentStatusRecorder = class {
+  env;
+  home;
+  now;
+  extractor;
+  readBranch;
+  constructor(props = {}) {
+    this.env = props.env ?? process.env;
+    this.home = props.home ?? homedir6();
+    this.now = props.now ?? Date.now;
+    this.extractor = props.extractor ?? new TicketKeyExtractor();
+    this.readBranch = props.readBranch ?? ((cwd) => new GitHeadReader().branch(cwd));
+  }
+  folder() {
+    const stateHome = this.env["XDG_STATE_HOME"];
+    const base = stateHome !== void 0 && stateHome !== "" ? stateHome : join16(this.home, ".local", "state");
+    return join16(base, "flight-rules", "agents");
+  }
+  /** Routes a hook payload by its `hook_event_name`. */
+  handle(harness, payload) {
+    const parsed = HookPayloadSchema.safeParse(payload);
+    if (parsed.success) {
+      const input2 = parsed.data;
+      switch (input2.hook_event_name) {
+        case "SubagentStart":
+          this.start(harness, input2);
+          break;
+        case "SubagentStop":
+          this.stop(harness, input2, this.failed(input2) ? "error" : "done");
+          break;
+        case "StopFailure":
+          this.stop(harness, input2, "error");
+          break;
+        case "PostToolUse":
+        case "PostToolUseFailure":
+          this.touch(harness, input2);
+          break;
+        case "SessionEnd":
+          this.endSession(harness, input2.session_id);
+          break;
+      }
+    }
+    this.prune();
+  }
+  read(harness, session, agent) {
+    return this.readPath(this.pathFor(harness, session, agent));
+  }
+  list() {
+    const records = [];
+    for (const name of this.entries()) {
+      if (!this.isRecordName(name)) continue;
+      const record2 = this.readPath(join16(this.folder(), name));
+      if (record2 !== void 0) records.push(record2);
+    }
+    return records;
+  }
+  prune() {
+    const cutoff = this.now() - subagentStatusMaxAgeMs;
+    for (const name of this.entries()) {
+      const path3 = join16(this.folder(), name);
+      if (this.isRecordName(name)) {
+        if (!this.expired(path3, cutoff)) continue;
+        for (const marker of this.markers(path3)) rmSync3(marker, { force: true });
+        rmSync3(path3, { force: true });
+      } else if (this.mtime(path3) < cutoff) {
+        rmSync3(path3, { force: true });
+      }
+    }
+  }
+  start(harness, input2) {
+    const agent = input2.agent_id;
+    if (agent === void 0) return;
+    const path3 = this.pathFor(harness, input2.session_id, agent);
+    for (const marker of this.markers(path3)) rmSync3(marker, { force: true });
+    const at = this.timestamp();
+    const base = this.readPath(path3) ?? this.fresh(harness, input2, agent, at);
+    this.commit(path3, this.enrich({ ...base, status: "working", updated_at: at, ended_at: null }, input2));
+  }
+  stop(harness, input2, status) {
+    const agent = input2.agent_id;
+    if (agent === void 0) return;
+    const path3 = this.pathFor(harness, input2.session_id, agent);
+    const at = this.timestamp();
+    const ended = this.end(path3, status, at);
+    const base = this.readPath(path3) ?? this.fresh(harness, input2, agent, at);
+    this.commit(path3, this.enrich({ ...base, ...ended, updated_at: at }, input2));
+  }
+  touch(harness, input2) {
+    const agent = input2.agent_id;
+    if (agent === void 0) return;
+    const path3 = this.pathFor(harness, input2.session_id, agent);
+    if (this.terminal(path3) !== void 0) return;
+    const existing = this.readPath(path3);
+    if (existing !== void 0 && (existing.status !== "working" || this.recent(existing) && this.resolved(existing))) return;
+    const at = this.timestamp();
+    const next = this.enrich({ ...existing ?? this.fresh(harness, input2, agent, at), updated_at: at }, input2);
+    if (existing !== void 0 && this.recent(existing) && next.description === existing.description && next.ticket === existing.ticket) return;
+    this.commit(path3, next);
+  }
+  endSession(harness, session) {
+    const at = this.timestamp();
+    for (const name of this.entries()) {
+      if (!this.isRecordName(name)) continue;
+      const path3 = join16(this.folder(), name);
+      const record2 = this.readPath(path3);
+      if (record2 === void 0 || record2.harness !== harness || record2.session_id !== session || record2.status !== "working") continue;
+      this.commit(path3, { ...record2, ...this.end(path3, "done", at), updated_at: at });
+    }
+  }
+  /**
+   * Hook processes can run at once (a sub-agent's last tool call beside its
+   * stop, SessionEnd beside a failure), so a finished state is never left to
+   * the last rename. Each end creates `.<record>.done` or `.<record>.error`
+   * with an exclusive create before it writes, and every writer re-reads the
+   * markers after its rename and rewrites the record if they disagree. Error
+   * outranks done, and the first marker of each kind keeps its time.
+   */
+  end(path3, status, at) {
+    try {
+      mkdirSync7(dirname15(path3), { recursive: true, mode: 448 });
+      writeFileSync8(this.markerPath(path3, status), at, { flag: "wx", mode: 384 });
+    } catch {
+    }
+    return this.terminal(path3) ?? { status, ended_at: at };
+  }
+  terminal(path3) {
+    for (const status of ["error", "done"]) {
+      try {
+        const ended = readFileSync18(this.markerPath(path3, status), "utf-8").trim();
+        if (ended !== "") return { status, ended_at: ended };
+      } catch {
+        continue;
+      }
+    }
+    return void 0;
+  }
+  commit(path3, record2) {
+    let next = record2;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      this.write(path3, next);
+      const ended = this.terminal(path3);
+      if (ended === void 0 || next.status === ended.status && next.ended_at === ended.ended_at) return;
+      next = { ...this.readPath(path3) ?? next, ...ended, updated_at: ended.ended_at > next.updated_at ? ended.ended_at : next.updated_at };
+    }
+  }
+  markerPath(path3, status) {
+    return join16(dirname15(path3), `.${basename6(path3)}.${status}`);
+  }
+  markers(path3) {
+    return [this.markerPath(path3, "done"), this.markerPath(path3, "error")];
+  }
+  expired(path3, cutoff) {
+    const record2 = this.readPath(path3);
+    const last = record2 === void 0 ? this.mtime(path3) : Date.parse(record2.ended_at ?? record2.updated_at);
+    const marked = Math.max(...this.markers(path3).map((marker) => Date.parse(this.readText(marker) ?? "")).filter(Number.isFinite), -Infinity);
+    return (!Number.isFinite(last) || last < cutoff) && marked < cutoff;
+  }
+  readText(path3) {
+    try {
+      return readFileSync18(path3, "utf-8").trim();
+    } catch {
+      return void 0;
+    }
+  }
+  recent(record2) {
+    return this.now() - Date.parse(record2.updated_at) < subagentTouchIntervalMs;
+  }
+  /** Nothing can outrank a key in the description, so only then is there nothing left to look up. */
+  resolved(record2) {
+    return record2.description !== "" && this.extractor.firstKey(record2.description) !== void 0;
+  }
+  fresh(harness, input2, agent, at) {
+    const terminal = this.env["HC_TERMINAL_ID"];
+    return {
+      v: 1,
+      harness,
+      hc_terminal: terminal !== void 0 && terminal !== "" ? terminal : null,
+      session_id: input2.session_id,
+      agent_id: agent,
+      agent_type: input2.agent_type !== void 0 && input2.agent_type !== "" ? input2.agent_type : "subagent",
+      description: "",
+      ticket: null,
+      status: "working",
+      cwd: input2.cwd !== void 0 && isAbsolute7(input2.cwd) ? input2.cwd : process.cwd(),
+      started_at: at,
+      updated_at: at,
+      ended_at: null
+    };
+  }
+  /**
+   * Fills the description and ticket once the harness has written something
+   * to read them from. A key in the description, then the first prompt, wins
+   * over one in the branch, so a branch ticket found early is replaced later.
+   */
+  enrich(record2, input2) {
+    const next = { ...record2 };
+    if (next.agent_type === "subagent" && input2.agent_type !== void 0 && input2.agent_type !== "") next.agent_type = input2.agent_type;
+    if (this.resolved(next)) return next;
+    const meta3 = this.claudeMeta(input2, record2.agent_id);
+    if (next.agent_type === "subagent" && meta3?.agentType !== void 0) next.agent_type = meta3.agentType;
+    if (next.description === "") {
+      next.description = this.clip(
+        input2.description ?? meta3?.description ?? input2.background_tasks?.find((task) => task.id === record2.agent_id)?.description ?? ""
+      );
+    }
+    const fromText = this.extractor.fromDispatch(next.description, input2.prompt ?? this.firstPrompt(input2, record2.agent_id));
+    next.ticket = fromText ?? next.ticket ?? this.extractor.firstKey(this.readBranch(next.cwd)) ?? null;
+    return next;
+  }
+  failed(input2) {
+    if (input2.status !== void 0 && failedTaskStatuses.has(input2.status.toLowerCase())) return true;
+    if (input2.error !== void 0 && input2.error !== null && input2.error !== false && input2.error !== "") return true;
+    const task = input2.background_tasks?.find((entry) => entry.id === input2.agent_id);
+    return task?.status !== void 0 && failedTaskStatuses.has(task.status.toLowerCase());
+  }
+  /** Claude Code keeps each sub-agent's sidecar beside the session transcript: `<transcript>/subagents/agent-<id>.meta.json`. */
+  claudeMeta(input2, agent) {
+    const dir = this.claudeSubagentsDir(input2);
+    if (dir === void 0) return void 0;
+    try {
+      const parsed = ClaudeSubagentMetaSchema.safeParse(JSON.parse(readFileSync18(join16(dir, `agent-${SubagentFileNameSchema.parse(agent)}.meta.json`), "utf-8")));
+      return parsed.success ? parsed.data : void 0;
+    } catch {
+      return void 0;
+    }
+  }
+  firstPrompt(input2, agent) {
+    const dir = this.claudeSubagentsDir(input2);
+    const path3 = input2.agent_transcript_path ?? (dir !== void 0 ? join16(dir, `agent-${SubagentFileNameSchema.parse(agent)}.jsonl`) : void 0);
+    if (path3 === void 0 || path3 === null) return void 0;
+    const head = this.readHead(path3);
+    if (head === void 0) return void 0;
+    for (const line of head.split("\n")) {
+      try {
+        const parsed = TranscriptLineSchema2.safeParse(JSON.parse(line));
+        if (!parsed.success || parsed.data.message?.role !== "user") continue;
+        const text7 = this.contentText(parsed.data.message.content);
+        if (text7 !== void 0) return text7;
+      } catch {
+        continue;
+      }
+    }
+    return void 0;
+  }
+  claudeSubagentsDir(input2) {
+    if (input2.agent_transcript_path !== void 0 && input2.agent_transcript_path !== null) return dirname15(input2.agent_transcript_path);
+    const transcript = input2.transcript_path;
+    if (transcript === void 0 || transcript === null || !transcript.endsWith(".jsonl")) return void 0;
+    return join16(transcript.slice(0, -".jsonl".length), "subagents");
+  }
+  pathFor(harness, session, agent) {
+    return join16(this.folder(), `${SubagentFileNameSchema.parse(`${harness}-${session}-${agent}`)}.json`);
+  }
+  readPath(path3) {
+    try {
+      const parsed = SubagentStatusRecordSchema.safeParse(JSON.parse(readFileSync18(path3, "utf-8")));
+      return parsed.success ? parsed.data : void 0;
+    } catch {
+      return void 0;
+    }
+  }
+  write(path3, record2) {
+    const folder = this.folder();
+    mkdirSync7(folder, { recursive: true, mode: 448 });
+    const temp = join16(folder, `.${randomBytes3(6).toString("hex")}.tmp`);
+    try {
+      writeFileSync8(temp, JSON.stringify(record2, null, 2) + "\n", { mode: 384 });
+      renameSync(temp, path3);
+    } catch (error62) {
+      rmSync3(temp, { force: true });
+      throw error62;
+    }
+  }
+  isRecordName(name) {
+    return name.endsWith(".json") && !name.startsWith(".");
+  }
+  mtime(path3) {
+    try {
+      return statSync7(path3).mtimeMs;
+    } catch {
+      return Number.NaN;
+    }
+  }
+  entries() {
+    try {
+      return readdirSync5(this.folder());
+    } catch {
+      return [];
+    }
+  }
+  timestamp() {
+    return new Date(this.now()).toISOString().replace(/\.\d{3}Z$/, "Z");
+  }
+  clip(text7) {
+    const flat = text7.replaceAll(/\s+/g, " ").trim();
+    return flat.length > maxDescriptionLength2 ? flat.slice(0, maxDescriptionLength2) : flat;
+  }
+  contentText(content3) {
+    if (typeof content3 === "string") return content3;
+    if (!Array.isArray(content3)) return void 0;
+    const parts = content3.flatMap(
+      (part) => typeof part === "object" && part !== null && "text" in part && typeof part.text === "string" ? [part.text] : []
+    );
+    return parts.length > 0 ? parts.join("\n") : void 0;
+  }
+  /** The transcript's first bytes only, so the read never grows with the transcript. */
+  readHead(path3) {
+    let fd;
+    try {
+      fd = openSync2(path3, "r");
+      const buffer = Buffer.alloc(transcriptHeadBytes2);
+      const read = readSync2(fd, buffer, 0, transcriptHeadBytes2, 0);
+      return buffer.subarray(0, read).toString("utf-8");
+    } catch {
+      return void 0;
+    } finally {
+      if (fd !== void 0) closeSync2(fd);
+    }
+  }
+};
+var GitHeadReader = class {
+  branch(cwd) {
+    let dir = resolve12(cwd);
+    for (; ; ) {
+      const dotGit = join16(dir, ".git");
+      const isDirectory = this.isDirectory(dotGit);
+      if (isDirectory !== void 0) return this.headBranch(dir, dotGit, isDirectory);
+      const parent = dirname15(dir);
+      if (parent === dir) return void 0;
+      dir = parent;
+    }
+  }
+  isDirectory(path3) {
+    try {
+      return statSync7(path3).isDirectory();
+    } catch {
+      return void 0;
+    }
+  }
+  headBranch(dir, dotGit, isDirectory) {
+    try {
+      const pointer = isDirectory ? void 0 : /^gitdir:\s*(.+)$/m.exec(readFileSync18(dotGit, "utf-8"))?.[1]?.trim();
+      const gitDir = isDirectory ? dotGit : pointer !== void 0 ? resolve12(dir, pointer) : void 0;
+      if (gitDir === void 0) return void 0;
+      return /^ref:\s*refs\/heads\/(.+)$/m.exec(readFileSync18(join16(gitDir, "HEAD"), "utf-8"))?.[1]?.trim();
+    } catch {
+      return void 0;
+    }
+  }
+};
+
 // src/hooks/commands/hook/command.ts
 var DefaultBoardHookServices = class {
   kit;
@@ -55268,7 +55666,7 @@ var DefaultBoardHookServices = class {
   }
 };
 var defaultBoardServices = new DefaultBoardHookServices();
-function createHookCommand(getHandler = () => new PreBashHook(), readStdin = () => text6(process.stdin), boardServices = defaultBoardServices) {
+function createHookCommand(getHandler = () => new PreBashHook(), readStdin = () => text6(process.stdin), boardServices = defaultBoardServices, getStatusRecorder = () => new SubagentStatusRecorder()) {
   const hook2 = new Command("hook").description("handlers for the plugin's Claude Code hooks");
   hook2.command("pre-bash").alias("guard-commit").description(
     "PreToolUse(Bash): block a hand-written `git commit` in a flight-rules repo, and strip Claude's attribution trailers from commit and PR commands"
@@ -55323,11 +55721,22 @@ function createHookCommand(getHandler = () => new PreBashHook(), readStdin = () 
       return;
     }
   });
+  hook2.command("subagent-status").description(
+    "SubagentStart, SubagentStop, StopFailure, PostToolUse and SessionEnd: keep a status file per sub-agent under $XDG_STATE_HOME/flight-rules/agents for terminal multiplexers; Claude Code and Codex; local only, no output, never blocks"
+  ).option("--harness <harness>", "the host running the hook: claude-code or codex", "claude-code").exitOverride().action(async (opts) => {
+    try {
+      const harness = SubagentHarnessSchema.safeParse(opts.harness);
+      if (!harness.success) return;
+      getStatusRecorder().handle(harness.data, JSON.parse(await readStdin()));
+    } catch {
+      return;
+    }
+  });
   return hook2;
 }
 
 // src/git/commands/commit/command.ts
-import { readFileSync as readFileSync18 } from "node:fs";
+import { readFileSync as readFileSync19 } from "node:fs";
 function collect2(value, previous3) {
   return [...previous3, value];
 }
@@ -55346,7 +55755,7 @@ function createGitCommand(registry2) {
         type: opts.type,
         scope: opts.scope,
         description: opts.description,
-        body: opts.bodyFile !== void 0 ? readFileSync18(opts.bodyFile, "utf8") : opts.body,
+        body: opts.bodyFile !== void 0 ? readFileSync19(opts.bodyFile, "utf8") : opts.body,
         footers: opts.footer,
         model: opts.model,
         files: opts.file
@@ -55384,9 +55793,9 @@ function createGitCommand(registry2) {
 }
 
 // src/git/commands/message/command.ts
-import { mkdtempSync, readFileSync as readFileSync19, writeFileSync as writeFileSync8 } from "node:fs";
+import { mkdtempSync, readFileSync as readFileSync20, writeFileSync as writeFileSync9 } from "node:fs";
 import { tmpdir as tmpdir2 } from "node:os";
-import { join as join16 } from "node:path";
+import { join as join17 } from "node:path";
 function createCommitMessageCommand(registry2) {
   const operations = new RegistryCommandOperationClient({ registry: registry2 });
   return new Command("commit-message").description(
@@ -55406,14 +55815,14 @@ function createCommitMessageCommand(registry2) {
         type: opts.type,
         scope: opts.scope,
         description: opts.description,
-        body: opts.bodyFile !== void 0 ? readFileSync19(opts.bodyFile, "utf8") : opts.body,
+        body: opts.bodyFile !== void 0 ? readFileSync20(opts.bodyFile, "utf8") : opts.body,
         footers: opts.footer,
         model: opts.model
       },
       external_exports.object({ message: external_exports.string() })
     );
-    const path3 = opts.out ?? join16(mkdtempSync(join16(tmpdir2(), "flight-rules-commit-")), "message.txt");
-    writeFileSync8(path3, `${message}
+    const path3 = opts.out ?? join17(mkdtempSync(join17(tmpdir2(), "flight-rules-commit-")), "message.txt");
+    writeFileSync9(path3, `${message}
 `);
     process.stdout.write(JSON.stringify({ path: path3, message }) + "\n");
   });
@@ -55699,6 +56108,11 @@ var excludedRoutes = [
     reason: "Consumes Claude SubagentStop payloads and reports host lifecycle events."
   },
   {
+    path: ["hook", "subagent-status"],
+    aliases: [],
+    reason: "Consumes Claude Code and Codex sub-agent lifecycle payloads and writes local status files."
+  },
+  {
     path: ["agents", "status"],
     aliases: [],
     reason: "Inspects native Codex registration files on the local host."
@@ -55811,7 +56225,7 @@ var cliRouteCoverage = new ManifestCliRouteCoverage({
 });
 
 // src/mcp/command.ts
-import { readFileSync as readFileSync23 } from "node:fs";
+import { readFileSync as readFileSync24 } from "node:fs";
 
 // node_modules/@modelcontextprotocol/server/dist/chunk-Br0eD_fh.mjs
 var __create2 = Object.create;
@@ -60236,14 +60650,14 @@ function inputRequiredRoundsExceededMessage(method, maxRounds) {
   return `Multi-round-trip request '${method}' still required input after ${maxRounds} rounds (inputRequired.maxRounds)`;
 }
 function sleep(ms, signal) {
-  return new Promise((resolve15, reject) => {
+  return new Promise((resolve16, reject) => {
     if (signal?.aborted) {
       reject(signal.reason instanceof SdkError ? signal.reason : new SdkError(SdkErrorCode.RequestTimeout, String(signal.reason)));
       return;
     }
     const timer = setTimeout(() => {
       signal?.removeEventListener("abort", onAbort);
-      resolve15();
+      resolve16();
     }, ms);
     const onAbort = () => {
       clearTimeout(timer);
@@ -61042,7 +61456,7 @@ var Protocol = class {
     const flowStartedAt = Date.now();
     let onAbort;
     let cleanupMessageId;
-    return new Promise((resolve15, reject) => {
+    return new Promise((resolve16, reject) => {
       const earlyReject = (error62) => {
         reject(error62);
       };
@@ -61111,7 +61525,7 @@ var Protocol = class {
         }
         if (decoded.kind === "invalid") return reject(decoded.error);
         if (decoded.kind === "input_required") {
-          if (options?.allowInputRequired === true) return resolve15(manualInputRequiredValue(decoded));
+          if (options?.allowInputRequired === true) return resolve16(manualInputRequiredValue(decoded));
           const flow3 = {
             codec: codec2,
             request: request2,
@@ -61123,11 +61537,11 @@ var Protocol = class {
               params
             }, resultSchema, legOptions)
           };
-          return resolve15(this._resolveNonCompleteResult(decoded, flow3));
+          return resolve16(this._resolveNonCompleteResult(decoded, flow3));
         }
         const result = decoded.result;
         validateStandardSchema(resultSchema, result).then((parseResult) => {
-          if (parseResult.success) resolve15(parseResult.data);
+          if (parseResult.success) resolve16(parseResult.data);
           else reject(new SdkError(SdkErrorCode.InvalidResult, `Invalid result for ${request2.method}: ${parseResult.error}`));
         }, reject);
       });
@@ -64043,7 +64457,7 @@ var require_compile = /* @__PURE__ */ __commonJSMin(((exports) => {
     ref = (0, resolve_1.resolveUrl)(this.opts.uriResolver, baseId, ref);
     const schOrFunc = root.refs[ref];
     if (schOrFunc) return schOrFunc;
-    let _sch = resolve15.call(this, root, ref);
+    let _sch = resolve16.call(this, root, ref);
     if (_sch === void 0) {
       const schema = (_a3 = root.localRefs) === null || _a3 === void 0 ? void 0 : _a3[ref];
       const { schemaId } = this.opts;
@@ -64069,7 +64483,7 @@ var require_compile = /* @__PURE__ */ __commonJSMin(((exports) => {
   function sameSchemaEnv(s1, s2) {
     return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
   }
-  function resolve15(root, ref) {
+  function resolve16(root, ref) {
     let sch;
     while (typeof (sch = this.refs[ref]) == "string") ref = sch;
     return sch || this.schemas[ref] || resolveSchema.call(this, root, ref);
@@ -64519,7 +64933,7 @@ var require_fast_uri = /* @__PURE__ */ __commonJSMin(((exports, module) => {
     else if (typeof uri === "object") uri = parse8(serialize(uri, options), options);
     return uri;
   }
-  function resolve15(baseURI, relativeURI, options) {
+  function resolve16(baseURI, relativeURI, options) {
     const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
     const resolved = resolveComponent(parse8(baseURI, schemelessOptions), parse8(relativeURI, schemelessOptions), schemelessOptions, true);
     schemelessOptions.skipEscape = true;
@@ -64693,7 +65107,7 @@ var require_fast_uri = /* @__PURE__ */ __commonJSMin(((exports, module) => {
   const fastUri = {
     SCHEMES,
     normalize,
-    resolve: resolve15,
+    resolve: resolve16,
     resolveComponent,
     equal,
     serialize,
@@ -70155,7 +70569,7 @@ var StdioServerTransport = class {
   }
   send(message) {
     if (this._closed) return Promise.reject(/* @__PURE__ */ new Error("StdioServerTransport is closed"));
-    return new Promise((resolve15, reject) => {
+    return new Promise((resolve16, reject) => {
       const json2 = serializeMessage(message);
       let settled = false;
       const onError = (error62) => {
@@ -70170,14 +70584,14 @@ var StdioServerTransport = class {
         settled = true;
         this._stdout.off("error", onError);
         this._stdout.off("drain", onDrain);
-        resolve15();
+        resolve16();
       };
       this._stdout.once("error", onError);
       if (this._stdout.write(json2)) {
         if (settled) return;
         settled = true;
         this._stdout.off("error", onError);
-        resolve15();
+        resolve16();
       } else if (!settled) this._stdout.once("drain", onDrain);
     });
   }
@@ -70231,14 +70645,14 @@ var StdioConnectionChannel = class {
   */
   async whenRequestsAnswered(timeoutMs) {
     if (this._closed || this._pendingRequests.size === 0) return true;
-    return await new Promise((resolve15) => {
+    return await new Promise((resolve16) => {
       const waiter = () => {
         clearTimeout(timer);
-        resolve15(true);
+        resolve16(true);
       };
       const timer = setTimeout(() => {
         this._drainWaiters = this._drainWaiters.filter((pending) => pending !== waiter);
-        resolve15(false);
+        resolve16(false);
       }, timeoutMs);
       this._drainWaiters.push(waiter);
     });
@@ -70580,15 +70994,15 @@ function toError(value) {
 }
 
 // src/mcp/mcp-server.ts
-import { existsSync as existsSync16, readFileSync as readFileSync22, realpathSync as realpathSync10, statSync as statSync9 } from "node:fs";
-import { dirname as dirname16, isAbsolute as isAbsolute9, relative as relative8, resolve as resolve14, sep as sep6 } from "node:path";
+import { existsSync as existsSync16, readFileSync as readFileSync23, realpathSync as realpathSync10, statSync as statSync10 } from "node:fs";
+import { dirname as dirname17, isAbsolute as isAbsolute10, relative as relative8, resolve as resolve15, sep as sep6 } from "node:path";
 
 // node_modules/@modelcontextprotocol/server/dist/index.mjs
 var DEFAULT_MAX_REQUEST_BODY_SIZE = 4 * 1024 * 1024;
 
 // src/operations/pr-operations.ts
-import { realpathSync as realpathSync8, statSync as statSync7 } from "node:fs";
-import { isAbsolute as isAbsolute7, relative as relative6, resolve as resolve12 } from "node:path";
+import { realpathSync as realpathSync8, statSync as statSync8 } from "node:fs";
+import { isAbsolute as isAbsolute8, relative as relative6, resolve as resolve13 } from "node:path";
 var propsSchema5 = external_exports.strictObject({
   cwd: external_exports.string().min(1),
   getHost: external_exports.custom((value) => typeof value === "function")
@@ -70686,9 +71100,9 @@ var DefaultPrOperations = class {
   getHost;
   constructor(props) {
     const parsed = propsSchema5.parse(props);
-    this.cwd = resolve12(parsed.cwd);
+    this.cwd = resolve13(parsed.cwd);
     this.launchRoot = realpathSync8(this.cwd);
-    const launchStat = statSync7(this.launchRoot);
+    const launchStat = statSync8(this.launchRoot);
     this.launchDevice = launchStat.dev;
     this.launchInode = launchStat.ino;
     this.getHost = parsed.getHost;
@@ -70748,23 +71162,23 @@ var DefaultPrOperations = class {
       if (pathname.length === 0 || split >= 0 && spec.slice(split + 1).length === 0) {
         throw new PullRequestAttachmentPathError(`Invalid attachment spec: ${spec}`);
       }
-      const candidate = isAbsolute7(pathname) ? pathname : resolve12(this.cwd, pathname);
+      const candidate = isAbsolute8(pathname) ? pathname : resolve13(this.cwd, pathname);
       let canonical;
       try {
         canonical = realpathSync8(candidate);
-        if (!statSync7(canonical).isFile()) throw new Error("not a file");
+        if (!statSync8(canonical).isFile()) throw new Error("not a file");
       } catch {
         throw new PullRequestAttachmentPathError(`Attachment is not a readable file: ${pathname}`);
       }
       const fromRoot = relative6(this.launchRoot, canonical);
-      if (fromRoot === ".." || fromRoot.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || isAbsolute7(fromRoot)) {
+      if (fromRoot === ".." || fromRoot.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || isAbsolute8(fromRoot)) {
         throw new PullRequestAttachmentPathError(`Attachment must be inside the launch checkout: ${pathname}`);
       }
     }
   }
   requireOriginalLaunchDirectory() {
     try {
-      const directory = statSync7(this.cwd);
+      const directory = statSync8(this.cwd);
       if (realpathSync8(this.cwd) !== this.launchRoot || directory.dev !== this.launchDevice || directory.ino !== this.launchInode) {
         throw new Error("replaced");
       }
@@ -70777,13 +71191,13 @@ var DefaultPrOperations = class {
 };
 
 // src/sdk/instruction-catalog-core.ts
-import { existsSync as existsSync15, readFileSync as readFileSync21, readdirSync as readdirSync6, realpathSync as realpathSync9, statSync as statSync8 } from "node:fs";
-import { basename as basename7, dirname as dirname15, isAbsolute as isAbsolute8, join as join18, relative as relative7, resolve as resolve13, sep as sep5 } from "node:path";
+import { existsSync as existsSync15, readFileSync as readFileSync22, readdirSync as readdirSync7, realpathSync as realpathSync9, statSync as statSync9 } from "node:fs";
+import { basename as basename8, dirname as dirname16, isAbsolute as isAbsolute9, join as join19, relative as relative7, resolve as resolve14, sep as sep5 } from "node:path";
 import { fileURLToPath as fileURLToPath4 } from "node:url";
 
 // src/agents/agent-registry/agent-registry.ts
-import { readFileSync as readFileSync20, readdirSync as readdirSync5 } from "node:fs";
-import { basename as basename6, join as join17 } from "node:path";
+import { readFileSync as readFileSync21, readdirSync as readdirSync6 } from "node:fs";
+import { basename as basename7, join as join18 } from "node:path";
 
 // src/agents/agent-frontmatter/agent-frontmatter.ts
 var import_yaml4 = __toESM(require_dist(), 1);
@@ -70820,18 +71234,18 @@ var InvalidAgentDefinitionError = class extends Error {
 };
 var FileAgentRegistry = class {
   load(directory) {
-    const agents = readdirSync5(directory, { withFileTypes: true }).filter((entry) => entry.isFile() && entry.name.endsWith(".md")).sort((a, b) => a.name.localeCompare(b.name)).map((entry) => {
-      const markdown = readFileSync20(join17(directory, entry.name), "utf8");
+    const agents = readdirSync6(directory, { withFileTypes: true }).filter((entry) => entry.isFile() && entry.name.endsWith(".md")).sort((a, b) => a.name.localeCompare(b.name)).map((entry) => {
+      const markdown = readFileSync21(join18(directory, entry.name), "utf8");
       const frontmatter = AgentRegistrationSchema.parse(agentFrontmatterParser.parse(markdown));
       const body = markdown.replace(/^---\r?\n[\s\S]*?^---(?:\r?\n|$)/m, "");
-      if (frontmatter.name !== basename6(entry.name, ".md") || body.trim() === "") {
+      if (frontmatter.name !== basename7(entry.name, ".md") || body.trim() === "") {
         throw new InvalidAgentDefinitionError(`Agent ${entry.name} needs a matching name and a nonempty prompt`);
       }
       return { frontmatter, body };
     });
     const canonical = new Map(agents.map((agent) => [agent.frontmatter.name, agent]));
     const names = new Set(canonical.keys());
-    const variants = AgentVariantsSchema.parse(JSON.parse(readFileSync20(join17(directory, "variants.json"), "utf8")));
+    const variants = AgentVariantsSchema.parse(JSON.parse(readFileSync21(join18(directory, "variants.json"), "utf8")));
     for (const variant of variants) {
       const base = canonical.get(variant.extends);
       if (base === void 0 || names.has(variant.name)) {
@@ -70872,13 +71286,13 @@ var ModulePackageHomeLocator = class {
     const parsed = CatalogPropsSchema.parse({ ...props, env: { ...props.env } });
     const override = parsed.env["FLIGHT_RULES_HOME"]?.trim();
     if (override) return override;
-    const moduleDirectory = dirname15(fileURLToPath4(parsed.moduleUrl));
-    if (basename7(moduleDirectory) === "sdk") return resolve13(moduleDirectory, "../..");
-    const bindingParent = dirname15(moduleDirectory);
-    if (basename7(bindingParent) === "sdk" && basename7(dirname15(bindingParent)) === "src") {
-      return resolve13(moduleDirectory, "../../..");
+    const moduleDirectory = dirname16(fileURLToPath4(parsed.moduleUrl));
+    if (basename8(moduleDirectory) === "sdk") return resolve14(moduleDirectory, "../..");
+    const bindingParent = dirname16(moduleDirectory);
+    if (basename8(bindingParent) === "sdk" && basename8(dirname16(bindingParent)) === "src") {
+      return resolve14(moduleDirectory, "../../..");
     }
-    return resolve13(moduleDirectory, "..");
+    return resolve14(moduleDirectory, "..");
   }
 };
 var packageHomeLocator = new ModulePackageHomeLocator();
@@ -70895,22 +71309,22 @@ var FileInstructionCatalog = class {
       "agents",
       "resources/agents"
     ]);
-    this.safePath(join18(this.agentDir, "variants.json"), this.agentDir);
+    this.safePath(join19(this.agentDir, "variants.json"), this.agentDir);
     this.agents = new Map(
       new FileAgentRegistry().load(this.agentDir).map((agent) => [agent.frontmatter.name, agent])
     );
   }
   listSkills() {
-    return readdirSync6(this.skillDir, { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile() && entry.name === "SKILL.md").map((entry) => relative7(this.skillDir, join18(entry.parentPath, entry.name)).split(sep5)[0]).filter((name) => name !== void 0).sort();
+    return readdirSync7(this.skillDir, { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile() && entry.name === "SKILL.md").map((entry) => relative7(this.skillDir, join19(entry.parentPath, entry.name)).split(sep5)[0]).filter((name) => name !== void 0).sort();
   }
   loadSkill(name) {
     const parsed = ResourceNameSchema.safeParse(name);
     if (!parsed.success) throw new UnsafeInstructionPathError(`Invalid skill name: ${name}`);
-    const path3 = join18(this.skillDir, parsed.data, "SKILL.md");
+    const path3 = join19(this.skillDir, parsed.data, "SKILL.md");
     return {
       name: parsed.data,
       path: this.safePath(path3, this.skillDir),
-      contents: readFileSync21(this.safePath(path3, this.skillDir), "utf8")
+      contents: readFileSync22(this.safePath(path3, this.skillDir), "utf8")
     };
   }
   listAgents() {
@@ -70924,18 +71338,18 @@ var FileInstructionCatalog = class {
     return agent;
   }
   findResourceDirectory(home, candidates) {
-    if (!existsSync15(home) || !statSync8(home).isDirectory()) {
+    if (!existsSync15(home) || !statSync9(home).isDirectory()) {
       throw new InstructionsUnavailableError(
         `The flight-rules installation directory is unavailable: ${home}`
       );
     }
     const installationRoot = realpathSync9(home);
     for (const candidate of candidates) {
-      const path3 = resolve13(installationRoot, candidate);
-      if (!existsSync15(path3) || !statSync8(path3).isDirectory()) continue;
+      const path3 = resolve14(installationRoot, candidate);
+      if (!existsSync15(path3) || !statSync9(path3).isDirectory()) continue;
       const realPath = realpathSync9(path3);
       const relativePath = relative7(installationRoot, realPath);
-      if (relativePath === ".." || relativePath.startsWith(`..${sep5}`) || isAbsolute8(relativePath)) {
+      if (relativePath === ".." || relativePath.startsWith(`..${sep5}`) || isAbsolute9(relativePath)) {
         throw new UnsafeInstructionPathError(
           `Instruction directory escapes its installation home: ${path3}`
         );
@@ -70945,11 +71359,11 @@ var FileInstructionCatalog = class {
     throw new InstructionsUnavailableError(`Canonical resources are unavailable under ${home}`);
   }
   safePath(path3, root) {
-    if (!isAbsolute8(path3) || !existsSync15(path3) || !statSync8(path3).isFile())
+    if (!isAbsolute9(path3) || !existsSync15(path3) || !statSync9(path3).isFile())
       throw new UnknownInstructionError(`Unknown instruction resource: ${path3}`);
     const realPath = realpathSync9(path3);
     const relativePath = relative7(root, realPath);
-    if (relativePath === ".." || relativePath.startsWith(`..${sep5}`) || isAbsolute8(relativePath)) {
+    if (relativePath === ".." || relativePath.startsWith(`..${sep5}`) || isAbsolute9(relativePath)) {
       throw new UnsafeInstructionPathError(
         `Instruction resource escapes its installation directory: ${path3}`
       );
@@ -70991,23 +71405,23 @@ var LaunchBoundQaFileSystem = class {
   }
   isFile(path3) {
     this.requireInsideLaunch(path3);
-    return existsSync16(path3) && statSync9(path3).isFile();
+    return existsSync16(path3) && statSync10(path3).isFile();
   }
   readFile(path3) {
     this.requireInsideLaunch(path3);
-    return readFileSync22(path3, "utf8");
+    return readFileSync23(path3, "utf8");
   }
   isInsideLaunch(path3) {
-    const absolute = resolve14(path3);
+    const absolute = resolve15(path3);
     let existing = absolute;
     while (!existsSync16(existing)) {
-      const parent = dirname16(existing);
+      const parent = dirname17(existing);
       if (parent === existing) return false;
       existing = parent;
     }
     const realPath = realpathSync10(existing);
     const relativePath = relative8(this.root, realPath);
-    return relativePath === "" || relativePath !== ".." && !relativePath.startsWith(`..${sep6}`) && !isAbsolute9(relativePath);
+    return relativePath === "" || relativePath !== ".." && !relativePath.startsWith(`..${sep6}`) && !isAbsolute10(relativePath);
   }
   requireInsideLaunch(path3) {
     if (!this.isInsideLaunch(path3)) {
@@ -71029,7 +71443,7 @@ var FlightRulesMcpServer = class {
   constructor(props) {
     this.props = McpLaunchPropsSchema.parse(props);
     this.cwd = realpathSync10(this.props.cwd);
-    const directory = statSync9(this.cwd);
+    const directory = statSync10(this.cwd);
     this.launchDevice = directory.dev;
     this.launchInode = directory.ino;
     this.qaFileSystem = new LaunchBoundQaFileSystem({ root: this.cwd });
@@ -71192,7 +71606,7 @@ var FlightRulesMcpServer = class {
   }
   /** Pathnames can be reused after a rename; the launch grant belongs to the original directory. */
   requireOriginalLaunchCheckout() {
-    const directory = existsSync16(this.cwd) ? statSync9(this.cwd) : void 0;
+    const directory = existsSync16(this.cwd) ? statSync10(this.cwd) : void 0;
     if (directory === void 0 || realpathSync10(this.cwd) !== this.cwd || directory.dev !== this.launchDevice || directory.ino !== this.launchInode) {
       throw new LaunchCheckoutChangedError(
         `The launch checkout was moved or replaced: ${this.cwd}`
@@ -71205,11 +71619,11 @@ var FlightRulesMcpServer = class {
     if (!parsedInput.success) return;
     const from = parsedInput.data.from;
     if (typeof from !== "string") return;
-    const candidate = isAbsolute9(from) ? from : resolve14(this.cwd, from);
+    const candidate = isAbsolute10(from) ? from : resolve15(this.cwd, from);
     if (!existsSync16(candidate)) throw new Error(`QA instructions path does not exist: ${from}`);
     const realPath = realpathSync10(candidate);
     const relativePath = relative8(this.cwd, realPath);
-    if (relativePath === ".." || relativePath.startsWith(`..${sep6}`) || isAbsolute9(relativePath)) {
+    if (relativePath === ".." || relativePath.startsWith(`..${sep6}`) || isAbsolute10(relativePath)) {
       throw new UnsafeQaInstructionsPathError(
         `QA instructions path escapes the launch checkout: ${from}`
       );
@@ -71253,7 +71667,7 @@ function createMcpCommand() {
   ).action(async (options) => {
     const parsed = CommandOptionsSchema.parse(options);
     const owners = parsed.reviewOwnersFile === void 0 ? {} : ReviewOperationsLaunchPropsSchema.shape.owners.parse(
-      JSON.parse(readFileSync23(parsed.reviewOwnersFile, "utf8"))
+      JSON.parse(readFileSync24(parsed.reviewOwnersFile, "utf8"))
     );
     await new StdioFlightRulesMcpTransport({
       cwd: process.cwd(),

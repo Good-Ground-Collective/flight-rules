@@ -1839,7 +1839,7 @@ var EnvLoader = class {
 };
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "1.98.3";
+var appVersion = false ? "0.0.0-dev" : "1.99.0";
 
 // src/shared/ariadne/review-packet.schema.ts
 import { z as z17 } from "zod";
@@ -10359,7 +10359,7 @@ var NativePluginCompiler = class {
     const diagnostics = codexEmitter === void 0 ? [] : [...new Set(definitions.flatMap((agent) => codexEmitter.diagnostics(agent)))];
     if (target === "codex")
       diagnostics.push(
-        "Claude commit and Ariadne hooks are omitted; this target emits no Codex hooks."
+        "Claude commit and Ariadne hooks are omitted; Codex gets only the sub-agent status hooks, which run once trusted through /hooks."
       );
     for (const executable of ["flight-rules", "flight-rules.mjs"]) {
       if (!existsSync14(join16(this.sourceDir, "bin", executable))) {
@@ -10406,11 +10406,14 @@ var NativePluginCompiler = class {
       join16(this.sourceDir, "adapters", target, "model-tiers.json"),
       join16(directory, "adapters", target, "model-tiers.json")
     );
-    if (target === "codex")
+    if (target === "codex") {
       copyFileSync(
         join16(this.sourceDir, "adapters/codex/reasoning-tiers.json"),
         join16(directory, "adapters/codex/reasoning-tiers.json")
       );
+      mkdirSync7(join16(directory, "hooks"), { recursive: true });
+      copyFileSync(join16(this.sourceDir, "adapters/codex/hooks.json"), join16(directory, "hooks", "hooks.json"));
+    }
     for (const executable of ["flight-rules", "flight-rules.mjs"])
       chmodSync2(join16(directory, "bin", executable), 493);
     const manifestDirectory = join16(
