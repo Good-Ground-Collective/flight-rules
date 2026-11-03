@@ -13,7 +13,7 @@ import {
   OperationInputError,
   MapOperationRegistry,
 } from "../operation-registry.js";
-import type { OperationDescriptor } from "../operation-registry.js";
+import { operationInputShape, type OperationDescriptor } from "../operation-registry.js";
 import type { OperationEffect } from "../operation.schema.js";
 import { buildProgram } from "../../cli/cli.js";
 import { createFlightRules } from "../../flight-rules/flight-rules.js";
@@ -24,6 +24,18 @@ const resolver: DocResolver = {
   list: () => ["workflow"],
   resolve: (id) => ({ id, path: `/install/docs/${id}.md`, contents: "Workflow\n" }),
 };
+
+describe("operationInputShape.render", () => {
+  it("renders an empty object compactly and lists fields otherwise", () => {
+    expect(operationInputShape.render([])).toBe("{}");
+    expect(
+      operationInputShape.render([
+        { name: "id", type: "string", required: true },
+        { name: "limit", type: "number", required: false },
+      ]),
+    ).toBe("{ id: string, limit?: number }");
+  });
+});
 
 describe("shared operations", () => {
   it("invokes the document descriptor with validated shared inputs and output", async () => {
