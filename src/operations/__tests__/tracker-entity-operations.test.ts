@@ -582,4 +582,17 @@ describe("tracker entity operations", () => {
     });
     expect(tracker.createEpic).not.toHaveBeenCalled();
   });
+
+  it.each(["", "   "])("rejects an empty tdd edit title %j before tracker mutation", async (title) => {
+    const tracker = makeTracker();
+    const registry = new DefaultTrackerEntityOperations({
+      getTracker: () => tracker,
+      cwd: makeRoot(),
+    }).registry(new LaunchOperationAccessPolicy({ allowedEffects: ["write", "network"] }));
+
+    await expect(registry.invoke("tdd-edit", { id: "TDD-1", title })).rejects.toMatchObject({
+      name: "OperationInputError",
+    });
+    expect(tracker.updateTechnicalDesign).not.toHaveBeenCalled();
+  });
 });

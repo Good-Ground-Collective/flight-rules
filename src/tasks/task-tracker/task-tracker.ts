@@ -125,7 +125,7 @@ export const UpdateTicketInputSchema = z.object({
 });
 
 export const UpdateTechnicalDesignInputSchema = z.object({
-  title: z.string().optional(),
+  title: z.string().refine((title) => title.trim().length > 0, "title must not be empty").optional(),
   body: z.string().optional(),
 });
 
