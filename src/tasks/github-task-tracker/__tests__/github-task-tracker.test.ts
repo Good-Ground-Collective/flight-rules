@@ -1213,3 +1213,13 @@ describe("GitHubTracker throws for unsupported label writes", () => {
     await expect(tracker.addAttachment("7", "/tmp/a.png")).rejects.toThrow(/--tracker jira/);
   });
 });
+
+describe("GitHubTracker technical design attachments", () => {
+  it("fails with an error naming the limitation", async () => {
+    const tracker = makeTracker();
+    expect(() => tracker.assertTechnicalDesignAttachments()).toThrow(
+      /GitHub tracker does not support attaching files to a technical design/,
+    );
+    await expect(tracker.addTechnicalDesignAttachment()).rejects.toThrow(/--tracker jira/);
+  });
+});

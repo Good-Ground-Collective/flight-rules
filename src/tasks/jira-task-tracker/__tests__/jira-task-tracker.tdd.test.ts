@@ -1,7 +1,11 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const jiraRequest = vi.hoisted(() => vi.fn())
 const confluenceRequest = vi.hoisted(() => vi.fn())
+const confluenceUpload = vi.hoisted(() => vi.fn())
 vi.mock('../jira-client.js', () => ({
   JiraClient: class {
     request = jiraRequest
@@ -10,6 +14,7 @@ vi.mock('../jira-client.js', () => ({
 vi.mock('../confluence-client.js', () => ({
   ConfluenceClient: class {
     request = confluenceRequest
+    upload = confluenceUpload
     siteBaseUrl = 'https://acme.atlassian.net/wiki'
   },
 }))
@@ -106,6 +111,7 @@ describe('JiraTaskTracker.getTechnicalDesign', () => {
         if (params?.['body-format'] === 'storage') return Promise.resolve({ ...page, body: storageBody })
         throw new Error(`unexpected body-format ${String(params?.['body-format'])}`)
       }
+      if (method === 'GET' && path === '/pages/111/attachments') return Promise.resolve({ results: [] })
       if (method === 'GET' && path === '/pages/111/properties')
         return Promise.resolve({
           results: [{ id: 'prop-1', key: 'flight-rules-metadata', value: { epicId: 'PROJ-1', notes: 'ctx' }, version: { number: 3 } }],
@@ -234,6 +240,7 @@ describe('JiraTaskTracker.getTechnicalDesign footer comments', () => {
     confluenceRequest.mockImplementation((method: string, path: string, _b?: unknown, params?: Record<string, unknown>) => {
       if (method === 'GET' && path === '/pages/111')
         return Promise.resolve({ ...page, body: { atlas_doc_format: { value: JSON.stringify({ type: 'doc', version: 1, content: [] }) } } })
+      if (method === 'GET' && path === '/pages/111/attachments') return Promise.resolve({ results: [] })
       if (method === 'GET' && path === '/pages/111/properties') return Promise.resolve({ results: [] })
       if (method === 'GET' && path === '/pages/111/footer-comments')
         return Promise.resolve({ results: [footerComment('root', 'a', '2026-07-11T00:00:00.000Z', text('root'))] })
@@ -272,6 +279,7 @@ describe('JiraTaskTracker.getTechnicalDesign footer comments', () => {
     confluenceRequest.mockImplementation(async (method: string, path: string) => {
       if (method === 'GET' && path === '/pages/111')
         return { ...page, body: { atlas_doc_format: { value: JSON.stringify({ type: 'doc', version: 1, content: [] }) } } }
+      if (method === 'GET' && path === '/pages/111/attachments') return Promise.resolve({ results: [] })
       if (method === 'GET' && path === '/pages/111/properties') return { results: [] }
       if (method === 'GET' && path === '/pages/111/footer-comments')
         return { results: ids.map((id) => footerComment(id, 'a', '2026-07-11T00:00:00.000Z', text(id))) }
@@ -302,6 +310,7 @@ describe('JiraTaskTracker.getTechnicalDesign footer comments', () => {
     confluenceRequest.mockImplementation((method: string, path: string, _b?: unknown, params?: Record<string, unknown>) => {
       if (method === 'GET' && path === '/pages/111')
         return Promise.resolve({ ...page, body: { atlas_doc_format: { value: JSON.stringify({ type: 'doc', version: 1, content: [] }) } } })
+      if (method === 'GET' && path === '/pages/111/attachments') return Promise.resolve({ results: [] })
       if (method === 'GET' && path === '/pages/111/properties') return Promise.resolve({ results: [] })
       if (method === 'GET' && path.endsWith('/children')) return Promise.resolve({ results: [] })
       if (method === 'GET' && path === '/pages/111/footer-comments') {
@@ -383,6 +392,7 @@ describe('JiraTaskTracker.updateTddMetadata', () => {
 
   it('merges the patch and PUTs the property with the next version number', async () => {
     confluenceRequest.mockImplementation((method: string, path: string) => {
+      if (method === 'GET' && path === '/pages/111/attachments') return Promise.resolve({ results: [] })
       if (method === 'GET' && path === '/pages/111/properties')
         return Promise.resolve({
           results: [{ id: 'prop-1', key: 'flight-rules-metadata', value: { epicId: 'PROJ-1', notes: 'old' }, version: { number: 3 } }],
@@ -403,6 +413,7 @@ describe('JiraTaskTracker.updateTddMetadata', () => {
 
   it('creates the property when none exists yet', async () => {
     confluenceRequest.mockImplementation((method: string, path: string) => {
+      if (method === 'GET' && path === '/pages/111/attachments') return Promise.resolve({ results: [] })
       if (method === 'GET' && path === '/pages/111/properties') return Promise.resolve({ results: [] })
       if (method === 'POST' && path === '/pages/111/properties') return Promise.resolve({})
       throw new Error(`unexpected confluence ${method} ${path}`)
@@ -433,6 +444,7 @@ describe('JiraTaskTracker.updateTechnicalDesign', () => {
           body: { atlas_doc_format: { value: existingAdf } },
         })
       if (method === 'PUT' && path === '/pages/111') return Promise.resolve({})
+      if (method === 'GET' && path === '/pages/111/attachments') return Promise.resolve({ results: [] })
       if (method === 'GET' && path === '/pages/111/properties') return Promise.resolve({ results: [] })
       if (method === 'GET' && path === '/pages/111/footer-comments') return Promise.resolve({ results: [] })
       throw new Error(`unexpected confluence ${method} ${path}`)
@@ -477,6 +489,7 @@ describe('JiraTaskTracker.updateTechnicalDesign', () => {
         return Promise.resolve({ ...page, body: { atlas_doc_format: { value: existingAdf } } })
       }
       if (method === 'PUT' && path === '/pages/111') return Promise.resolve({})
+      if (method === 'GET' && path === '/pages/111/attachments') return Promise.resolve({ results: [] })
       if (method === 'GET' && path === '/pages/111/properties') return Promise.resolve({ results: [] })
       if (method === 'GET' && path === '/pages/111/footer-comments') return Promise.resolve({ results: [] })
       throw new Error(`unexpected confluence ${method} ${path}`)
@@ -496,5 +509,126 @@ describe('JiraTaskTracker.updateTechnicalDesign', () => {
 
     const put = confluenceCall('PUT', '/pages/111')?.[2] as { body: { value: string } }
     expect(put.body.value).toBe(existingAdf)
+  })
+})
+
+describe('JiraTaskTracker technical design attachments', () => {
+  const imageAttachment = { id: '900', title: 'flow.png', mediaType: 'image/png', fileSize: 42, fileId: 'file-uuid-1' }
+  const emptyDoc = JSON.stringify({ type: 'doc', version: 1, content: [] })
+
+  beforeEach(() => {
+    jiraRequest.mockReset()
+    confluenceRequest.mockReset()
+    confluenceUpload.mockReset()
+  })
+
+  const stub = (attachments: unknown[], adf: string = emptyDoc) =>
+    confluenceRequest.mockImplementation((method: string, path: string) => {
+      if (method === 'GET' && path === '/pages/111')
+        return Promise.resolve({ ...page, body: { atlas_doc_format: { value: adf } } })
+      if (method === 'PUT' && path === '/pages/111') return Promise.resolve({})
+      if (method === 'GET' && path === '/pages/111/attachments') return Promise.resolve({ results: attachments })
+      if (method === 'GET' && path === '/pages/111/properties') return Promise.resolve({ results: [] })
+      if (method === 'GET' && path === '/pages/111/footer-comments') return Promise.resolve({ results: [] })
+      throw new Error(`unexpected confluence ${method} ${path}`)
+    })
+
+  it('uploads through the v1 child-attachment path and returns the fileId as the media id', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tdd-upload-'))
+    const file = join(dir, 'flow.png')
+    writeFileSync(file, 'png-bytes')
+    confluenceUpload.mockResolvedValue({
+      results: [{ id: 'att900', title: 'flow.png', extensions: { mediaType: 'image/png', fileSize: 9, fileId: 'file-uuid-1' } }],
+    })
+
+    try {
+      const attachment = await makeTracker().addTechnicalDesignAttachment('111', file)
+      expect(attachment).toEqual({ id: 'att900', filename: 'flow.png', mimeType: 'image/png', size: 9, mediaUuid: 'file-uuid-1' })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+    const [path, files] = confluenceUpload.mock.calls[0] as [string, File[]]
+    expect(path).toBe('/content/111/child/attachment')
+    expect(files).toHaveLength(1)
+    expect(files[0]?.name).toBe('flow.png')
+    expect(files[0]?.type).toBe('image/png')
+  })
+
+  it('renders an attachment: reference as a media node in the page collection on edit', async () => {
+    stub([imageAttachment])
+
+    await makeTracker().updateTechnicalDesign('111', { body: 'Intro\n\n![the flow](attachment:flow.png)\n' })
+
+    const put = confluenceCall('PUT', '/pages/111')?.[2] as { body: { value: string } }
+    const doc = JSON.parse(put.body.value) as { content: Array<{ type: string; content?: Array<{ type: string; attrs: Record<string, unknown> }> }> }
+    const single = doc.content.find((node) => node.type === 'mediaSingle')
+    expect(single?.content?.[0]).toEqual({
+      type: 'media',
+      attrs: { type: 'file', id: 'file-uuid-1', collection: 'contentId-111', alt: 'the flow' },
+    })
+  })
+
+  it('also resolves a ./filename reference', async () => {
+    stub([imageAttachment])
+    await makeTracker().updateTechnicalDesign('111', { body: '![x](./flow.png)' })
+    const put = confluenceCall('PUT', '/pages/111')?.[2] as { body: { value: string } }
+    expect(put.body.value).toContain('"type":"mediaSingle"')
+  })
+
+  it('keeps images already on the page when the body is edited', async () => {
+    stub([imageAttachment, { id: '901', title: 'hand-added.png', mediaType: 'image/png', fileSize: 5, fileId: 'file-uuid-2' }])
+
+    await makeTracker().updateTechnicalDesign('111', {
+      body: '![a](attachment:flow.png)\n\n![b](attachment:hand-added.png)',
+    })
+
+    const put = confluenceCall('PUT', '/pages/111')?.[2] as { body: { value: string } }
+    expect(put.body.value).toContain('file-uuid-1')
+    expect(put.body.value).toContain('file-uuid-2')
+    expect(put.body.value).not.toContain('"type":"text","text":"![')
+  })
+
+  it('reads attachments and renders media back as the attachment: reference', async () => {
+    const adf = JSON.stringify({
+      type: 'doc',
+      version: 1,
+      content: [
+        {
+          type: 'mediaSingle',
+          attrs: { layout: 'center' },
+          content: [{ type: 'media', attrs: { type: 'file', id: 'file-uuid-1', collection: 'contentId-111', alt: 'the flow' } }],
+        },
+      ],
+    })
+    stub([imageAttachment], adf)
+
+    const tdd = await makeTracker().getTechnicalDesign('111')
+
+    expect(tdd.body).toBe('![the flow](attachment:flow.png)')
+    expect(tdd.attachments).toEqual([
+      { id: '900', filename: 'flow.png', mimeType: 'image/png', size: 42, mediaUuid: 'file-uuid-1' },
+    ])
+  })
+
+  it('follows the attachments cursor so every attachment is read', async () => {
+    const params: Array<Record<string, unknown> | undefined> = []
+    confluenceRequest.mockImplementation((method: string, path: string, _b?: unknown, p?: Record<string, unknown>) => {
+      if (method === 'GET' && path === '/pages/111')
+        return Promise.resolve({ ...page, body: { atlas_doc_format: { value: emptyDoc } } })
+      if (method === 'GET' && path === '/pages/111/attachments') {
+        params.push(p)
+        if (p?.['cursor'] === undefined)
+          return Promise.resolve({ results: [imageAttachment], _links: { next: '/wiki/api/v2/pages/111/attachments?cursor=n2&limit=250' } })
+        return Promise.resolve({ results: [{ id: '902', title: 'b.png', fileId: 'f2' }] })
+      }
+      if (method === 'GET' && path === '/pages/111/properties') return Promise.resolve({ results: [] })
+      if (method === 'GET' && path === '/pages/111/footer-comments') return Promise.resolve({ results: [] })
+      throw new Error(`unexpected confluence ${method} ${path}`)
+    })
+
+    const { attachments } = await makeTracker().getTechnicalDesign('111')
+
+    expect(attachments.map((a) => a.filename)).toEqual(['flow.png', 'b.png'])
+    expect(params[1]?.['cursor']).toBe('n2')
   })
 })

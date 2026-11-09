@@ -87,8 +87,24 @@ export class EvidenceUploadFailure extends Error {
   }
 }
 
+export interface AttachmentUploader {
+  addAttachment(entityId: string, filePath: string): Promise<Attachment>;
+}
+
+export class TechnicalDesignAttachmentUploader implements AttachmentUploader {
+  private readonly tracker: Pick<TaskTracker, "addTechnicalDesignAttachment">;
+
+  constructor(props: { tracker: Pick<TaskTracker, "addTechnicalDesignAttachment"> }) {
+    this.tracker = props.tracker;
+  }
+
+  addAttachment(entityId: string, filePath: string): Promise<Attachment> {
+    return this.tracker.addTechnicalDesignAttachment(entityId, filePath);
+  }
+}
+
 export interface TrackerEvidenceServiceProps {
-  tracker: TaskTracker;
+  tracker: AttachmentUploader;
 }
 
 /**
@@ -99,7 +115,7 @@ export interface TrackerEvidenceServiceProps {
  * partial-post behaviour, which the PR host keeps because gh owns its own rewrite.
  */
 export class TrackerEvidenceService implements EvidenceService {
-  private readonly tracker: TaskTracker;
+  private readonly tracker: AttachmentUploader;
 
   constructor(props: TrackerEvidenceServiceProps) {
     this.tracker = props.tracker;

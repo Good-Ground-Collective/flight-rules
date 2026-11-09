@@ -514,6 +514,7 @@ export class GitHubTaskTracker implements TaskTracker {
       ...(discussion.url !== undefined ? { url: discussion.url } : {}),
       body: discussion.body,
       comments: [],
+      attachments: [],
       metadata: this.bodyMetadata.parse(discussion.body),
       updatedAt: discussion.updatedAt,
     };
@@ -610,9 +611,24 @@ export class GitHubTaskTracker implements TaskTracker {
         createdAt: n.createdAt,
         updatedAt: n.updatedAt,
       })),
+      attachments: [],
       metadata,
       updatedAt: discussion.updatedAt,
     };
+  }
+
+  // eslint-disable-next-line preflight/no-throw-helpers -- a capability stub's whole body is the throw
+  assertTechnicalDesignAttachments(): never {
+    throw new UnsupportedTrackerOperationError({
+      tracker: "GitHub",
+      operation: "attaching files to a technical design",
+      remedy:
+        "GitHub Discussions have no attachment API; use --tracker jira, or reference an image by URL in the body",
+    });
+  }
+
+  async addTechnicalDesignAttachment(): Promise<Attachment> {
+    return this.assertTechnicalDesignAttachments();
   }
 
   async addTechnicalDesignComment(id: string, body: string): Promise<Comment> {

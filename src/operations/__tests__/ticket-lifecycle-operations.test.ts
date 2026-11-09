@@ -54,6 +54,8 @@ const trackerFixture = (): TaskTracker => ({
   getTechnicalDesign: vi.fn(),
   addComment: vi.fn().mockResolvedValue(comment),
   addTechnicalDesignComment: vi.fn(),
+  assertTechnicalDesignAttachments: vi.fn(),
+  addTechnicalDesignAttachment: vi.fn(),
   addAttachment: vi.fn().mockResolvedValue({
     id: "ATT-1",
     filename: "proof.png",

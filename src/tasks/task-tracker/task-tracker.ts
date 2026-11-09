@@ -46,6 +46,7 @@ export const TechnicalDesignSchema = z.object({
   url: z.string().optional(),
   body: z.string(),
   comments: z.array(CommentSchema),
+  attachments: z.array(AttachmentSchema).default([]),
   metadata: EntityMetadataSchema.default({}),
   updatedAt: z.string(),
 });
@@ -219,6 +220,9 @@ export interface TaskTracker {
   addComment(entityId: string, body: string): Promise<Comment>;
   addTechnicalDesignComment(id: string, body: string): Promise<Comment>;
   addAttachment(ticketId: string, filePath: string): Promise<Attachment>;
+  /** Throws when the backend cannot attach files to a design, before any write is made. */
+  assertTechnicalDesignAttachments(): void;
+  addTechnicalDesignAttachment(id: string, filePath: string): Promise<Attachment>;
   getUsers(): Promise<TrackerUser[]>;
   ping(options?: { signal?: AbortSignal }): Promise<void>;
 }

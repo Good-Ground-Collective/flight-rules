@@ -3,6 +3,7 @@ import { z } from 'zod'
 const maxRetries = 4
 const defaultRetryAfterSeconds = 2
 const maxBackoffMs = 30_000
+const attachmentXsrfHeader = 'no-check'
 
 const ConfluenceErrorBodySchema = z.object({
   errors: z
@@ -27,11 +28,13 @@ export interface ConfluenceClientConfig {
 export class ConfluenceClient {
   readonly siteBaseUrl: string
   private readonly baseUrl: string
+  private readonly legacyBaseUrl: string
   private readonly authHeader: string
 
   constructor(config: ConfluenceClientConfig) {
     this.siteBaseUrl = `https://${config.host}/wiki`
     this.baseUrl = `${this.siteBaseUrl}/api/v2`
+    this.legacyBaseUrl = `${this.siteBaseUrl}/rest/api`
     this.authHeader = `Basic ${Buffer.from(`${config.email}:${config.token}`).toString('base64')}`
   }
 
@@ -54,6 +57,31 @@ export class ConfluenceClient {
     const text = await res.text()
     // JSON.parse is lib-typed `any` (assignable to T without an assertion, which
     // the repo's eslint bans); undici's res.json() is `unknown` and would not be.
+    const data: T = text.length > 0 ? JSON.parse(text) : undefined
+    return data
+  }
+
+  /**
+   * Uploads files as page attachments. v2 has no upload endpoint, so this targets the v1
+   * `/rest/api` path, which demands the `X-Atlassian-Token: no-check` XSRF opt-out; `Content-Type`
+   * is left unset so undici writes the multipart boundary itself.
+   */
+  async upload<T>(path: string, files: File[]): Promise<T> {
+    const form = new FormData()
+    files.forEach((file) => form.append('file', file, file.name))
+
+    const res = await this.fetchWithRetry(`${this.legacyBaseUrl}${path}`, {
+      method: 'POST',
+      headers: {
+        Authorization: this.authHeader,
+        Accept: 'application/json',
+        'X-Atlassian-Token': attachmentXsrfHeader,
+      },
+      body: form,
+    })
+
+    if (!res.ok) await this.throwApiError(res)
+    const text = await res.text()
     const data: T = text.length > 0 ? JSON.parse(text) : undefined
     return data
   }

@@ -11,6 +11,7 @@ const mockTdd: TechnicalDesign = {
   epicId: '42',
   body: 'Design doc body',
   comments: [],
+  attachments: [],
   metadata: {},
   updatedAt: '2026-01-01T00:00:00Z',
 }
@@ -42,6 +43,8 @@ const makeTracker = (): TaskTracker => ({
   linkEpicToInitiative: vi.fn(),
   addComment: vi.fn(),
   addTechnicalDesignComment: vi.fn(),
+  assertTechnicalDesignAttachments: vi.fn(),
+  addTechnicalDesignAttachment: vi.fn(),
   addAttachment: vi.fn(),
   getUsers: vi.fn(),
   ping: vi.fn(),
@@ -171,5 +174,28 @@ describe('tdd command', () => {
     await run(tracker, ['edit', '3', '--body', 'Notes: ~/notes.md', '--allow-local-paths'])
     expect(tracker.updateTechnicalDesign).toHaveBeenCalledWith('3', { body: 'Notes: ~/notes.md' })
     output.mockRestore()
+  })
+
+  it('passes repeatable --attach specs through "edit"', async () => {
+    const dir = mkdtempSync(join(process.cwd(), '.tdd-attach-'))
+    const first = join(dir, 'a.png')
+    const second = join(dir, 'b.png')
+    writeFileSync(first, 'x')
+    writeFileSync(second, 'y')
+    const tracker = makeTracker()
+    vi.mocked(tracker.addTechnicalDesignAttachment).mockImplementation((_id, path) =>
+      Promise.resolve({ id: path, filename: path.split('/').pop() ?? '', mimeType: 'image/png' }),
+    )
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    try {
+      await run(tracker, ['edit', '3', '--body', 'Body', '--attach', `${first}#A`, '--attach', second])
+    } finally {
+      output.mockRestore()
+      rmSync(dir, { recursive: true, force: true })
+    }
+    expect(tracker.addTechnicalDesignAttachment).toHaveBeenCalledTimes(2)
+    expect(tracker.updateTechnicalDesign).toHaveBeenCalledWith('3', {
+      body: 'Body\n\n![A](attachment:a.png)\n\n![b.png](attachment:b.png)',
+    })
   })
 })

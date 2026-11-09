@@ -53,6 +53,7 @@ const tdd = {
   epicId: "EPIC-1",
   body: "Design body",
   comments: [],
+  attachments: [],
   metadata: {},
   updatedAt: "2026-01-01T00:00:00Z",
 };
@@ -105,6 +106,8 @@ const makeTracker = (): TaskTracker =>
     getTechnicalDesign: vi.fn().mockResolvedValue(tdd),
     addComment: vi.fn(),
     addTechnicalDesignComment: vi.fn().mockResolvedValue(tddComment),
+    assertTechnicalDesignAttachments: vi.fn(),
+    addTechnicalDesignAttachment: vi.fn(),
     addAttachment: vi
       .fn()
       .mockResolvedValue({ id: "ATT-1", filename: "proof.png", mimeType: "image/png" }),
@@ -609,5 +612,139 @@ describe("tracker entity operations", () => {
       name: "OperationInputError",
     });
     expect(tracker.updateTechnicalDesign).not.toHaveBeenCalled();
+  });
+
+  describe("tdd attachments", () => {
+    const attachmentOf = (filename: string) => ({
+      id: "A-1",
+      filename,
+      mimeType: "image/png",
+      mediaUuid: "media-1",
+    });
+    const setup = () => {
+      const root = makeRoot();
+      const image = join(root, "diagram.png");
+      writeFileSync(image, "image");
+      const tracker = makeTracker();
+      vi.mocked(tracker.addTechnicalDesignAttachment).mockResolvedValue(
+        attachmentOf("diagram.png"),
+      );
+      const registry = new DefaultTrackerEntityOperations({
+        getTracker: () => tracker,
+        cwd: root,
+      }).registry(new LaunchOperationAccessPolicy({ allowedEffects: ["write", "network"] }));
+      return { tracker, registry, image };
+    };
+
+    it("creates the page, uploads, then rewrites the body with the attachment reference", async () => {
+      const { tracker, registry, image } = setup();
+      vi.mocked(tracker.createTechnicalDesign).mockResolvedValue({ ...tdd, id: "TDD-9" });
+
+      const result = await registry.invoke("tdd-create", {
+        title: "Design",
+        body: "See ![flow](./diagram.png)",
+        epicId: "EPIC-1",
+        attach: [`${image}#Flow`],
+      });
+
+      expect(result.status).toBe("success");
+      expect(tracker.createTechnicalDesign).toHaveBeenCalledOnce();
+      expect(tracker.addTechnicalDesignAttachment).toHaveBeenCalledWith("TDD-9", expect.stringMatching(/diagram\.png$/));
+      expect(tracker.updateTechnicalDesign).toHaveBeenCalledWith("TDD-9", {
+        body: "See ![flow](attachment:diagram.png)",
+      });
+    });
+
+    it("reports a partial create when the upload fails after the page exists", async () => {
+      const { tracker, registry, image } = setup();
+      vi.mocked(tracker.createTechnicalDesign).mockResolvedValue({ ...tdd, id: "TDD-9" });
+      vi.mocked(tracker.addTechnicalDesignAttachment).mockRejectedValue(new Error("upload boom"));
+
+      const result = await registry.invoke("tdd-create", {
+        title: "Design",
+        body: "Body",
+        epicId: "EPIC-1",
+        attach: [image],
+      });
+
+      expect(result).toMatchObject({
+        status: "partial",
+        data: { id: "TDD-9", epicId: "EPIC-1" },
+        error: { message: "upload boom" },
+      });
+      expect(tracker.updateTechnicalDesign).not.toHaveBeenCalled();
+    });
+
+    it("reports a partial create when the body rewrite fails", async () => {
+      const { tracker, registry, image } = setup();
+      vi.mocked(tracker.createTechnicalDesign).mockResolvedValue({ ...tdd, id: "TDD-9" });
+      vi.mocked(tracker.updateTechnicalDesign).mockRejectedValue(new Error("rewrite boom"));
+
+      const result = await registry.invoke("tdd-create", {
+        title: "Design",
+        body: "Body",
+        epicId: "EPIC-1",
+        attach: [image],
+      });
+
+      expect(result).toMatchObject({
+        status: "partial",
+        data: { id: "TDD-9" },
+        error: { message: "rewrite boom" },
+      });
+    });
+
+    it("fails before any write when the tracker cannot attach to a design", async () => {
+      const { tracker, registry, image } = setup();
+      vi.mocked(tracker.assertTechnicalDesignAttachments).mockImplementation(() => {
+        throw new Error("The GitHub tracker does not support attaching files to a technical design");
+      });
+
+      const result = await registry.invoke("tdd-create", {
+        title: "Design",
+        body: "Body",
+        epicId: "EPIC-1",
+        attach: [image],
+      });
+
+      expect(result).toMatchObject({
+        status: "error",
+        error: { message: expect.stringContaining("does not support attaching files") },
+      });
+      expect(tracker.createTechnicalDesign).not.toHaveBeenCalled();
+      expect(tracker.addTechnicalDesignAttachment).not.toHaveBeenCalled();
+    });
+
+    it("uploads on edit and writes the rewritten body", async () => {
+      const { tracker, registry, image } = setup();
+
+      await registry.invoke("tdd-edit", {
+        id: "TDD-1",
+        body: "![flow](diagram.png)",
+        attach: [image],
+      });
+
+      expect(tracker.addTechnicalDesignAttachment).toHaveBeenCalledWith("TDD-1", expect.stringMatching(/diagram\.png$/));
+      expect(tracker.updateTechnicalDesign).toHaveBeenCalledWith("TDD-1", {
+        body: "![flow](attachment:diagram.png)",
+      });
+    });
+
+    it("requires a body to edit with --attach and rejects files outside trusted roots", async () => {
+      const { tracker, registry, image } = setup();
+      await expect(
+        registry.invoke("tdd-edit", { id: "TDD-1", title: "T", attach: [image] }),
+      ).resolves.toMatchObject({
+        status: "error",
+        error: { message: expect.stringContaining("needs a new body") },
+      });
+
+      const outside = join(makeRoot(), "x.png");
+      writeFileSync(outside, "image");
+      await expect(
+        registry.invoke("tdd-edit", { id: "TDD-1", body: "B", attach: [outside] }),
+      ).resolves.toMatchObject({ status: "error" });
+      expect(tracker.addTechnicalDesignAttachment).not.toHaveBeenCalled();
+    });
   });
 });

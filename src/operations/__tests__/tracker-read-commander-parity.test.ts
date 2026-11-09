@@ -66,6 +66,7 @@ const design: TechnicalDesign = {
   url: "https://example.test/wiki/PAGE-12",
   body: "Design body",
   comments: [],
+  attachments: [],
   metadata: {},
   updatedAt: "2026-10-01T00:00:00Z",
 };
@@ -103,6 +104,8 @@ const makeTracker = (overrides: Partial<TaskTracker> = {}): TaskTracker => ({
   getTechnicalDesign: vi.fn().mockResolvedValue(design),
   addComment: vi.fn(),
   addTechnicalDesignComment: vi.fn(),
+  assertTechnicalDesignAttachments: vi.fn(),
+  addTechnicalDesignAttachment: vi.fn(),
   addAttachment: vi.fn(),
   getUsers: vi.fn().mockResolvedValue(users),
   ping: vi.fn(),

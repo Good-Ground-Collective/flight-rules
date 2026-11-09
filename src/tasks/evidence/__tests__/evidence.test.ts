@@ -33,6 +33,8 @@ const makeTracker = (): TaskTracker => ({
   getTechnicalDesign: vi.fn(),
   addComment: vi.fn(),
   addTechnicalDesignComment: vi.fn(),
+  assertTechnicalDesignAttachments: vi.fn(),
+  addTechnicalDesignAttachment: vi.fn(),
   addAttachment: vi.fn(async (_id: string, path: string) => ({
     id: "1",
     filename: basename(path),

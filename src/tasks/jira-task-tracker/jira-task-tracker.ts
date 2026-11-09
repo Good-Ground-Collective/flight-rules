@@ -27,6 +27,8 @@ import type {
 } from "./jira-interfaces.js";
 import type {
   ConfluenceFooterComment,
+  ConfluenceAttachment,
+  ConfluenceAttachmentsResponse,
   ConfluenceFooterCommentsResponse,
   ConfluencePage,
   ConfluencePropertiesResponse,
@@ -82,6 +84,22 @@ const JiraUploadedAttachmentSchema = z.object({
 });
 const JiraUploadedAttachmentsSchema = z.array(JiraUploadedAttachmentSchema);
 type JiraUploadedAttachment = z.infer<typeof JiraUploadedAttachmentSchema>;
+
+const ConfluenceUploadedAttachmentsSchema = z.object({
+  results: z.array(
+    z.object({
+      id: z.union([z.string(), z.number()]).transform(String),
+      title: z.string(),
+      extensions: z
+        .object({
+          mediaType: z.string().optional(),
+          fileSize: z.number().optional(),
+          fileId: z.string().optional(),
+        })
+        .optional(),
+    }),
+  ),
+});
 
 const adfDocValidator = (value: unknown): value is AdfDocNode =>
   typeof value === "object" &&
@@ -463,10 +481,12 @@ export class JiraTaskTracker implements TaskTracker {
     if (input.body === undefined && existingAdf === undefined) {
       throw new Error(`Page ${id} has no ADF body to keep; pass a body with the new title`);
     }
+    const media =
+      input.body === undefined ? {} : this.mediaLookup(id, await this.pageAttachments(id));
     const value =
       input.body === undefined
         ? (existingAdf ?? "")
-        : JSON.stringify(this.bodyFormat.toAdf(this.withoutTitleHeading(input.body, title)));
+        : JSON.stringify(this.bodyFormat.toAdf(this.withoutTitleHeading(input.body, title), media));
 
     await this.confluence.request("PUT", `/pages/${id}`, {
       id,
@@ -484,15 +504,53 @@ export class JiraTaskTracker implements TaskTracker {
   }
 
   async getTechnicalDesign(id: string): Promise<TechnicalDesign> {
-    const [page, property, comments] = await Promise.all([
+    const [page, property, comments, attachments] = await Promise.all([
       this.confluence.request<ConfluencePage>("GET", `/pages/${id}`, undefined, {
         "body-format": "atlas_doc_format",
       }),
       this.tddMetadataProperty(id),
       this.footerComments(id),
+      this.pageAttachments(id),
     ]);
-    const body = this.readAdfBody(page) ?? (await this.readStorageBody(id));
-    return this.mapTechnicalDesign(page, body, property?.value ?? {}, comments);
+    const body =
+      this.readAdfBody(page, this.mediaLookup(id, attachments)) ??
+      (await this.readStorageBody(id));
+    return this.mapTechnicalDesign(
+      page,
+      body,
+      property?.value ?? {},
+      comments,
+      attachments.map((attachment) => this.mapPageAttachment(attachment)),
+    );
+  }
+
+  assertTechnicalDesignAttachments(): void {}
+
+  /**
+   * Uploads a file to a Confluence page. v2 has no upload endpoint, so this goes through v1;
+   * the response's `extensions.fileId` is the media id an inline ADF node addresses it by.
+   */
+  async addTechnicalDesignAttachment(id: string, filePath: string): Promise<Attachment> {
+    const filename = basename(filePath);
+    const file = new File([readFileSync(filePath)], filename, {
+      type: this.mimeTypes.forFilename(filename),
+    });
+
+    const uploaded = ConfluenceUploadedAttachmentsSchema.parse(
+      await this.confluence.upload<unknown>(`/content/${id}/child/attachment`, [file]),
+    );
+    const attachment = uploaded.results[0];
+    if (attachment === undefined) {
+      throw new Error(`Confluence accepted the upload of ${filename} to page ${id} but returned no attachment`);
+    }
+
+    return {
+      id: attachment.id,
+      filename: attachment.title,
+      mimeType: attachment.extensions?.mediaType ?? file.type,
+      ...(attachment.extensions?.fileSize !== undefined ? { size: attachment.extensions.fileSize } : {}),
+      ...(attachment.extensions?.fileId !== undefined ? { mediaUuid: attachment.extensions.fileId } : {}),
+    };
   }
 
   async addTechnicalDesignComment(id: string, body: string): Promise<Comment> {
@@ -704,6 +762,50 @@ export class JiraTaskTracker implements TaskTracker {
   private async fetchTransitions(ticketId: string): Promise<JiraTransitionsResponse> {
     // Resolved per call, not cached: only transitions reachable from the issue's current status are returned.
     return this.client.request<JiraTransitionsResponse>("GET", `/issue/${ticketId}/transitions`);
+  }
+
+  /** Follows the v2 `_links.next` cursor so every attachment is read. */
+  private async pageAttachments(id: string): Promise<ConfluenceAttachment[]> {
+    const results: ConfluenceAttachment[] = [];
+    let cursor: string | undefined;
+    do {
+      const response: ConfluenceAttachmentsResponse = await this.confluence.request(
+        "GET",
+        `/pages/${id}/attachments`,
+        undefined,
+        { limit: 250, ...(cursor !== undefined ? { cursor } : {}) },
+      );
+      results.push(...response.results);
+      const next = response._links?.next;
+      cursor =
+        next === undefined
+          ? undefined
+          : (new URL(next, this.confluence.siteBaseUrl).searchParams.get("cursor") ?? undefined);
+    } while (cursor !== undefined);
+    return results;
+  }
+
+  /** Confluence media nodes address a page's attachments by `fileId` within `contentId-<pageId>`. */
+  private mediaLookup(pageId: string, attachments: ConfluenceAttachment[]): MediaLookup {
+    const lookup: MediaLookup = {};
+    for (const attachment of attachments) {
+      if (attachment.fileId === undefined || attachment.fileId === "") continue;
+      lookup[attachment.title] = {
+        mediaUuid: attachment.fileId,
+        collection: `contentId-${pageId}`,
+      };
+    }
+    return lookup;
+  }
+
+  private mapPageAttachment(attachment: ConfluenceAttachment): Attachment {
+    return {
+      id: String(attachment.id),
+      filename: attachment.title,
+      mimeType: attachment.mediaType ?? "application/octet-stream",
+      ...(attachment.fileSize !== undefined ? { size: attachment.fileSize } : {}),
+      ...(attachment.fileId !== undefined ? { mediaUuid: attachment.fileId } : {}),
+    };
   }
 
   private async resolveMediaUuid(attachmentId: string): Promise<string> {
@@ -924,12 +1026,12 @@ export class JiraTaskTracker implements TaskTracker {
   }
 
   /** Converts the ADF body to markdown, or returns undefined when it is missing or unreadable. */
-  private readAdfBody(page: ConfluencePage): string | undefined {
+  private readAdfBody(page: ConfluencePage, media: MediaLookup = {}): string | undefined {
     const raw = page.body?.atlas_doc_format?.value;
     if (raw === undefined) return undefined;
     try {
       const doc: unknown = JSON.parse(raw);
-      if (adfDocValidator(doc)) return this.bodyFormat.toMarkdown(doc.content);
+      if (adfDocValidator(doc)) return this.bodyFormat.toMarkdown(doc.content, media);
     } catch {
       // not JSON: the caller falls back to the storage value
     }
@@ -949,6 +1051,7 @@ export class JiraTaskTracker implements TaskTracker {
     body: string,
     propertyValue: Record<string, unknown>,
     comments: Comment[] = [],
+    attachments: Attachment[] = [],
   ): TechnicalDesign {
     const { epicId: rawEpicId, ...rest } = propertyValue;
     const metadata = EntityMetadataSchema.parse(rest);
@@ -961,6 +1064,7 @@ export class JiraTaskTracker implements TaskTracker {
       ...(webui !== undefined ? { url: `${this.confluence.siteBaseUrl}${webui}` } : {}),
       body,
       comments,
+      attachments,
       metadata,
       updatedAt: page.version?.createdAt ?? "",
     };
