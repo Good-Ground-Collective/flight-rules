@@ -33,7 +33,7 @@ const page = {
   _links: { webui: '/spaces/SD/pages/111/Payments+TDD' },
 }
 
-const MD = '# Payments — TDD\n\n## Problem\n\n| a | b |\n| - | - |\n| 1 | 2 |\n\n```ts\nconst x = 1\n```\n\n<details><summary>More</summary>\n\nhidden\n\n</details>\n'
+const tddMarkdown = '# Payments — TDD\n\n## Problem\n\n| a | b |\n| - | - |\n| 1 | 2 |\n\n```ts\nconst x = 1\n```\n\n<details><summary>More</summary>\n\nhidden\n\n</details>\n'
 
 const confluenceCall = (method: string, path: string) =>
   confluenceRequest.mock.calls.find(([m, p]) => m === method && p === path)
@@ -60,7 +60,7 @@ describe('JiraTaskTracker.createTechnicalDesign', () => {
 
     const tdd = await makeTracker().createTechnicalDesign({
       title: 'Payments — TDD',
-      body: MD,
+      body: tddMarkdown,
       epicId: 'PROJ-1',
     })
 
@@ -76,7 +76,7 @@ describe('JiraTaskTracker.createTechnicalDesign', () => {
     expect(doc.content[0]?.type).toBe('heading')
     expect(doc.content[0]?.attrs?.['level']).toBe(2)
     expect(doc.content.find((n) => n.type === 'codeBlock')?.attrs?.['language']).toBe('ts')
-    expect(tdd.body).toBe(MD)
+    expect(tdd.body).toBe(tddMarkdown)
     expect(confluenceCall('POST', '/pages/111/properties')?.[2]).toEqual({
       key: 'flight-rules-metadata',
       value: { epicId: 'PROJ-1' },

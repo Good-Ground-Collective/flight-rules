@@ -79,10 +79,17 @@ const JiraUploadedAttachmentSchema = z.object({
 const JiraUploadedAttachmentsSchema = z.array(JiraUploadedAttachmentSchema);
 type JiraUploadedAttachment = z.infer<typeof JiraUploadedAttachmentSchema>;
 
-const confluenceAdfDocSchema = z.object({
-  type: z.literal("doc"),
-  content: z.array(z.object({ type: z.string() }).passthrough()),
-});
+const adfDocValidator = (value: unknown): value is AdfDocNode =>
+  typeof value === "object" &&
+  value !== null &&
+  "type" in value &&
+  value.type === "doc" &&
+  "content" in value &&
+  Array.isArray(value.content) &&
+  value.content.every(
+    (node: unknown) =>
+      typeof node === "object" && node !== null && "type" in node && typeof node.type === "string",
+  );
 
 /**
  * The Jira / Jira Product Discovery backend. Epics map to the Epic issue type
@@ -792,8 +799,8 @@ export class JiraTaskTracker implements TaskTracker {
     const raw = page.body?.atlas_doc_format?.value;
     if (raw === undefined) return undefined;
     try {
-      const doc = confluenceAdfDocSchema.safeParse(JSON.parse(raw));
-      if (doc.success) return this.bodyFormat.toMarkdown(doc.data.content as AdfNode[]);
+      const doc: unknown = JSON.parse(raw);
+      if (adfDocValidator(doc)) return this.bodyFormat.toMarkdown(doc.content);
     } catch {
       // not JSON: the caller falls back to the storage value
     }
