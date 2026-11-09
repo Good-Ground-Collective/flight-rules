@@ -57,6 +57,14 @@ const tdd = {
   updatedAt: "2026-01-01T00:00:00Z",
 };
 
+const tddComment = {
+  id: "C-1",
+  body: "Looks good",
+  author: "alice",
+  createdAt: "2026-01-01T00:00:00Z",
+  updatedAt: "2026-01-01T00:00:00Z",
+};
+
 const temporaryRoots: string[] = [];
 afterEach(() => {
   vi.restoreAllMocks();
@@ -95,6 +103,7 @@ const makeTracker = (): TaskTracker =>
     createTechnicalDesign: vi.fn().mockResolvedValue(tdd),
     getTechnicalDesign: vi.fn().mockResolvedValue(tdd),
     addComment: vi.fn(),
+    addTechnicalDesignComment: vi.fn().mockResolvedValue(tddComment),
     addAttachment: vi
       .fn()
       .mockResolvedValue({ id: "ATT-1", filename: "proof.png", mimeType: "image/png" }),
@@ -222,6 +231,12 @@ describe("tracker entity operations", () => {
       input: { title: "Design", body: "Design body", epicId: "EPIC-1" },
       args: ["tdd", "create", "--title", "Design", "--body", "Design body", "--epic-id", "EPIC-1"],
       result: tdd,
+    },
+    {
+      id: "tdd-comment",
+      input: { id: "TDD-1", body: "Looks good" },
+      args: ["tdd", "comment", "TDD-1", "--body", "Looks good"],
+      result: tddComment,
     },
   ])(
     "serves $id through its shared handler and Commander route",

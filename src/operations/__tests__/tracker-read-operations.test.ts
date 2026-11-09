@@ -89,6 +89,7 @@ const makeTracker = (epics: Epic[] = [epic("E-1")]): TaskTracker => ({
     trackerField: "preserved",
   }),
   addComment: vi.fn(),
+  addTechnicalDesignComment: vi.fn(),
   addAttachment: vi.fn(),
   getUsers: vi
     .fn()

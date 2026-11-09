@@ -226,6 +226,7 @@ export const cliRouteCoverage: CliRouteCoverage = new ManifestCliRouteCoverage({
     { status: "supported", route: { path: ["doc"], aliases: [] }, operationId: "doc" },
     ...[
       ["tdd create", "tdd-create"],
+      ["tdd comment", "tdd-comment"],
       ["epic create", "epic-create"],
       ["epic edit", "epic-edit"],
       ["epic link-initiative", "epic-link-initiative"],

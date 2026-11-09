@@ -52,6 +52,7 @@ const trackerFixture = (): TaskTracker => ({
   linkEpicToInitiative: vi.fn(),
   getTechnicalDesign: vi.fn(),
   addComment: vi.fn().mockResolvedValue(comment),
+  addTechnicalDesignComment: vi.fn(),
   addAttachment: vi.fn().mockResolvedValue({
     id: "ATT-1",
     filename: "proof.png",

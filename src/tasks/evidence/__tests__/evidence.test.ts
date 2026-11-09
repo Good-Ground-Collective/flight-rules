@@ -31,6 +31,7 @@ const makeTracker = (): TaskTracker => ({
   linkEpicToInitiative: vi.fn(),
   getTechnicalDesign: vi.fn(),
   addComment: vi.fn(),
+  addTechnicalDesignComment: vi.fn(),
   addAttachment: vi.fn(async (_id: string, path: string) => ({
     id: "1",
     filename: basename(path),

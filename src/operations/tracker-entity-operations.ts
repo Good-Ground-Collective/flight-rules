@@ -10,6 +10,7 @@ import { portableContextGuard } from "../tasks/portable-context/portable-context
 import {
   CreateEpicInputSchema,
   CreateInitiativeInputSchema,
+  CommentSchema,
   CreateTechnicalDesignInputSchema,
   CreateTicketInputSchema,
   AttachmentSchema,
@@ -78,6 +79,9 @@ const createTddInput = CreateTechnicalDesignInputSchema.extend({
   allowLocalPaths: z.boolean().default(false),
 }).strict();
 const entityId = z.string().min(1);
+const commentTddInput = z
+  .object({ id: entityId, body: z.string(), allowLocalPaths: z.boolean().default(false) })
+  .strict();
 const linkInput = z.object({ epicId: entityId, initiativeId: entityId }).strict();
 const partialTicketEdit = z.object({
   id: entityId,
@@ -206,6 +210,15 @@ export class DefaultTrackerEntityOperations implements TrackerEntityOperations {
         createTddInput,
         z.union([TechnicalDesignSchema, partialTddCreate]),
         (input) => this.createTdd(input),
+      ),
+      this.descriptor(
+        "tdd-comment",
+        "Post a comment on a technical design.",
+        ["write", "network"],
+        ["tdd", "comment"],
+        commentTddInput,
+        CommentSchema,
+        (input) => this.commentOnTdd(input),
       ),
     ];
   }
@@ -392,6 +405,11 @@ export class DefaultTrackerEntityOperations implements TrackerEntityOperations {
         error: { name: error.name, message: error.message },
       };
     }
+  }
+
+  private async commentOnTdd(input: z.infer<typeof commentTddInput>) {
+    this.assertPortable(input.body, input.allowLocalPaths);
+    return this.props.getTracker().addTechnicalDesignComment(input.id, input.body);
   }
 
   private assertPortable(body: string, allowLocalPaths = false): void {

@@ -110,6 +110,7 @@ describe('JiraTaskTracker.getTechnicalDesign', () => {
         return Promise.resolve({
           results: [{ id: 'prop-1', key: 'flight-rules-metadata', value: { epicId: 'PROJ-1', notes: 'ctx' }, version: { number: 3 } }],
         })
+      if (method === 'GET' && path === '/pages/111/footer-comments') return Promise.resolve({ results: [] })
       throw new Error(`unexpected confluence ${method} ${path}`)
     })
 
@@ -181,6 +182,123 @@ describe('JiraTaskTracker.getTechnicalDesign', () => {
     mockGet({ atlas_doc_format: { value: 'not json' } }, { storage: { value: '<p>old</p>' } })
     expect((await makeTracker().getTechnicalDesign('111')).body).toBe('<p>old</p>')
     expect(pageGets()).toEqual([{ 'body-format': 'atlas_doc_format' }, { 'body-format': 'storage' }])
+  })
+})
+
+const commentAdf = {
+  type: 'doc',
+  version: 1,
+  content: [
+    { type: 'paragraph', content: [{ type: 'text', text: 'Consider this' }] },
+    { type: 'codeBlock', attrs: { language: 'ts' }, content: [{ type: 'text', text: 'const x = 1' }] },
+    {
+      type: 'table',
+      content: [
+        {
+          type: 'tableRow',
+          content: [
+            { type: 'tableHeader', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'a' }] }] },
+            { type: 'tableHeader', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'b' }] }] },
+          ],
+        },
+        {
+          type: 'tableRow',
+          content: [
+            { type: 'tableCell', content: [{ type: 'paragraph', content: [{ type: 'text', text: '1' }] }] },
+            { type: 'tableCell', content: [{ type: 'paragraph', content: [{ type: 'text', text: '2' }] }] },
+          ],
+        },
+      ],
+    },
+  ],
+}
+
+describe('JiraTaskTracker.getTechnicalDesign footer comments', () => {
+  beforeEach(() => {
+    confluenceRequest.mockReset()
+  })
+
+  const footerComment = (id: string, authorId: string, createdAt: string, adf: unknown) => ({
+    id,
+    version: { number: 1, createdAt, authorId },
+    body: { atlas_doc_format: { value: JSON.stringify(adf) } },
+  })
+
+  it('reads every page of footer comments as markdown with author and timestamps', async () => {
+    const footerParams: Array<Record<string, unknown> | undefined> = []
+    confluenceRequest.mockImplementation((method: string, path: string, _b?: unknown, params?: Record<string, unknown>) => {
+      if (method === 'GET' && path === '/pages/111')
+        return Promise.resolve({ ...page, body: { atlas_doc_format: { value: JSON.stringify({ type: 'doc', version: 1, content: [] }) } } })
+      if (method === 'GET' && path === '/pages/111/properties') return Promise.resolve({ results: [] })
+      if (method === 'GET' && path === '/pages/111/footer-comments') {
+        footerParams.push(params)
+        if (params?.['cursor'] === undefined)
+          return Promise.resolve({
+            results: [footerComment('c1', 'acct-1', '2026-07-11T00:00:00.000Z', commentAdf)],
+            _links: { next: '/wiki/api/v2/pages/111/footer-comments?body-format=atlas_doc_format&cursor=abc123&limit=250' },
+          })
+        return Promise.resolve({
+          results: [
+            footerComment('c2', 'acct-2', '2026-07-12T00:00:00.000Z', {
+              type: 'doc',
+              version: 1,
+              content: [{ type: 'paragraph', content: [{ type: 'text', text: 'second page' }] }],
+            }),
+          ],
+        })
+      }
+      throw new Error(`unexpected confluence ${method} ${path}`)
+    })
+
+    const { comments } = await makeTracker().getTechnicalDesign('111')
+
+    expect(footerParams).toHaveLength(2)
+    expect(footerParams[0]?.['body-format']).toBe('atlas_doc_format')
+    expect(footerParams[1]?.['cursor']).toBe('abc123')
+    expect(comments.map((c) => c.id)).toEqual(['c1', 'c2'])
+    expect(comments[0]).toMatchObject({
+      author: 'acct-1',
+      createdAt: '2026-07-11T00:00:00.000Z',
+      updatedAt: '2026-07-11T00:00:00.000Z',
+    })
+    expect(comments[0]?.body).toContain('Consider this')
+    expect(comments[0]?.body).toContain('```ts')
+    expect(comments[0]?.body).toContain('const x = 1')
+    expect(comments[0]?.body).toContain('| a | b |')
+    expect(comments[1]?.body).toContain('second page')
+  })
+})
+
+describe('JiraTaskTracker.addTechnicalDesignComment', () => {
+  beforeEach(() => {
+    confluenceRequest.mockReset()
+  })
+
+  it('posts an ADF footer comment on the page and returns the Comment', async () => {
+    confluenceRequest.mockResolvedValue({
+      id: '9001',
+      version: { number: 1, createdAt: '2026-07-13T00:00:00.000Z', authorId: 'acct-9' },
+    })
+    const body = 'Note\n\n```ts\nconst x = 1\n```\n\n| a | b |\n| - | - |\n| 1 | 2 |\n'
+
+    const comment = await makeTracker().addTechnicalDesignComment('111', body)
+
+    const posted = confluenceCall('POST', '/footer-comments')?.[2] as {
+      pageId: string
+      body: { representation: string; value: string }
+    }
+    expect(posted.pageId).toBe('111')
+    expect(posted.body.representation).toBe('atlas_doc_format')
+    const doc = JSON.parse(posted.body.value) as { type: string; content: Array<{ type: string }> }
+    expect(doc.type).toBe('doc')
+    expect(doc.content.map((n) => n.type)).toEqual(expect.arrayContaining(['codeBlock', 'table']))
+    expect(comment).toEqual({
+      id: '9001',
+      body,
+      author: 'acct-9',
+      createdAt: '2026-07-13T00:00:00.000Z',
+      updatedAt: '2026-07-13T00:00:00.000Z',
+    })
   })
 })
 

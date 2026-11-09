@@ -17,6 +17,12 @@ type CreateTddOptions = {
   allowLocalPaths?: boolean;
 };
 
+type CommentTddOptions = {
+  body?: string;
+  bodyFile?: string;
+  allowLocalPaths?: boolean;
+};
+
 export function createTddCommand(
   getTracker: () => TaskTracker,
   registry?: OperationRegistry,
@@ -64,6 +70,26 @@ export function createTddCommand(
     .argument("<id>", "tdd id")
     .action(async (id: string) => {
       const result = await operations.invoke("tdd-get", { id }, z.unknown());
+      process.stdout.write(JSON.stringify(result) + "\n");
+    });
+
+  tdd
+    .command("comment")
+    .exitOverride()
+    .argument("<id>", "tdd id")
+    .option("--body <body>", "comment body (or use --body-file)")
+    .option("--body-file <path>", "read the comment body from a file")
+    .option(
+      "--allow-local-paths",
+      "accept machine-local paths in the body (see docs/layered-body-format.md)",
+    )
+    .action(async (id: string, opts: CommentTddOptions) => {
+      const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
+      const result = await operations.invoke(
+        "tdd-comment",
+        { id, body, allowLocalPaths: opts.allowLocalPaths ?? false },
+        z.unknown(),
+      );
       process.stdout.write(JSON.stringify(result) + "\n");
     });
 

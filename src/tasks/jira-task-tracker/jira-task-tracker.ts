@@ -26,6 +26,8 @@ import type {
   JiraTrackerConfig,
 } from "./jira-interfaces.js";
 import type {
+  ConfluenceFooterComment,
+  ConfluenceFooterCommentsResponse,
   ConfluencePage,
   ConfluencePropertiesResponse,
   ConfluenceProperty,
@@ -446,14 +448,30 @@ export class JiraTaskTracker implements TaskTracker {
   }
 
   async getTechnicalDesign(id: string): Promise<TechnicalDesign> {
-    const [page, property] = await Promise.all([
+    const [page, property, comments] = await Promise.all([
       this.confluence.request<ConfluencePage>("GET", `/pages/${id}`, undefined, {
         "body-format": "atlas_doc_format",
       }),
       this.tddMetadataProperty(id),
+      this.footerComments(id),
     ]);
     const body = this.readAdfBody(page) ?? (await this.readStorageBody(id));
-    return this.mapTechnicalDesign(page, body, property?.value ?? {});
+    return this.mapTechnicalDesign(page, body, property?.value ?? {}, comments);
+  }
+
+  async addTechnicalDesignComment(id: string, body: string): Promise<Comment> {
+    const created = await this.confluence.request<ConfluenceFooterComment>(
+      "POST",
+      "/footer-comments",
+      {
+        pageId: id,
+        body: {
+          representation: "atlas_doc_format",
+          value: JSON.stringify(this.bodyFormat.toAdf(body)),
+        },
+      },
+    );
+    return this.mapFooterComment(created, body);
   }
 
   async addComment(entityId: string, body: string): Promise<Comment> {
@@ -788,6 +806,53 @@ export class JiraTaskTracker implements TaskTracker {
     return response.results.find((property) => property.key === tddMetadataPropertyKey);
   }
 
+  /** Follows the v2 `_links.next` cursor so every page of footer comments is read. */
+  private async footerComments(pageId: string): Promise<Comment[]> {
+    const comments: Comment[] = [];
+    let cursor: string | undefined;
+    do {
+      const response: ConfluenceFooterCommentsResponse = await this.confluence.request(
+        "GET",
+        `/pages/${pageId}/footer-comments`,
+        undefined,
+        {
+          "body-format": "atlas_doc_format",
+          limit: 250,
+          ...(cursor !== undefined ? { cursor } : {}),
+        },
+      );
+      comments.push(...response.results.map((comment) => this.mapFooterComment(comment)));
+      const next = response._links?.next;
+      cursor =
+        next === undefined
+          ? undefined
+          : (new URL(next, this.confluence.siteBaseUrl).searchParams.get("cursor") ?? undefined);
+    } while (cursor !== undefined);
+    return comments;
+  }
+
+  private mapFooterComment(comment: ConfluenceFooterComment, markdown?: string): Comment {
+    const timestamp = comment.version?.createdAt ?? "";
+    return {
+      id: String(comment.id),
+      body: markdown ?? this.readAdfValue(comment.body?.atlas_doc_format?.value),
+      author: comment.version?.authorId ?? "",
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+  }
+
+  private readAdfValue(raw: string | undefined): string {
+    if (raw === undefined) return "";
+    try {
+      const doc: unknown = JSON.parse(raw);
+      if (adfDocValidator(doc)) return this.bodyFormat.toMarkdown(doc.content);
+    } catch {
+      return raw;
+    }
+    return raw;
+  }
+
   private withoutTitleHeading(body: string, title: string): string {
     const match = /^\s*#[ \t]+([^\n]*?)[ \t#]*(?:\r?\n|$)/.exec(body);
     if (match === null || match[1]?.trim().toLowerCase() !== title.trim().toLowerCase()) return body;
@@ -819,6 +884,7 @@ export class JiraTaskTracker implements TaskTracker {
     page: ConfluencePage,
     body: string,
     propertyValue: Record<string, unknown>,
+    comments: Comment[] = [],
   ): TechnicalDesign {
     const { epicId: rawEpicId, ...rest } = propertyValue;
     const metadata = EntityMetadataSchema.parse(rest);
@@ -830,7 +896,7 @@ export class JiraTaskTracker implements TaskTracker {
       epicId,
       ...(webui !== undefined ? { url: `${this.confluence.siteBaseUrl}${webui}` } : {}),
       body,
-      comments: [],
+      comments,
       metadata,
       updatedAt: page.version?.createdAt ?? "",
     };
