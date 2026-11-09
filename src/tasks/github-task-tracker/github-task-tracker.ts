@@ -20,6 +20,7 @@ import type {
   TrackerUser,
   UpdateEpicInput,
   UpdateInitiativeInput,
+  UpdateTechnicalDesignInput,
   UpdateTicketInput,
 } from "../task-tracker/task-tracker.js";
 
@@ -516,6 +517,45 @@ export class GitHubTaskTracker implements TaskTracker {
       metadata: this.bodyMetadata.parse(discussion.body),
       updatedAt: discussion.updatedAt,
     };
+  }
+
+  async updateTechnicalDesign(
+    id: string,
+    input: UpdateTechnicalDesignInput,
+  ): Promise<TechnicalDesign> {
+    const fetched = await this.gql<{
+      repository: { discussion: { id: string; body: string } | null };
+    }>(
+      `query GetDiscussionForEdit($owner: String!, $repo: String!, $number: Int!) {
+        repository(owner: $owner, name: $repo) {
+          discussion(number: $number) { id body }
+        }
+      }`,
+      { owner: this.owner, repo: this.repo, number: parseInt(id, 10) },
+    );
+    const discussion = fetched.repository.discussion;
+    if (discussion === null) throw new Error(`Discussion #${id} not found`);
+
+    const changes = {
+      ...(input.title === undefined ? {} : { title: input.title }),
+      ...(input.body === undefined
+        ? {}
+        : { body: this.bodyMetadata.splice(input.body, this.bodyMetadata.parse(discussion.body)) }),
+    };
+    await this.gql(
+      `mutation UpdateDiscussion($discussionId: ID!, $title: String, $body: String) {
+        updateDiscussion(input: { discussionId: $discussionId, title: $title, body: $body }) {
+          discussion { number }
+        }
+      }`,
+      { discussionId: discussion.id, ...changes },
+    );
+
+    try {
+      return await this.getTechnicalDesign(id);
+    } catch (cause) {
+      throw new TaskTrackerPartialWriteError({ id, cause });
+    }
   }
 
   async getTechnicalDesign(id: string): Promise<TechnicalDesign> {

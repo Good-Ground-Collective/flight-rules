@@ -74,7 +74,7 @@ Credentials live in your environment, never in flight-rules config files.
 | --- | --- |
 | `GITHUB_TOKEN` | GitHub tracker. Needs `repo` scope, and `read:org` for listing reviewers. `gh` also uses it when set, ahead of its own login, so PRs are opened as the token's account. |
 | `GH_TOKEN` | Optional. Takes precedence over `GITHUB_TOKEN` for `gh` (PRs and reviews) only. Set it when PRs should come from a different account than tracker writes. |
-| `JIRA_TOKEN` | Jira tracker. An Atlassian API token, which also covers Jira Product Discovery and Confluence. `JIRA_API_TOKEN` or `JIRA_API_KEY` work too. |
+| `JIRA_TOKEN` | Jira tracker. An Atlassian API token, which also covers Jira Product Discovery and Confluence. `JIRA_API_TOKEN` or `JIRA_API_KEY` work too. Can be set up [here](https://id.atlassian.com/manage-profile/security/api-tokens) |
 | `JIRA_EMAIL` | Optional. The Atlassian account that owns the token. Setup stores it in config as `jiraEmail`; the variable overrides that. |
 | `JIRA_HOST` | Optional. Overrides the `jiraHost` config value, e.g. `acme.atlassian.net`. |
 | `FLIGHT_RULES_HOST` | Optional. `claude` or `codex`. Only needed with the generic npm CLI; the plugin CLIs know their host. |

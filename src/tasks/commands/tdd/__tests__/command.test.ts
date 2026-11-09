@@ -35,6 +35,7 @@ const makeTracker = (): TaskTracker => ({
   updateTicketDescription: vi.fn(),
   updateInitiativeDescription: vi.fn(),
   createTechnicalDesign: vi.fn().mockResolvedValue(mockTdd),
+  updateTechnicalDesign: vi.fn().mockResolvedValue(mockTdd),
   getTechnicalDesign: vi.fn().mockResolvedValue(mockTdd),
   createInitiative: vi.fn(),
   getInitiative: vi.fn(),
@@ -131,5 +132,44 @@ describe('tdd command', () => {
     await expect(run(tracker, ['create', '--title', 'T', '--body', 'B'])).rejects.toThrow(CommanderError)
     expect(tracker.createTechnicalDesign).not.toHaveBeenCalled()
     errOutput.mockRestore()
+  })
+
+  it('edits a tdd title and body and prints JSON for "edit"', async () => {
+    const tracker = makeTracker()
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(tracker, ['edit', '3', '--title', 'New', '--body', 'Updated body'])
+    expect(tracker.updateTechnicalDesign).toHaveBeenCalledWith('3', { title: 'New', body: 'Updated body' })
+    expect(output).toHaveBeenCalledWith(JSON.stringify(mockTdd) + '\n')
+    output.mockRestore()
+  })
+
+  it('edits only the title when no body is given', async () => {
+    const tracker = makeTracker()
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(tracker, ['edit', '3', '--title', 'Only title'])
+    expect(tracker.updateTechnicalDesign).toHaveBeenCalledWith('3', { title: 'Only title' })
+    output.mockRestore()
+  })
+
+  it('rejects "edit" with neither title nor body', async () => {
+    const tracker = makeTracker()
+    await expect(run(tracker, ['edit', '3'])).rejects.toThrow('new title, a new body, or both')
+    expect(tracker.updateTechnicalDesign).not.toHaveBeenCalled()
+  })
+
+  it('rejects "edit" when the body references a machine-local path', async () => {
+    const tracker = makeTracker()
+    await expect(run(tracker, ['edit', '3', '--body', 'Notes: ~/notes.md'])).rejects.toThrow(
+      'references files on this machine',
+    )
+    expect(tracker.updateTechnicalDesign).not.toHaveBeenCalled()
+  })
+
+  it('accepts a machine-local path on "edit" with --allow-local-paths', async () => {
+    const tracker = makeTracker()
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(tracker, ['edit', '3', '--body', 'Notes: ~/notes.md', '--allow-local-paths'])
+    expect(tracker.updateTechnicalDesign).toHaveBeenCalledWith('3', { body: 'Notes: ~/notes.md' })
+    output.mockRestore()
   })
 })

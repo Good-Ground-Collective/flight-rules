@@ -87,5 +87,10 @@ export declare class JiraTaskTracker implements TaskTracker {
     private availableIssueTypes;
     private resolveConfluenceSpaceId;
     private tddMetadataProperty;
+    private withoutTitleHeading;
+    /** Converts the ADF body to markdown, or returns undefined when it is missing or unreadable. */
+    private readAdfBody;
+    /** Pages published as storage XHTML (or with an unparseable ADF body) fall back to the storage value unchanged. */
+    private readStorageBody;
     private mapTechnicalDesign;
 }

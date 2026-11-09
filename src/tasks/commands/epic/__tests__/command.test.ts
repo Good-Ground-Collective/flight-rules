@@ -55,6 +55,7 @@ const makeTracker = (): TaskTracker => ({
   updateTicketDescription: vi.fn(),
   updateInitiativeDescription: vi.fn(),
   createTechnicalDesign: vi.fn(),
+  updateTechnicalDesign: vi.fn(),
   createInitiative: vi.fn(),
   getInitiative: vi.fn(),
   linkEpicToInitiative: vi.fn(),

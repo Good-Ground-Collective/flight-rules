@@ -79,6 +79,7 @@ const makeTracker = (epics: Epic[] = [epic("E-1")]): TaskTracker => ({
   getInitiative: vi.fn().mockResolvedValue(initiative),
   linkEpicToInitiative: vi.fn(),
   createTechnicalDesign: vi.fn(),
+  updateTechnicalDesign: vi.fn(),
   getTechnicalDesign: vi.fn().mockResolvedValue({
     id: "TDD-1",
     epicId: "E-1",

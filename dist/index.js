@@ -3270,6 +3270,11 @@ var LayeredBodyAdfConverter = class {
   literal(node, source) {
     return source.slice(node.position?.start.offset ?? 0, node.position?.end.offset ?? 0);
   }
+  /** A Smart Link has no text; it renders as a plain link to attrs.url, or nothing without one. */
+  smartLinkToMarkdown(node) {
+    const url = node.attrs?.["url"];
+    return typeof url === "string" && url !== "" ? this.linkToMarkdown(url, { type: "link", attrs: { href: url } }) : "";
+  }
   blockToMarkdown(node, names) {
     switch (node.type) {
       case "heading": {
@@ -3319,6 +3324,10 @@ ${this.render(node.content ?? [], names)}
         return (node.content ?? []).map((child) => this.blockToMarkdown(child, names)).join("\n\n");
       case "media":
         return this.mediaReference(node, names);
+      // Block Smart Links keep their destination in attrs.url, like inlineCard, and read back as a link paragraph.
+      case "blockCard":
+      case "embedCard":
+        return this.smartLinkToMarkdown(node);
       default:
         return node.text ?? this.render(node.content ?? [], names);
     }
@@ -3451,6 +3460,17 @@ ${indent}`)}`;
         const codeDepth = open.findIndex((mark) => mark.type === "code");
         if (codeDepth !== -1) closeFrom(codeDepth);
         out += this.mentionToMarkdown(node);
+        continue;
+      }
+      if (node.type === "inlineCard") {
+        closeFrom(0);
+        out += this.smartLinkToMarkdown(node);
+        continue;
+      }
+      if (node.type === "status") {
+        closeFrom(0);
+        const label = node.attrs?.["text"];
+        if (typeof label === "string" && label.trim() !== "") out += `**[${this.escapeText(label.trim(), false)}]**`;
         continue;
       }
       if (node.type === "hardBreak") {
@@ -3727,6 +3747,9 @@ var JiraUploadedAttachmentSchema = z22.object({
   size: z22.number().optional()
 });
 var JiraUploadedAttachmentsSchema = z22.array(JiraUploadedAttachmentSchema);
+var adfDocValidator = (value) => typeof value === "object" && value !== null && "type" in value && value.type === "doc" && "content" in value && Array.isArray(value.content) && value.content.every(
+  (node) => typeof node === "object" && node !== null && "type" in node && typeof node.type === "string"
+);
 var JiraTaskTracker = class {
   client;
   confluence;
@@ -3999,7 +4022,10 @@ var JiraTaskTracker = class {
       spaceId,
       status: "current",
       title: input.title,
-      body: { representation: "storage", value: input.body }
+      body: {
+        representation: "atlas_doc_format",
+        value: JSON.stringify(this.bodyFormat.toAdf(this.withoutTitleHeading(input.body, input.title)))
+      }
     });
     try {
       await this.confluence.request("POST", `/pages/${page.id}/properties`, {
@@ -4015,11 +4041,12 @@ var JiraTaskTracker = class {
   async getTechnicalDesign(id) {
     const [page, property] = await Promise.all([
       this.confluence.request("GET", `/pages/${id}`, void 0, {
-        "body-format": "storage"
+        "body-format": "atlas_doc_format"
       }),
       this.tddMetadataProperty(id)
     ]);
-    return this.mapTechnicalDesign(page, page.body?.storage?.value ?? "", property?.value ?? {});
+    const body = this.readAdfBody(page) ?? await this.readStorageBody(id);
+    return this.mapTechnicalDesign(page, body, property?.value ?? {});
   }
   async addComment(entityId2, body) {
     const comment = await this.client.request("POST", `/issue/${entityId2}/comment`, {
@@ -4307,6 +4334,29 @@ var JiraTaskTracker = class {
       `/pages/${pageId}/properties`
     );
     return response.results.find((property) => property.key === tddMetadataPropertyKey);
+  }
+  withoutTitleHeading(body, title) {
+    const match = /^\s*#[ \t]+([^\n]*?)[ \t#]*(?:\r?\n|$)/.exec(body);
+    if (match === null || match[1]?.trim().toLowerCase() !== title.trim().toLowerCase()) return body;
+    return body.slice(match[0].length).replace(/^\s*\n/, "");
+  }
+  /** Converts the ADF body to markdown, or returns undefined when it is missing or unreadable. */
+  readAdfBody(page) {
+    const raw = page.body?.atlas_doc_format?.value;
+    if (raw === void 0) return void 0;
+    try {
+      const doc = JSON.parse(raw);
+      if (adfDocValidator(doc)) return this.bodyFormat.toMarkdown(doc.content);
+    } catch {
+    }
+    return void 0;
+  }
+  /** Pages published as storage XHTML (or with an unparseable ADF body) fall back to the storage value unchanged. */
+  async readStorageBody(id) {
+    const page = await this.confluence.request("GET", `/pages/${id}`, void 0, {
+      "body-format": "storage"
+    });
+    return page.body?.storage?.value ?? "";
   }
   mapTechnicalDesign(page, body, propertyValue) {
     const { epicId: rawEpicId, ...rest } = propertyValue;
@@ -8631,7 +8681,7 @@ function createFlightRules(props = {}) {
 var settingsScopes = ["user", "project", "local"];
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "2.2.0";
+var appVersion = false ? "0.0.0-dev" : "2.2.1";
 
 // src/agents/agent-frontmatter/agent-frontmatter.ts
 import { parse as parseYaml4 } from "yaml";
