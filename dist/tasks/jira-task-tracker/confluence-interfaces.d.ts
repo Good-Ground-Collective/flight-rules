@@ -12,6 +12,9 @@ export interface ConfluencePage {
         storage?: {
             value: string;
         };
+        atlas_doc_format?: {
+            value: string;
+        };
     };
     version?: {
         number: number;

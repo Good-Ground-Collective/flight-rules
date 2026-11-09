@@ -226,6 +226,8 @@ export declare class LayeredBodyAdfConverter implements MarkdownAdfConverter {
     private literalBlock;
     private stripEnclosingQuote;
     private literal;
+    /** A Smart Link has no text; it renders as a plain link to attrs.url, or nothing without one. */
+    private smartLinkToMarkdown;
     private blockToMarkdown;
     /**
      * Recovers an image reference from a `media` (or `mediaInline`) node, escaping
