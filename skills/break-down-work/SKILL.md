@@ -50,7 +50,7 @@ A cross-epic edge is allowed only when it is absolutely necessary, and only with
 Two entry modes:
 
 - **RFC file path** (the first hop): a human-authored `rfcs/RFC-NNN.md`. Read its frontmatter `size` and its sections. The RFC file is an input, not a reference. Carry its Problem, Solution, and Acceptance Criteria into the bodies you emit. Link the RFC only when it is merged to a default branch, and then by its GitHub URL, never by its path.
-- **Tracker node id** (every subsequent hop): an id like `31`. Resolve it through the CLI — never call GitHub/Jira directly:
+- **Tracker node id** (a node written by `/new`, or every subsequent hop): an id like `31`. Resolve it through the CLI — never call GitHub/Jira directly:
 
   ```bash
   flight-rules epic get <id>
@@ -189,6 +189,8 @@ Write each body to a temp file and pass it with `--body-file <file>` — the det
 
 Use only `flight-rules` — never the tracker's native API directly.
 
+**When the input is a tracker node, it already exists.** Don't create it again. Link new epics to the existing initiative with `epic link-initiative`, create tickets under the existing epic with `--epic-id`, and update the parent's body with its `edit` command when this hop adds decisions. A ticket input is enriched in place: add the Guided Walkthrough and any decisions with `ticket edit`, keeping the human-written sections as they are.
+
 **initiative → epics:**
 ```bash
 # 1. materialize the initiative
@@ -224,6 +226,8 @@ flight-rules ticket block <ticketId> --by <blockerInAnotherEpic> --cross-epic-re
 ```bash
 # a ticket-sized RFC has no parent epic — omit --epic-id and the ticket is created standalone
 flight-rules ticket create --title "<title>" --body-file ticket.md   # → { "id": <ticketId> }
+# a ticket node from /new already exists — enrich it in place
+flight-rules ticket edit <ticketId> --body-file ticket.md
 ```
 
 Only pass `--epic-id` when this hop really does sit under an existing epic. Do **not** invent a wrapper epic to satisfy the flag — a ticket-sized RFC maps to one parentless ticket, and a single-child epic is hierarchy noise.
