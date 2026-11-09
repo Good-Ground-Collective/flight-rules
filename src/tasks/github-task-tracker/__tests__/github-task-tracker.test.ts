@@ -710,6 +710,68 @@ describe("GitHubTracker.createTechnicalDesign metadata", () => {
   });
 });
 
+describe("GitHubTracker.updateTechnicalDesign", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const existingBody =
+    "Old body\n\n<details>\n<summary>LLM Context</summary>\n<!-- flight-rules:metadata -->\n\n```yaml\nepicId: 10\n```\n\n</details>";
+
+  const stubDiscussion = () => {
+    const tracker = makeTracker();
+    // @ts-expect-error — accessing private field for test setup
+    const mockGql = vi.mocked(tracker.gql);
+    mockGql
+      .mockResolvedValueOnce({
+        repository: { discussion: { id: "D_1", title: "Old title", body: existingBody } },
+      } as never)
+      .mockResolvedValueOnce({} as never)
+      .mockResolvedValueOnce({
+        repository: {
+          discussion: {
+            number: 5,
+            body: existingBody,
+            updatedAt: "2026-01-01T00:00:00Z",
+            comments: { nodes: [] },
+          },
+        },
+      } as never);
+    return { tracker, mockGql };
+  };
+
+  it("updates the discussion and splices the existing metadata into the new body", async () => {
+    const { tracker, mockGql } = stubDiscussion();
+
+    await tracker.updateTechnicalDesign("5", { title: "New title", body: "New body" });
+
+    const vars = mockGql.mock.calls[1]?.[1] as Record<string, string>;
+    expect(mockGql.mock.calls[1]?.[0]).toContain("updateDiscussion");
+    expect(vars["discussionId"]).toBe("D_1");
+    expect(vars["title"]).toBe("New title");
+    expect(vars["body"]).toContain("New body");
+    expect(vars["body"]).not.toContain("Old body");
+    expect(vars["body"]).toContain("flight-rules:metadata");
+    expect(vars["body"]).toContain("epicId: 10");
+  });
+
+  it("keeps the current title when none is given", async () => {
+    const { tracker, mockGql } = stubDiscussion();
+
+    await tracker.updateTechnicalDesign("5", { body: "New body" });
+
+    const vars = mockGql.mock.calls[1]?.[1] as Record<string, string>;
+    expect(vars["title"]).toBe("Old title");
+  });
+
+  it("keeps the current body on a title-only edit", async () => {
+    const { tracker, mockGql } = stubDiscussion();
+
+    await tracker.updateTechnicalDesign("5", { title: "New title" });
+
+    const vars = mockGql.mock.calls[1]?.[1] as Record<string, string>;
+    expect(vars["body"]).toBe(existingBody);
+  });
+});
+
 describe("GitHubTracker.getTechnicalDesign metadata", () => {
   beforeEach(() => vi.clearAllMocks());
 

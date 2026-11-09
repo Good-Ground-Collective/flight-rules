@@ -99,6 +99,7 @@ const makeTracker = (overrides: Partial<TaskTracker> = {}): TaskTracker => ({
   getInitiative: vi.fn().mockResolvedValue(initiative),
   linkEpicToInitiative: vi.fn(),
   createTechnicalDesign: vi.fn(),
+  updateTechnicalDesign: vi.fn(),
   getTechnicalDesign: vi.fn().mockResolvedValue(design),
   addComment: vi.fn(),
   addAttachment: vi.fn(),

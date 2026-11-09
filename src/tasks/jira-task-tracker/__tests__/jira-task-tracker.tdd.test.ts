@@ -224,3 +224,63 @@ describe('JiraTaskTracker.updateTddMetadata', () => {
     })
   })
 })
+
+describe('JiraTaskTracker.updateTechnicalDesign', () => {
+  beforeEach(() => {
+    jiraRequest.mockReset()
+    confluenceRequest.mockReset()
+  })
+
+  const existingAdf = JSON.stringify({ type: 'doc', version: 1, content: [] })
+  const stubConfluence = () =>
+    confluenceRequest.mockImplementation((method: string, path: string) => {
+      if (method === 'GET' && path === '/pages/111')
+        return Promise.resolve({
+          ...page,
+          version: { number: 4, createdAt: '2026-07-10T00:00:00.000Z' },
+          body: { atlas_doc_format: { value: existingAdf } },
+        })
+      if (method === 'PUT' && path === '/pages/111') return Promise.resolve({})
+      if (method === 'GET' && path === '/pages/111/properties') return Promise.resolve({ results: [] })
+      throw new Error(`unexpected confluence ${method} ${path}`)
+    })
+
+  it('PUTs ADF with the current title and the next version when the title is omitted', async () => {
+    stubConfluence()
+
+    await makeTracker().updateTechnicalDesign('111', { body: '## Problem\n\nNew text\n' })
+
+    const put = confluenceCall('PUT', '/pages/111')?.[2] as {
+      id: string
+      status: string
+      title: string
+      body: { representation: string; value: string }
+      version: { number: number }
+    }
+    expect(put.title).toBe('Payments — TDD')
+    expect(put.status).toBe('current')
+    expect(put.version.number).toBe(5)
+    expect(put.body.representation).toBe('atlas_doc_format')
+    const doc = JSON.parse(put.body.value) as { type: string; content: Array<{ type: string }> }
+    expect(doc.content[0]?.type).toBe('heading')
+  })
+
+  it('uses the new title when given', async () => {
+    stubConfluence()
+
+    await makeTracker().updateTechnicalDesign('111', { title: 'Renamed', body: 'Text' })
+
+    const put = confluenceCall('PUT', '/pages/111')?.[2] as { title: string; version: { number: number } }
+    expect(put.title).toBe('Renamed')
+    expect(put.version.number).toBe(5)
+  })
+
+  it('keeps the existing ADF body on a title-only edit', async () => {
+    stubConfluence()
+
+    await makeTracker().updateTechnicalDesign('111', { title: 'Renamed' })
+
+    const put = confluenceCall('PUT', '/pages/111')?.[2] as { body: { value: string } }
+    expect(put.body.value).toBe(existingAdf)
+  })
+})

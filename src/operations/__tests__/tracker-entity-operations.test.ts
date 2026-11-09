@@ -93,6 +93,7 @@ const makeTracker = (): TaskTracker =>
     getInitiative: vi.fn().mockResolvedValue(initiative),
     linkEpicToInitiative: vi.fn(),
     createTechnicalDesign: vi.fn().mockResolvedValue(tdd),
+    updateTechnicalDesign: vi.fn().mockResolvedValue(tdd),
     getTechnicalDesign: vi.fn().mockResolvedValue(tdd),
     addComment: vi.fn(),
     addAttachment: vi

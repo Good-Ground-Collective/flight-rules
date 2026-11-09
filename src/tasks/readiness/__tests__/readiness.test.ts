@@ -110,6 +110,7 @@ function inputs() {
     getInitiative: vi.fn<TaskTracker["getInitiative"]>(),
     linkEpicToInitiative: vi.fn<TaskTracker["linkEpicToInitiative"]>(),
     createTechnicalDesign: vi.fn<TaskTracker["createTechnicalDesign"]>(),
+    updateTechnicalDesign: vi.fn<TaskTracker["updateTechnicalDesign"]>(),
     getTechnicalDesign: vi.fn<TaskTracker["getTechnicalDesign"]>(),
     addComment: vi.fn<TaskTracker["addComment"]>(),
     addAttachment: vi.fn<TaskTracker["addAttachment"]>(),

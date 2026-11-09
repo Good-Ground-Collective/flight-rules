@@ -241,6 +241,7 @@ export const cliRouteCoverage: CliRouteCoverage = new ManifestCliRouteCoverage({
       ["ticket comment", "ticket-comment"],
       ["ticket label", "ticket-label"],
       ["users get", "users-get"],
+      ["tdd edit", "tdd-edit"],
       ["tdd get", "tdd-get"],
       ["epic get", "epic-get"],
       ["epic plan", "epic-plan"],

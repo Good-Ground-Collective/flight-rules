@@ -124,6 +124,11 @@ export const UpdateTicketInputSchema = z.object({
   labels: z.array(z.string()).optional(),
 });
 
+export const UpdateTechnicalDesignInputSchema = z.object({
+  title: z.string().optional(),
+  body: z.string().optional(),
+});
+
 export const UpdateInitiativeInputSchema = z.object({
   body: z.string(),
   title: z.string().optional(),
@@ -154,6 +159,7 @@ export type Initiative = z.infer<typeof InitiativeSchema>;
 export type CreateInitiativeInput = z.infer<typeof CreateInitiativeInputSchema>;
 export type UpdateEpicInput = z.infer<typeof UpdateEpicInputSchema>;
 export type UpdateTicketInput = z.infer<typeof UpdateTicketInputSchema>;
+export type UpdateTechnicalDesignInput = z.infer<typeof UpdateTechnicalDesignInputSchema>;
 export type UpdateInitiativeInput = z.infer<typeof UpdateInitiativeInputSchema>;
 
 const partialWriteErrorSchema = z.object({
@@ -207,6 +213,8 @@ export interface TaskTracker {
   getInitiative(id: string): Promise<Initiative>;
   linkEpicToInitiative(epicId: string, initiativeId: string): Promise<void>;
   createTechnicalDesign(input: CreateTechnicalDesignInput): Promise<TechnicalDesign>;
+  /** Rewrites a design's title and/or body, keeping its metadata; an omitted field is left as it is. */
+  updateTechnicalDesign(id: string, input: UpdateTechnicalDesignInput): Promise<TechnicalDesign>;
   getTechnicalDesign(id: string): Promise<TechnicalDesign>;
   addComment(entityId: string, body: string): Promise<Comment>;
   addAttachment(ticketId: string, filePath: string): Promise<Attachment>;

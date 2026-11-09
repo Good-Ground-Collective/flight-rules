@@ -51,6 +51,7 @@ import type {
   TrackerUser,
   UpdateEpicInput,
   UpdateInitiativeInput,
+  UpdateTechnicalDesignInput,
   UpdateTicketInput,
 } from "../task-tracker/task-tracker.js";
 
@@ -443,6 +444,34 @@ export class JiraTaskTracker implements TaskTracker {
     }
 
     return this.mapTechnicalDesign(page, input.body, propertyValue);
+  }
+
+  async updateTechnicalDesign(
+    id: string,
+    input: UpdateTechnicalDesignInput,
+  ): Promise<TechnicalDesign> {
+    const current = await this.confluence.request<ConfluencePage>("GET", `/pages/${id}`, undefined, {
+      "body-format": "atlas_doc_format",
+    });
+    const title = input.title ?? current.title;
+    const existingAdf = current.body?.atlas_doc_format?.value;
+    if (input.body === undefined && existingAdf === undefined) {
+      throw new Error(`Page ${id} has no ADF body to keep; pass a body with the new title`);
+    }
+    const value =
+      input.body === undefined
+        ? (existingAdf ?? "")
+        : JSON.stringify(this.bodyFormat.toAdf(this.withoutTitleHeading(input.body, title)));
+
+    await this.confluence.request("PUT", `/pages/${id}`, {
+      id,
+      status: "current",
+      title,
+      body: { representation: "atlas_doc_format", value },
+      version: { number: (current.version?.number ?? 1) + 1 },
+    });
+
+    return this.getTechnicalDesign(id);
   }
 
   async getTechnicalDesign(id: string): Promise<TechnicalDesign> {
