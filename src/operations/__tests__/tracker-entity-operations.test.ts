@@ -650,9 +650,11 @@ describe("tracker entity operations", () => {
       expect(result.status).toBe("success");
       expect(tracker.createTechnicalDesign).toHaveBeenCalledOnce();
       expect(tracker.addTechnicalDesignAttachment).toHaveBeenCalledWith("TDD-9", expect.stringMatching(/diagram\.png$/));
-      expect(tracker.updateTechnicalDesign).toHaveBeenCalledWith("TDD-9", {
-        body: "See ![flow](attachment:diagram.png)",
-      });
+      expect(tracker.updateTechnicalDesign).toHaveBeenCalledWith(
+        "TDD-9",
+        { body: "See ![flow](attachment:diagram.png)" },
+        { uploaded: [expect.objectContaining(attachmentOf("diagram.png"))] },
+      );
     });
 
     it("reports a partial create when the upload fails after the page exists", async () => {
@@ -725,9 +727,11 @@ describe("tracker entity operations", () => {
       });
 
       expect(tracker.addTechnicalDesignAttachment).toHaveBeenCalledWith("TDD-1", expect.stringMatching(/diagram\.png$/));
-      expect(tracker.updateTechnicalDesign).toHaveBeenCalledWith("TDD-1", {
-        body: "![flow](attachment:diagram.png)",
-      });
+      expect(tracker.updateTechnicalDesign).toHaveBeenCalledWith(
+        "TDD-1",
+        { body: "![flow](attachment:diagram.png)" },
+        { uploaded: [expect.objectContaining(attachmentOf("diagram.png"))] },
+      );
     });
 
     it("reports a partial edit when the body update fails after an upload", async () => {

@@ -194,8 +194,10 @@ describe('tdd command', () => {
       rmSync(dir, { recursive: true, force: true })
     }
     expect(tracker.addTechnicalDesignAttachment).toHaveBeenCalledTimes(2)
-    expect(tracker.updateTechnicalDesign).toHaveBeenCalledWith('3', {
-      body: 'Body\n\n![A](attachment:a.png)\n\n![b.png](attachment:b.png)',
-    })
+    expect(tracker.updateTechnicalDesign).toHaveBeenCalledWith(
+      '3',
+      { body: 'Body\n\n![A](attachment:a.png)\n\n![b.png](attachment:b.png)' },
+      { uploaded: expect.any(Array) },
+    )
   })
 })

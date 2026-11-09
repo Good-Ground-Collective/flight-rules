@@ -56,6 +56,7 @@ import type {
   UpdateEpicInput,
   UpdateInitiativeInput,
   UpdateTechnicalDesignInput,
+  UpdateTechnicalDesignOptions,
   UpdateTicketInput,
 } from "../task-tracker/task-tracker.js";
 
@@ -472,6 +473,7 @@ export class JiraTaskTracker implements TaskTracker {
   async updateTechnicalDesign(
     id: string,
     input: UpdateTechnicalDesignInput,
+    options: UpdateTechnicalDesignOptions = {},
   ): Promise<TechnicalDesign> {
     const current = await this.confluence.request<ConfluencePage>("GET", `/pages/${id}`, undefined, {
       "body-format": "atlas_doc_format",
@@ -482,7 +484,7 @@ export class JiraTaskTracker implements TaskTracker {
       throw new Error(`Page ${id} has no ADF body to keep; pass a body with the new title`);
     }
     const media =
-      input.body === undefined ? {} : this.mediaLookup(id, await this.pageAttachments(id));
+      input.body === undefined ? {} : this.mediaLookup(id, await this.pageAttachments(id), options.uploaded);
     const value =
       input.body === undefined
         ? (existingAdf ?? "")
@@ -786,14 +788,20 @@ export class JiraTaskTracker implements TaskTracker {
   }
 
   /** Confluence media nodes address a page's attachments by `fileId` within `contentId-<pageId>`. */
-  private mediaLookup(pageId: string, attachments: ConfluenceAttachment[]): MediaLookup {
+  private mediaLookup(
+    pageId: string,
+    attachments: ConfluenceAttachment[],
+    uploaded: readonly Attachment[] = [],
+  ): MediaLookup {
     const lookup: MediaLookup = {};
+    const collection = `contentId-${pageId}`;
     for (const attachment of attachments) {
       if (attachment.fileId === undefined || attachment.fileId === "") continue;
-      lookup[attachment.title] = {
-        mediaUuid: attachment.fileId,
-        collection: `contentId-${pageId}`,
-      };
+      lookup[attachment.title] = { mediaUuid: attachment.fileId, collection };
+    }
+    for (const attachment of uploaded) {
+      if (attachment.mediaUuid === undefined || attachment.mediaUuid === "") continue;
+      lookup[attachment.filename] = { mediaUuid: attachment.mediaUuid, collection };
     }
     return lookup;
   }

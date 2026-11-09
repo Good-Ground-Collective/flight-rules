@@ -3,6 +3,7 @@ import { isAbsolute, relative, resolve } from "node:path";
 import { z } from "zod";
 import {
   AttachmentSpecSchema,
+  type EvidenceAttachment,
   EvidenceUploadFailure,
   TechnicalDesignAttachmentUploader,
   TrackerEvidenceService,
@@ -434,7 +435,11 @@ export class DefaultTrackerEntityOperations implements TrackerEntityOperations {
       const created = await tracker.createTechnicalDesign({ ...fields, body: prepared });
       id = created.id;
       const uploaded = await evidence.attach({ ticketId: id, body: fields.body, specs });
-      return await tracker.updateTechnicalDesign(id, { body: uploaded.body });
+      return await tracker.updateTechnicalDesign(
+        id,
+        { body: uploaded.body },
+        { uploaded: uploaded.attachments },
+      );
     } catch (error) {
       const cause = error instanceof EvidenceUploadFailure ? error.cause : error;
       if (id === undefined) return this.partialTddCreate(cause, fields);
@@ -494,16 +499,20 @@ export class DefaultTrackerEntityOperations implements TrackerEntityOperations {
       tracker: new TechnicalDesignAttachmentUploader({ tracker }),
     });
     this.assertPortable(evidence.prepareBody({ body: fields.body, specs }), allowLocalPaths);
+    let uploadedAttachments: EvidenceAttachment[] | undefined;
     try {
       const uploaded = await evidence.attach({ ticketId: id, body: fields.body, specs });
       fields = { ...fields, body: uploaded.body };
+      uploadedAttachments = uploaded.attachments;
     } catch (error) {
       if (!(error instanceof EvidenceUploadFailure)) throw error;
       if (error.attachments.length === 0) throw error.cause;
       return this.partialTddEdit(id, fields, error.cause);
     }
     try {
-      return await this.props.getTracker().updateTechnicalDesign(id, fields);
+      return await this.props.getTracker().updateTechnicalDesign(id, fields, {
+        ...(uploadedAttachments === undefined ? {} : { uploaded: uploadedAttachments }),
+      });
     } catch (error) {
       return this.partialTddEdit(id, fields, error);
     }

@@ -568,6 +568,24 @@ describe('JiraTaskTracker technical design attachments', () => {
     })
   })
 
+  it('uses just-uploaded media ids when the attachments listing lags the upload', async () => {
+    stub([])
+
+    await makeTracker().updateTechnicalDesign(
+      '111',
+      { body: '![the flow](attachment:flow.png)' },
+      { uploaded: [{ id: 'att900', filename: 'flow.png', mimeType: 'image/png', mediaUuid: 'file-uuid-9' }] },
+    )
+
+    const put = confluenceCall('PUT', '/pages/111')?.[2] as { body: { value: string } }
+    const doc = JSON.parse(put.body.value) as { content: Array<{ type: string; content?: Array<{ type: string; attrs: Record<string, unknown> }> }> }
+    const single = doc.content.find((node) => node.type === 'mediaSingle')
+    expect(single?.content?.[0]).toEqual({
+      type: 'media',
+      attrs: { type: 'file', id: 'file-uuid-9', collection: 'contentId-111', alt: 'the flow' },
+    })
+  })
+
   it('also resolves a ./filename reference', async () => {
     stub([imageAttachment])
     await makeTracker().updateTechnicalDesign('111', { body: '![x](./flow.png)' })
