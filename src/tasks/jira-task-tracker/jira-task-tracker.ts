@@ -90,6 +90,11 @@ type JiraUploadedAttachment = z.infer<typeof JiraUploadedAttachmentSchema>;
  * Confluence pages in the configured space, their metadata held in a native
  * content property and their URL stamped onto the parent epic.
  */
+const confluenceAdfDocSchema = z.object({
+  type: z.literal("doc"),
+  content: z.array(z.object({ type: z.string() }).passthrough()),
+});
+
 export class JiraTaskTracker implements TaskTracker {
   private readonly client: JiraClient;
   private readonly confluence: ConfluenceClient;
@@ -414,7 +419,10 @@ export class JiraTaskTracker implements TaskTracker {
       spaceId,
       status: "current",
       title: input.title,
-      body: { representation: "storage", value: input.body },
+      body: {
+        representation: "atlas_doc_format",
+        value: JSON.stringify(this.bodyFormat.toAdf(this.withoutTitleHeading(input.body, input.title))),
+      },
     });
 
     try {
@@ -433,11 +441,11 @@ export class JiraTaskTracker implements TaskTracker {
   async getTechnicalDesign(id: string): Promise<TechnicalDesign> {
     const [page, property] = await Promise.all([
       this.confluence.request<ConfluencePage>("GET", `/pages/${id}`, undefined, {
-        "body-format": "storage",
+        "body-format": "atlas_doc_format",
       }),
       this.tddMetadataProperty(id),
     ]);
-    return this.mapTechnicalDesign(page, page.body?.storage?.value ?? "", property?.value ?? {});
+    return this.mapTechnicalDesign(page, this.readPageBody(page), property?.value ?? {});
   }
 
   async addComment(entityId: string, body: string): Promise<Comment> {
@@ -770,6 +778,26 @@ export class JiraTaskTracker implements TaskTracker {
       `/pages/${pageId}/properties`,
     );
     return response.results.find((property) => property.key === tddMetadataPropertyKey);
+  }
+
+  private withoutTitleHeading(body: string, title: string): string {
+    const match = /^\s*#[ \t]+([^\n]*?)[ \t#]*(?:\r?\n|$)/.exec(body);
+    if (match === null || match[1]?.trim().toLowerCase() !== title.trim().toLowerCase()) return body;
+    return body.slice(match[0].length).replace(/^\s*\n/, "");
+  }
+
+  /** Prefers the ADF body; pages published as storage XHTML (or with an unparseable ADF body) fall back to the storage value unchanged. */
+  private readPageBody(page: ConfluencePage): string {
+    const raw = page.body?.atlas_doc_format?.value;
+    if (raw !== undefined) {
+      try {
+        const doc = confluenceAdfDocSchema.safeParse(JSON.parse(raw));
+        if (doc.success) return this.bodyFormat.toMarkdown(doc.data.content as AdfNode[]);
+      } catch {
+        // not JSON: fall through to the storage value
+      }
+    }
+    return page.body?.storage?.value ?? "";
   }
 
   private mapTechnicalDesign(

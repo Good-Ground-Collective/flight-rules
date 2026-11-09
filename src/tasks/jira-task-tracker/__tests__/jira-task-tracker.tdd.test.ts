@@ -33,6 +33,8 @@ const page = {
   _links: { webui: '/spaces/SD/pages/111/Payments+TDD' },
 }
 
+const MD = '# Payments — TDD\n\n## Problem\n\n| a | b |\n| - | - |\n| 1 | 2 |\n\n```ts\nconst x = 1\n```\n\n<details><summary>More</summary>\n\nhidden\n\n</details>\n'
+
 const confluenceCall = (method: string, path: string) =>
   confluenceRequest.mock.calls.find(([m, p]) => m === method && p === path)
 
@@ -42,7 +44,7 @@ describe('JiraTaskTracker.createTechnicalDesign', () => {
     confluenceRequest.mockReset()
   })
 
-  it('creates a storage page, stores metadata in a content property, stamps the epic, and assembles the URL', async () => {
+  it('creates an ADF page, stores metadata in a content property, stamps the epic, and assembles the URL', async () => {
     confluenceRequest.mockImplementation((method: string, path: string) => {
       if (method === 'GET' && path === '/spaces') return Promise.resolve(spaces)
       if (method === 'POST' && path === '/pages') return Promise.resolve(page)
@@ -58,21 +60,23 @@ describe('JiraTaskTracker.createTechnicalDesign', () => {
 
     const tdd = await makeTracker().createTechnicalDesign({
       title: 'Payments — TDD',
-      body: '<h2>Problem</h2><p>...</p>',
+      body: MD,
       epicId: 'PROJ-1',
     })
 
     expect(tdd.id).toBe('111')
     expect(tdd.epicId).toBe('PROJ-1')
     expect(tdd.url).toBe('https://acme.atlassian.net/wiki/spaces/SD/pages/111/Payments+TDD')
-    expect(tdd.body).toBe('<h2>Problem</h2><p>...</p>')
-
-    expect(confluenceCall('POST', '/pages')?.[2]).toEqual({
-      spaceId: '163842',
-      status: 'current',
-      title: 'Payments — TDD',
-      body: { representation: 'storage', value: '<h2>Problem</h2><p>...</p>' },
-    })
+    const posted = confluenceCall('POST', '/pages')?.[2] as { body: { representation: string; value: string }; title: string }
+    expect(posted.body.representation).toBe('atlas_doc_format')
+    const doc = JSON.parse(posted.body.value) as { type: string; content: Array<{ type: string; attrs?: Record<string, unknown> }> }
+    expect(doc.type).toBe('doc')
+    const types = doc.content.map((n) => n.type)
+    expect(types).toEqual(expect.arrayContaining(['heading', 'table', 'codeBlock', 'expand']))
+    expect(doc.content[0]?.type).toBe('heading')
+    expect(doc.content[0]?.attrs?.['level']).toBe(2)
+    expect(doc.content.find((n) => n.type === 'codeBlock')?.attrs?.['language']).toBe('ts')
+    expect(tdd.body).toBe(MD)
     expect(confluenceCall('POST', '/pages/111/properties')?.[2]).toEqual({
       key: 'flight-rules-metadata',
       value: { epicId: 'PROJ-1' },
@@ -95,11 +99,11 @@ describe('JiraTaskTracker.getTechnicalDesign', () => {
     confluenceRequest.mockReset()
   })
 
-  it('fetches the storage page and content property, returning epicId and url', async () => {
-    confluenceRequest.mockImplementation((method: string, path: string, _body?: unknown, params?: Record<string, unknown>) => {
+  const mockGet = (body: unknown) =>
+    confluenceRequest.mockImplementation((method: string, path: string, _b?: unknown, params?: Record<string, unknown>) => {
       if (method === 'GET' && path === '/pages/111') {
-        expect(params?.['body-format']).toBe('storage')
-        return Promise.resolve({ ...page, body: { storage: { value: '<p>the design</p>' } } })
+        expect(params?.['body-format']).toBe('atlas_doc_format')
+        return Promise.resolve({ ...page, body })
       }
       if (method === 'GET' && path === '/pages/111/properties')
         return Promise.resolve({
@@ -108,12 +112,34 @@ describe('JiraTaskTracker.getTechnicalDesign', () => {
       throw new Error(`unexpected confluence ${method} ${path}`)
     })
 
+  it('reads the ADF body back as markdown with epicId and url', async () => {
+    const adf = {
+      type: 'doc',
+      version: 1,
+      content: [
+        { type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: 'Problem' }] },
+        { type: 'paragraph', content: [{ type: 'text', text: 'the design' }] },
+      ],
+    }
+    mockGet({ atlas_doc_format: { value: JSON.stringify(adf) } })
+
     const tdd = await makeTracker().getTechnicalDesign('111')
 
     expect(tdd.epicId).toBe('PROJ-1')
-    expect(tdd.body).toBe('<p>the design</p>')
+    expect(tdd.body).toContain('## Problem')
+    expect(tdd.body).toContain('the design')
     expect(tdd.url).toBe('https://acme.atlassian.net/wiki/spaces/SD/pages/111/Payments+TDD')
     expect(tdd.metadata).toEqual({ notes: 'ctx' })
+  })
+
+  it('falls back to the storage value when the ADF body is missing', async () => {
+    mockGet({ storage: { value: '<p>the design</p>' } })
+    expect((await makeTracker().getTechnicalDesign('111')).body).toBe('<p>the design</p>')
+  })
+
+  it('falls back to the storage value when the ADF body is unparseable', async () => {
+    mockGet({ atlas_doc_format: { value: 'not json' }, storage: { value: '<p>old</p>' } })
+    expect((await makeTracker().getTechnicalDesign('111')).body).toBe('<p>old</p>')
   })
 })
 
