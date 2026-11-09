@@ -114,6 +114,8 @@ function inputs() {
     getTechnicalDesign: vi.fn<TaskTracker["getTechnicalDesign"]>(),
     addComment: vi.fn<TaskTracker["addComment"]>(),
     addTechnicalDesignComment: vi.fn<TaskTracker["addTechnicalDesignComment"]>(),
+    assertTechnicalDesignAttachments: vi.fn<TaskTracker["assertTechnicalDesignAttachments"]>(),
+    addTechnicalDesignAttachment: vi.fn<TaskTracker["addTechnicalDesignAttachment"]>(),
     addAttachment: vi.fn<TaskTracker["addAttachment"]>(),
     getUsers: vi.fn<TaskTracker["getUsers"]>(),
     ping: vi.fn<TaskTracker["ping"]>().mockResolvedValue(undefined),

@@ -1,6 +1,7 @@
 import { Command } from "commander";
 import type { TaskTracker } from "../../task-tracker/task-tracker.js";
 import { resolveBody } from "../resolve-body.js";
+import { collect } from "../../../shared/collect.js";
 import { z } from "zod";
 import { RegistryCommandOperationClient } from "../../../operations/command-operation-client.js";
 import { DefaultTrackerEntityOperations } from "../../../operations/tracker-entity-operations.js";
@@ -14,6 +15,7 @@ type CreateTddOptions = {
   body?: string;
   bodyFile?: string;
   epicId: string;
+  attach: string[];
   allowLocalPaths?: boolean;
 };
 
@@ -27,6 +29,7 @@ type EditTddOptions = {
   title?: string;
   body?: string;
   bodyFile?: string;
+  attach: string[];
   allowLocalPaths?: boolean;
 };
 
@@ -52,6 +55,7 @@ export function createTddCommand(
     .option("--body <body>", "tdd body (or use --body-file)")
     .option("--body-file <path>", "read the tdd body from a file")
     .requiredOption("--epic-id <id>", "parent epic id")
+    .option("--attach <spec>", "file to attach, as <path>#<caption> (repeatable)", collect, [])
     .option(
       "--allow-local-paths",
       "accept machine-local paths in the body (see docs/layered-body-format.md)",
@@ -64,6 +68,7 @@ export function createTddCommand(
           title: opts.title,
           body,
           epicId: opts.epicId,
+          attach: opts.attach,
           allowLocalPaths: opts.allowLocalPaths ?? false,
         },
         z.unknown(),
@@ -78,6 +83,7 @@ export function createTddCommand(
     .option("--title <title>", "new tdd title (unchanged if omitted)")
     .option("--body <body>", "new tdd body (or use --body-file)")
     .option("--body-file <path>", "read the new tdd body from a file")
+    .option("--attach <spec>", "file to attach, as <path>#<caption> (repeatable)", collect, [])
     .option(
       "--allow-local-paths",
       "accept machine-local paths in the body (see docs/layered-body-format.md)",
@@ -91,6 +97,7 @@ export function createTddCommand(
           id,
           ...(opts.title !== undefined ? { title: opts.title } : {}),
           ...(body !== undefined ? { body } : {}),
+          attach: opts.attach,
           allowLocalPaths: opts.allowLocalPaths ?? false,
         },
         z.unknown(),

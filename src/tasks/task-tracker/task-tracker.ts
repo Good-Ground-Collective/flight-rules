@@ -46,6 +46,7 @@ export const TechnicalDesignSchema = z.object({
   url: z.string().optional(),
   body: z.string(),
   comments: z.array(CommentSchema),
+  attachments: z.array(AttachmentSchema).default([]),
   metadata: EntityMetadataSchema.default({}),
   updatedAt: z.string(),
 });
@@ -160,6 +161,11 @@ export type CreateInitiativeInput = z.infer<typeof CreateInitiativeInputSchema>;
 export type UpdateEpicInput = z.infer<typeof UpdateEpicInputSchema>;
 export type UpdateTicketInput = z.infer<typeof UpdateTicketInputSchema>;
 export type UpdateTechnicalDesignInput = z.infer<typeof UpdateTechnicalDesignInputSchema>;
+
+export interface UpdateTechnicalDesignOptions {
+  /** Attachments just uploaded to the design; trackers use their media ids in preference to a listing that may lag the upload. */
+  uploaded?: readonly Attachment[];
+}
 export type UpdateInitiativeInput = z.infer<typeof UpdateInitiativeInputSchema>;
 
 const partialWriteErrorSchema = z.object({
@@ -214,11 +220,18 @@ export interface TaskTracker {
   linkEpicToInitiative(epicId: string, initiativeId: string): Promise<void>;
   createTechnicalDesign(input: CreateTechnicalDesignInput): Promise<TechnicalDesign>;
   /** Rewrites a design's title and/or body, keeping its metadata; an omitted field is left as it is. */
-  updateTechnicalDesign(id: string, input: UpdateTechnicalDesignInput): Promise<TechnicalDesign>;
+  updateTechnicalDesign(
+    id: string,
+    input: UpdateTechnicalDesignInput,
+    options?: UpdateTechnicalDesignOptions,
+  ): Promise<TechnicalDesign>;
   getTechnicalDesign(id: string): Promise<TechnicalDesign>;
   addComment(entityId: string, body: string): Promise<Comment>;
   addTechnicalDesignComment(id: string, body: string): Promise<Comment>;
   addAttachment(ticketId: string, filePath: string): Promise<Attachment>;
+  /** Throws when the backend cannot attach files to a design, before any write is made. */
+  assertTechnicalDesignAttachments(): void;
+  addTechnicalDesignAttachment(id: string, filePath: string): Promise<Attachment>;
   getUsers(): Promise<TrackerUser[]>;
   ping(options?: { signal?: AbortSignal }): Promise<void>;
 }

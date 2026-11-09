@@ -3,7 +3,9 @@ import { isAbsolute, relative, resolve } from "node:path";
 import { z } from "zod";
 import {
   AttachmentSpecSchema,
+  type EvidenceAttachment,
   EvidenceUploadFailure,
+  TechnicalDesignAttachmentUploader,
   TrackerEvidenceService,
 } from "../tasks/evidence/evidence.js";
 import { portableContextGuard } from "../tasks/portable-context/portable-context.js";
@@ -78,9 +80,11 @@ const updateTicketInput = z
   .strict();
 const createTddInput = CreateTechnicalDesignInputSchema.extend({
   allowLocalPaths: z.boolean().default(false),
+  attach: z.array(z.string().min(1)).default([]),
 }).strict();
 const updateTddInput = UpdateTechnicalDesignInputSchema.extend({
   allowLocalPaths: z.boolean().default(false),
+  attach: z.array(z.string().min(1)).default([]),
 }).strict();
 const entityId = z.string().min(1);
 const commentTddInput = z
@@ -406,18 +410,64 @@ export class DefaultTrackerEntityOperations implements TrackerEntityOperations {
   }
 
   private async createTdd(input: z.infer<typeof createTddInput>) {
-    this.assertPortable(input.body, input.allowLocalPaths);
-    const fields = CreateTechnicalDesignInputSchema.parse(input);
+    const { allowLocalPaths, attach, ...rest } = input;
+    const fields = CreateTechnicalDesignInputSchema.parse(rest);
+    const tracker = this.props.getTracker();
+    if (attach.length === 0) {
+      this.assertPortable(fields.body, allowLocalPaths);
+      try {
+        return await tracker.createTechnicalDesign(fields);
+      } catch (error) {
+        return this.partialTddCreate(error, fields);
+      }
+    }
+
+    tracker.assertTechnicalDesignAttachments();
+    const specs = this.trustedSpecs(attach);
+    const evidence = new TrackerEvidenceService({
+      tracker: new TechnicalDesignAttachmentUploader({ tracker }),
+    });
+    const prepared = evidence.prepareBody({ body: fields.body, specs });
+    this.assertPortable(prepared, allowLocalPaths);
+
+    let id: string | undefined;
     try {
-      return await this.props.getTracker().createTechnicalDesign(fields);
+      const created = await tracker.createTechnicalDesign({ ...fields, body: prepared });
+      id = created.id;
+      const uploaded = await evidence.attach({ ticketId: id, body: fields.body, specs });
+      return await tracker.updateTechnicalDesign(
+        id,
+        { body: uploaded.body },
+        { uploaded: uploaded.attachments },
+      );
     } catch (error) {
-      if (!TaskTrackerPartialWriteError.isPartialWrite(error)) throw error;
+      const cause = error instanceof EvidenceUploadFailure ? error.cause : error;
+      if (id === undefined) return this.partialTddCreate(cause, fields);
       return {
         status: "partial" as const,
-        data: { id: error.id, epicId: fields.epicId, body: fields.body },
-        error: { name: error.name, message: error.message },
+        data: { id, epicId: fields.epicId, body: fields.body },
+        error: {
+          name: cause instanceof Error ? cause.name : "Error",
+          message: cause instanceof Error ? cause.message : String(cause),
+        },
       };
     }
+  }
+
+  private partialTddCreate(error: unknown, fields: { epicId: string; body: string }) {
+    if (!TaskTrackerPartialWriteError.isPartialWrite(error)) throw error;
+    return {
+      status: "partial" as const,
+      data: { id: error.id, epicId: fields.epicId, body: fields.body },
+      error: { name: error.name, message: error.message },
+    };
+  }
+
+  private trustedSpecs(attach: readonly string[]): string[] {
+    return attach.map((spec) => {
+      const parsed = AttachmentSpecSchema.parse(spec);
+      return `${this.trustedFilePath(parsed.path)}#${parsed.caption}`;
+    });
   }
 
   private async commentOnTdd(input: z.infer<typeof commentTddInput>) {
@@ -426,25 +476,74 @@ export class DefaultTrackerEntityOperations implements TrackerEntityOperations {
   }
 
   private async editTdd(id: string, input: z.infer<typeof updateTddInput>) {
-    if (input.body === undefined && input.title === undefined) {
+    const { allowLocalPaths, attach, ...rest } = input;
+    if (rest.body === undefined && rest.title === undefined) {
       throw new Error("tdd edit needs a new title, a new body, or both");
     }
-    if (input.body !== undefined) this.assertPortable(input.body, input.allowLocalPaths);
-    const fields = UpdateTechnicalDesignInputSchema.parse(input);
+    if (attach.length > 0 && rest.body === undefined) {
+      throw new Error("tdd edit --attach needs a new body to reference the attached files");
+    }
+    let fields = UpdateTechnicalDesignInputSchema.parse(rest);
+    const tracker = this.props.getTracker();
+    if (fields.body === undefined) {
+      return this.updateTdd(id, fields);
+    }
+    if (attach.length === 0) {
+      this.assertPortable(fields.body, allowLocalPaths);
+      return this.updateTdd(id, fields);
+    }
+
+    tracker.assertTechnicalDesignAttachments();
+    const specs = this.trustedSpecs(attach);
+    const evidence = new TrackerEvidenceService({
+      tracker: new TechnicalDesignAttachmentUploader({ tracker }),
+    });
+    this.assertPortable(evidence.prepareBody({ body: fields.body, specs }), allowLocalPaths);
+    let uploadedAttachments: EvidenceAttachment[] | undefined;
+    try {
+      const uploaded = await evidence.attach({ ticketId: id, body: fields.body, specs });
+      fields = { ...fields, body: uploaded.body };
+      uploadedAttachments = uploaded.attachments;
+    } catch (error) {
+      if (!(error instanceof EvidenceUploadFailure)) throw error;
+      if (error.attachments.length === 0) throw error.cause;
+      return this.partialTddEdit(id, fields, error.cause);
+    }
+    try {
+      return await this.props.getTracker().updateTechnicalDesign(id, fields, {
+        ...(uploadedAttachments === undefined ? {} : { uploaded: uploadedAttachments }),
+      });
+    } catch (error) {
+      return this.partialTddEdit(id, fields, error);
+    }
+  }
+
+  private async updateTdd(id: string, fields: z.infer<typeof UpdateTechnicalDesignInputSchema>) {
     try {
       return await this.props.getTracker().updateTechnicalDesign(id, fields);
     } catch (error) {
       if (!TaskTrackerPartialWriteError.isPartialWrite(error)) throw error;
-      return {
-        status: "partial" as const,
-        data: {
-          id,
-          ...(fields.title === undefined ? {} : { title: fields.title }),
-          ...(fields.body === undefined ? {} : { body: fields.body }),
-        },
-        error: { name: error.name, message: error.message },
-      };
+      return this.partialTddEdit(id, fields, error);
     }
+  }
+
+  private partialTddEdit(
+    id: string,
+    fields: z.infer<typeof UpdateTechnicalDesignInputSchema>,
+    cause: unknown,
+  ) {
+    return {
+      status: "partial" as const,
+      data: {
+        id,
+        ...(fields.title === undefined ? {} : { title: fields.title }),
+        ...(fields.body === undefined ? {} : { body: fields.body }),
+      },
+      error: {
+        name: cause instanceof Error ? cause.name : "Error",
+        message: cause instanceof Error ? cause.message : String(cause),
+      },
+    };
   }
 
   private assertPortable(body: string, allowLocalPaths = false): void {
