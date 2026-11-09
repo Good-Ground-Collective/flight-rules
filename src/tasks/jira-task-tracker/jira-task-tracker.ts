@@ -806,14 +806,28 @@ export class JiraTaskTracker implements TaskTracker {
     return response.results.find((property) => property.key === tddMetadataPropertyKey);
   }
 
-  /** Follows the v2 `_links.next` cursor so every page of footer comments is read. */
+  /** Reads root footer comments, each followed depth-first by its replies. */
   private async footerComments(pageId: string): Promise<Comment[]> {
+    return this.footerCommentTree(`/pages/${pageId}/footer-comments`);
+  }
+
+  private async footerCommentTree(path: string): Promise<Comment[]> {
     const comments: Comment[] = [];
+    for (const comment of await this.footerCommentPages(path)) {
+      comments.push(this.mapFooterComment(comment));
+      comments.push(...(await this.footerCommentTree(`/footer-comments/${comment.id}/children`)));
+    }
+    return comments;
+  }
+
+  /** Follows the v2 `_links.next` cursor so every page is read. */
+  private async footerCommentPages(path: string): Promise<ConfluenceFooterComment[]> {
+    const results: ConfluenceFooterComment[] = [];
     let cursor: string | undefined;
     do {
       const response: ConfluenceFooterCommentsResponse = await this.confluence.request(
         "GET",
-        `/pages/${pageId}/footer-comments`,
+        path,
         undefined,
         {
           "body-format": "atlas_doc_format",
@@ -821,14 +835,14 @@ export class JiraTaskTracker implements TaskTracker {
           ...(cursor !== undefined ? { cursor } : {}),
         },
       );
-      comments.push(...response.results.map((comment) => this.mapFooterComment(comment)));
+      results.push(...response.results);
       const next = response._links?.next;
       cursor =
         next === undefined
           ? undefined
           : (new URL(next, this.confluence.siteBaseUrl).searchParams.get("cursor") ?? undefined);
     } while (cursor !== undefined);
-    return comments;
+    return results;
   }
 
   private mapFooterComment(comment: ConfluenceFooterComment, markdown?: string): Comment {

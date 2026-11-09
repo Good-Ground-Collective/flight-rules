@@ -224,12 +224,49 @@ describe('JiraTaskTracker.getTechnicalDesign footer comments', () => {
     body: { atlas_doc_format: { value: JSON.stringify(adf) } },
   })
 
+  it('includes nested replies and paginates children depth-first', async () => {
+    const text = (t: string): Record<string, unknown> => ({
+      type: 'doc',
+      version: 1,
+      content: [{ type: 'paragraph', content: [{ type: 'text', text: t }] }],
+    })
+    const childParams: Array<Record<string, unknown> | undefined> = []
+    confluenceRequest.mockImplementation((method: string, path: string, _b?: unknown, params?: Record<string, unknown>) => {
+      if (method === 'GET' && path === '/pages/111')
+        return Promise.resolve({ ...page, body: { atlas_doc_format: { value: JSON.stringify({ type: 'doc', version: 1, content: [] }) } } })
+      if (method === 'GET' && path === '/pages/111/properties') return Promise.resolve({ results: [] })
+      if (method === 'GET' && path === '/pages/111/footer-comments')
+        return Promise.resolve({ results: [footerComment('root', 'a', '2026-07-11T00:00:00.000Z', text('root'))] })
+      if (method === 'GET' && path === '/footer-comments/root/children') {
+        childParams.push(params)
+        if (params?.['cursor'] === undefined)
+          return Promise.resolve({
+            results: [footerComment('r1', 'b', '2026-07-12T00:00:00.000Z', text('blocking reply'))],
+            _links: { next: '/wiki/api/v2/footer-comments/root/children?cursor=kid2&limit=250' },
+          })
+        return Promise.resolve({ results: [footerComment('r2', 'c', '2026-07-13T00:00:00.000Z', text('second reply'))] })
+      }
+      if (method === 'GET' && path === '/footer-comments/r1/children')
+        return Promise.resolve({ results: [footerComment('n1', 'd', '2026-07-14T00:00:00.000Z', text('nested reply'))] })
+      if (method === 'GET' && path.endsWith('/children')) return Promise.resolve({ results: [] })
+      throw new Error(`unexpected confluence ${method} ${path}`)
+    })
+
+    const { comments } = await makeTracker().getTechnicalDesign('111')
+
+    expect(comments.map((c) => c.id)).toEqual(['root', 'r1', 'n1', 'r2'])
+    expect(comments[1]?.body).toContain('blocking reply')
+    expect(childParams[0]?.['body-format']).toBe('atlas_doc_format')
+    expect(childParams[1]?.['cursor']).toBe('kid2')
+  })
+
   it('reads every page of footer comments as markdown with author and timestamps', async () => {
     const footerParams: Array<Record<string, unknown> | undefined> = []
     confluenceRequest.mockImplementation((method: string, path: string, _b?: unknown, params?: Record<string, unknown>) => {
       if (method === 'GET' && path === '/pages/111')
         return Promise.resolve({ ...page, body: { atlas_doc_format: { value: JSON.stringify({ type: 'doc', version: 1, content: [] }) } } })
       if (method === 'GET' && path === '/pages/111/properties') return Promise.resolve({ results: [] })
+      if (method === 'GET' && path.endsWith('/children')) return Promise.resolve({ results: [] })
       if (method === 'GET' && path === '/pages/111/footer-comments') {
         footerParams.push(params)
         if (params?.['cursor'] === undefined)
