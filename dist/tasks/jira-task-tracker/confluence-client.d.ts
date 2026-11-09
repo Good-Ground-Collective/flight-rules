@@ -12,9 +12,16 @@ export interface ConfluenceClientConfig {
 export declare class ConfluenceClient {
     readonly siteBaseUrl: string;
     private readonly baseUrl;
+    private readonly legacyBaseUrl;
     private readonly authHeader;
     constructor(config: ConfluenceClientConfig);
     request<T>(method: string, path: string, body?: unknown, params?: Record<string, string | number>): Promise<T>;
+    /**
+     * Uploads files as page attachments. v2 has no upload endpoint, so this targets the v1
+     * `/rest/api` path, which demands the `X-Atlassian-Token: no-check` XSRF opt-out; `Content-Type`
+     * is left unset so undici writes the multipart boundary itself.
+     */
+    upload<T>(path: string, files: File[]): Promise<T>;
     private fetchWithRetry;
     private throwApiError;
 }

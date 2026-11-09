@@ -36199,6 +36199,7 @@ var TechnicalDesignSchema = external_exports.object({
   url: external_exports.string().optional(),
   body: external_exports.string(),
   comments: external_exports.array(CommentSchema),
+  attachments: external_exports.array(AttachmentSchema).default([]),
   metadata: EntityMetadataSchema.default({}),
   updatedAt: external_exports.string()
 });
@@ -36790,6 +36791,7 @@ var GitHubTaskTracker = class {
       ...discussion.url !== void 0 ? { url: discussion.url } : {},
       body: discussion.body,
       comments: [],
+      attachments: [],
       metadata: this.bodyMetadata.parse(discussion.body),
       updatedAt: discussion.updatedAt
     };
@@ -36855,9 +36857,21 @@ var GitHubTaskTracker = class {
         createdAt: n.createdAt,
         updatedAt: n.updatedAt
       })),
+      attachments: [],
       metadata,
       updatedAt: discussion.updatedAt
     };
+  }
+  // eslint-disable-next-line preflight/no-throw-helpers -- a capability stub's whole body is the throw
+  assertTechnicalDesignAttachments() {
+    throw new UnsupportedTrackerOperationError({
+      tracker: "GitHub",
+      operation: "attaching files to a technical design",
+      remedy: "GitHub Discussions have no attachment API; use --tracker jira, or reference an image by URL in the body"
+    });
+  }
+  async addTechnicalDesignAttachment() {
+    return this.assertTechnicalDesignAttachments();
   }
   async addTechnicalDesignComment(id, body) {
     const fetchData = await this.gql(
@@ -37132,6 +37146,7 @@ var JiraClient = class {
 var maxRetries2 = 4;
 var defaultRetryAfterSeconds2 = 2;
 var maxBackoffMs2 = 3e4;
+var attachmentXsrfHeader2 = "no-check";
 var ConfluenceErrorBodySchema = external_exports.object({
   errors: external_exports.array(external_exports.object({ title: external_exports.string().optional(), detail: external_exports.string().optional() })).optional().catch(void 0),
   message: external_exports.string().optional()
@@ -37139,10 +37154,12 @@ var ConfluenceErrorBodySchema = external_exports.object({
 var ConfluenceClient = class {
   siteBaseUrl;
   baseUrl;
+  legacyBaseUrl;
   authHeader;
   constructor(config2) {
     this.siteBaseUrl = `https://${config2.host}/wiki`;
     this.baseUrl = `${this.siteBaseUrl}/api/v2`;
+    this.legacyBaseUrl = `${this.siteBaseUrl}/rest/api`;
     this.authHeader = `Basic ${Buffer.from(`${config2.email}:${config2.token}`).toString("base64")}`;
   }
   async request(method, path3, body, params) {
@@ -37152,6 +37169,28 @@ var ConfluenceClient = class {
       method,
       headers: { Authorization: this.authHeader, "Content-Type": "application/json", Accept: "application/json" },
       ...body !== void 0 ? { body: JSON.stringify(body) } : {}
+    });
+    if (!res.ok) await this.throwApiError(res);
+    const text6 = await res.text();
+    const data = text6.length > 0 ? JSON.parse(text6) : void 0;
+    return data;
+  }
+  /**
+   * Uploads files as page attachments. v2 has no upload endpoint, so this targets the v1
+   * `/rest/api` path, which demands the `X-Atlassian-Token: no-check` XSRF opt-out; `Content-Type`
+   * is left unset so undici writes the multipart boundary itself.
+   */
+  async upload(path3, files) {
+    const form = new FormData();
+    files.forEach((file2) => form.append("file", file2, file2.name));
+    const res = await this.fetchWithRetry(`${this.legacyBaseUrl}${path3}`, {
+      method: "PUT",
+      headers: {
+        Authorization: this.authHeader,
+        Accept: "application/json",
+        "X-Atlassian-Token": attachmentXsrfHeader2
+      },
+      body: form
     });
     if (!res.ok) await this.throwApiError(res);
     const text6 = await res.text();
@@ -47123,6 +47162,19 @@ var JiraUploadedAttachmentSchema = external_exports.object({
   size: external_exports.number().optional()
 });
 var JiraUploadedAttachmentsSchema = external_exports.array(JiraUploadedAttachmentSchema);
+var ConfluenceUploadedAttachmentsSchema = external_exports.object({
+  results: external_exports.array(
+    external_exports.object({
+      id: external_exports.union([external_exports.string(), external_exports.number()]).transform(String),
+      title: external_exports.string(),
+      extensions: external_exports.object({
+        mediaType: external_exports.string().optional(),
+        fileSize: external_exports.number().optional(),
+        fileId: external_exports.string().optional()
+      }).optional()
+    })
+  )
+});
 var adfDocValidator = (value) => typeof value === "object" && value !== null && "type" in value && value.type === "doc" && "content" in value && Array.isArray(value.content) && value.content.every(
   (node3) => typeof node3 === "object" && node3 !== null && "type" in node3 && typeof node3.type === "string"
 );
@@ -47416,7 +47468,7 @@ var JiraTaskTracker = class {
     }
     return this.mapTechnicalDesign(page, input2.body, propertyValue);
   }
-  async updateTechnicalDesign(id, input2) {
+  async updateTechnicalDesign(id, input2, options = {}) {
     const current = await this.confluence.request("GET", `/pages/${id}`, void 0, {
       "body-format": "atlas_doc_format"
     });
@@ -47425,7 +47477,8 @@ var JiraTaskTracker = class {
     if (input2.body === void 0 && existingAdf === void 0) {
       throw new Error(`Page ${id} has no ADF body to keep; pass a body with the new title`);
     }
-    const value = input2.body === void 0 ? existingAdf ?? "" : JSON.stringify(this.bodyFormat.toAdf(this.withoutTitleHeading(input2.body, title)));
+    const media = input2.body === void 0 ? {} : this.mediaLookup(id, await this.pageAttachments(id), options.uploaded);
+    const value = input2.body === void 0 ? existingAdf ?? "" : JSON.stringify(this.bodyFormat.toAdf(this.withoutTitleHeading(input2.body, title), media));
     await this.confluence.request("PUT", `/pages/${id}`, {
       id,
       status: "current",
@@ -47440,15 +47493,48 @@ var JiraTaskTracker = class {
     }
   }
   async getTechnicalDesign(id) {
-    const [page, property, comments] = await Promise.all([
+    const [page, property, comments, attachments] = await Promise.all([
       this.confluence.request("GET", `/pages/${id}`, void 0, {
         "body-format": "atlas_doc_format"
       }),
       this.tddMetadataProperty(id),
-      this.footerComments(id)
+      this.footerComments(id),
+      this.pageAttachments(id)
     ]);
-    const body = this.readAdfBody(page) ?? await this.readStorageBody(id);
-    return this.mapTechnicalDesign(page, body, property?.value ?? {}, comments);
+    const body = this.readAdfBody(page, this.mediaLookup(id, attachments)) ?? await this.readStorageBody(id);
+    return this.mapTechnicalDesign(
+      page,
+      body,
+      property?.value ?? {},
+      comments,
+      attachments.map((attachment) => this.mapPageAttachment(attachment))
+    );
+  }
+  assertTechnicalDesignAttachments() {
+  }
+  /**
+   * Uploads a file to a Confluence page. v2 has no upload endpoint, so this goes through v1;
+   * the response's `extensions.fileId` is the media id an inline ADF node addresses it by.
+   */
+  async addTechnicalDesignAttachment(id, filePath) {
+    const filename = basename2(filePath);
+    const file2 = new File([readFileSync7(filePath)], filename, {
+      type: this.mimeTypes.forFilename(filename)
+    });
+    const uploaded = ConfluenceUploadedAttachmentsSchema.parse(
+      await this.confluence.upload(`/content/${id}/child/attachment`, [file2])
+    );
+    const attachment = uploaded.results[0];
+    if (attachment === void 0) {
+      throw new Error(`Confluence accepted the upload of ${filename} to page ${id} but returned no attachment`);
+    }
+    return {
+      id: attachment.id,
+      filename: attachment.title,
+      mimeType: attachment.extensions?.mediaType ?? file2.type,
+      ...attachment.extensions?.fileSize !== void 0 ? { size: attachment.extensions.fileSize } : {},
+      ...attachment.extensions?.fileId !== void 0 ? { mediaUuid: attachment.extensions.fileId } : {}
+    };
   }
   async addTechnicalDesignComment(id, body) {
     const created = await this.confluence.request(
@@ -47627,6 +47713,46 @@ var JiraTaskTracker = class {
   }
   async fetchTransitions(ticketId) {
     return this.client.request("GET", `/issue/${ticketId}/transitions`);
+  }
+  /** Follows the v2 `_links.next` cursor so every attachment is read. */
+  async pageAttachments(id) {
+    const results = [];
+    let cursor;
+    do {
+      const response = await this.confluence.request(
+        "GET",
+        `/pages/${id}/attachments`,
+        void 0,
+        { limit: 250, ...cursor !== void 0 ? { cursor } : {} }
+      );
+      results.push(...response.results);
+      const next = response._links?.next;
+      cursor = next === void 0 ? void 0 : new URL(next, this.confluence.siteBaseUrl).searchParams.get("cursor") ?? void 0;
+    } while (cursor !== void 0);
+    return results;
+  }
+  /** Confluence media nodes address a page's attachments by `fileId` within `contentId-<pageId>`. */
+  mediaLookup(pageId, attachments, uploaded = []) {
+    const lookup = {};
+    const collection = `contentId-${pageId}`;
+    for (const attachment of attachments) {
+      if (attachment.fileId === void 0 || attachment.fileId === "") continue;
+      lookup[attachment.title] = { mediaUuid: attachment.fileId, collection };
+    }
+    for (const attachment of uploaded) {
+      if (attachment.mediaUuid === void 0 || attachment.mediaUuid === "") continue;
+      lookup[attachment.filename] = { mediaUuid: attachment.mediaUuid, collection };
+    }
+    return lookup;
+  }
+  mapPageAttachment(attachment) {
+    return {
+      id: String(attachment.id),
+      filename: attachment.title,
+      mimeType: attachment.mediaType ?? "application/octet-stream",
+      ...attachment.fileSize !== void 0 ? { size: attachment.fileSize } : {},
+      ...attachment.fileId !== void 0 ? { mediaUuid: attachment.fileId } : {}
+    };
   }
   async resolveMediaUuid(attachmentId) {
     const location = await this.client.locationFor(`/attachment/content/${attachmentId}`);
@@ -47823,12 +47949,12 @@ var JiraTaskTracker = class {
     return body.slice(match[0].length).replace(/^\s*\n/, "");
   }
   /** Converts the ADF body to markdown, or returns undefined when it is missing or unreadable. */
-  readAdfBody(page) {
+  readAdfBody(page, media = {}) {
     const raw = page.body?.atlas_doc_format?.value;
     if (raw === void 0) return void 0;
     try {
       const doc = JSON.parse(raw);
-      if (adfDocValidator(doc)) return this.bodyFormat.toMarkdown(doc.content);
+      if (adfDocValidator(doc)) return this.bodyFormat.toMarkdown(doc.content, media);
     } catch {
     }
     return void 0;
@@ -47840,7 +47966,7 @@ var JiraTaskTracker = class {
     });
     return page.body?.storage?.value ?? "";
   }
-  mapTechnicalDesign(page, body, propertyValue, comments = []) {
+  mapTechnicalDesign(page, body, propertyValue, comments = [], attachments = []) {
     const { epicId: rawEpicId, ...rest } = propertyValue;
     const metadata = EntityMetadataSchema.parse(rest);
     const epicId = typeof rawEpicId === "string" ? rawEpicId : rawEpicId !== void 0 ? String(rawEpicId) : "";
@@ -47851,6 +47977,7 @@ var JiraTaskTracker = class {
       ...webui !== void 0 ? { url: `${this.confluence.siteBaseUrl}${webui}` } : {},
       body,
       comments,
+      attachments,
       metadata,
       updatedAt: page.version?.createdAt ?? ""
     };
@@ -50204,6 +50331,15 @@ var EvidenceUploadFailure = class extends Error {
     this.attachments = props.attachments;
   }
 };
+var TechnicalDesignAttachmentUploader = class {
+  tracker;
+  constructor(props) {
+    this.tracker = props.tracker;
+  }
+  addAttachment(entityId2, filePath) {
+    return this.tracker.addTechnicalDesignAttachment(entityId2, filePath);
+  }
+};
 var TrackerEvidenceService = class {
   tracker;
   constructor(props) {
@@ -51672,10 +51808,12 @@ var updateTicketInput = external_exports.object({
   attach: external_exports.array(external_exports.string().min(1)).default([])
 }).strict();
 var createTddInput = CreateTechnicalDesignInputSchema.extend({
-  allowLocalPaths: external_exports.boolean().default(false)
+  allowLocalPaths: external_exports.boolean().default(false),
+  attach: external_exports.array(external_exports.string().min(1)).default([])
 }).strict();
 var updateTddInput = UpdateTechnicalDesignInputSchema.extend({
-  allowLocalPaths: external_exports.boolean().default(false)
+  allowLocalPaths: external_exports.boolean().default(false),
+  attach: external_exports.array(external_exports.string().min(1)).default([])
 }).strict();
 var entityId = external_exports.string().min(1);
 var commentTddInput = external_exports.object({ id: entityId, body: external_exports.string(), allowLocalPaths: external_exports.boolean().default(false) }).strict();
@@ -51966,43 +52104,127 @@ var DefaultTrackerEntityOperations = class {
     }
   }
   async createTdd(input2) {
-    this.assertPortable(input2.body, input2.allowLocalPaths);
-    const fields = CreateTechnicalDesignInputSchema.parse(input2);
+    const { allowLocalPaths, attach, ...rest } = input2;
+    const fields = CreateTechnicalDesignInputSchema.parse(rest);
+    const tracker = this.props.getTracker();
+    if (attach.length === 0) {
+      this.assertPortable(fields.body, allowLocalPaths);
+      try {
+        return await tracker.createTechnicalDesign(fields);
+      } catch (error62) {
+        return this.partialTddCreate(error62, fields);
+      }
+    }
+    tracker.assertTechnicalDesignAttachments();
+    const specs = this.trustedSpecs(attach);
+    const evidence = new TrackerEvidenceService({
+      tracker: new TechnicalDesignAttachmentUploader({ tracker })
+    });
+    const prepared = evidence.prepareBody({ body: fields.body, specs });
+    this.assertPortable(prepared, allowLocalPaths);
+    let id;
     try {
-      return await this.props.getTracker().createTechnicalDesign(fields);
+      const created = await tracker.createTechnicalDesign({ ...fields, body: prepared });
+      id = created.id;
+      const uploaded = await evidence.attach({ ticketId: id, body: fields.body, specs });
+      return await tracker.updateTechnicalDesign(
+        id,
+        { body: uploaded.body },
+        { uploaded: uploaded.attachments }
+      );
     } catch (error62) {
-      if (!TaskTrackerPartialWriteError.isPartialWrite(error62)) throw error62;
+      const cause = error62 instanceof EvidenceUploadFailure ? error62.cause : error62;
+      if (id === void 0) return this.partialTddCreate(cause, fields);
       return {
         status: "partial",
-        data: { id: error62.id, epicId: fields.epicId, body: fields.body },
-        error: { name: error62.name, message: error62.message }
+        data: { id, epicId: fields.epicId, body: fields.body },
+        error: {
+          name: cause instanceof Error ? cause.name : "Error",
+          message: cause instanceof Error ? cause.message : String(cause)
+        }
       };
     }
+  }
+  partialTddCreate(error62, fields) {
+    if (!TaskTrackerPartialWriteError.isPartialWrite(error62)) throw error62;
+    return {
+      status: "partial",
+      data: { id: error62.id, epicId: fields.epicId, body: fields.body },
+      error: { name: error62.name, message: error62.message }
+    };
+  }
+  trustedSpecs(attach) {
+    return attach.map((spec) => {
+      const parsed = AttachmentSpecSchema.parse(spec);
+      return `${this.trustedFilePath(parsed.path)}#${parsed.caption}`;
+    });
   }
   async commentOnTdd(input2) {
     this.assertPortable(input2.body, input2.allowLocalPaths);
     return this.props.getTracker().addTechnicalDesignComment(input2.id, input2.body);
   }
   async editTdd(id, input2) {
-    if (input2.body === void 0 && input2.title === void 0) {
+    const { allowLocalPaths, attach, ...rest } = input2;
+    if (rest.body === void 0 && rest.title === void 0) {
       throw new Error("tdd edit needs a new title, a new body, or both");
     }
-    if (input2.body !== void 0) this.assertPortable(input2.body, input2.allowLocalPaths);
-    const fields = UpdateTechnicalDesignInputSchema.parse(input2);
+    if (attach.length > 0 && rest.body === void 0) {
+      throw new Error("tdd edit --attach needs a new body to reference the attached files");
+    }
+    let fields = UpdateTechnicalDesignInputSchema.parse(rest);
+    const tracker = this.props.getTracker();
+    if (fields.body === void 0) {
+      return this.updateTdd(id, fields);
+    }
+    if (attach.length === 0) {
+      this.assertPortable(fields.body, allowLocalPaths);
+      return this.updateTdd(id, fields);
+    }
+    tracker.assertTechnicalDesignAttachments();
+    const specs = this.trustedSpecs(attach);
+    const evidence = new TrackerEvidenceService({
+      tracker: new TechnicalDesignAttachmentUploader({ tracker })
+    });
+    this.assertPortable(evidence.prepareBody({ body: fields.body, specs }), allowLocalPaths);
+    let uploadedAttachments;
+    try {
+      const uploaded = await evidence.attach({ ticketId: id, body: fields.body, specs });
+      fields = { ...fields, body: uploaded.body };
+      uploadedAttachments = uploaded.attachments;
+    } catch (error62) {
+      if (!(error62 instanceof EvidenceUploadFailure)) throw error62;
+      if (error62.attachments.length === 0) throw error62.cause;
+      return this.partialTddEdit(id, fields, error62.cause);
+    }
+    try {
+      return await this.props.getTracker().updateTechnicalDesign(id, fields, {
+        ...uploadedAttachments === void 0 ? {} : { uploaded: uploadedAttachments }
+      });
+    } catch (error62) {
+      return this.partialTddEdit(id, fields, error62);
+    }
+  }
+  async updateTdd(id, fields) {
     try {
       return await this.props.getTracker().updateTechnicalDesign(id, fields);
     } catch (error62) {
       if (!TaskTrackerPartialWriteError.isPartialWrite(error62)) throw error62;
-      return {
-        status: "partial",
-        data: {
-          id,
-          ...fields.title === void 0 ? {} : { title: fields.title },
-          ...fields.body === void 0 ? {} : { body: fields.body }
-        },
-        error: { name: error62.name, message: error62.message }
-      };
+      return this.partialTddEdit(id, fields, error62);
     }
+  }
+  partialTddEdit(id, fields, cause) {
+    return {
+      status: "partial",
+      data: {
+        id,
+        ...fields.title === void 0 ? {} : { title: fields.title },
+        ...fields.body === void 0 ? {} : { body: fields.body }
+      },
+      error: {
+        name: cause instanceof Error ? cause.name : "Error",
+        message: cause instanceof Error ? cause.message : String(cause)
+      }
+    };
   }
   assertPortable(body, allowLocalPaths = false) {
     portableContextGuard.assertPortable(body, { allowLocalPaths });
@@ -52903,7 +53125,7 @@ function createTddCommand(getTracker, registry2) {
       })
     )
   });
-  tdd.command("create").exitOverride().requiredOption("--title <title>", "tdd title").option("--body <body>", "tdd body (or use --body-file)").option("--body-file <path>", "read the tdd body from a file").requiredOption("--epic-id <id>", "parent epic id").option(
+  tdd.command("create").exitOverride().requiredOption("--title <title>", "tdd title").option("--body <body>", "tdd body (or use --body-file)").option("--body-file <path>", "read the tdd body from a file").requiredOption("--epic-id <id>", "parent epic id").option("--attach <spec>", "file to attach, as <path>#<caption> (repeatable)", collect, []).option(
     "--allow-local-paths",
     "accept machine-local paths in the body (see docs/layered-body-format.md)"
   ).action(async (opts) => {
@@ -52914,13 +53136,14 @@ function createTddCommand(getTracker, registry2) {
         title: opts.title,
         body,
         epicId: opts.epicId,
+        attach: opts.attach,
         allowLocalPaths: opts.allowLocalPaths ?? false
       },
       external_exports.unknown()
     );
     process.stdout.write(JSON.stringify(result) + "\n");
   });
-  tdd.command("edit").exitOverride().argument("<id>", "tdd id").option("--title <title>", "new tdd title (unchanged if omitted)").option("--body <body>", "new tdd body (or use --body-file)").option("--body-file <path>", "read the new tdd body from a file").option(
+  tdd.command("edit").exitOverride().argument("<id>", "tdd id").option("--title <title>", "new tdd title (unchanged if omitted)").option("--body <body>", "new tdd body (or use --body-file)").option("--body-file <path>", "read the new tdd body from a file").option("--attach <spec>", "file to attach, as <path>#<caption> (repeatable)", collect, []).option(
     "--allow-local-paths",
     "accept machine-local paths in the body (see docs/layered-body-format.md)"
   ).action(async (id, opts) => {
@@ -52932,6 +53155,7 @@ function createTddCommand(getTracker, registry2) {
         id,
         ...opts.title !== void 0 ? { title: opts.title } : {},
         ...body !== void 0 ? { body } : {},
+        attach: opts.attach,
         allowLocalPaths: opts.allowLocalPaths ?? false
       },
       external_exports.unknown()
@@ -54450,7 +54674,7 @@ function createPrCommand(registry2) {
 }
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "2.4.0";
+var appVersion = false ? "0.0.0-dev" : "2.5.0";
 
 // src/plugins/commands/agents/command.ts
 function createAgentsCommand(getInstallation) {

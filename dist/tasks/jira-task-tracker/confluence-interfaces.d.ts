@@ -54,3 +54,16 @@ export interface ConfluenceFooterCommentsResponse {
         next?: string;
     };
 }
+export interface ConfluenceAttachment {
+    id: string;
+    title: string;
+    mediaType?: string;
+    fileSize?: number;
+    fileId?: string;
+}
+export interface ConfluenceAttachmentsResponse {
+    results: ConfluenceAttachment[];
+    _links?: {
+        next?: string;
+    };
+}

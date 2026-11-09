@@ -1,5 +1,5 @@
 import type { JiraTrackerConfig } from "./jira-interfaces.js";
-import type { Attachment, Comment, CreateEpicInput, CreateInitiativeInput, CreateTechnicalDesignInput, CreateTicketInput, EntityMetadata, Epic, Initiative, TaskTracker, TechnicalDesign, Ticket, TrackerUser, UpdateEpicInput, UpdateInitiativeInput, UpdateTechnicalDesignInput, UpdateTicketInput } from "../task-tracker/task-tracker.js";
+import type { Attachment, Comment, CreateEpicInput, CreateInitiativeInput, CreateTechnicalDesignInput, CreateTicketInput, EntityMetadata, Epic, Initiative, TaskTracker, TechnicalDesign, Ticket, TrackerUser, UpdateEpicInput, UpdateInitiativeInput, UpdateTechnicalDesignInput, UpdateTechnicalDesignOptions, UpdateTicketInput } from "../task-tracker/task-tracker.js";
 /**
  * The Jira / Jira Product Discovery backend. Epics map to the Epic issue type
  * and tickets to Story; parentage rides the native `parent` field, and entity
@@ -54,8 +54,14 @@ export declare class JiraTaskTracker implements TaskTracker {
     getInitiative(id: string): Promise<Initiative>;
     linkEpicToInitiative(epicId: string, initiativeId: string): Promise<void>;
     createTechnicalDesign(input: CreateTechnicalDesignInput): Promise<TechnicalDesign>;
-    updateTechnicalDesign(id: string, input: UpdateTechnicalDesignInput): Promise<TechnicalDesign>;
+    updateTechnicalDesign(id: string, input: UpdateTechnicalDesignInput, options?: UpdateTechnicalDesignOptions): Promise<TechnicalDesign>;
     getTechnicalDesign(id: string): Promise<TechnicalDesign>;
+    assertTechnicalDesignAttachments(): void;
+    /**
+     * Uploads a file to a Confluence page. v2 has no upload endpoint, so this goes through v1;
+     * the response's `extensions.fileId` is the media id an inline ADF node addresses it by.
+     */
+    addTechnicalDesignAttachment(id: string, filePath: string): Promise<Attachment>;
     addTechnicalDesignComment(id: string, body: string): Promise<Comment>;
     addComment(entityId: string, body: string): Promise<Comment>;
     /**
@@ -79,6 +85,11 @@ export declare class JiraTaskTracker implements TaskTracker {
     private ensureJpdProject;
     private issueLinks;
     private fetchTransitions;
+    /** Follows the v2 `_links.next` cursor so every attachment is read. */
+    private pageAttachments;
+    /** Confluence media nodes address a page's attachments by `fileId` within `contentId-<pageId>`. */
+    private mediaLookup;
+    private mapPageAttachment;
     private resolveMediaUuid;
     private extractMediaUuid;
     private resolveBlocksLinkType;

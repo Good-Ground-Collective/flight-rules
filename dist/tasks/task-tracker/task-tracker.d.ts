@@ -43,6 +43,13 @@ export declare const TechnicalDesignSchema: z.ZodObject<{
         createdAt: z.ZodString;
         updatedAt: z.ZodString;
     }, z.core.$strip>>;
+    attachments: z.ZodDefault<z.ZodArray<z.ZodObject<{
+        id: z.ZodString;
+        filename: z.ZodString;
+        mimeType: z.ZodString;
+        size: z.ZodOptional<z.ZodNumber>;
+        mediaUuid: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>>;
     metadata: z.ZodDefault<z.ZodObject<{
         tddId: z.ZodOptional<z.ZodNumber>;
         epicId: z.ZodOptional<z.ZodNumber>;
@@ -157,6 +164,13 @@ export declare const EpicSchema: z.ZodObject<{
             createdAt: z.ZodString;
             updatedAt: z.ZodString;
         }, z.core.$strip>>;
+        attachments: z.ZodDefault<z.ZodArray<z.ZodObject<{
+            id: z.ZodString;
+            filename: z.ZodString;
+            mimeType: z.ZodString;
+            size: z.ZodOptional<z.ZodNumber>;
+            mediaUuid: z.ZodOptional<z.ZodString>;
+        }, z.core.$strip>>>;
         metadata: z.ZodDefault<z.ZodObject<{
             tddId: z.ZodOptional<z.ZodNumber>;
             epicId: z.ZodOptional<z.ZodNumber>;
@@ -279,6 +293,10 @@ export type CreateInitiativeInput = z.infer<typeof CreateInitiativeInputSchema>;
 export type UpdateEpicInput = z.infer<typeof UpdateEpicInputSchema>;
 export type UpdateTicketInput = z.infer<typeof UpdateTicketInputSchema>;
 export type UpdateTechnicalDesignInput = z.infer<typeof UpdateTechnicalDesignInputSchema>;
+export interface UpdateTechnicalDesignOptions {
+    /** Attachments just uploaded to the design; trackers use their media ids in preference to a listing that may lag the upload. */
+    uploaded?: readonly Attachment[];
+}
 export type UpdateInitiativeInput = z.infer<typeof UpdateInitiativeInputSchema>;
 /** A tracker write completed, but a follow-up step failed; callers can reconcile by id. */
 export declare class TaskTrackerPartialWriteError extends Error {
@@ -316,11 +334,14 @@ export interface TaskTracker {
     linkEpicToInitiative(epicId: string, initiativeId: string): Promise<void>;
     createTechnicalDesign(input: CreateTechnicalDesignInput): Promise<TechnicalDesign>;
     /** Rewrites a design's title and/or body, keeping its metadata; an omitted field is left as it is. */
-    updateTechnicalDesign(id: string, input: UpdateTechnicalDesignInput): Promise<TechnicalDesign>;
+    updateTechnicalDesign(id: string, input: UpdateTechnicalDesignInput, options?: UpdateTechnicalDesignOptions): Promise<TechnicalDesign>;
     getTechnicalDesign(id: string): Promise<TechnicalDesign>;
     addComment(entityId: string, body: string): Promise<Comment>;
     addTechnicalDesignComment(id: string, body: string): Promise<Comment>;
     addAttachment(ticketId: string, filePath: string): Promise<Attachment>;
+    /** Throws when the backend cannot attach files to a design, before any write is made. */
+    assertTechnicalDesignAttachments(): void;
+    addTechnicalDesignAttachment(id: string, filePath: string): Promise<Attachment>;
     getUsers(): Promise<TrackerUser[]>;
     ping(options?: {
         signal?: AbortSignal;

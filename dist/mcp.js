@@ -2140,6 +2140,15 @@ var EvidenceUploadFailure = class extends Error {
     this.attachments = props.attachments;
   }
 };
+var TechnicalDesignAttachmentUploader = class {
+  tracker;
+  constructor(props) {
+    this.tracker = props.tracker;
+  }
+  addAttachment(entityId2, filePath) {
+    return this.tracker.addTechnicalDesignAttachment(entityId2, filePath);
+  }
+};
 var TrackerEvidenceService = class {
   tracker;
   constructor(props) {
@@ -2357,6 +2366,7 @@ var TechnicalDesignSchema = z21.object({
   url: z21.string().optional(),
   body: z21.string(),
   comments: z21.array(CommentSchema2),
+  attachments: z21.array(AttachmentSchema).default([]),
   metadata: EntityMetadataSchema.default({}),
   updatedAt: z21.string()
 });
@@ -3541,10 +3551,12 @@ var updateTicketInput = z24.object({
   attach: z24.array(z24.string().min(1)).default([])
 }).strict();
 var createTddInput = CreateTechnicalDesignInputSchema.extend({
-  allowLocalPaths: z24.boolean().default(false)
+  allowLocalPaths: z24.boolean().default(false),
+  attach: z24.array(z24.string().min(1)).default([])
 }).strict();
 var updateTddInput = UpdateTechnicalDesignInputSchema.extend({
-  allowLocalPaths: z24.boolean().default(false)
+  allowLocalPaths: z24.boolean().default(false),
+  attach: z24.array(z24.string().min(1)).default([])
 }).strict();
 var entityId = z24.string().min(1);
 var commentTddInput = z24.object({ id: entityId, body: z24.string(), allowLocalPaths: z24.boolean().default(false) }).strict();
@@ -3835,43 +3847,127 @@ var DefaultTrackerEntityOperations = class {
     }
   }
   async createTdd(input) {
-    this.assertPortable(input.body, input.allowLocalPaths);
-    const fields = CreateTechnicalDesignInputSchema.parse(input);
+    const { allowLocalPaths, attach, ...rest } = input;
+    const fields = CreateTechnicalDesignInputSchema.parse(rest);
+    const tracker = this.props.getTracker();
+    if (attach.length === 0) {
+      this.assertPortable(fields.body, allowLocalPaths);
+      try {
+        return await tracker.createTechnicalDesign(fields);
+      } catch (error) {
+        return this.partialTddCreate(error, fields);
+      }
+    }
+    tracker.assertTechnicalDesignAttachments();
+    const specs = this.trustedSpecs(attach);
+    const evidence = new TrackerEvidenceService({
+      tracker: new TechnicalDesignAttachmentUploader({ tracker })
+    });
+    const prepared = evidence.prepareBody({ body: fields.body, specs });
+    this.assertPortable(prepared, allowLocalPaths);
+    let id;
     try {
-      return await this.props.getTracker().createTechnicalDesign(fields);
+      const created = await tracker.createTechnicalDesign({ ...fields, body: prepared });
+      id = created.id;
+      const uploaded = await evidence.attach({ ticketId: id, body: fields.body, specs });
+      return await tracker.updateTechnicalDesign(
+        id,
+        { body: uploaded.body },
+        { uploaded: uploaded.attachments }
+      );
     } catch (error) {
-      if (!TaskTrackerPartialWriteError.isPartialWrite(error)) throw error;
+      const cause = error instanceof EvidenceUploadFailure ? error.cause : error;
+      if (id === void 0) return this.partialTddCreate(cause, fields);
       return {
         status: "partial",
-        data: { id: error.id, epicId: fields.epicId, body: fields.body },
-        error: { name: error.name, message: error.message }
+        data: { id, epicId: fields.epicId, body: fields.body },
+        error: {
+          name: cause instanceof Error ? cause.name : "Error",
+          message: cause instanceof Error ? cause.message : String(cause)
+        }
       };
     }
+  }
+  partialTddCreate(error, fields) {
+    if (!TaskTrackerPartialWriteError.isPartialWrite(error)) throw error;
+    return {
+      status: "partial",
+      data: { id: error.id, epicId: fields.epicId, body: fields.body },
+      error: { name: error.name, message: error.message }
+    };
+  }
+  trustedSpecs(attach) {
+    return attach.map((spec) => {
+      const parsed = AttachmentSpecSchema.parse(spec);
+      return `${this.trustedFilePath(parsed.path)}#${parsed.caption}`;
+    });
   }
   async commentOnTdd(input) {
     this.assertPortable(input.body, input.allowLocalPaths);
     return this.props.getTracker().addTechnicalDesignComment(input.id, input.body);
   }
   async editTdd(id, input) {
-    if (input.body === void 0 && input.title === void 0) {
+    const { allowLocalPaths, attach, ...rest } = input;
+    if (rest.body === void 0 && rest.title === void 0) {
       throw new Error("tdd edit needs a new title, a new body, or both");
     }
-    if (input.body !== void 0) this.assertPortable(input.body, input.allowLocalPaths);
-    const fields = UpdateTechnicalDesignInputSchema.parse(input);
+    if (attach.length > 0 && rest.body === void 0) {
+      throw new Error("tdd edit --attach needs a new body to reference the attached files");
+    }
+    let fields = UpdateTechnicalDesignInputSchema.parse(rest);
+    const tracker = this.props.getTracker();
+    if (fields.body === void 0) {
+      return this.updateTdd(id, fields);
+    }
+    if (attach.length === 0) {
+      this.assertPortable(fields.body, allowLocalPaths);
+      return this.updateTdd(id, fields);
+    }
+    tracker.assertTechnicalDesignAttachments();
+    const specs = this.trustedSpecs(attach);
+    const evidence = new TrackerEvidenceService({
+      tracker: new TechnicalDesignAttachmentUploader({ tracker })
+    });
+    this.assertPortable(evidence.prepareBody({ body: fields.body, specs }), allowLocalPaths);
+    let uploadedAttachments;
+    try {
+      const uploaded = await evidence.attach({ ticketId: id, body: fields.body, specs });
+      fields = { ...fields, body: uploaded.body };
+      uploadedAttachments = uploaded.attachments;
+    } catch (error) {
+      if (!(error instanceof EvidenceUploadFailure)) throw error;
+      if (error.attachments.length === 0) throw error.cause;
+      return this.partialTddEdit(id, fields, error.cause);
+    }
+    try {
+      return await this.props.getTracker().updateTechnicalDesign(id, fields, {
+        ...uploadedAttachments === void 0 ? {} : { uploaded: uploadedAttachments }
+      });
+    } catch (error) {
+      return this.partialTddEdit(id, fields, error);
+    }
+  }
+  async updateTdd(id, fields) {
     try {
       return await this.props.getTracker().updateTechnicalDesign(id, fields);
     } catch (error) {
       if (!TaskTrackerPartialWriteError.isPartialWrite(error)) throw error;
-      return {
-        status: "partial",
-        data: {
-          id,
-          ...fields.title === void 0 ? {} : { title: fields.title },
-          ...fields.body === void 0 ? {} : { body: fields.body }
-        },
-        error: { name: error.name, message: error.message }
-      };
+      return this.partialTddEdit(id, fields, error);
     }
+  }
+  partialTddEdit(id, fields, cause) {
+    return {
+      status: "partial",
+      data: {
+        id,
+        ...fields.title === void 0 ? {} : { title: fields.title },
+        ...fields.body === void 0 ? {} : { body: fields.body }
+      },
+      error: {
+        name: cause instanceof Error ? cause.name : "Error",
+        message: cause instanceof Error ? cause.message : String(cause)
+      }
+    };
   }
   assertPortable(body, allowLocalPaths = false) {
     portableContextGuard.assertPortable(body, { allowLocalPaths });
@@ -5640,6 +5736,7 @@ var GitHubTaskTracker = class {
       ...discussion.url !== void 0 ? { url: discussion.url } : {},
       body: discussion.body,
       comments: [],
+      attachments: [],
       metadata: this.bodyMetadata.parse(discussion.body),
       updatedAt: discussion.updatedAt
     };
@@ -5705,9 +5802,21 @@ var GitHubTaskTracker = class {
         createdAt: n.createdAt,
         updatedAt: n.updatedAt
       })),
+      attachments: [],
       metadata,
       updatedAt: discussion.updatedAt
     };
+  }
+  // eslint-disable-next-line preflight/no-throw-helpers -- a capability stub's whole body is the throw
+  assertTechnicalDesignAttachments() {
+    throw new UnsupportedTrackerOperationError({
+      tracker: "GitHub",
+      operation: "attaching files to a technical design",
+      remedy: "GitHub Discussions have no attachment API; use --tracker jira, or reference an image by URL in the body"
+    });
+  }
+  async addTechnicalDesignAttachment() {
+    return this.assertTechnicalDesignAttachments();
   }
   async addTechnicalDesignComment(id, body) {
     const fetchData = await this.gql(
@@ -5987,6 +6096,7 @@ import { z as z37 } from "zod";
 var maxRetries2 = 4;
 var defaultRetryAfterSeconds2 = 2;
 var maxBackoffMs2 = 3e4;
+var attachmentXsrfHeader2 = "no-check";
 var ConfluenceErrorBodySchema = z37.object({
   errors: z37.array(z37.object({ title: z37.string().optional(), detail: z37.string().optional() })).optional().catch(void 0),
   message: z37.string().optional()
@@ -5994,10 +6104,12 @@ var ConfluenceErrorBodySchema = z37.object({
 var ConfluenceClient = class {
   siteBaseUrl;
   baseUrl;
+  legacyBaseUrl;
   authHeader;
   constructor(config) {
     this.siteBaseUrl = `https://${config.host}/wiki`;
     this.baseUrl = `${this.siteBaseUrl}/api/v2`;
+    this.legacyBaseUrl = `${this.siteBaseUrl}/rest/api`;
     this.authHeader = `Basic ${Buffer.from(`${config.email}:${config.token}`).toString("base64")}`;
   }
   async request(method, path, body, params) {
@@ -6007,6 +6119,28 @@ var ConfluenceClient = class {
       method,
       headers: { Authorization: this.authHeader, "Content-Type": "application/json", Accept: "application/json" },
       ...body !== void 0 ? { body: JSON.stringify(body) } : {}
+    });
+    if (!res.ok) await this.throwApiError(res);
+    const text = await res.text();
+    const data = text.length > 0 ? JSON.parse(text) : void 0;
+    return data;
+  }
+  /**
+   * Uploads files as page attachments. v2 has no upload endpoint, so this targets the v1
+   * `/rest/api` path, which demands the `X-Atlassian-Token: no-check` XSRF opt-out; `Content-Type`
+   * is left unset so undici writes the multipart boundary itself.
+   */
+  async upload(path, files) {
+    const form = new FormData();
+    files.forEach((file) => form.append("file", file, file.name));
+    const res = await this.fetchWithRetry(`${this.legacyBaseUrl}${path}`, {
+      method: "PUT",
+      headers: {
+        Authorization: this.authHeader,
+        Accept: "application/json",
+        "X-Atlassian-Token": attachmentXsrfHeader2
+      },
+      body: form
     });
     if (!res.ok) await this.throwApiError(res);
     const text = await res.text();
@@ -7092,6 +7226,19 @@ var JiraUploadedAttachmentSchema = z39.object({
   size: z39.number().optional()
 });
 var JiraUploadedAttachmentsSchema = z39.array(JiraUploadedAttachmentSchema);
+var ConfluenceUploadedAttachmentsSchema = z39.object({
+  results: z39.array(
+    z39.object({
+      id: z39.union([z39.string(), z39.number()]).transform(String),
+      title: z39.string(),
+      extensions: z39.object({
+        mediaType: z39.string().optional(),
+        fileSize: z39.number().optional(),
+        fileId: z39.string().optional()
+      }).optional()
+    })
+  )
+});
 var adfDocValidator = (value) => typeof value === "object" && value !== null && "type" in value && value.type === "doc" && "content" in value && Array.isArray(value.content) && value.content.every(
   (node) => typeof node === "object" && node !== null && "type" in node && typeof node.type === "string"
 );
@@ -7385,7 +7532,7 @@ var JiraTaskTracker = class {
     }
     return this.mapTechnicalDesign(page, input.body, propertyValue);
   }
-  async updateTechnicalDesign(id, input) {
+  async updateTechnicalDesign(id, input, options = {}) {
     const current = await this.confluence.request("GET", `/pages/${id}`, void 0, {
       "body-format": "atlas_doc_format"
     });
@@ -7394,7 +7541,8 @@ var JiraTaskTracker = class {
     if (input.body === void 0 && existingAdf === void 0) {
       throw new Error(`Page ${id} has no ADF body to keep; pass a body with the new title`);
     }
-    const value = input.body === void 0 ? existingAdf ?? "" : JSON.stringify(this.bodyFormat.toAdf(this.withoutTitleHeading(input.body, title)));
+    const media = input.body === void 0 ? {} : this.mediaLookup(id, await this.pageAttachments(id), options.uploaded);
+    const value = input.body === void 0 ? existingAdf ?? "" : JSON.stringify(this.bodyFormat.toAdf(this.withoutTitleHeading(input.body, title), media));
     await this.confluence.request("PUT", `/pages/${id}`, {
       id,
       status: "current",
@@ -7409,15 +7557,48 @@ var JiraTaskTracker = class {
     }
   }
   async getTechnicalDesign(id) {
-    const [page, property, comments] = await Promise.all([
+    const [page, property, comments, attachments] = await Promise.all([
       this.confluence.request("GET", `/pages/${id}`, void 0, {
         "body-format": "atlas_doc_format"
       }),
       this.tddMetadataProperty(id),
-      this.footerComments(id)
+      this.footerComments(id),
+      this.pageAttachments(id)
     ]);
-    const body = this.readAdfBody(page) ?? await this.readStorageBody(id);
-    return this.mapTechnicalDesign(page, body, property?.value ?? {}, comments);
+    const body = this.readAdfBody(page, this.mediaLookup(id, attachments)) ?? await this.readStorageBody(id);
+    return this.mapTechnicalDesign(
+      page,
+      body,
+      property?.value ?? {},
+      comments,
+      attachments.map((attachment) => this.mapPageAttachment(attachment))
+    );
+  }
+  assertTechnicalDesignAttachments() {
+  }
+  /**
+   * Uploads a file to a Confluence page. v2 has no upload endpoint, so this goes through v1;
+   * the response's `extensions.fileId` is the media id an inline ADF node addresses it by.
+   */
+  async addTechnicalDesignAttachment(id, filePath) {
+    const filename = basename3(filePath);
+    const file = new File([readFileSync9(filePath)], filename, {
+      type: this.mimeTypes.forFilename(filename)
+    });
+    const uploaded = ConfluenceUploadedAttachmentsSchema.parse(
+      await this.confluence.upload(`/content/${id}/child/attachment`, [file])
+    );
+    const attachment = uploaded.results[0];
+    if (attachment === void 0) {
+      throw new Error(`Confluence accepted the upload of ${filename} to page ${id} but returned no attachment`);
+    }
+    return {
+      id: attachment.id,
+      filename: attachment.title,
+      mimeType: attachment.extensions?.mediaType ?? file.type,
+      ...attachment.extensions?.fileSize !== void 0 ? { size: attachment.extensions.fileSize } : {},
+      ...attachment.extensions?.fileId !== void 0 ? { mediaUuid: attachment.extensions.fileId } : {}
+    };
   }
   async addTechnicalDesignComment(id, body) {
     const created = await this.confluence.request(
@@ -7596,6 +7777,46 @@ var JiraTaskTracker = class {
   }
   async fetchTransitions(ticketId) {
     return this.client.request("GET", `/issue/${ticketId}/transitions`);
+  }
+  /** Follows the v2 `_links.next` cursor so every attachment is read. */
+  async pageAttachments(id) {
+    const results = [];
+    let cursor;
+    do {
+      const response = await this.confluence.request(
+        "GET",
+        `/pages/${id}/attachments`,
+        void 0,
+        { limit: 250, ...cursor !== void 0 ? { cursor } : {} }
+      );
+      results.push(...response.results);
+      const next = response._links?.next;
+      cursor = next === void 0 ? void 0 : new URL(next, this.confluence.siteBaseUrl).searchParams.get("cursor") ?? void 0;
+    } while (cursor !== void 0);
+    return results;
+  }
+  /** Confluence media nodes address a page's attachments by `fileId` within `contentId-<pageId>`. */
+  mediaLookup(pageId, attachments, uploaded = []) {
+    const lookup = {};
+    const collection = `contentId-${pageId}`;
+    for (const attachment of attachments) {
+      if (attachment.fileId === void 0 || attachment.fileId === "") continue;
+      lookup[attachment.title] = { mediaUuid: attachment.fileId, collection };
+    }
+    for (const attachment of uploaded) {
+      if (attachment.mediaUuid === void 0 || attachment.mediaUuid === "") continue;
+      lookup[attachment.filename] = { mediaUuid: attachment.mediaUuid, collection };
+    }
+    return lookup;
+  }
+  mapPageAttachment(attachment) {
+    return {
+      id: String(attachment.id),
+      filename: attachment.title,
+      mimeType: attachment.mediaType ?? "application/octet-stream",
+      ...attachment.fileSize !== void 0 ? { size: attachment.fileSize } : {},
+      ...attachment.fileId !== void 0 ? { mediaUuid: attachment.fileId } : {}
+    };
   }
   async resolveMediaUuid(attachmentId) {
     const location = await this.client.locationFor(`/attachment/content/${attachmentId}`);
@@ -7792,12 +8013,12 @@ var JiraTaskTracker = class {
     return body.slice(match[0].length).replace(/^\s*\n/, "");
   }
   /** Converts the ADF body to markdown, or returns undefined when it is missing or unreadable. */
-  readAdfBody(page) {
+  readAdfBody(page, media = {}) {
     const raw = page.body?.atlas_doc_format?.value;
     if (raw === void 0) return void 0;
     try {
       const doc = JSON.parse(raw);
-      if (adfDocValidator(doc)) return this.bodyFormat.toMarkdown(doc.content);
+      if (adfDocValidator(doc)) return this.bodyFormat.toMarkdown(doc.content, media);
     } catch {
     }
     return void 0;
@@ -7809,7 +8030,7 @@ var JiraTaskTracker = class {
     });
     return page.body?.storage?.value ?? "";
   }
-  mapTechnicalDesign(page, body, propertyValue, comments = []) {
+  mapTechnicalDesign(page, body, propertyValue, comments = [], attachments = []) {
     const { epicId: rawEpicId, ...rest } = propertyValue;
     const metadata = EntityMetadataSchema.parse(rest);
     const epicId = typeof rawEpicId === "string" ? rawEpicId : rawEpicId !== void 0 ? String(rawEpicId) : "";
@@ -7820,6 +8041,7 @@ var JiraTaskTracker = class {
       ...webui !== void 0 ? { url: `${this.confluence.siteBaseUrl}${webui}` } : {},
       body,
       comments,
+      attachments,
       metadata,
       updatedAt: page.version?.createdAt ?? ""
     };

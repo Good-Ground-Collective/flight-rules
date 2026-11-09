@@ -30,8 +30,12 @@ export declare class DefaultTrackerEntityOperations implements TrackerEntityOper
     private createTicket;
     private editTicket;
     private createTdd;
+    private partialTddCreate;
+    private trustedSpecs;
     private commentOnTdd;
     private editTdd;
+    private updateTdd;
+    private partialTddEdit;
     private assertPortable;
     private trustedFilePath;
 }

@@ -2212,6 +2212,15 @@ var EvidenceUploadFailure = class extends Error {
     this.attachments = props.attachments;
   }
 };
+var TechnicalDesignAttachmentUploader = class {
+  tracker;
+  constructor(props) {
+    this.tracker = props.tracker;
+  }
+  addAttachment(entityId2, filePath) {
+    return this.tracker.addTechnicalDesignAttachment(entityId2, filePath);
+  }
+};
 var TrackerEvidenceService = class {
   tracker;
   constructor(props) {
@@ -2429,6 +2438,7 @@ var TechnicalDesignSchema = z28.object({
   url: z28.string().optional(),
   body: z28.string(),
   comments: z28.array(CommentSchema),
+  attachments: z28.array(AttachmentSchema).default([]),
   metadata: EntityMetadataSchema.default({}),
   updatedAt: z28.string()
 });
@@ -3613,10 +3623,12 @@ var updateTicketInput = z31.object({
   attach: z31.array(z31.string().min(1)).default([])
 }).strict();
 var createTddInput = CreateTechnicalDesignInputSchema.extend({
-  allowLocalPaths: z31.boolean().default(false)
+  allowLocalPaths: z31.boolean().default(false),
+  attach: z31.array(z31.string().min(1)).default([])
 }).strict();
 var updateTddInput = UpdateTechnicalDesignInputSchema.extend({
-  allowLocalPaths: z31.boolean().default(false)
+  allowLocalPaths: z31.boolean().default(false),
+  attach: z31.array(z31.string().min(1)).default([])
 }).strict();
 var entityId = z31.string().min(1);
 var commentTddInput = z31.object({ id: entityId, body: z31.string(), allowLocalPaths: z31.boolean().default(false) }).strict();
@@ -3907,43 +3919,127 @@ var DefaultTrackerEntityOperations = class {
     }
   }
   async createTdd(input) {
-    this.assertPortable(input.body, input.allowLocalPaths);
-    const fields = CreateTechnicalDesignInputSchema.parse(input);
+    const { allowLocalPaths, attach, ...rest } = input;
+    const fields = CreateTechnicalDesignInputSchema.parse(rest);
+    const tracker = this.props.getTracker();
+    if (attach.length === 0) {
+      this.assertPortable(fields.body, allowLocalPaths);
+      try {
+        return await tracker.createTechnicalDesign(fields);
+      } catch (error) {
+        return this.partialTddCreate(error, fields);
+      }
+    }
+    tracker.assertTechnicalDesignAttachments();
+    const specs = this.trustedSpecs(attach);
+    const evidence = new TrackerEvidenceService({
+      tracker: new TechnicalDesignAttachmentUploader({ tracker })
+    });
+    const prepared = evidence.prepareBody({ body: fields.body, specs });
+    this.assertPortable(prepared, allowLocalPaths);
+    let id;
     try {
-      return await this.props.getTracker().createTechnicalDesign(fields);
+      const created = await tracker.createTechnicalDesign({ ...fields, body: prepared });
+      id = created.id;
+      const uploaded = await evidence.attach({ ticketId: id, body: fields.body, specs });
+      return await tracker.updateTechnicalDesign(
+        id,
+        { body: uploaded.body },
+        { uploaded: uploaded.attachments }
+      );
     } catch (error) {
-      if (!TaskTrackerPartialWriteError.isPartialWrite(error)) throw error;
+      const cause = error instanceof EvidenceUploadFailure ? error.cause : error;
+      if (id === void 0) return this.partialTddCreate(cause, fields);
       return {
         status: "partial",
-        data: { id: error.id, epicId: fields.epicId, body: fields.body },
-        error: { name: error.name, message: error.message }
+        data: { id, epicId: fields.epicId, body: fields.body },
+        error: {
+          name: cause instanceof Error ? cause.name : "Error",
+          message: cause instanceof Error ? cause.message : String(cause)
+        }
       };
     }
+  }
+  partialTddCreate(error, fields) {
+    if (!TaskTrackerPartialWriteError.isPartialWrite(error)) throw error;
+    return {
+      status: "partial",
+      data: { id: error.id, epicId: fields.epicId, body: fields.body },
+      error: { name: error.name, message: error.message }
+    };
+  }
+  trustedSpecs(attach) {
+    return attach.map((spec) => {
+      const parsed = AttachmentSpecSchema.parse(spec);
+      return `${this.trustedFilePath(parsed.path)}#${parsed.caption}`;
+    });
   }
   async commentOnTdd(input) {
     this.assertPortable(input.body, input.allowLocalPaths);
     return this.props.getTracker().addTechnicalDesignComment(input.id, input.body);
   }
   async editTdd(id, input) {
-    if (input.body === void 0 && input.title === void 0) {
+    const { allowLocalPaths, attach, ...rest } = input;
+    if (rest.body === void 0 && rest.title === void 0) {
       throw new Error("tdd edit needs a new title, a new body, or both");
     }
-    if (input.body !== void 0) this.assertPortable(input.body, input.allowLocalPaths);
-    const fields = UpdateTechnicalDesignInputSchema.parse(input);
+    if (attach.length > 0 && rest.body === void 0) {
+      throw new Error("tdd edit --attach needs a new body to reference the attached files");
+    }
+    let fields = UpdateTechnicalDesignInputSchema.parse(rest);
+    const tracker = this.props.getTracker();
+    if (fields.body === void 0) {
+      return this.updateTdd(id, fields);
+    }
+    if (attach.length === 0) {
+      this.assertPortable(fields.body, allowLocalPaths);
+      return this.updateTdd(id, fields);
+    }
+    tracker.assertTechnicalDesignAttachments();
+    const specs = this.trustedSpecs(attach);
+    const evidence = new TrackerEvidenceService({
+      tracker: new TechnicalDesignAttachmentUploader({ tracker })
+    });
+    this.assertPortable(evidence.prepareBody({ body: fields.body, specs }), allowLocalPaths);
+    let uploadedAttachments;
+    try {
+      const uploaded = await evidence.attach({ ticketId: id, body: fields.body, specs });
+      fields = { ...fields, body: uploaded.body };
+      uploadedAttachments = uploaded.attachments;
+    } catch (error) {
+      if (!(error instanceof EvidenceUploadFailure)) throw error;
+      if (error.attachments.length === 0) throw error.cause;
+      return this.partialTddEdit(id, fields, error.cause);
+    }
+    try {
+      return await this.props.getTracker().updateTechnicalDesign(id, fields, {
+        ...uploadedAttachments === void 0 ? {} : { uploaded: uploadedAttachments }
+      });
+    } catch (error) {
+      return this.partialTddEdit(id, fields, error);
+    }
+  }
+  async updateTdd(id, fields) {
     try {
       return await this.props.getTracker().updateTechnicalDesign(id, fields);
     } catch (error) {
       if (!TaskTrackerPartialWriteError.isPartialWrite(error)) throw error;
-      return {
-        status: "partial",
-        data: {
-          id,
-          ...fields.title === void 0 ? {} : { title: fields.title },
-          ...fields.body === void 0 ? {} : { body: fields.body }
-        },
-        error: { name: error.name, message: error.message }
-      };
+      return this.partialTddEdit(id, fields, error);
     }
+  }
+  partialTddEdit(id, fields, cause) {
+    return {
+      status: "partial",
+      data: {
+        id,
+        ...fields.title === void 0 ? {} : { title: fields.title },
+        ...fields.body === void 0 ? {} : { body: fields.body }
+      },
+      error: {
+        name: cause instanceof Error ? cause.name : "Error",
+        message: cause instanceof Error ? cause.message : String(cause)
+      }
+    };
   }
   assertPortable(body, allowLocalPaths = false) {
     portableContextGuard.assertPortable(body, { allowLocalPaths });

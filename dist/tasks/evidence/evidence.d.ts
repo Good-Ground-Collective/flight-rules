@@ -45,8 +45,18 @@ export declare class EvidenceUploadFailure extends Error {
         attachments: EvidenceAttachment[];
     });
 }
+export interface AttachmentUploader {
+    addAttachment(entityId: string, filePath: string): Promise<Attachment>;
+}
+export declare class TechnicalDesignAttachmentUploader implements AttachmentUploader {
+    private readonly tracker;
+    constructor(props: {
+        tracker: Pick<TaskTracker, "addTechnicalDesignAttachment">;
+    });
+    addAttachment(entityId: string, filePath: string): Promise<Attachment>;
+}
 export interface TrackerEvidenceServiceProps {
-    tracker: TaskTracker;
+    tracker: AttachmentUploader;
 }
 /**
  * Uploads every `--attach` spec, then rewrites the body's local `![alt](./file)`
