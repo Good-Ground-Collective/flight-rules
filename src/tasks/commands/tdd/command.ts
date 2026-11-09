@@ -17,6 +17,13 @@ type CreateTddOptions = {
   allowLocalPaths?: boolean;
 };
 
+type EditTddOptions = {
+  title?: string;
+  body?: string;
+  bodyFile?: string;
+  allowLocalPaths?: boolean;
+};
+
 export function createTddCommand(
   getTracker: () => TaskTracker,
   registry?: OperationRegistry,
@@ -51,6 +58,33 @@ export function createTddCommand(
           title: opts.title,
           body,
           epicId: opts.epicId,
+          allowLocalPaths: opts.allowLocalPaths ?? false,
+        },
+        z.unknown(),
+      );
+      process.stdout.write(JSON.stringify(result) + "\n");
+    });
+
+  tdd
+    .command("edit")
+    .exitOverride()
+    .argument("<id>", "tdd id")
+    .option("--title <title>", "new tdd title (unchanged if omitted)")
+    .option("--body <body>", "new tdd body (or use --body-file)")
+    .option("--body-file <path>", "read the new tdd body from a file")
+    .option(
+      "--allow-local-paths",
+      "accept machine-local paths in the body (see docs/layered-body-format.md)",
+    )
+    .action(async (id: string, opts: EditTddOptions) => {
+      const hasBody = opts.body !== undefined || opts.bodyFile !== undefined;
+      const body = hasBody ? resolveBody({ body: opts.body, bodyFile: opts.bodyFile }) : undefined;
+      const result = await operations.invoke(
+        "tdd-edit",
+        {
+          id,
+          ...(opts.title !== undefined ? { title: opts.title } : {}),
+          ...(body !== undefined ? { body } : {}),
           allowLocalPaths: opts.allowLocalPaths ?? false,
         },
         z.unknown(),

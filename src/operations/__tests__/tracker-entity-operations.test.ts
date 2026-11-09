@@ -93,6 +93,7 @@ const makeTracker = (): TaskTracker =>
     getInitiative: vi.fn().mockResolvedValue(initiative),
     linkEpicToInitiative: vi.fn(),
     createTechnicalDesign: vi.fn().mockResolvedValue(tdd),
+    updateTechnicalDesign: vi.fn().mockResolvedValue(tdd),
     getTechnicalDesign: vi.fn().mockResolvedValue(tdd),
     addComment: vi.fn(),
     addAttachment: vi
@@ -496,6 +497,17 @@ describe("tracker entity operations", () => {
       data: { id: "TICKET-1", attachments: [], body: "Edited ticket" },
     },
     {
+      id: "tdd-edit",
+      setup: (tracker: TaskTracker) =>
+        vi
+          .mocked(tracker.updateTechnicalDesign)
+          .mockRejectedValueOnce(
+            new TaskTrackerPartialWriteError({ id: "TDD-1", cause: new Error("read failed") }),
+          ),
+      input: { id: "TDD-1", title: "New title", body: "Edited design" },
+      data: { id: "TDD-1", title: "New title", body: "Edited design" },
+    },
+    {
       id: "tdd-create",
       setup: (tracker: TaskTracker) =>
         vi.mocked(tracker.createTechnicalDesign).mockRejectedValueOnce(
@@ -569,5 +581,18 @@ describe("tracker entity operations", () => {
       name: "OperationInputError",
     });
     expect(tracker.createEpic).not.toHaveBeenCalled();
+  });
+
+  it.each(["", "   "])("rejects an empty tdd edit title %j before tracker mutation", async (title) => {
+    const tracker = makeTracker();
+    const registry = new DefaultTrackerEntityOperations({
+      getTracker: () => tracker,
+      cwd: makeRoot(),
+    }).registry(new LaunchOperationAccessPolicy({ allowedEffects: ["write", "network"] }));
+
+    await expect(registry.invoke("tdd-edit", { id: "TDD-1", title })).rejects.toMatchObject({
+      name: "OperationInputError",
+    });
+    expect(tracker.updateTechnicalDesign).not.toHaveBeenCalled();
   });
 });

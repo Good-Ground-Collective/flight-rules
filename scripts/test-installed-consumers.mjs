@@ -435,7 +435,7 @@ try {
       try {
         await client.connect(transport);
         const { tools } = await client.listTools();
-        assert.equal(tools.length, 53, binary + ' (' + mode + ')');
+        assert.equal(tools.length, 54, binary + ' (' + mode + ')');
         assert.ok(tools.some(({ name }) => name === 'ticket-create'));
         for (const tool of tools) {
           const validInput = sampleValue(tool.inputSchema);
@@ -543,7 +543,7 @@ console.log(JSON.stringify({ routeContractCalls, eofResults }));
     },
     claudeAgentWorker: JSON.parse(claudeAgentProof),
     mcpClients: {
-      toolsPerBinary: 53,
+      toolsPerBinary: 54,
       packedAndRelocatedClis: relocatedArgs.length,
       validAndInvalidInputsPerRoute: true,
       ...mcpMetrics,

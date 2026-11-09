@@ -19,6 +19,7 @@ import {
   TicketSchema,
   UpdateEpicInputSchema,
   UpdateInitiativeInputSchema,
+  UpdateTechnicalDesignInputSchema,
   UpdateTicketInputSchema,
   type TaskTracker,
   TaskTrackerPartialWriteError,
@@ -75,6 +76,9 @@ const updateTicketInput = z
   })
   .strict();
 const createTddInput = CreateTechnicalDesignInputSchema.extend({
+  allowLocalPaths: z.boolean().default(false),
+}).strict();
+const updateTddInput = UpdateTechnicalDesignInputSchema.extend({
   allowLocalPaths: z.boolean().default(false),
 }).strict();
 const entityId = z.string().min(1);
@@ -206,6 +210,15 @@ export class DefaultTrackerEntityOperations implements TrackerEntityOperations {
         createTddInput,
         z.union([TechnicalDesignSchema, partialTddCreate]),
         (input) => this.createTdd(input),
+      ),
+      this.descriptor(
+        "tdd-edit",
+        "Update a technical design's title and/or body.",
+        ["write", "network"],
+        ["tdd", "edit"],
+        z.object({ id: entityId, ...updateTddInput.shape }).strict(),
+        z.union([TechnicalDesignSchema, partialEntityWrite]),
+        ({ id, ...input }) => this.editTdd(id, input),
       ),
     ];
   }
@@ -389,6 +402,28 @@ export class DefaultTrackerEntityOperations implements TrackerEntityOperations {
       return {
         status: "partial" as const,
         data: { id: error.id, epicId: fields.epicId, body: fields.body },
+        error: { name: error.name, message: error.message },
+      };
+    }
+  }
+
+  private async editTdd(id: string, input: z.infer<typeof updateTddInput>) {
+    if (input.body === undefined && input.title === undefined) {
+      throw new Error("tdd edit needs a new title, a new body, or both");
+    }
+    if (input.body !== undefined) this.assertPortable(input.body, input.allowLocalPaths);
+    const fields = UpdateTechnicalDesignInputSchema.parse(input);
+    try {
+      return await this.props.getTracker().updateTechnicalDesign(id, fields);
+    } catch (error) {
+      if (!TaskTrackerPartialWriteError.isPartialWrite(error)) throw error;
+      return {
+        status: "partial" as const,
+        data: {
+          id,
+          ...(fields.title === undefined ? {} : { title: fields.title }),
+          ...(fields.body === undefined ? {} : { body: fields.body }),
+        },
         error: { name: error.name, message: error.message },
       };
     }
