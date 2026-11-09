@@ -176,7 +176,7 @@ if (!appVersion || !createFlightRules({ cwd: process.cwd(), env: {} }) || !revie
       archive,
       "deepagents@1.15.0",
       "langchain@1.5.16",
-      "@langchain/core@1.2.18",
+      "@langchain/core@1.3.5",
       "@langchain/langgraph@1.5.0",
       "@anthropic-ai/claude-agent-sdk@0.3.316",
       "@anthropic-ai/sdk@0.93.0",
