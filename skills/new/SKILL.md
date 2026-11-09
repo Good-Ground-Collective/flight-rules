@@ -171,8 +171,10 @@ Read each node back with its `get` command, as someone who never saw this conver
 
 Report the ids and links, then name the next step:
 
-- **Initiative or epic:** `/break-down-work <id>` takes it one level down, grounded in the code.
-- **Ticket:** `/break-down-work <id>` adds the code-grounded Guided Walkthrough; then `/execute-work <id>` builds it.
+- **Initiative or epic:** `/break-down-work <type> <id>` (for example `/break-down-work epic 31`) takes it one level down, grounded in the code. When the node already has children, it matches them against the sketch and creates only the missing ones.
+- **Ticket:** `/break-down-work ticket <id>` adds the code-grounded Guided Walkthrough; then `/execute-work <id>` builds it.
+
+Always name the type: the same id can mean different things to different getters.
 
 Stop there. Don't break the work down in this skill.
 

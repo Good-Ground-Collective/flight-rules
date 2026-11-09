@@ -50,15 +50,28 @@ A cross-epic edge is allowed only when it is absolutely necessary, and only with
 Two entry modes:
 
 - **RFC file path** (the first hop): a human-authored `rfcs/RFC-NNN.md`. Read its frontmatter `size` and its sections. The RFC file is an input, not a reference. Carry its Problem, Solution, and Acceptance Criteria into the bodies you emit. Link the RFC only when it is merged to a default branch, and then by its GitHub URL, never by its path.
-- **Tracker node id** (a node written by `/new`, or every subsequent hop): an id like `31`. Resolve it through the CLI — never call GitHub/Jira directly:
+- **Tracker node** (a node written by `/new`, or every subsequent hop): a type and an id, such as `epic 31`. Resolve it through the CLI with the getter for its type — never call GitHub/Jira directly:
 
   ```bash
+  flight-rules initiative get <id>
   flight-rules epic get <id>
+  flight-rules ticket get <id>
   ```
 
-  The CLI's tracker abstraction handles which system it is. Read `size` from the returned top-level `size` field (derived from the entity's kind) and the sections from the body. **An emitted node's layered body is the RFC for the next hop** — that is what makes the recursion clean.
+  The type decides the getter, and the getter decides the returned `size`; `epic get` reports `epic` for any id, and on GitHub an initiative (a milestone) and an issue can share a number. So never infer the type from a getter's result. When you are given a bare id, ask which type it is. Read the sections from the body. **An emitted node's layered body is the RFC for the next hop** — that is what makes the recursion clean.
 
-If the input is ambiguous, resolve a real file path as an RFC file; otherwise treat it as a node id.
+If the input is ambiguous, resolve a real file path as an RFC file; otherwise treat it as a tracker node and settle its type first.
+
+### Existing children
+
+A tracker node may already have children, for example an epic that `/new` refined after an earlier breakdown. `epic get` lists them in `childIssues`, and `initiative get` lists its `epics`. Before deriving research briefs, match each sketch item to an existing child:
+
+- **Matched and done:** leave it alone.
+- **Matched and open:** propose an update with `ticket edit` or `epic edit` only when the sketch changed what it must do.
+- **Unmatched sketch item:** a candidate new child.
+- **Child with no sketch item:** flag it to the human; never close or delete it.
+
+Research only the new and changed items. The preview in step 7 shows the matching, and only new children the human approves get created.
 
 ## Calling Model (read this before you count invocations)
 

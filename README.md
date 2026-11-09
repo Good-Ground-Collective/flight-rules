@@ -13,7 +13,7 @@ Every stage writes to your tracker (GitHub Issues or Jira) through one CLI, so t
 ```
 
 1. **`/new`** interviews you about what you want to build. It asks one question at a time, each with a recommended answer, until you both agree on the problem, the must-haves, what can wait, what's out of scope, and the traps. When there's a lot to settle, it opens an interactive page with diagrams, mocks and questions you can answer with a toggle or free text. It sizes the work as a ticket, epic or initiative and writes it to the tracker. Point it at an existing initiative, epic or ticket to add to it instead.
-2. **`/break-down-work <id>`** takes a node one level down (initiative → epics, epic → tickets), researches the code for each piece, and writes tickets that another engineer could build with nothing but the ticket.
+2. **`/break-down-work <type> <id>`** (e.g. `epic 31`) takes a node one level down (initiative → epics, epic → tickets), researches the code for each piece, and writes tickets that another engineer could build with nothing but the ticket.
 3. **`/execute-work <id>`** builds one ticket: branch, implement, verify each acceptance criterion with a separate agent, open the PR, then review and fix it. **`/execute-wave <id>`** does that for every ticket in an epic that nothing is blocking, then stops so you can merge.
 4. **`/guided-code-review`** walks a human reviewer through a PR. **`/remediate-review`** works the open review threads.
 5. **`/reproduce-bug`** and **`/verify-ticket`** reproduce a bug or confirm a fix in the running product, with screenshots and a recording.
@@ -72,7 +72,8 @@ Credentials live in your environment, never in flight-rules config files.
 
 | Variable | When you need it |
 | --- | --- |
-| `GITHUB_TOKEN` | GitHub tracker. Needs `repo` scope, and `read:org` for listing reviewers. `gh` handles PRs with its own login. |
+| `GITHUB_TOKEN` | GitHub tracker. Needs `repo` scope, and `read:org` for listing reviewers. `gh` also uses it when set, ahead of its own login, so PRs are opened as the token's account. |
+| `GH_TOKEN` | Optional. Takes precedence over `GITHUB_TOKEN` for `gh` (PRs and reviews) only. Set it when PRs should come from a different account than tracker writes. |
 | `JIRA_TOKEN` | Jira tracker. An Atlassian API token, which also covers Jira Product Discovery and Confluence. `JIRA_API_TOKEN` or `JIRA_API_KEY` work too. |
 | `JIRA_EMAIL` | Optional. The Atlassian account that owns the token. Setup stores it in config as `jiraEmail`; the variable overrides that. |
 | `JIRA_HOST` | Optional. Overrides the `jiraHost` config value, e.g. `acme.atlassian.net`. |
