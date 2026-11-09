@@ -713,6 +713,12 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
     return source.slice(node.position?.start.offset ?? 0, node.position?.end.offset ?? 0)
   }
 
+  /** A Smart Link has no text; it renders as a plain link to attrs.url, or nothing without one. */
+  private smartLinkToMarkdown(node: AdfNode): string {
+    const url = node.attrs?.['url']
+    return typeof url === 'string' && url !== '' ? this.linkToMarkdown(url, { type: 'link', attrs: { href: url } }) : ''
+  }
+
   private blockToMarkdown(node: AdfNode, names: Map<string, string>): string {
     switch (node.type) {
       case 'heading': {
@@ -762,6 +768,10 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
         return (node.content ?? []).map((child) => this.blockToMarkdown(child, names)).join('\n\n')
       case 'media':
         return this.mediaReference(node, names)
+      // Block Smart Links keep their destination in attrs.url, like inlineCard, and read back as a link paragraph.
+      case 'blockCard':
+      case 'embedCard':
+        return this.smartLinkToMarkdown(node)
       default:
         // unknown blocks (layoutSection, …) flatten so UI-authored content never throws
         return node.text ?? this.render(node.content ?? [], names)
@@ -919,8 +929,14 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
       if (node.type === 'inlineCard') {
         // A Smart Link keeps its destination in attrs.url and has no text; it reads back as a plain link to that url.
         closeFrom(0)
-        const url = node.attrs?.['url']
-        if (typeof url === 'string' && url !== '') out += this.linkToMarkdown(url, { type: 'link', attrs: { href: url } })
+        out += this.smartLinkToMarkdown(node)
+        continue
+      }
+      if (node.type === 'status') {
+        // A status lozenge keeps its label in attrs.text; it reads back as bold bracketed text.
+        closeFrom(0)
+        const label = node.attrs?.['text']
+        if (typeof label === 'string' && label.trim() !== '') out += `**[${this.escapeText(label.trim(), false)}]**`
         continue
       }
       if (node.type === 'hardBreak') {

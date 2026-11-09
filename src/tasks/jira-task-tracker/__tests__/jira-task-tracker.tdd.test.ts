@@ -155,6 +155,22 @@ describe('JiraTaskTracker.getTechnicalDesign', () => {
     expect((await makeTracker().getTechnicalDesign('111')).body).toContain('https://acme.atlassian.net/browse/PROJ-9')
   })
 
+  it('keeps a blockCard url and a status label without a storage request', async () => {
+    const adf = {
+      type: 'doc',
+      version: 1,
+      content: [
+        { type: 'paragraph', content: [{ type: 'text', text: 'state ' }, { type: 'status', attrs: { text: 'BLOCKED', color: 'red' } }] },
+        { type: 'blockCard', attrs: { url: 'https://acme.atlassian.net/wiki/spaces/X/pages/1' } },
+      ],
+    }
+    mockGet({ atlas_doc_format: { value: JSON.stringify(adf) } })
+    const { body } = await makeTracker().getTechnicalDesign('111')
+    expect(body).toContain('[BLOCKED]')
+    expect(body).toContain('https://acme.atlassian.net/wiki/spaces/X/pages/1')
+    expect(pageGets()).toEqual([{ 'body-format': 'atlas_doc_format' }])
+  })
+
   it('fetches the storage representation when the ADF body is missing', async () => {
     mockGet({}, { storage: { value: '<p>the design</p>' } })
     expect((await makeTracker().getTechnicalDesign('111')).body).toBe('<p>the design</p>')
