@@ -1158,3 +1158,57 @@ describe('markdownAdfConverter emits schema-valid ADF for <details> edge cases',
     expect(markdownAdfConverter.toMarkdown(markdownAdfConverter.toAdf(once).content)).toBe(once)
   })
 })
+
+describe('markdownAdfConverter inlineCard Smart Links', () => {
+  const para = (...content: AdfNode[]): AdfNode[] => [{ type: 'paragraph', content }]
+
+  it('renders an inlineCard as its url and round-trips to a link', () => {
+    const url = 'https://acme.atlassian.net/browse/PROJ-9'
+    const md = markdownAdfConverter.toMarkdown(
+      para({ type: 'text', text: 'see ' }, { type: 'inlineCard', attrs: { url } }),
+    )
+    expect(md).toBe(`see ${url}`)
+    const back = markdownAdfConverter.toAdf(md).content[0]?.content ?? []
+    expect(back.some((n) => n.marks?.some((m) => m.type === 'link' && m.attrs?.['href'] === url))).toBe(true)
+  })
+
+  it('renders an inlineCard without a url as nothing', () => {
+    expect(markdownAdfConverter.toMarkdown(para({ type: 'text', text: 'a' }, { type: 'inlineCard', attrs: {} }))).toBe('a')
+    expect(markdownAdfConverter.toMarkdown(para({ type: 'inlineCard' }))).toBe('')
+  })
+})
+
+describe('markdownAdfConverter blockCard, embedCard and status', () => {
+  const url = 'https://acme.atlassian.net/wiki/spaces/X/pages/1'
+  const para = (...content: AdfNode[]): AdfNode => ({ type: 'paragraph', content })
+
+  it.each(['blockCard', 'embedCard'])('renders a %s as its own link paragraph', (type) => {
+    const md = markdownAdfConverter.toMarkdown([para({ type: 'text', text: 'before' }), { type, attrs: { url } }, para({ type: 'text', text: 'after' })])
+    expect(md).toBe(`before\n\n${url}\n\nafter`)
+    const back = markdownAdfConverter.toAdf(md).content[1]?.content ?? []
+    expect(back.some((n) => n.marks?.some((m) => m.type === 'link' && m.attrs?.['href'] === url))).toBe(true)
+  })
+
+  it.each(['blockCard', 'embedCard'])('renders a %s without a url as nothing', (type) => {
+    expect(markdownAdfConverter.toMarkdown([{ type, attrs: {} }])).toBe('')
+    expect(markdownAdfConverter.toMarkdown([{ type }])).toBe('')
+  })
+
+  it('renders a status as bold bracketed text', () => {
+    const md = markdownAdfConverter.toMarkdown([
+      para({ type: 'text', text: 'state ' }, { type: 'status', attrs: { text: 'BLOCKED', color: 'red' } }),
+    ])
+    expect(md).toBe('state **[BLOCKED]**')
+  })
+
+  it('escapes markdown in a status label', () => {
+    const md = markdownAdfConverter.toMarkdown([para({ type: 'status', attrs: { text: 'a*b' } })])
+    expect(md).toBe('**[a\\*b]**')
+  })
+
+  it('renders a status without text as nothing', () => {
+    expect(markdownAdfConverter.toMarkdown([para({ type: 'status', attrs: {} })])).toBe('')
+    expect(markdownAdfConverter.toMarkdown([para({ type: 'status', attrs: { text: '  ' } })])).toBe('')
+    expect(markdownAdfConverter.toMarkdown([para({ type: 'status' })])).toBe('')
+  })
+})

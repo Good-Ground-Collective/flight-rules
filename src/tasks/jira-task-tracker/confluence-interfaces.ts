@@ -10,7 +10,7 @@ export interface ConfluenceSpacesResponse {
 export interface ConfluencePage {
   id: string
   title: string
-  body?: { storage?: { value: string } }
+  body?: { storage?: { value: string }; atlas_doc_format?: { value: string } }
   version?: { number: number; createdAt?: string }
   _links?: { webui?: string }
 }

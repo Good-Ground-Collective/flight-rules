@@ -79,6 +79,18 @@ const JiraUploadedAttachmentSchema = z.object({
 const JiraUploadedAttachmentsSchema = z.array(JiraUploadedAttachmentSchema);
 type JiraUploadedAttachment = z.infer<typeof JiraUploadedAttachmentSchema>;
 
+const adfDocValidator = (value: unknown): value is AdfDocNode =>
+  typeof value === "object" &&
+  value !== null &&
+  "type" in value &&
+  value.type === "doc" &&
+  "content" in value &&
+  Array.isArray(value.content) &&
+  value.content.every(
+    (node: unknown) =>
+      typeof node === "object" && node !== null && "type" in node && typeof node.type === "string",
+  );
+
 /**
  * The Jira / Jira Product Discovery backend. Epics map to the Epic issue type
  * and tickets to Story; parentage rides the native `parent` field, and entity
@@ -414,7 +426,10 @@ export class JiraTaskTracker implements TaskTracker {
       spaceId,
       status: "current",
       title: input.title,
-      body: { representation: "storage", value: input.body },
+      body: {
+        representation: "atlas_doc_format",
+        value: JSON.stringify(this.bodyFormat.toAdf(this.withoutTitleHeading(input.body, input.title))),
+      },
     });
 
     try {
@@ -433,11 +448,12 @@ export class JiraTaskTracker implements TaskTracker {
   async getTechnicalDesign(id: string): Promise<TechnicalDesign> {
     const [page, property] = await Promise.all([
       this.confluence.request<ConfluencePage>("GET", `/pages/${id}`, undefined, {
-        "body-format": "storage",
+        "body-format": "atlas_doc_format",
       }),
       this.tddMetadataProperty(id),
     ]);
-    return this.mapTechnicalDesign(page, page.body?.storage?.value ?? "", property?.value ?? {});
+    const body = this.readAdfBody(page) ?? (await this.readStorageBody(id));
+    return this.mapTechnicalDesign(page, body, property?.value ?? {});
   }
 
   async addComment(entityId: string, body: string): Promise<Comment> {
@@ -770,6 +786,33 @@ export class JiraTaskTracker implements TaskTracker {
       `/pages/${pageId}/properties`,
     );
     return response.results.find((property) => property.key === tddMetadataPropertyKey);
+  }
+
+  private withoutTitleHeading(body: string, title: string): string {
+    const match = /^\s*#[ \t]+([^\n]*?)[ \t#]*(?:\r?\n|$)/.exec(body);
+    if (match === null || match[1]?.trim().toLowerCase() !== title.trim().toLowerCase()) return body;
+    return body.slice(match[0].length).replace(/^\s*\n/, "");
+  }
+
+  /** Converts the ADF body to markdown, or returns undefined when it is missing or unreadable. */
+  private readAdfBody(page: ConfluencePage): string | undefined {
+    const raw = page.body?.atlas_doc_format?.value;
+    if (raw === undefined) return undefined;
+    try {
+      const doc: unknown = JSON.parse(raw);
+      if (adfDocValidator(doc)) return this.bodyFormat.toMarkdown(doc.content);
+    } catch {
+      // not JSON: the caller falls back to the storage value
+    }
+    return undefined;
+  }
+
+  /** Pages published as storage XHTML (or with an unparseable ADF body) fall back to the storage value unchanged. */
+  private async readStorageBody(id: string): Promise<string> {
+    const page = await this.confluence.request<ConfluencePage>("GET", `/pages/${id}`, undefined, {
+      "body-format": "storage",
+    });
+    return page.body?.storage?.value ?? "";
   }
 
   private mapTechnicalDesign(
