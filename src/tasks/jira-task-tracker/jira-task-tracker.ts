@@ -62,6 +62,7 @@ const ticketFields = `${issueFields},attachment,reporter,issuetype`;
 const ideaIssueType = "Idea";
 const jpdProjectType = "product_discovery";
 const deliveryLinkOutward = "implements";
+const footerCommentConcurrency = 4
 const tddMetadataPropertyKey = "flight-rules-metadata";
 
 // Anchored to the full pathname so only an exact `/file/<uuid>/binary` matches: a
@@ -118,6 +119,8 @@ export class JiraTaskTracker implements TaskTracker {
   private deliveryLinkType: string | undefined;
   private confluenceSpaceId: string | undefined;
   private jpdProjectVerified = false;
+  private footerRequestsInFlight = 0;
+  private readonly footerRequestWaiters: Array<() => void> = [];
 
   constructor(config: JiraTrackerConfig) {
     this.client = new JiraClient({ host: config.host, email: config.email, token: config.token });
@@ -812,12 +815,29 @@ export class JiraTaskTracker implements TaskTracker {
   }
 
   private async footerCommentTree(path: string): Promise<Comment[]> {
-    const comments: Comment[] = [];
-    for (const comment of await this.footerCommentPages(path)) {
-      comments.push(this.mapFooterComment(comment));
-      comments.push(...(await this.footerCommentTree(`/footer-comments/${comment.id}/children`)));
+    const subtrees = await Promise.all(
+      (await this.footerCommentPages(path)).map(async (comment) => [
+        this.mapFooterComment(comment),
+        ...(await this.footerCommentTree(`/footer-comments/${comment.id}/children`)),
+      ]),
+    );
+    return subtrees.flat();
+  }
+
+  /** Caps in-flight footer-comment requests across the whole traversal; slots are held only per request. */
+  private async withFooterRequestSlot<T>(task: () => Promise<T>): Promise<T> {
+    if (this.footerRequestsInFlight >= footerCommentConcurrency) {
+      await new Promise<void>((resolve) => this.footerRequestWaiters.push(resolve));
+    } else {
+      this.footerRequestsInFlight += 1;
     }
-    return comments;
+    try {
+      return await task();
+    } finally {
+      const next = this.footerRequestWaiters.shift();
+      if (next === undefined) this.footerRequestsInFlight -= 1;
+      else next();
+    }
   }
 
   /** Follows the v2 `_links.next` cursor so every page is read. */
@@ -825,15 +845,12 @@ export class JiraTaskTracker implements TaskTracker {
     const results: ConfluenceFooterComment[] = [];
     let cursor: string | undefined;
     do {
-      const response: ConfluenceFooterCommentsResponse = await this.confluence.request(
-        "GET",
-        path,
-        undefined,
-        {
+      const response: ConfluenceFooterCommentsResponse = await this.withFooterRequestSlot(() =>
+        this.confluence.request("GET", path, undefined, {
           "body-format": "atlas_doc_format",
           limit: 250,
           ...(cursor !== undefined ? { cursor } : {}),
-        },
+        }),
       );
       results.push(...response.results);
       const next = response._links?.next;

@@ -260,6 +260,43 @@ describe('JiraTaskTracker.getTechnicalDesign footer comments', () => {
     expect(childParams[1]?.['cursor']).toBe('kid2')
   })
 
+  it('caps in-flight children requests across siblings and keeps depth-first order', async () => {
+    const text = (t: string): Record<string, unknown> => ({
+      type: 'doc',
+      version: 1,
+      content: [{ type: 'paragraph', content: [{ type: 'text', text: t }] }],
+    })
+    const ids = Array.from({ length: 12 }, (_, i) => `c${i}`)
+    let inFlight = 0
+    let peak = 0
+    confluenceRequest.mockImplementation(async (method: string, path: string) => {
+      if (method === 'GET' && path === '/pages/111')
+        return { ...page, body: { atlas_doc_format: { value: JSON.stringify({ type: 'doc', version: 1, content: [] }) } } }
+      if (method === 'GET' && path === '/pages/111/properties') return { results: [] }
+      if (method === 'GET' && path === '/pages/111/footer-comments')
+        return { results: ids.map((id) => footerComment(id, 'a', '2026-07-11T00:00:00.000Z', text(id))) }
+      if (method === 'GET' && path.endsWith('/children')) {
+        inFlight += 1
+        peak = Math.max(peak, inFlight)
+        await new Promise((resolve) => setTimeout(resolve, 5))
+        inFlight -= 1
+        const parent = path.split('/')[2] ?? ''
+        return {
+          results: parent.startsWith('c') && !parent.includes('r')
+            ? [footerComment(`${parent}r`, 'b', '2026-07-12T00:00:00.000Z', text('reply'))]
+            : [],
+        }
+      }
+      throw new Error(`unexpected confluence ${method} ${path}`)
+    })
+
+    const { comments } = await makeTracker().getTechnicalDesign('111')
+
+    expect(peak).toBeGreaterThan(1)
+    expect(peak).toBeLessThanOrEqual(5)
+    expect(comments.map((c) => c.id)).toEqual(ids.flatMap((id) => [id, `${id}r`]))
+  })
+
   it('reads every page of footer comments as markdown with author and timestamps', async () => {
     const footerParams: Array<Record<string, unknown> | undefined> = []
     confluenceRequest.mockImplementation((method: string, path: string, _b?: unknown, params?: Record<string, unknown>) => {
