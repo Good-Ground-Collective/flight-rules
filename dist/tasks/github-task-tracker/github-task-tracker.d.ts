@@ -40,6 +40,7 @@ export declare class GitHubTaskTracker implements TaskTracker {
     createTechnicalDesign(input: CreateTechnicalDesignInput): Promise<TechnicalDesign>;
     updateTechnicalDesign(id: string, input: UpdateTechnicalDesignInput): Promise<TechnicalDesign>;
     getTechnicalDesign(id: string): Promise<TechnicalDesign>;
+    addTechnicalDesignComment(id: string, body: string): Promise<Comment>;
     addComment(entityId: string, body: string): Promise<Comment>;
     addAttachment(ticketId: string, filePath: string): Promise<Attachment>;
     getUsers(): Promise<TrackerUser[]>;

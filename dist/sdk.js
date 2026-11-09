@@ -2110,6 +2110,7 @@ var cliRouteCoverage = new ManifestCliRouteCoverage({
     { status: "supported", route: { path: ["doc"], aliases: [] }, operationId: "doc" },
     ...[
       ["tdd create", "tdd-create"],
+      ["tdd comment", "tdd-comment"],
       ["epic create", "epic-create"],
       ["epic edit", "epic-edit"],
       ["epic link-initiative", "epic-link-initiative"],
@@ -3618,6 +3619,7 @@ var updateTddInput = UpdateTechnicalDesignInputSchema.extend({
   allowLocalPaths: z31.boolean().default(false)
 }).strict();
 var entityId = z31.string().min(1);
+var commentTddInput = z31.object({ id: entityId, body: z31.string(), allowLocalPaths: z31.boolean().default(false) }).strict();
 var linkInput = z31.object({ epicId: entityId, initiativeId: entityId }).strict();
 var partialTicketEdit = z31.object({
   id: entityId,
@@ -3734,6 +3736,15 @@ var DefaultTrackerEntityOperations = class {
         createTddInput,
         z31.union([TechnicalDesignSchema, partialTddCreate]),
         (input) => this.createTdd(input)
+      ),
+      this.descriptor(
+        "tdd-comment",
+        "Post a comment on a technical design.",
+        ["write", "network"],
+        ["tdd", "comment"],
+        commentTddInput,
+        CommentSchema,
+        (input) => this.commentOnTdd(input)
       ),
       this.descriptor(
         "tdd-edit",
@@ -3908,6 +3919,10 @@ var DefaultTrackerEntityOperations = class {
         error: { name: error.name, message: error.message }
       };
     }
+  }
+  async commentOnTdd(input) {
+    this.assertPortable(input.body, input.allowLocalPaths);
+    return this.props.getTracker().addTechnicalDesignComment(input.id, input.body);
   }
   async editTdd(id, input) {
     if (input.body === void 0 && input.title === void 0) {

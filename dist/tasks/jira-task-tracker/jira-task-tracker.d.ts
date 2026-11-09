@@ -25,6 +25,8 @@ export declare class JiraTaskTracker implements TaskTracker {
     private deliveryLinkType;
     private confluenceSpaceId;
     private jpdProjectVerified;
+    private footerRequestsInFlight;
+    private readonly footerRequestWaiters;
     constructor(config: JiraTrackerConfig);
     createEpic(input: CreateEpicInput): Promise<Epic>;
     getEpic(id: string): Promise<Epic>;
@@ -54,6 +56,7 @@ export declare class JiraTaskTracker implements TaskTracker {
     createTechnicalDesign(input: CreateTechnicalDesignInput): Promise<TechnicalDesign>;
     updateTechnicalDesign(id: string, input: UpdateTechnicalDesignInput): Promise<TechnicalDesign>;
     getTechnicalDesign(id: string): Promise<TechnicalDesign>;
+    addTechnicalDesignComment(id: string, body: string): Promise<Comment>;
     addComment(entityId: string, body: string): Promise<Comment>;
     /**
      * Uploads a file as a native Jira attachment and resolves the media UUID that
@@ -88,6 +91,15 @@ export declare class JiraTaskTracker implements TaskTracker {
     private availableIssueTypes;
     private resolveConfluenceSpaceId;
     private tddMetadataProperty;
+    /** Reads root footer comments, each followed depth-first by its replies. */
+    private footerComments;
+    private footerCommentTree;
+    /** Caps in-flight footer-comment requests across the whole traversal; slots are held only per request. */
+    private withFooterRequestSlot;
+    /** Follows the v2 `_links.next` cursor so every page is read. */
+    private footerCommentPages;
+    private mapFooterComment;
+    private readAdfValue;
     private withoutTitleHeading;
     /** Converts the ADF body to markdown, or returns undefined when it is missing or unreadable. */
     private readAdfBody;

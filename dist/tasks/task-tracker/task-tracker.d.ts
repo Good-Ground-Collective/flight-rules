@@ -319,6 +319,7 @@ export interface TaskTracker {
     updateTechnicalDesign(id: string, input: UpdateTechnicalDesignInput): Promise<TechnicalDesign>;
     getTechnicalDesign(id: string): Promise<TechnicalDesign>;
     addComment(entityId: string, body: string): Promise<Comment>;
+    addTechnicalDesignComment(id: string, body: string): Promise<Comment>;
     addAttachment(ticketId: string, filePath: string): Promise<Attachment>;
     getUsers(): Promise<TrackerUser[]>;
     ping(options?: {

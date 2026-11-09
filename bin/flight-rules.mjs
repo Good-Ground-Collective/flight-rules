@@ -36859,6 +36859,34 @@ var GitHubTaskTracker = class {
       updatedAt: discussion.updatedAt
     };
   }
+  async addTechnicalDesignComment(id, body) {
+    const fetchData = await this.gql(
+      `query GetDiscussionForComment($owner: String!, $repo: String!, $number: Int!) {
+        repository(owner: $owner, name: $repo) {
+          discussion(number: $number) { id }
+        }
+      }`,
+      { owner: this.owner, repo: this.repo, number: parseInt(id, 10) }
+    );
+    const discussion = fetchData.repository.discussion;
+    if (discussion === null) throw new Error(`Discussion #${id} not found`);
+    const data = await this.gql(
+      `mutation AddDiscussionComment($discussionId: ID!, $body: String!) {
+        addDiscussionComment(input: { discussionId: $discussionId, body: $body }) {
+          comment { id body author { login } createdAt updatedAt }
+        }
+      }`,
+      { discussionId: discussion.id, body }
+    );
+    const comment = data.addDiscussionComment.comment;
+    return {
+      id: comment.id,
+      body: comment.body,
+      author: comment.author?.login ?? "",
+      createdAt: comment.createdAt,
+      updatedAt: comment.updatedAt
+    };
+  }
   async addComment(entityId2, body) {
     const { data } = await this.octokit.rest.issues.createComment({
       owner: this.owner,
@@ -47084,6 +47112,7 @@ var ticketFields = `${issueFields},attachment,reporter,issuetype`;
 var ideaIssueType = "Idea";
 var jpdProjectType = "product_discovery";
 var deliveryLinkOutward = "implements";
+var footerCommentConcurrency = 4;
 var tddMetadataPropertyKey = "flight-rules-metadata";
 var mediaFilePath = /^\/file\/([0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12})\/binary$/;
 var mediaLocationBase = "https://media.invalid/";
@@ -47111,6 +47140,8 @@ var JiraTaskTracker = class {
   deliveryLinkType;
   confluenceSpaceId;
   jpdProjectVerified = false;
+  footerRequestsInFlight = 0;
+  footerRequestWaiters = [];
   constructor(config2) {
     this.client = new JiraClient({ host: config2.host, email: config2.email, token: config2.token });
     this.confluence = new ConfluenceClient({
@@ -47409,14 +47440,29 @@ var JiraTaskTracker = class {
     }
   }
   async getTechnicalDesign(id) {
-    const [page, property] = await Promise.all([
+    const [page, property, comments] = await Promise.all([
       this.confluence.request("GET", `/pages/${id}`, void 0, {
         "body-format": "atlas_doc_format"
       }),
-      this.tddMetadataProperty(id)
+      this.tddMetadataProperty(id),
+      this.footerComments(id)
     ]);
     const body = this.readAdfBody(page) ?? await this.readStorageBody(id);
-    return this.mapTechnicalDesign(page, body, property?.value ?? {});
+    return this.mapTechnicalDesign(page, body, property?.value ?? {}, comments);
+  }
+  async addTechnicalDesignComment(id, body) {
+    const created = await this.confluence.request(
+      "POST",
+      "/footer-comments",
+      {
+        pageId: id,
+        body: {
+          representation: "atlas_doc_format",
+          value: JSON.stringify(this.bodyFormat.toAdf(body))
+        }
+      }
+    );
+    return this.mapFooterComment(created, body);
   }
   async addComment(entityId2, body) {
     const comment = await this.client.request("POST", `/issue/${entityId2}/comment`, {
@@ -47705,6 +47751,72 @@ var JiraTaskTracker = class {
     );
     return response.results.find((property) => property.key === tddMetadataPropertyKey);
   }
+  /** Reads root footer comments, each followed depth-first by its replies. */
+  async footerComments(pageId) {
+    return this.footerCommentTree(`/pages/${pageId}/footer-comments`);
+  }
+  async footerCommentTree(path3) {
+    const subtrees = await Promise.all(
+      (await this.footerCommentPages(path3)).map(async (comment) => [
+        this.mapFooterComment(comment),
+        ...await this.footerCommentTree(`/footer-comments/${comment.id}/children`)
+      ])
+    );
+    return subtrees.flat();
+  }
+  /** Caps in-flight footer-comment requests across the whole traversal; slots are held only per request. */
+  async withFooterRequestSlot(task) {
+    if (this.footerRequestsInFlight >= footerCommentConcurrency) {
+      await new Promise((resolve16) => this.footerRequestWaiters.push(resolve16));
+    } else {
+      this.footerRequestsInFlight += 1;
+    }
+    try {
+      return await task();
+    } finally {
+      const next = this.footerRequestWaiters.shift();
+      if (next === void 0) this.footerRequestsInFlight -= 1;
+      else next();
+    }
+  }
+  /** Follows the v2 `_links.next` cursor so every page is read. */
+  async footerCommentPages(path3) {
+    const results = [];
+    let cursor;
+    do {
+      const response = await this.withFooterRequestSlot(
+        () => this.confluence.request("GET", path3, void 0, {
+          "body-format": "atlas_doc_format",
+          limit: 250,
+          ...cursor !== void 0 ? { cursor } : {}
+        })
+      );
+      results.push(...response.results);
+      const next = response._links?.next;
+      cursor = next === void 0 ? void 0 : new URL(next, this.confluence.siteBaseUrl).searchParams.get("cursor") ?? void 0;
+    } while (cursor !== void 0);
+    return results;
+  }
+  mapFooterComment(comment, markdown) {
+    const timestamp = comment.version?.createdAt ?? "";
+    return {
+      id: String(comment.id),
+      body: markdown ?? this.readAdfValue(comment.body?.atlas_doc_format?.value),
+      author: comment.version?.authorId ?? "",
+      createdAt: timestamp,
+      updatedAt: timestamp
+    };
+  }
+  readAdfValue(raw) {
+    if (raw === void 0) return "";
+    try {
+      const doc = JSON.parse(raw);
+      if (adfDocValidator(doc)) return this.bodyFormat.toMarkdown(doc.content);
+    } catch {
+      return raw;
+    }
+    return raw;
+  }
   withoutTitleHeading(body, title) {
     const match = /^\s*#[ \t]+([^\n]*?)[ \t#]*(?:\r?\n|$)/.exec(body);
     if (match === null || match[1]?.trim().toLowerCase() !== title.trim().toLowerCase()) return body;
@@ -47728,7 +47840,7 @@ var JiraTaskTracker = class {
     });
     return page.body?.storage?.value ?? "";
   }
-  mapTechnicalDesign(page, body, propertyValue) {
+  mapTechnicalDesign(page, body, propertyValue, comments = []) {
     const { epicId: rawEpicId, ...rest } = propertyValue;
     const metadata = EntityMetadataSchema.parse(rest);
     const epicId = typeof rawEpicId === "string" ? rawEpicId : rawEpicId !== void 0 ? String(rawEpicId) : "";
@@ -47738,7 +47850,7 @@ var JiraTaskTracker = class {
       epicId,
       ...webui !== void 0 ? { url: `${this.confluence.siteBaseUrl}${webui}` } : {},
       body,
-      comments: [],
+      comments,
       metadata,
       updatedAt: page.version?.createdAt ?? ""
     };
@@ -51566,6 +51678,7 @@ var updateTddInput = UpdateTechnicalDesignInputSchema.extend({
   allowLocalPaths: external_exports.boolean().default(false)
 }).strict();
 var entityId = external_exports.string().min(1);
+var commentTddInput = external_exports.object({ id: entityId, body: external_exports.string(), allowLocalPaths: external_exports.boolean().default(false) }).strict();
 var linkInput = external_exports.object({ epicId: entityId, initiativeId: entityId }).strict();
 var partialTicketEdit = external_exports.object({
   id: entityId,
@@ -51682,6 +51795,15 @@ var DefaultTrackerEntityOperations = class {
         createTddInput,
         external_exports.union([TechnicalDesignSchema, partialTddCreate]),
         (input2) => this.createTdd(input2)
+      ),
+      this.descriptor(
+        "tdd-comment",
+        "Post a comment on a technical design.",
+        ["write", "network"],
+        ["tdd", "comment"],
+        commentTddInput,
+        CommentSchema,
+        (input2) => this.commentOnTdd(input2)
       ),
       this.descriptor(
         "tdd-edit",
@@ -51856,6 +51978,10 @@ var DefaultTrackerEntityOperations = class {
         error: { name: error62.name, message: error62.message }
       };
     }
+  }
+  async commentOnTdd(input2) {
+    this.assertPortable(input2.body, input2.allowLocalPaths);
+    return this.props.getTracker().addTechnicalDesignComment(input2.id, input2.body);
   }
   async editTdd(id, input2) {
     if (input2.body === void 0 && input2.title === void 0) {
@@ -52814,6 +52940,18 @@ function createTddCommand(getTracker, registry2) {
   });
   tdd.command("get").exitOverride().argument("<id>", "tdd id").action(async (id) => {
     const result = await operations.invoke("tdd-get", { id }, external_exports.unknown());
+    process.stdout.write(JSON.stringify(result) + "\n");
+  });
+  tdd.command("comment").exitOverride().argument("<id>", "tdd id").option("--body <body>", "comment body (or use --body-file)").option("--body-file <path>", "read the comment body from a file").option(
+    "--allow-local-paths",
+    "accept machine-local paths in the body (see docs/layered-body-format.md)"
+  ).action(async (id, opts) => {
+    const body = resolveBody({ body: opts.body, bodyFile: opts.bodyFile });
+    const result = await operations.invoke(
+      "tdd-comment",
+      { id, body, allowLocalPaths: opts.allowLocalPaths ?? false },
+      external_exports.unknown()
+    );
     process.stdout.write(JSON.stringify(result) + "\n");
   });
   return tdd;
@@ -54312,7 +54450,7 @@ function createPrCommand(registry2) {
 }
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "2.3.0";
+var appVersion = false ? "0.0.0-dev" : "2.4.0";
 
 // src/plugins/commands/agents/command.ts
 function createAgentsCommand(getInstallation) {
@@ -54501,6 +54639,7 @@ var cliRouteCoverage = new ManifestCliRouteCoverage({
     { status: "supported", route: { path: ["doc"], aliases: [] }, operationId: "doc" },
     ...[
       ["tdd create", "tdd-create"],
+      ["tdd comment", "tdd-comment"],
       ["epic create", "epic-create"],
       ["epic edit", "epic-edit"],
       ["epic link-initiative", "epic-link-initiative"],
