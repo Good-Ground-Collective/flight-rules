@@ -99,11 +99,12 @@ describe('JiraTaskTracker.getTechnicalDesign', () => {
     confluenceRequest.mockReset()
   })
 
-  const mockGet = (body: unknown) =>
+  const mockGet = (adfBody: unknown, storageBody?: unknown) =>
     confluenceRequest.mockImplementation((method: string, path: string, _b?: unknown, params?: Record<string, unknown>) => {
       if (method === 'GET' && path === '/pages/111') {
-        expect(params?.['body-format']).toBe('atlas_doc_format')
-        return Promise.resolve({ ...page, body })
+        if (params?.['body-format'] === 'atlas_doc_format') return Promise.resolve({ ...page, body: adfBody })
+        if (params?.['body-format'] === 'storage') return Promise.resolve({ ...page, body: storageBody })
+        throw new Error(`unexpected body-format ${String(params?.['body-format'])}`)
       }
       if (method === 'GET' && path === '/pages/111/properties')
         return Promise.resolve({
@@ -111,6 +112,9 @@ describe('JiraTaskTracker.getTechnicalDesign', () => {
         })
       throw new Error(`unexpected confluence ${method} ${path}`)
     })
+
+  const pageGets = (): Array<unknown> =>
+    confluenceRequest.mock.calls.filter(([m, p]) => m === 'GET' && p === '/pages/111').map(([, , , params]) => params)
 
   it('reads the ADF body back as markdown with epicId and url', async () => {
     const adf = {
@@ -130,16 +134,37 @@ describe('JiraTaskTracker.getTechnicalDesign', () => {
     expect(tdd.body).toContain('the design')
     expect(tdd.url).toBe('https://acme.atlassian.net/wiki/spaces/SD/pages/111/Payments+TDD')
     expect(tdd.metadata).toEqual({ notes: 'ctx' })
+    expect(pageGets()).toEqual([{ 'body-format': 'atlas_doc_format' }])
   })
 
-  it('falls back to the storage value when the ADF body is missing', async () => {
-    mockGet({ storage: { value: '<p>the design</p>' } })
+  it('keeps an inlineCard Smart Link url when reading the ADF body', async () => {
+    const adf = {
+      type: 'doc',
+      version: 1,
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            { type: 'text', text: 'see ' },
+            { type: 'inlineCard', attrs: { url: 'https://acme.atlassian.net/browse/PROJ-9' } },
+          ],
+        },
+      ],
+    }
+    mockGet({ atlas_doc_format: { value: JSON.stringify(adf) } })
+    expect((await makeTracker().getTechnicalDesign('111')).body).toContain('https://acme.atlassian.net/browse/PROJ-9')
+  })
+
+  it('fetches the storage representation when the ADF body is missing', async () => {
+    mockGet({}, { storage: { value: '<p>the design</p>' } })
     expect((await makeTracker().getTechnicalDesign('111')).body).toBe('<p>the design</p>')
+    expect(pageGets()).toEqual([{ 'body-format': 'atlas_doc_format' }, { 'body-format': 'storage' }])
   })
 
-  it('falls back to the storage value when the ADF body is unparseable', async () => {
-    mockGet({ atlas_doc_format: { value: 'not json' }, storage: { value: '<p>old</p>' } })
+  it('fetches the storage representation when the ADF body is unparseable', async () => {
+    mockGet({ atlas_doc_format: { value: 'not json' } }, { storage: { value: '<p>old</p>' } })
     expect((await makeTracker().getTechnicalDesign('111')).body).toBe('<p>old</p>')
+    expect(pageGets()).toEqual([{ 'body-format': 'atlas_doc_format' }, { 'body-format': 'storage' }])
   })
 })
 

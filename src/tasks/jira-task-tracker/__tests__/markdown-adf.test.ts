@@ -1158,3 +1158,22 @@ describe('markdownAdfConverter emits schema-valid ADF for <details> edge cases',
     expect(markdownAdfConverter.toMarkdown(markdownAdfConverter.toAdf(once).content)).toBe(once)
   })
 })
+
+describe('markdownAdfConverter inlineCard Smart Links', () => {
+  const para = (...content: AdfNode[]): AdfNode[] => [{ type: 'paragraph', content }]
+
+  it('renders an inlineCard as its url and round-trips to a link', () => {
+    const url = 'https://acme.atlassian.net/browse/PROJ-9'
+    const md = markdownAdfConverter.toMarkdown(
+      para({ type: 'text', text: 'see ' }, { type: 'inlineCard', attrs: { url } }),
+    )
+    expect(md).toBe(`see ${url}`)
+    const back = markdownAdfConverter.toAdf(md).content[0]?.content ?? []
+    expect(back.some((n) => n.marks?.some((m) => m.type === 'link' && m.attrs?.['href'] === url))).toBe(true)
+  })
+
+  it('renders an inlineCard without a url as nothing', () => {
+    expect(markdownAdfConverter.toMarkdown(para({ type: 'text', text: 'a' }, { type: 'inlineCard', attrs: {} }))).toBe('a')
+    expect(markdownAdfConverter.toMarkdown(para({ type: 'inlineCard' }))).toBe('')
+  })
+})

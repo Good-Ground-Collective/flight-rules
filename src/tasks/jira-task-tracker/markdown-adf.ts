@@ -916,6 +916,13 @@ export class LayeredBodyAdfConverter implements MarkdownAdfConverter {
         out += this.mentionToMarkdown(node)
         continue
       }
+      if (node.type === 'inlineCard') {
+        // A Smart Link keeps its destination in attrs.url and has no text; it reads back as a plain link to that url.
+        closeFrom(0)
+        const url = node.attrs?.['url']
+        if (typeof url === 'string' && url !== '') out += this.linkToMarkdown(url, { type: 'link', attrs: { href: url } })
+        continue
+      }
       if (node.type === 'hardBreak') {
         closeFrom(0)
         out += '\n'

@@ -79,6 +79,11 @@ const JiraUploadedAttachmentSchema = z.object({
 const JiraUploadedAttachmentsSchema = z.array(JiraUploadedAttachmentSchema);
 type JiraUploadedAttachment = z.infer<typeof JiraUploadedAttachmentSchema>;
 
+const confluenceAdfDocSchema = z.object({
+  type: z.literal("doc"),
+  content: z.array(z.object({ type: z.string() }).passthrough()),
+});
+
 /**
  * The Jira / Jira Product Discovery backend. Epics map to the Epic issue type
  * and tickets to Story; parentage rides the native `parent` field, and entity
@@ -90,11 +95,6 @@ type JiraUploadedAttachment = z.infer<typeof JiraUploadedAttachmentSchema>;
  * Confluence pages in the configured space, their metadata held in a native
  * content property and their URL stamped onto the parent epic.
  */
-const confluenceAdfDocSchema = z.object({
-  type: z.literal("doc"),
-  content: z.array(z.object({ type: z.string() }).passthrough()),
-});
-
 export class JiraTaskTracker implements TaskTracker {
   private readonly client: JiraClient;
   private readonly confluence: ConfluenceClient;
@@ -445,7 +445,8 @@ export class JiraTaskTracker implements TaskTracker {
       }),
       this.tddMetadataProperty(id),
     ]);
-    return this.mapTechnicalDesign(page, this.readPageBody(page), property?.value ?? {});
+    const body = this.readAdfBody(page) ?? (await this.readStorageBody(id));
+    return this.mapTechnicalDesign(page, body, property?.value ?? {});
   }
 
   async addComment(entityId: string, body: string): Promise<Comment> {
@@ -786,17 +787,24 @@ export class JiraTaskTracker implements TaskTracker {
     return body.slice(match[0].length).replace(/^\s*\n/, "");
   }
 
-  /** Prefers the ADF body; pages published as storage XHTML (or with an unparseable ADF body) fall back to the storage value unchanged. */
-  private readPageBody(page: ConfluencePage): string {
+  /** Converts the ADF body to markdown, or returns undefined when it is missing or unreadable. */
+  private readAdfBody(page: ConfluencePage): string | undefined {
     const raw = page.body?.atlas_doc_format?.value;
-    if (raw !== undefined) {
-      try {
-        const doc = confluenceAdfDocSchema.safeParse(JSON.parse(raw));
-        if (doc.success) return this.bodyFormat.toMarkdown(doc.data.content as AdfNode[]);
-      } catch {
-        // not JSON: fall through to the storage value
-      }
+    if (raw === undefined) return undefined;
+    try {
+      const doc = confluenceAdfDocSchema.safeParse(JSON.parse(raw));
+      if (doc.success) return this.bodyFormat.toMarkdown(doc.data.content as AdfNode[]);
+    } catch {
+      // not JSON: the caller falls back to the storage value
     }
+    return undefined;
+  }
+
+  /** Pages published as storage XHTML (or with an unparseable ADF body) fall back to the storage value unchanged. */
+  private async readStorageBody(id: string): Promise<string> {
+    const page = await this.confluence.request<ConfluencePage>("GET", `/pages/${id}`, undefined, {
+      "body-format": "storage",
+    });
     return page.body?.storage?.value ?? "";
   }
 
