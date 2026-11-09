@@ -25,3 +25,14 @@ export interface ConfluenceProperty {
 export interface ConfluencePropertiesResponse {
   results: ConfluenceProperty[]
 }
+
+export interface ConfluenceFooterComment {
+  id: string
+  body?: { atlas_doc_format?: { value: string } }
+  version?: { number: number; createdAt?: string; authorId?: string }
+}
+
+export interface ConfluenceFooterCommentsResponse {
+  results: ConfluenceFooterComment[]
+  _links?: { next?: string }
+}

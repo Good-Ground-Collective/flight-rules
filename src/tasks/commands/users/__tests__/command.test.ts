@@ -28,6 +28,7 @@ const makeTracker = (): TaskTracker => ({
   linkEpicToInitiative: vi.fn(),
   getTechnicalDesign: vi.fn(),
   addComment: vi.fn(),
+  addTechnicalDesignComment: vi.fn(),
   addAttachment: vi.fn(),
   getUsers: vi.fn(),
   ping: vi.fn(),

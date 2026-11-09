@@ -615,6 +615,48 @@ export class GitHubTaskTracker implements TaskTracker {
     };
   }
 
+  async addTechnicalDesignComment(id: string, body: string): Promise<Comment> {
+    const fetchData = await this.gql<{
+      repository: { discussion: { id: string } | null };
+    }>(
+      `query GetDiscussionForComment($owner: String!, $repo: String!, $number: Int!) {
+        repository(owner: $owner, name: $repo) {
+          discussion(number: $number) { id }
+        }
+      }`,
+      { owner: this.owner, repo: this.repo, number: parseInt(id, 10) },
+    );
+    const discussion = fetchData.repository.discussion;
+    if (discussion === null) throw new Error(`Discussion #${id} not found`);
+
+    const data = await this.gql<{
+      addDiscussionComment: {
+        comment: {
+          id: string;
+          body: string;
+          author: { login: string } | null;
+          createdAt: string;
+          updatedAt: string;
+        };
+      };
+    }>(
+      `mutation AddDiscussionComment($discussionId: ID!, $body: String!) {
+        addDiscussionComment(input: { discussionId: $discussionId, body: $body }) {
+          comment { id body author { login } createdAt updatedAt }
+        }
+      }`,
+      { discussionId: discussion.id, body },
+    );
+    const comment = data.addDiscussionComment.comment;
+    return {
+      id: comment.id,
+      body: comment.body,
+      author: comment.author?.login ?? "",
+      createdAt: comment.createdAt,
+      updatedAt: comment.updatedAt,
+    };
+  }
+
   async addComment(entityId: string, body: string): Promise<Comment> {
     const { data } = await this.octokit.rest.issues.createComment({
       owner: this.owner,

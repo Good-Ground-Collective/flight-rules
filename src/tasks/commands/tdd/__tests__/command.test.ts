@@ -41,6 +41,7 @@ const makeTracker = (): TaskTracker => ({
   getInitiative: vi.fn(),
   linkEpicToInitiative: vi.fn(),
   addComment: vi.fn(),
+  addTechnicalDesignComment: vi.fn(),
   addAttachment: vi.fn(),
   getUsers: vi.fn(),
   ping: vi.fn(),
@@ -91,6 +92,38 @@ describe('tdd command', () => {
       run(tracker, ['create', '--title', 'T', '--body', 'Notes: ~/notes.md', '--epic-id', '42']),
     ).rejects.toThrow('references files on this machine')
     expect(tracker.createTechnicalDesign).not.toHaveBeenCalled()
+  })
+
+  it('calls addTechnicalDesignComment and prints JSON for "comment"', async () => {
+    const tracker = makeTracker()
+    const posted = { id: 'c1', body: 'Looks good', author: 'a', createdAt: 't', updatedAt: 't' }
+    vi.mocked(tracker.addTechnicalDesignComment).mockResolvedValue(posted)
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(tracker, ['comment', '3', '--body', 'Looks good'])
+    expect(tracker.addTechnicalDesignComment).toHaveBeenCalledWith('3', 'Looks good')
+    expect(output).toHaveBeenCalledWith(JSON.stringify(posted) + '\n')
+    output.mockRestore()
+  })
+
+  it('reads the "comment" body from --body-file', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'fr-tdd-'))
+    const bodyFile = join(dir, 'comment.md')
+    writeFileSync(bodyFile, 'From file')
+    const tracker = makeTracker()
+    vi.mocked(tracker.addTechnicalDesignComment).mockResolvedValue({ id: 'c', body: 'From file', author: 'a', createdAt: 't', updatedAt: 't' })
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await run(tracker, ['comment', '3', '--body-file', bodyFile])
+    expect(tracker.addTechnicalDesignComment).toHaveBeenCalledWith('3', 'From file')
+    output.mockRestore()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('rejects "comment" when the body references a machine-local path', async () => {
+    const tracker = makeTracker()
+    await expect(run(tracker, ['comment', '3', '--body', 'See ~/notes.md'])).rejects.toThrow(
+      'references files on this machine',
+    )
+    expect(tracker.addTechnicalDesignComment).not.toHaveBeenCalled()
   })
 
   it('rejects "create" when --epic-id is missing', async () => {

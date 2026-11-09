@@ -818,6 +818,95 @@ describe("GitHubTracker.getTechnicalDesign metadata", () => {
   });
 });
 
+describe("GitHubTracker.getTechnicalDesign comments", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("returns discussion comments in the Comment shape, markdown preserved", async () => {
+    const tracker = makeTracker();
+    // @ts-expect-error — accessing private field for test setup
+    const mockGql = vi.mocked(tracker.gql);
+    const markdown = "Try:\n\n```ts\nconst x = 1\n```\n\n| a | b |\n| - | - |\n| 1 | 2 |";
+    mockGql.mockResolvedValueOnce({
+      repository: {
+        discussion: {
+          number: 5,
+          body: "TDD body",
+          updatedAt: "2026-01-01T00:00:00Z",
+          comments: {
+            nodes: [
+              {
+                id: "DC_1",
+                body: markdown,
+                author: { login: "alice" },
+                createdAt: "2026-01-02T00:00:00Z",
+                updatedAt: "2026-01-03T00:00:00Z",
+              },
+            ],
+          },
+        },
+      },
+    } as never);
+
+    const tdd = await tracker.getTechnicalDesign("5");
+    expect(tdd.comments).toEqual([
+      {
+        id: "DC_1",
+        body: markdown,
+        author: "alice",
+        createdAt: "2026-01-02T00:00:00Z",
+        updatedAt: "2026-01-03T00:00:00Z",
+      },
+    ]);
+  });
+});
+
+describe("GitHubTracker.addTechnicalDesignComment", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("resolves the discussion node id and runs addDiscussionComment", async () => {
+    const tracker = makeTracker();
+    // @ts-expect-error — accessing private field for test setup
+    const mockGql = vi.mocked(tracker.gql);
+    const body = "Use a table:\n\n| a | b |\n| - | - |\n\n```ts\nconst x = 1\n```";
+    mockGql
+      .mockResolvedValueOnce({ repository: { discussion: { id: "D_kwDO1" } } } as never)
+      .mockResolvedValueOnce({
+        addDiscussionComment: {
+          comment: {
+            id: "DC_9",
+            body,
+            author: { login: "bot" },
+            createdAt: "2026-02-01T00:00:00Z",
+            updatedAt: "2026-02-01T00:00:00Z",
+          },
+        },
+      } as never);
+
+    const comment = await tracker.addTechnicalDesignComment("5", body);
+
+    expect(String(mockGql.mock.calls[1]?.[0])).toContain("addDiscussionComment");
+    expect(mockGql.mock.calls[1]?.[1]).toEqual({ discussionId: "D_kwDO1", body });
+    expect(comment).toEqual({
+      id: "DC_9",
+      body,
+      author: "bot",
+      createdAt: "2026-02-01T00:00:00Z",
+      updatedAt: "2026-02-01T00:00:00Z",
+    });
+  });
+
+  it("fails when the discussion does not exist", async () => {
+    const tracker = makeTracker();
+    // @ts-expect-error — accessing private field for test setup
+    const mockGql = vi.mocked(tracker.gql);
+    mockGql.mockResolvedValueOnce({ repository: { discussion: null } } as never);
+    await expect(tracker.addTechnicalDesignComment("5", "hi")).rejects.toThrow(
+      "Discussion #5 not found",
+    );
+    expect(mockGql).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("GitHubTracker.getUsers", () => {
   beforeEach(() => vi.clearAllMocks());
 
