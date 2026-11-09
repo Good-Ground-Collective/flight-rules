@@ -1,4 +1,4 @@
-import type { Attachment, Comment, CreateEpicInput, CreateInitiativeInput, CreateTicketInput, CreateTechnicalDesignInput, EntityMetadata, Epic, Initiative, TaskTracker, TechnicalDesign, Ticket, TrackerUser, UpdateEpicInput, UpdateInitiativeInput, UpdateTicketInput } from "../task-tracker/task-tracker.js";
+import type { Attachment, Comment, CreateEpicInput, CreateInitiativeInput, CreateTicketInput, CreateTechnicalDesignInput, EntityMetadata, Epic, Initiative, TaskTracker, TechnicalDesign, Ticket, TrackerUser, UpdateEpicInput, UpdateInitiativeInput, UpdateTechnicalDesignInput, UpdateTicketInput } from "../task-tracker/task-tracker.js";
 export interface GitHubTrackerConfig {
     token: string;
     owner: string;
@@ -38,6 +38,7 @@ export declare class GitHubTaskTracker implements TaskTracker {
     updateInitiativeDescription(initiativeId: string, input: UpdateInitiativeInput): Promise<Initiative>;
     updateTddMetadata(tddId: string, patch: Partial<EntityMetadata>): Promise<void>;
     createTechnicalDesign(input: CreateTechnicalDesignInput): Promise<TechnicalDesign>;
+    updateTechnicalDesign(id: string, input: UpdateTechnicalDesignInput): Promise<TechnicalDesign>;
     getTechnicalDesign(id: string): Promise<TechnicalDesign>;
     addComment(entityId: string, body: string): Promise<Comment>;
     addAttachment(ticketId: string, filePath: string): Promise<Attachment>;

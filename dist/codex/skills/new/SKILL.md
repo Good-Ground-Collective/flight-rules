@@ -158,6 +158,7 @@ Adding to existing work:
 flight-rules ticket edit <ticketId> --body-file ticket.md
 flight-rules epic edit <epicId> --body-file epic.md
 flight-rules initiative edit <initiativeId> --body-file initiative.md
+flight-rules tdd edit <tddId> --body-file tdd.md
 flight-rules ticket create --title "<title>" --body-file ticket.md --epic-id <epicId>
 flight-rules epic create --title "<title>" --body-file epic.md
 flight-rules epic link-initiative <epicId> --initiative <initiativeId>

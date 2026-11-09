@@ -219,7 +219,7 @@ flight-rules epic link-initiative <epicId> --initiative <milestoneId>
 flight-rules tdd create --title "<title>" --body-file tdd.md --epic-id <epicId>   # → { "id": …, "url": … }
 ```
 
-On an initiative hop, run it after each `epic create` that needs one. On an epic hop, run it before the first `ticket create`. If the epic's body is missing decisions from this hop, add them with `flight-rules epic edit <epicId> --body-file epic.md` before creating tickets. The artifact is a full document: put the decisions, the cross-ticket explanation, and any diagrams in it, not a pointer to somewhere else.
+On an initiative hop, run it after each `epic create` that needs one. On an epic hop, run it before the first `ticket create`. If the epic's body is missing decisions from this hop, add them with `flight-rules epic edit <epicId> --body-file epic.md` before creating tickets. If an artifact for this epic already exists, update it with `flight-rules tdd edit <tddId> --body-file tdd.md` instead of publishing a second one. The artifact is a full document: put the decisions, the cross-ticket explanation, and any diagrams in it, not a pointer to somewhere else.
 
 **epic → tickets:**
 ```bash

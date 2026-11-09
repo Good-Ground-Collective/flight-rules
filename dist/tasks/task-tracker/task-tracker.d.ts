@@ -244,6 +244,10 @@ export declare const UpdateTicketInputSchema: z.ZodObject<{
     title: z.ZodOptional<z.ZodString>;
     labels: z.ZodOptional<z.ZodArray<z.ZodString>>;
 }, z.core.$strip>;
+export declare const UpdateTechnicalDesignInputSchema: z.ZodObject<{
+    title: z.ZodOptional<z.ZodString>;
+    body: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>;
 export declare const UpdateInitiativeInputSchema: z.ZodObject<{
     body: z.ZodString;
     title: z.ZodOptional<z.ZodString>;
@@ -274,6 +278,7 @@ export type Initiative = z.infer<typeof InitiativeSchema>;
 export type CreateInitiativeInput = z.infer<typeof CreateInitiativeInputSchema>;
 export type UpdateEpicInput = z.infer<typeof UpdateEpicInputSchema>;
 export type UpdateTicketInput = z.infer<typeof UpdateTicketInputSchema>;
+export type UpdateTechnicalDesignInput = z.infer<typeof UpdateTechnicalDesignInputSchema>;
 export type UpdateInitiativeInput = z.infer<typeof UpdateInitiativeInputSchema>;
 /** A tracker write completed, but a follow-up step failed; callers can reconcile by id. */
 export declare class TaskTrackerPartialWriteError extends Error {
@@ -310,6 +315,8 @@ export interface TaskTracker {
     getInitiative(id: string): Promise<Initiative>;
     linkEpicToInitiative(epicId: string, initiativeId: string): Promise<void>;
     createTechnicalDesign(input: CreateTechnicalDesignInput): Promise<TechnicalDesign>;
+    /** Rewrites a design's title and/or body, keeping its metadata; an omitted field is left as it is. */
+    updateTechnicalDesign(id: string, input: UpdateTechnicalDesignInput): Promise<TechnicalDesign>;
     getTechnicalDesign(id: string): Promise<TechnicalDesign>;
     addComment(entityId: string, body: string): Promise<Comment>;
     addAttachment(ticketId: string, filePath: string): Promise<Attachment>;

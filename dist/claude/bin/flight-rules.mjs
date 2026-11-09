@@ -36263,6 +36263,10 @@ var UpdateTicketInputSchema = external_exports.object({
   title: external_exports.string().optional(),
   labels: external_exports.array(external_exports.string()).optional()
 });
+var UpdateTechnicalDesignInputSchema = external_exports.object({
+  title: external_exports.string().refine((title) => title.trim().length > 0, "title must not be empty").optional(),
+  body: external_exports.string().optional()
+});
 var UpdateInitiativeInputSchema = external_exports.object({
   body: external_exports.string(),
   title: external_exports.string().optional()
@@ -36789,6 +36793,35 @@ var GitHubTaskTracker = class {
       metadata: this.bodyMetadata.parse(discussion.body),
       updatedAt: discussion.updatedAt
     };
+  }
+  async updateTechnicalDesign(id, input2) {
+    const fetched = await this.gql(
+      `query GetDiscussionForEdit($owner: String!, $repo: String!, $number: Int!) {
+        repository(owner: $owner, name: $repo) {
+          discussion(number: $number) { id body }
+        }
+      }`,
+      { owner: this.owner, repo: this.repo, number: parseInt(id, 10) }
+    );
+    const discussion = fetched.repository.discussion;
+    if (discussion === null) throw new Error(`Discussion #${id} not found`);
+    const changes = {
+      ...input2.title === void 0 ? {} : { title: input2.title },
+      ...input2.body === void 0 ? {} : { body: this.bodyMetadata.splice(input2.body, this.bodyMetadata.parse(discussion.body)) }
+    };
+    await this.gql(
+      `mutation UpdateDiscussion($discussionId: ID!, $title: String, $body: String) {
+        updateDiscussion(input: { discussionId: $discussionId, title: $title, body: $body }) {
+          discussion { number }
+        }
+      }`,
+      { discussionId: discussion.id, ...changes }
+    );
+    try {
+      return await this.getTechnicalDesign(id);
+    } catch (cause) {
+      throw new TaskTrackerPartialWriteError({ id, cause });
+    }
   }
   async getTechnicalDesign(id) {
     const data = await this.gql(
@@ -47352,6 +47385,29 @@ var JiraTaskTracker = class {
     }
     return this.mapTechnicalDesign(page, input2.body, propertyValue);
   }
+  async updateTechnicalDesign(id, input2) {
+    const current = await this.confluence.request("GET", `/pages/${id}`, void 0, {
+      "body-format": "atlas_doc_format"
+    });
+    const title = input2.title ?? current.title;
+    const existingAdf = current.body?.atlas_doc_format?.value;
+    if (input2.body === void 0 && existingAdf === void 0) {
+      throw new Error(`Page ${id} has no ADF body to keep; pass a body with the new title`);
+    }
+    const value = input2.body === void 0 ? existingAdf ?? "" : JSON.stringify(this.bodyFormat.toAdf(this.withoutTitleHeading(input2.body, title)));
+    await this.confluence.request("PUT", `/pages/${id}`, {
+      id,
+      status: "current",
+      title,
+      body: { representation: "atlas_doc_format", value },
+      version: { number: (current.version?.number ?? 1) + 1 }
+    });
+    try {
+      return await this.getTechnicalDesign(id);
+    } catch (cause) {
+      throw new TaskTrackerPartialWriteError({ id, cause });
+    }
+  }
   async getTechnicalDesign(id) {
     const [page, property] = await Promise.all([
       this.confluence.request("GET", `/pages/${id}`, void 0, {
@@ -51506,6 +51562,9 @@ var updateTicketInput = external_exports.object({
 var createTddInput = CreateTechnicalDesignInputSchema.extend({
   allowLocalPaths: external_exports.boolean().default(false)
 }).strict();
+var updateTddInput = UpdateTechnicalDesignInputSchema.extend({
+  allowLocalPaths: external_exports.boolean().default(false)
+}).strict();
 var entityId = external_exports.string().min(1);
 var linkInput = external_exports.object({ epicId: entityId, initiativeId: entityId }).strict();
 var partialTicketEdit = external_exports.object({
@@ -51623,6 +51682,15 @@ var DefaultTrackerEntityOperations = class {
         createTddInput,
         external_exports.union([TechnicalDesignSchema, partialTddCreate]),
         (input2) => this.createTdd(input2)
+      ),
+      this.descriptor(
+        "tdd-edit",
+        "Update a technical design's title and/or body.",
+        ["write", "network"],
+        ["tdd", "edit"],
+        external_exports.object({ id: entityId, ...updateTddInput.shape }).strict(),
+        external_exports.union([TechnicalDesignSchema, partialEntityWrite]),
+        ({ id, ...input2 }) => this.editTdd(id, input2)
       )
     ];
   }
@@ -51785,6 +51853,27 @@ var DefaultTrackerEntityOperations = class {
       return {
         status: "partial",
         data: { id: error62.id, epicId: fields.epicId, body: fields.body },
+        error: { name: error62.name, message: error62.message }
+      };
+    }
+  }
+  async editTdd(id, input2) {
+    if (input2.body === void 0 && input2.title === void 0) {
+      throw new Error("tdd edit needs a new title, a new body, or both");
+    }
+    if (input2.body !== void 0) this.assertPortable(input2.body, input2.allowLocalPaths);
+    const fields = UpdateTechnicalDesignInputSchema.parse(input2);
+    try {
+      return await this.props.getTracker().updateTechnicalDesign(id, fields);
+    } catch (error62) {
+      if (!TaskTrackerPartialWriteError.isPartialWrite(error62)) throw error62;
+      return {
+        status: "partial",
+        data: {
+          id,
+          ...fields.title === void 0 ? {} : { title: fields.title },
+          ...fields.body === void 0 ? {} : { body: fields.body }
+        },
         error: { name: error62.name, message: error62.message }
       };
     }
@@ -52699,6 +52788,24 @@ function createTddCommand(getTracker, registry2) {
         title: opts.title,
         body,
         epicId: opts.epicId,
+        allowLocalPaths: opts.allowLocalPaths ?? false
+      },
+      external_exports.unknown()
+    );
+    process.stdout.write(JSON.stringify(result) + "\n");
+  });
+  tdd.command("edit").exitOverride().argument("<id>", "tdd id").option("--title <title>", "new tdd title (unchanged if omitted)").option("--body <body>", "new tdd body (or use --body-file)").option("--body-file <path>", "read the new tdd body from a file").option(
+    "--allow-local-paths",
+    "accept machine-local paths in the body (see docs/layered-body-format.md)"
+  ).action(async (id, opts) => {
+    const hasBody = opts.body !== void 0 || opts.bodyFile !== void 0;
+    const body = hasBody ? resolveBody({ body: opts.body, bodyFile: opts.bodyFile }) : void 0;
+    const result = await operations.invoke(
+      "tdd-edit",
+      {
+        id,
+        ...opts.title !== void 0 ? { title: opts.title } : {},
+        ...body !== void 0 ? { body } : {},
         allowLocalPaths: opts.allowLocalPaths ?? false
       },
       external_exports.unknown()
@@ -54205,7 +54312,7 @@ function createPrCommand(registry2) {
 }
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "2.2.1";
+var appVersion = false ? "0.0.0-dev" : "2.3.0";
 
 // src/plugins/commands/agents/command.ts
 function createAgentsCommand(getInstallation) {
@@ -54409,6 +54516,7 @@ var cliRouteCoverage = new ManifestCliRouteCoverage({
       ["ticket comment", "ticket-comment"],
       ["ticket label", "ticket-label"],
       ["users get", "users-get"],
+      ["tdd edit", "tdd-edit"],
       ["tdd get", "tdd-get"],
       ["epic get", "epic-get"],
       ["epic plan", "epic-plan"],

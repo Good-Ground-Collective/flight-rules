@@ -2421,6 +2421,10 @@ var UpdateTicketInputSchema = z21.object({
   title: z21.string().optional(),
   labels: z21.array(z21.string()).optional()
 });
+var UpdateTechnicalDesignInputSchema = z21.object({
+  title: z21.string().refine((title) => title.trim().length > 0, "title must not be empty").optional(),
+  body: z21.string().optional()
+});
 var UpdateInitiativeInputSchema = z21.object({
   body: z21.string(),
   title: z21.string().optional()
@@ -3539,6 +3543,9 @@ var updateTicketInput = z24.object({
 var createTddInput = CreateTechnicalDesignInputSchema.extend({
   allowLocalPaths: z24.boolean().default(false)
 }).strict();
+var updateTddInput = UpdateTechnicalDesignInputSchema.extend({
+  allowLocalPaths: z24.boolean().default(false)
+}).strict();
 var entityId = z24.string().min(1);
 var linkInput = z24.object({ epicId: entityId, initiativeId: entityId }).strict();
 var partialTicketEdit = z24.object({
@@ -3656,6 +3663,15 @@ var DefaultTrackerEntityOperations = class {
         createTddInput,
         z24.union([TechnicalDesignSchema, partialTddCreate]),
         (input) => this.createTdd(input)
+      ),
+      this.descriptor(
+        "tdd-edit",
+        "Update a technical design's title and/or body.",
+        ["write", "network"],
+        ["tdd", "edit"],
+        z24.object({ id: entityId, ...updateTddInput.shape }).strict(),
+        z24.union([TechnicalDesignSchema, partialEntityWrite]),
+        ({ id, ...input }) => this.editTdd(id, input)
       )
     ];
   }
@@ -3818,6 +3834,27 @@ var DefaultTrackerEntityOperations = class {
       return {
         status: "partial",
         data: { id: error.id, epicId: fields.epicId, body: fields.body },
+        error: { name: error.name, message: error.message }
+      };
+    }
+  }
+  async editTdd(id, input) {
+    if (input.body === void 0 && input.title === void 0) {
+      throw new Error("tdd edit needs a new title, a new body, or both");
+    }
+    if (input.body !== void 0) this.assertPortable(input.body, input.allowLocalPaths);
+    const fields = UpdateTechnicalDesignInputSchema.parse(input);
+    try {
+      return await this.props.getTracker().updateTechnicalDesign(id, fields);
+    } catch (error) {
+      if (!TaskTrackerPartialWriteError.isPartialWrite(error)) throw error;
+      return {
+        status: "partial",
+        data: {
+          id,
+          ...fields.title === void 0 ? {} : { title: fields.title },
+          ...fields.body === void 0 ? {} : { body: fields.body }
+        },
         error: { name: error.name, message: error.message }
       };
     }
@@ -5593,6 +5630,35 @@ var GitHubTaskTracker = class {
       updatedAt: discussion.updatedAt
     };
   }
+  async updateTechnicalDesign(id, input) {
+    const fetched = await this.gql(
+      `query GetDiscussionForEdit($owner: String!, $repo: String!, $number: Int!) {
+        repository(owner: $owner, name: $repo) {
+          discussion(number: $number) { id body }
+        }
+      }`,
+      { owner: this.owner, repo: this.repo, number: parseInt(id, 10) }
+    );
+    const discussion = fetched.repository.discussion;
+    if (discussion === null) throw new Error(`Discussion #${id} not found`);
+    const changes = {
+      ...input.title === void 0 ? {} : { title: input.title },
+      ...input.body === void 0 ? {} : { body: this.bodyMetadata.splice(input.body, this.bodyMetadata.parse(discussion.body)) }
+    };
+    await this.gql(
+      `mutation UpdateDiscussion($discussionId: ID!, $title: String, $body: String) {
+        updateDiscussion(input: { discussionId: $discussionId, title: $title, body: $body }) {
+          discussion { number }
+        }
+      }`,
+      { discussionId: discussion.id, ...changes }
+    );
+    try {
+      return await this.getTechnicalDesign(id);
+    } catch (cause) {
+      throw new TaskTrackerPartialWriteError({ id, cause });
+    }
+  }
   async getTechnicalDesign(id) {
     const data = await this.gql(
       `query GetDiscussion($owner: String!, $repo: String!, $number: Int!) {
@@ -7273,6 +7339,29 @@ var JiraTaskTracker = class {
       throw new TaskTrackerPartialWriteError({ id: page.id, cause });
     }
     return this.mapTechnicalDesign(page, input.body, propertyValue);
+  }
+  async updateTechnicalDesign(id, input) {
+    const current = await this.confluence.request("GET", `/pages/${id}`, void 0, {
+      "body-format": "atlas_doc_format"
+    });
+    const title = input.title ?? current.title;
+    const existingAdf = current.body?.atlas_doc_format?.value;
+    if (input.body === void 0 && existingAdf === void 0) {
+      throw new Error(`Page ${id} has no ADF body to keep; pass a body with the new title`);
+    }
+    const value = input.body === void 0 ? existingAdf ?? "" : JSON.stringify(this.bodyFormat.toAdf(this.withoutTitleHeading(input.body, title)));
+    await this.confluence.request("PUT", `/pages/${id}`, {
+      id,
+      status: "current",
+      title,
+      body: { representation: "atlas_doc_format", value },
+      version: { number: (current.version?.number ?? 1) + 1 }
+    });
+    try {
+      return await this.getTechnicalDesign(id);
+    } catch (cause) {
+      throw new TaskTrackerPartialWriteError({ id, cause });
+    }
   }
   async getTechnicalDesign(id) {
     const [page, property] = await Promise.all([
