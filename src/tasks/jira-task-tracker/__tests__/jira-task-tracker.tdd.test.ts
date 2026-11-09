@@ -275,6 +275,26 @@ describe('JiraTaskTracker.updateTechnicalDesign', () => {
     expect(put.version.number).toBe(5)
   })
 
+  it('reports a partial write when the readback fails after the PUT', async () => {
+    let gets = 0
+    confluenceRequest.mockImplementation((method: string, path: string) => {
+      if (method === 'GET' && path === '/pages/111') {
+        gets += 1
+        if (gets > 1) return Promise.reject(new Error('readback failed'))
+        return Promise.resolve({ ...page, body: { atlas_doc_format: { value: existingAdf } } })
+      }
+      if (method === 'PUT' && path === '/pages/111') return Promise.resolve({})
+      if (method === 'GET' && path === '/pages/111/properties') return Promise.resolve({ results: [] })
+      throw new Error(`unexpected confluence ${method} ${path}`)
+    })
+
+    await expect(makeTracker().updateTechnicalDesign('111', { title: 'Renamed' })).rejects.toMatchObject({
+      name: 'TaskTrackerPartialWriteError',
+      id: '111',
+    })
+    expect(confluenceCall('PUT', '/pages/111')).toBeDefined()
+  })
+
   it('keeps the existing ADF body on a title-only edit', async () => {
     stubConfluence()
 

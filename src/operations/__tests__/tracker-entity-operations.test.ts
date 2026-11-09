@@ -497,6 +497,17 @@ describe("tracker entity operations", () => {
       data: { id: "TICKET-1", attachments: [], body: "Edited ticket" },
     },
     {
+      id: "tdd-edit",
+      setup: (tracker: TaskTracker) =>
+        vi
+          .mocked(tracker.updateTechnicalDesign)
+          .mockRejectedValueOnce(
+            new TaskTrackerPartialWriteError({ id: "TDD-1", cause: new Error("read failed") }),
+          ),
+      input: { id: "TDD-1", title: "New title", body: "Edited design" },
+      data: { id: "TDD-1", title: "New title", body: "Edited design" },
+    },
+    {
       id: "tdd-create",
       setup: (tracker: TaskTracker) =>
         vi.mocked(tracker.createTechnicalDesign).mockRejectedValueOnce(

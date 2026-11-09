@@ -753,22 +753,41 @@ describe("GitHubTracker.updateTechnicalDesign", () => {
     expect(vars["body"]).toContain("epicId: 10");
   });
 
-  it("keeps the current title when none is given", async () => {
+  it("sends no title on a body-only edit", async () => {
     const { tracker, mockGql } = stubDiscussion();
 
     await tracker.updateTechnicalDesign("5", { body: "New body" });
 
     const vars = mockGql.mock.calls[1]?.[1] as Record<string, string>;
-    expect(vars["title"]).toBe("Old title");
+    expect(vars).not.toHaveProperty("title");
+    expect(vars["body"]).toContain("New body");
   });
 
-  it("keeps the current body on a title-only edit", async () => {
+  it("sends no body on a title-only edit", async () => {
     const { tracker, mockGql } = stubDiscussion();
 
     await tracker.updateTechnicalDesign("5", { title: "New title" });
 
     const vars = mockGql.mock.calls[1]?.[1] as Record<string, string>;
-    expect(vars["body"]).toBe(existingBody);
+    expect(vars).not.toHaveProperty("body");
+    expect(vars["title"]).toBe("New title");
+  });
+
+  it("reports a partial write when the readback fails after the mutation", async () => {
+    const tracker = makeTracker();
+    // @ts-expect-error — accessing private field for test setup
+    const mockGql = vi.mocked(tracker.gql);
+    mockGql
+      .mockResolvedValueOnce({
+        repository: { discussion: { id: "D_1", body: existingBody } },
+      } as never)
+      .mockResolvedValueOnce({} as never)
+      .mockRejectedValueOnce(new Error("readback failed"));
+
+    await expect(tracker.updateTechnicalDesign("5", { title: "T" })).rejects.toMatchObject({
+      name: "TaskTrackerPartialWriteError",
+      id: "5",
+    });
   });
 });
 

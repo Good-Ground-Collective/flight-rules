@@ -217,7 +217,7 @@ export class DefaultTrackerEntityOperations implements TrackerEntityOperations {
         ["write", "network"],
         ["tdd", "edit"],
         z.object({ id: entityId, ...updateTddInput.shape }).strict(),
-        TechnicalDesignSchema,
+        z.union([TechnicalDesignSchema, partialEntityWrite]),
         ({ id, ...input }) => this.editTdd(id, input),
       ),
     ];
@@ -413,7 +413,20 @@ export class DefaultTrackerEntityOperations implements TrackerEntityOperations {
     }
     if (input.body !== undefined) this.assertPortable(input.body, input.allowLocalPaths);
     const fields = UpdateTechnicalDesignInputSchema.parse(input);
-    return this.props.getTracker().updateTechnicalDesign(id, fields);
+    try {
+      return await this.props.getTracker().updateTechnicalDesign(id, fields);
+    } catch (error) {
+      if (!TaskTrackerPartialWriteError.isPartialWrite(error)) throw error;
+      return {
+        status: "partial" as const,
+        data: {
+          id,
+          ...(fields.title === undefined ? {} : { title: fields.title }),
+          ...(fields.body === undefined ? {} : { body: fields.body }),
+        },
+        error: { name: error.name, message: error.message },
+      };
+    }
   }
 
   private assertPortable(body: string, allowLocalPaths = false): void {

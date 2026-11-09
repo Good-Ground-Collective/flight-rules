@@ -524,11 +524,11 @@ export class GitHubTaskTracker implements TaskTracker {
     input: UpdateTechnicalDesignInput,
   ): Promise<TechnicalDesign> {
     const fetched = await this.gql<{
-      repository: { discussion: { id: string; title: string; body: string } | null };
+      repository: { discussion: { id: string; body: string } | null };
     }>(
       `query GetDiscussionForEdit($owner: String!, $repo: String!, $number: Int!) {
         repository(owner: $owner, name: $repo) {
-          discussion(number: $number) { id title body }
+          discussion(number: $number) { id body }
         }
       }`,
       { owner: this.owner, repo: this.repo, number: parseInt(id, 10) },
@@ -536,20 +536,26 @@ export class GitHubTaskTracker implements TaskTracker {
     const discussion = fetched.repository.discussion;
     if (discussion === null) throw new Error(`Discussion #${id} not found`);
 
-    const body =
-      input.body === undefined
-        ? discussion.body
-        : this.bodyMetadata.splice(input.body, this.bodyMetadata.parse(discussion.body));
+    const changes = {
+      ...(input.title === undefined ? {} : { title: input.title }),
+      ...(input.body === undefined
+        ? {}
+        : { body: this.bodyMetadata.splice(input.body, this.bodyMetadata.parse(discussion.body)) }),
+    };
     await this.gql(
-      `mutation UpdateDiscussion($discussionId: ID!, $title: String!, $body: String!) {
+      `mutation UpdateDiscussion($discussionId: ID!, $title: String, $body: String) {
         updateDiscussion(input: { discussionId: $discussionId, title: $title, body: $body }) {
           discussion { number }
         }
       }`,
-      { discussionId: discussion.id, title: input.title ?? discussion.title, body },
+      { discussionId: discussion.id, ...changes },
     );
 
-    return this.getTechnicalDesign(id);
+    try {
+      return await this.getTechnicalDesign(id);
+    } catch (cause) {
+      throw new TaskTrackerPartialWriteError({ id, cause });
+    }
   }
 
   async getTechnicalDesign(id: string): Promise<TechnicalDesign> {

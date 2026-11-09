@@ -471,7 +471,11 @@ export class JiraTaskTracker implements TaskTracker {
       version: { number: (current.version?.number ?? 1) + 1 },
     });
 
-    return this.getTechnicalDesign(id);
+    try {
+      return await this.getTechnicalDesign(id);
+    } catch (cause) {
+      throw new TaskTrackerPartialWriteError({ id, cause });
+    }
   }
 
   async getTechnicalDesign(id: string): Promise<TechnicalDesign> {
