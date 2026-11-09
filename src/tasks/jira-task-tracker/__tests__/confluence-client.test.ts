@@ -8,7 +8,7 @@ describe('ConfluenceClient.upload', () => {
     vi.unstubAllGlobals()
   })
 
-  it('posts multipart to the v1 content path with the XSRF header and no Content-Type', async () => {
+  it('puts multipart to the v1 content path with the XSRF header and no Content-Type', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ results: [{ id: '1' }] }), { status: 200 }))
     vi.stubGlobal('fetch', fetchMock)
 
@@ -19,7 +19,7 @@ describe('ConfluenceClient.upload', () => {
     expect(result).toEqual({ results: [{ id: '1' }] })
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toBe('https://acme.atlassian.net/wiki/rest/api/content/111/child/attachment')
-    expect(init.method).toBe('POST')
+    expect(init.method).toBe('PUT')
     const headers = init.headers as Record<string, string>
     expect(headers['X-Atlassian-Token']).toBe('no-check')
     expect(headers['Content-Type']).toBeUndefined()

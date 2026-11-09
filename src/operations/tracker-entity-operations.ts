@@ -502,7 +502,11 @@ export class DefaultTrackerEntityOperations implements TrackerEntityOperations {
       if (error.attachments.length === 0) throw error.cause;
       return this.partialTddEdit(id, fields, error.cause);
     }
-    return this.updateTdd(id, fields);
+    try {
+      return await this.props.getTracker().updateTechnicalDesign(id, fields);
+    } catch (error) {
+      return this.partialTddEdit(id, fields, error);
+    }
   }
 
   private async updateTdd(id: string, fields: z.infer<typeof UpdateTechnicalDesignInputSchema>) {

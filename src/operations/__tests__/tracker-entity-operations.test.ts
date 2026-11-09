@@ -730,6 +730,24 @@ describe("tracker entity operations", () => {
       });
     });
 
+    it("reports a partial edit when the body update fails after an upload", async () => {
+      const { tracker, registry, image } = setup();
+      vi.mocked(tracker.updateTechnicalDesign).mockRejectedValue(new Error("409 version conflict"));
+
+      const result = await registry.invoke("tdd-edit", {
+        id: "TDD-1",
+        body: "![flow](diagram.png)",
+        attach: [image],
+      });
+
+      expect(result).toMatchObject({
+        status: "partial",
+        data: { id: "TDD-1", body: "![flow](attachment:diagram.png)" },
+        error: { name: "Error", message: "409 version conflict" },
+      });
+      expect(tracker.addTechnicalDesignAttachment).toHaveBeenCalledOnce();
+    });
+
     it("requires a body to edit with --attach and rejects files outside trusted roots", async () => {
       const { tracker, registry, image } = setup();
       await expect(

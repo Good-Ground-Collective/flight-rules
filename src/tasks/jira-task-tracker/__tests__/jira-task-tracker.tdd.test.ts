@@ -533,7 +533,7 @@ describe('JiraTaskTracker technical design attachments', () => {
       throw new Error(`unexpected confluence ${method} ${path}`)
     })
 
-  it('uploads through the v1 child-attachment path and returns the fileId as the media id', async () => {
+  it('uploads through the v1 child-attachment path (PUT upsert) and returns the fileId as the media id', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'tdd-upload-'))
     const file = join(dir, 'flow.png')
     writeFileSync(file, 'png-bytes')

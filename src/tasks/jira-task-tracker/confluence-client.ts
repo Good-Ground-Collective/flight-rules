@@ -71,7 +71,7 @@ export class ConfluenceClient {
     files.forEach((file) => form.append('file', file, file.name))
 
     const res = await this.fetchWithRetry(`${this.legacyBaseUrl}${path}`, {
-      method: 'POST',
+      method: 'PUT',
       headers: {
         Authorization: this.authHeader,
         Accept: 'application/json',
