@@ -66,7 +66,7 @@ If the input is ambiguous, resolve a real file path as an RFC file; otherwise tr
 
 A tracker node may already have children, for example an epic that `/new` refined after an earlier breakdown. `epic get` lists them in `childIssues`, and `initiative get` lists its `epics`. Before deriving research briefs, match each sketch item to an existing child:
 
-- **Matched and done:** leave it alone.
+- **Matched and done:** leave the child alone. If the sketch item now asks for more than the child delivered, propose a new follow-up child for the difference.
 - **Matched and open:** propose an update with `ticket edit` or `epic edit` only when the sketch changed what it must do.
 - **Unmatched sketch item:** a candidate new child.
 - **Child with no sketch item:** flag it to the human; never close or delete it.
