@@ -50,15 +50,28 @@ A cross-epic edge is allowed only when it is absolutely necessary, and only with
 Two entry modes:
 
 - **RFC file path** (the first hop): a human-authored `rfcs/RFC-NNN.md`. Read its frontmatter `size` and its sections. The RFC file is an input, not a reference. Carry its Problem, Solution, and Acceptance Criteria into the bodies you emit. Link the RFC only when it is merged to a default branch, and then by its GitHub URL, never by its path.
-- **Tracker node id** (every subsequent hop): an id like `31`. Resolve it through the CLI — never call GitHub/Jira directly:
+- **Tracker node** (a node written by `/new`, or every subsequent hop): a type and an id, such as `epic 31`. Resolve it through the CLI with the getter for its type — never call GitHub/Jira directly:
 
   ```bash
+  flight-rules initiative get <id>
   flight-rules epic get <id>
+  flight-rules ticket get <id>
   ```
 
-  The CLI's tracker abstraction handles which system it is. Read `size` from the returned top-level `size` field (derived from the entity's kind) and the sections from the body. **An emitted node's layered body is the RFC for the next hop** — that is what makes the recursion clean.
+  The type decides the getter, and the getter decides the returned `size`; `epic get` reports `epic` for any id, and on GitHub an initiative (a milestone) and an issue can share a number. So never infer the type from a getter's result. When you are given a bare id, ask which type it is. Read the sections from the body. **An emitted node's layered body is the RFC for the next hop** — that is what makes the recursion clean.
 
-If the input is ambiguous, resolve a real file path as an RFC file; otherwise treat it as a node id.
+If the input is ambiguous, resolve a real file path as an RFC file; otherwise treat it as a tracker node and settle its type first.
+
+### Existing children
+
+A tracker node may already have children, for example an epic that `/new` refined after an earlier breakdown. `epic get` lists them in `childIssues`, and `initiative get` lists its `epics`. Before deriving research briefs, match each sketch item to an existing child:
+
+- **Matched and done:** leave the child alone. If the sketch item now asks for more than the child delivered, propose a new follow-up child for the difference.
+- **Matched and open:** propose an update with `ticket edit` or `epic edit` only when the sketch changed what it must do.
+- **Unmatched sketch item:** a candidate new child.
+- **Child with no sketch item:** flag it to the human; never close or delete it.
+
+Research only the new and changed items. The preview in step 7 shows the matching, and only new children the human approves get created.
 
 ## Calling Model (read this before you count invocations)
 
@@ -189,6 +202,8 @@ Write each body to a temp file and pass it with `--body-file <file>` — the det
 
 Use only `flight-rules` — never the tracker's native API directly.
 
+**When the input is a tracker node, it already exists.** Don't create it again. Link new epics to the existing initiative with `epic link-initiative`, create tickets under the existing epic with `--epic-id`, and update the parent's body with its `edit` command when this hop adds decisions. A ticket input is enriched in place: add the Guided Walkthrough and any decisions with `ticket edit`, keeping the human-written sections as they are.
+
 **initiative → epics:**
 ```bash
 # 1. materialize the initiative
@@ -224,6 +239,8 @@ flight-rules ticket block <ticketId> --by <blockerInAnotherEpic> --cross-epic-re
 ```bash
 # a ticket-sized RFC has no parent epic — omit --epic-id and the ticket is created standalone
 flight-rules ticket create --title "<title>" --body-file ticket.md   # → { "id": <ticketId> }
+# a ticket node from /new already exists — enrich it in place
+flight-rules ticket edit <ticketId> --body-file ticket.md
 ```
 
 Only pass `--epic-id` when this hop really does sit under an existing epic. Do **not** invent a wrapper epic to satisfy the flag — a ticket-sized RFC maps to one parentless ticket, and a single-child epic is hierarchy noise.

@@ -137,7 +137,7 @@ flight-rules users get
 The command prints a JSON array of `{ accountId, displayName }` pairs — the `accountId` addresses a user in a mention, the `displayName` is what a human reads.
 
 - If it returns a JSON array (even empty): setup is complete. Tell the user:
-  > "Setup complete. `flight-rules` is configured for `<repo>`. Try `/draft-request-for-comments` to author your first RFC."
+  > "Setup complete. `flight-rules` is configured for `<repo>`. Try `/new` to start your first piece of work."
 - If it returns an error: show the error and explain likely causes:
   - 401/403 — token lacks `read:org` scope or doesn't have access to the org
   - 404 — the org in the repo field doesn't exist or the token can't see it
@@ -234,7 +234,7 @@ flight-rules check
 ```
 
 - If the JSON report shows `"ok": true`: setup is complete. Tell the user:
-  > "Setup complete. `flight-rules` is configured for Jira project `<project key>`. Try `/draft-request-for-comments` to author your first RFC."
+  > "Setup complete. `flight-rules` is configured for Jira project `<project key>`. Try `/new` to start your first piece of work."
 - If a check fails, show the report and explain by failed check:
   - `credentials` — the detail names what is missing: no token under `JIRA_TOKEN`, `JIRA_API_TOKEN`, or `JIRA_API_KEY`, or no email in either `JIRA_EMAIL` or the config's `jiraEmail`.
   - `reachable` — 401 means the token/email pair is wrong; 404 means the host or project key is wrong; a network error means the host domain is unreachable.

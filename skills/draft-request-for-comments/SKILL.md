@@ -1,15 +1,17 @@
 ---
 name: draft-request-for-comments
-description: "Forces a human to author an RFC before any agent touches a codebase, then sizes the work as a ticket, epic, or initiative. Builds the RFC interactively via Socratic dialogue or interrogates an existing file. Always the first step in the software factory pipeline."
+description: "Has a human author an RFC for work that needs comments from other people before it starts, then sizes it as a ticket, epic, or initiative. Builds the RFC interactively via Socratic dialogue or interrogates an existing file, and opens it as a PR for review. For work you can align on in one session, use /new instead."
 ---
 
 # Draft Request for Comments
 
-This skill forces a human to author an RFC before any agent starts planning or building. It either accepts an existing file and interrogates it, or guides the user through writing one from scratch via Socratic questions — no canned options, free-form answers only. It closes by sizing the work — ticket, epic, or initiative — so the rest of the pipeline knows what to do next.
+Most work starts with `/new`, which interviews the human and writes the agreed result straight into the tracker. Use this skill instead when the work needs comments from people beyond the person in the session: a cross-team change, a contested direction, or anything that needs sign-off before work starts.
+
+This skill has a human author an RFC before any agent starts planning or building. It either accepts an existing file and interrogates it, or guides the user through writing one from scratch via Socratic questions — no canned options, free-form answers only. It closes by sizing the work — ticket, epic, or initiative — so the rest of the pipeline knows what to do next.
 
 This document is an **RFC** — the upstream "what and why" that collects comments — not a spec. A true spec is a downstream artifact that lives alongside its delivery (the code, the PR). Keep this skill lean; it must never grow into an implementation spec.
 
-The RFC this skill produces is the grounding source for all downstream agents. Nothing proceeds without a merged RFC. The RFC is a human artifact that agents read, not an agent artifact that humans rubber-stamp.
+The RFC this skill produces is the grounding source for all downstream agents. Work that starts here doesn't proceed until its RFC is merged. The RFC is a human artifact that agents read, not an agent artifact that humans rubber-stamp.
 
 ## Entry Modes
 
