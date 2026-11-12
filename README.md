@@ -135,6 +135,23 @@ When you're ready to try it on real work, run `/flight-rules:new` with an idea, 
 | `sharpen-the-saw` | Writes a failing test suite for a ticket a human will implement. |
 | `setup` | Configures flight-rules for a repository. |
 
+## Technical design docs
+
+When an epic needs more context than fits in its body, `break-down-work` publishes a technical design doc (TDD) and links it from the tickets. On Jira it's a Confluence page in the space named by `confluenceSpaceKey`, which setup doesn't ask for yet (`flight-rules config set confluenceSpaceKey ENG --scope user`); on GitHub it's a Discussion in a "TDDs" category. The skills manage these for you, and the same commands are there when you want to do it by hand:
+
+```sh
+flight-rules tdd create --title "Payments retry design" --body-file tdd.md --epic-id FRT-340
+flight-rules tdd get <id>
+flight-rules tdd edit <id> --body-file tdd.md
+flight-rules tdd edit <id> --title "Payments retry design v2"
+flight-rules tdd comment <id> --body "Reviewed with the team; going with option B."
+```
+
+- `tdd edit` changes the title, the body, or both. Leave one out and it stays as it is.
+- `tdd comment` adds a comment. On Confluence it's a footer comment, and `tdd get` returns comments with their replies.
+- `--attach <path>#<caption>` on `tdd create` and `tdd edit` uploads a file to a Confluence page. Reference it in the body as `![caption](attachment:<file>)` to show it inline. Edits keep images already on the page. GitHub Discussions have no attachment API, so `--attach` fails there.
+- Bodies are markdown. On Confluence they're stored as formatted pages, so headings, tables, code blocks and `<details>` sections render properly.
+
 ## Further reading
 
 - [Layered body format](docs/layered-body-format.md): the shape of every epic and ticket.
