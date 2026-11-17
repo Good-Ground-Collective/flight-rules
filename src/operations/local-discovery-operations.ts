@@ -142,15 +142,6 @@ export class DefaultLocalDiscoveryOperations implements LocalDiscoveryOperations
         (input) => this.charter(input),
       ),
       this.descriptor(
-        "competencies",
-        "Read the configured worker competencies.",
-        ["read", "process"],
-        ["competencies"],
-        z.object({}),
-        z.array(z.string()),
-        () => this.props.getConfig().competencies,
-      ),
-      this.descriptor(
         "rfc-dir",
         "Resolve the RFC directory for this checkout.",
         ["read", "process"],

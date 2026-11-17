@@ -20,7 +20,7 @@ The SDK also exports the existing run context, dispatch, outcome, question, sibl
 
 The SDK exposes the validated operation registry and each shared operation family, including tracker reads, plans and writes, ticket lifecycle, Git/configuration, pull requests, and review. Compose these services with a launch-bound `LaunchOperationAccessPolicy`; an operation's presence in the registry does not itself authorize a write or network effect. `DefaultTrackerEntityOperations` is the aggregate for tracker reads, ticket lifecycle and entity writes, so consumers should register that aggregate once.
 
-`DefaultFlightRules.localOperations()` supplies the shared charter, competency, RFC, QA, config-read, and readiness operations. A host can register them alongside the existing document operation and invoke normalized inputs through the same validated registry used by the CLI:
+`DefaultFlightRules.localOperations()` supplies the shared charter, RFC, QA, config-read, and readiness operations. A host can register them alongside the existing document operation and invoke normalized inputs through the same validated registry used by the CLI:
 
 ```ts
 import { createFlightRules } from "@good-ground-collective/flight-rules";

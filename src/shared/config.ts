@@ -3,21 +3,6 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { z } from "zod";
 import { JiraHostSchema } from "../tasks/jira-task-tracker/jira-host.js";
 
-export const seedCompetencies = [
-  "define-a-schema",
-  "wire-an-endpoint",
-  "write-a-migration",
-  "pure-transform",
-  "write-a-query",
-  "mapper-adapter",
-  "harden-edge-cases",
-  "business-rule",
-  "external-api-client",
-  "reducer-state",
-  "async-coordination",
-  "auth-check",
-] as const;
-
 export const usageHandoffThresholdSchema = z.coerce
   .number()
   .min(1)
@@ -76,7 +61,6 @@ export const ConfigSchema = z
       .describe(
         "Deprecated: path to a legacy QA recipe, read only when no QA.md or AGENTS.md QA section exists; relative paths resolve against the directory holding this config file; defaults to flight-rules.qa.md beside it",
       ),
-    competencies: z.array(z.string()).default([...seedCompetencies]),
     usageHandoffThreshold: usageHandoffThresholdSchema.optional(),
     usageHandoffMinResetMinutes: usageHandoffMinResetMinutesSchema.optional(),
   })

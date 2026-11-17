@@ -4,7 +4,6 @@ import {
   getRfcDir,
   getQaRecipePath,
   resolveConfigPath,
-  seedCompetencies,
 } from "../config.js";
 import { writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -66,27 +65,16 @@ repo: acme/my-project
     expect(() => readConfig(filePath)).toThrow();
   });
 
-  it("defaults competencies to the seed set when omitted", () => {
-    const filePath = setupFixture(`---
-tracker: github
-repo: acme/my-project
----
-`);
-    const config = readConfig(filePath);
-    expect(config.competencies).toEqual([...seedCompetencies]);
-  });
-
-  it("parses a competencies override", () => {
+  it("ignores a legacy competencies key", () => {
     const filePath = setupFixture(`---
 tracker: github
 repo: acme/my-project
 competencies:
   - custom-thing
-  - another-thing
 ---
 `);
     const config = readConfig(filePath);
-    expect(config.competencies).toEqual(["custom-thing", "another-thing"]);
+    expect(config).not.toHaveProperty("competencies");
   });
 
   it("parses a valid jira config without a repo", () => {
@@ -163,7 +151,6 @@ const base: Config = {
   repo: "acme/proj",
   defaultLabels: [],
   rfcStorage: "local",
-  competencies: [],
 };
 
 describe("getRfcDir", () => {

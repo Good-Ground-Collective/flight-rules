@@ -5,7 +5,7 @@ description: "Drives a single ticket from to-do to PR-in-review: reads it throug
 
 # Execute Work
 
-This is the skill that builds the thing. You are handed a **ticket id**; you hand back an open pull request that an independent verifier has already checked, criterion by criterion, against that ticket's Acceptance Criteria. Where `sharpen-the-saw` deliberately stops at a red test suite so a human can implement, this skill carries the work all the way to review.
+This is the skill that builds the thing. You are handed a **ticket id**; you hand back an open pull request that an independent verifier has already checked, criterion by criterion, against that ticket's Acceptance Criteria.
 
 **The hard rule: this skill never merges, and never lets an unverified change reach a PR.** Those are one rule, not two. The verifier is the gate, and a human is the merge button. If you catch yourself opening a PR on the strength of the implementer's own say-so, stop — you have removed the only independent check in the pipeline.
 
@@ -91,8 +91,6 @@ Also note the ticket's title (for the branch slug), its labels, and its `metadat
 - a pointer to something unwritten: "per the planning doc", "see decisions.md", or a decision ID that no body or artifact defines.
 
 **On any of these, stop and report a ticket defect.** Name each unresolvable reference and say the ticket needs it inlined or published (see the Portable context section of `flight-rules doc layered-body-format`). Do not look for the file on this machine, even if it happens to exist. A run that works only on the author's laptop hides the defect from the next engineer.
-
-If the ticket carries the `sharpen-the-saw` label, stop and point the user at `/sharpen-the-saw` instead. That work is reserved for a human.
 
 Confirm the working tree is clean before going further:
 

@@ -13,9 +13,9 @@ const makeMockExecutor = (): GitExecutor => ({
   stage: vi.fn().mockResolvedValue(undefined),
   commit: vi.fn().mockResolvedValue(undefined),
   getCommitSha: vi.fn().mockResolvedValue("abc123"),
-  checkout: vi.fn().mockResolvedValue("feat/25-saw"),
-  startBranch: vi.fn().mockResolvedValue({ branch: "feat/25-saw", renamedFrom: null }),
-  getCurrentBranch: vi.fn().mockResolvedValue("feat/25-saw"),
+  checkout: vi.fn().mockResolvedValue("feat/25-sample"),
+  startBranch: vi.fn().mockResolvedValue({ branch: "feat/25-sample", renamedFrom: null }),
+  getCurrentBranch: vi.fn().mockResolvedValue("feat/25-sample"),
   push: vi.fn().mockResolvedValue(undefined),
 });
 
@@ -189,13 +189,13 @@ describe("git checkout command", () => {
   it("creates a semantic branch and outputs the branch name as JSON", async () => {
     const executor = makeMockExecutor();
     const output = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-    await run(executor, ["checkout", "--type", "feat", "--scope", "25", "--description", "saw"]);
+    await run(executor, ["checkout", "--type", "feat", "--scope", "25", "--description", "sample"]);
     expect(vi.mocked(executor.startBranch)).toHaveBeenCalledWith(
-      { type: "feat", scope: "25", description: "saw" },
+      { type: "feat", scope: "25", description: "sample" },
       undefined,
     );
     expect(output).toHaveBeenCalledWith(
-      expect.stringContaining('"branch":"feat/25-saw"') as string,
+      expect.stringContaining('"branch":"feat/25-sample"') as string,
     );
     output.mockRestore();
   });
@@ -235,11 +235,11 @@ describe("git push command", () => {
     await run(executor, ["push"]);
     expect(executor.getCurrentBranch).toHaveBeenCalled();
     expect(executor.push).toHaveBeenCalledWith({
-      branch: "feat/25-saw",
+      branch: "feat/25-sample",
       remote: "origin",
       setUpstream: true,
     });
-    expect(write).toHaveBeenCalledWith(expect.stringContaining('"branch":"feat/25-saw"') as string);
+    expect(write).toHaveBeenCalledWith(expect.stringContaining('"branch":"feat/25-sample"') as string);
     write.mockRestore();
   });
 
@@ -248,7 +248,7 @@ describe("git push command", () => {
     vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     await run(executor, ["push", "--remote", "upstream", "--no-set-upstream"]);
     expect(executor.push).toHaveBeenCalledWith({
-      branch: "feat/25-saw",
+      branch: "feat/25-sample",
       remote: "upstream",
       setUpstream: false,
     });

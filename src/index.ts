@@ -145,7 +145,6 @@ export {
   resolveConfigPath,
   getRfcDir,
   getQaRecipePath,
-  seedCompetencies,
 } from "./shared/config.js";
 export type { Config } from "./shared/config.js";
 export { ConfigStore, configScopes } from "./shared/config-store.js";
