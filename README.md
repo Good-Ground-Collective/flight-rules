@@ -132,7 +132,6 @@ When you're ready to try it on real work, run `/flight-rules:new` with an idea, 
 | `reproduce-bug` | Reproduces a bug in the running product and documents it on the ticket. |
 | `verify-ticket` | Checks a landed fix or story in the running product. |
 | `capture-evidence` | Takes screenshots and a recording for the QA skills. |
-| `sharpen-the-saw` | Writes a failing test suite for a ticket a human will implement. |
 | `setup` | Configures flight-rules for a repository. |
 
 ## Technical design docs

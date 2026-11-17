@@ -243,7 +243,7 @@ export class ConfigStore {
     this.assertKnownKey(key);
     const field = Object.entries(ConfigSchema.shape).find(([name]) => name === key)?.[1];
     if (field === undefined) return undefined;
-    // Array fields (defaultLabels, competencies) accept a list and reject a
+    // Array fields (defaultLabels) accept a list and reject a
     // bare string; every other field is a scalar string.
     const isArray = field.safeParse([]).success && !field.safeParse("").success;
     const joined = rawValues.join(" ");

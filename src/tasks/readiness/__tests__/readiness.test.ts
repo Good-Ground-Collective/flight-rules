@@ -33,7 +33,6 @@ const config = {
   tracker: "github",
   repo: "acme/repo",
   defaultLabels: [],
-  competencies: [],
   rfcStorage: "local",
 } as const;
 const directories: string[] = [];
@@ -121,7 +120,7 @@ function inputs() {
     ping: vi.fn<TaskTracker["ping"]>().mockResolvedValue(undefined),
   };
   return {
-    config: () => ({ ...config, defaultLabels: [], competencies: [] }),
+    config: () => ({ ...config, defaultLabels: [] }),
     configPath: () => "/nonexistent/config.md",
     tracker: () => tracker,
     probe: { probe: vi.fn().mockResolvedValue([]) },

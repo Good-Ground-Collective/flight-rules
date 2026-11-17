@@ -15,7 +15,6 @@ const CharterResultSchema = z.object({
 });
 const ConfigPathResultSchema = z.object({ path: z.string() });
 const RfcIdResultSchema = z.object({ id: z.string() });
-const CompetenciesResultSchema = z.array(z.string());
 const ConfigInspectionResultSchema = z.object({
   host: z.string(),
   valid: z.boolean(),
@@ -60,7 +59,6 @@ export class CommanderLocalDiscoveryCli implements LocalDiscoveryCommandAdapter 
 
   addTo(program: Command): void {
     this.addCharter(program);
-    this.addCompetencies(program);
     this.addRfc(program);
     this.addQa(program);
     this.addConfig(program);
@@ -112,17 +110,6 @@ export class CommanderLocalDiscoveryCli implements LocalDiscoveryCommandAdapter 
           process.stdout.write(output);
         },
       );
-  }
-
-  private addCompetencies(program: Command): void {
-    program
-      .command("competencies")
-      .exitOverride()
-      .action(async () => {
-        process.stdout.write(
-          `${JSON.stringify(await this.invoke("competencies", {}, CompetenciesResultSchema))}\n`,
-        );
-      });
   }
 
   private addRfc(program: Command): void {

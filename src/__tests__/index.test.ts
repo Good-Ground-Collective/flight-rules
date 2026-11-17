@@ -116,7 +116,6 @@ describe("public library surface", () => {
         "readConfig",
         "resolveConfigPath",
         "sectionSelector",
-        "seedCompetencies",
         "semanticTypes",
         "ClaudeSettingsSource",
         "ConfigStore",

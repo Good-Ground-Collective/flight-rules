@@ -14,7 +14,6 @@ const config: Config = {
   repo: "acme/proj",
   defaultLabels: [],
   rfcStorage: "local",
-  competencies: [],
 };
 
 const makeTracker = (
@@ -269,7 +268,6 @@ const jiraConfig: Config = {
   jiraProject: "PROJ",
   defaultLabels: [],
   rfcStorage: "local",
-  competencies: [],
 };
 
 describe("check command (jira)", () => {

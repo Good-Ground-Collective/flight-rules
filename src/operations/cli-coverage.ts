@@ -251,7 +251,6 @@ export const cliRouteCoverage: CliRouteCoverage = new ManifestCliRouteCoverage({
       ["initiative plan", "initiative-plan"],
       ["initiative review-plan", "initiative-review-plan"],
       ["charter", "charter"],
-      ["competencies", "competencies"],
       ["rfc dir", "rfc-dir"],
       ["rfc next-id", "rfc-next-id"],
       ["qa instructions", "qa-instructions"],

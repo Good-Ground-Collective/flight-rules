@@ -10,7 +10,6 @@ const config: Config = {
   repo: "acme/proj",
   defaultLabels: [],
   rfcStorage: "local",
-  competencies: [],
 };
 
 let repo: string;

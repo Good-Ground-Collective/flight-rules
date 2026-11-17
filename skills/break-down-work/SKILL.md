@@ -31,7 +31,7 @@ So every fact an implementer needs lives in one of three places, per [Portable c
 
 Never point a body at a local path, an uncommitted or unmerged file, a `specs/` or planning draft, `.claude/` scratch, or an RFC that exists only in a local `rfcs/` folder. Never leave a decision in the conversation. If you wrote planning notes while you worked, move what matters into a body or the artifact, then forget the file.
 
-The CLI rejects bodies with home paths, `~/` paths, and `file://` URLs. It cannot catch an unmerged repo-relative path or a decision you never wrote down. Step 11 catches those.
+The CLI rejects bodies with home paths, `~/` paths, and `file://` URLs. It cannot catch an unmerged repo-relative path or a decision you never wrote down. Step 10 catches those.
 
 ## The second hard rule: epics are self-contained
 
@@ -43,7 +43,7 @@ When a dependency would cross epics, restructure before you emit anything:
 2. **Merge the two tickets**, when one PR would carry both.
 3. **Sequence the epics**, so the blocking epic finishes before the dependent one starts.
 
-A cross-epic edge is allowed only when it is absolutely necessary, and only with a one-line justification recorded on the dependent ticket (`ticket block --cross-epic-reason`, step 9). Step 10 fails a breakdown that has a cross-epic edge without one.
+A cross-epic edge is allowed only when it is absolutely necessary, and only with a one-line justification recorded on the dependent ticket (`ticket block --cross-epic-reason`, step 8). Step 9 fails a breakdown that has a cross-epic edge without one.
 
 ## Input — an RFC file or a node id
 
@@ -71,7 +71,7 @@ A tracker node may already have children, for example an epic that `/new` refine
 - **Unmatched sketch item:** a candidate new child.
 - **Child with no sketch item:** flag it to the human; never close or delete it.
 
-Research only the new and changed items. The preview in step 7 shows the matching, and only new children the human approves get created.
+Research only the new and changed items. The preview in step 6 shows the matching, and only new children the human approves get created.
 
 ## Calling Model (read this before you count invocations)
 
@@ -104,7 +104,7 @@ When you ask, be specific: state what's unclear, show what you found, and offer 
 
 ## Process
 
-Track your progress with your own to-do mechanism — one to-do per step, completed in order. This is *internal* progress-tracking, separate from the tracker nodes you **emit** in step 8.
+Track your progress with your own to-do mechanism — one to-do per step, completed in order. This is *internal* progress-tracking, separate from the tracker nodes you **emit** in step 7.
 
 ### 1. Read the work item and settle the input altitude
 
@@ -147,45 +147,22 @@ You hold the RFC context and every findings report. Now decide the children:
 - **epic → tickets:** break the work into executable tickets, each roughly one PR. Use the *deep* findings to write each ticket's **Guided Walkthrough** so a standard-tier agent can build it — name the exact files, patterns to follow, integration points, and the test approach, drawn straight from the findings (`files`, `patterns`, `integrationPoints`, `risks`). Decide the dependency ordering between tickets. Every blocker must be a ticket in this epic. If a ticket needs work owned by another epic, restructure (see "The second hard rule") rather than wire the edge; keep it only when it is absolutely necessary, with a one-line justification.
 - **ticket:** the single deep node.
 
-**Collect the decisions.** List every choice you or the human made that shapes the work: a slicing call, a rejected approach, a naming rule, an answer to a human question. Each one belongs in the parent body or the technical artifact before any ticket references it (step 9). Decide now whether the context fits in the bodies or needs a technical artifact. Reach for the artifact when the shared context runs past a screen, or when several tickets need the same long explanation.
+**Collect the decisions.** List every choice you or the human made that shapes the work: a slicing call, a rejected approach, a naming rule, an answer to a human question. Each one belongs in the parent body or the technical artifact before any ticket references it (step 8). Decide now whether the context fits in the bodies or needs a technical artifact. Reach for the artifact when the shared context runs past a screen, or when several tickets need the same long explanation.
 
 Every child ties back to the parent's Problem Statement. If the findings **contradict the RFC** — a seam that isn't real, a missing one, or a risk that reshapes the work — do **not** silently restructure: this is a *stop-and-ask* trigger (see "Working with the human"). Surface what you found, propose the adjusted breakdown, and wait for the human's call before continuing.
 
-### 6. (epic → tickets only) Sharpen-the-Saw: label at most one leaf
-
-Keep a trickle of foundational work in human hands. You have the whole epic's ticket graph in context, so this is the one place the cap can be enforced without cross-epic state.
-
-Pull the configurable competency list:
-
-```bash
-flight-rules competencies   # → JSON array of competency slugs (12-item seed default)
-```
-
-Then, over the tickets you just planned:
-
-1. **Find the leaves** — tickets with an **empty `blocking` set** (nothing else in the epic depends on them). Only leaves are eligible; an un-worked leaf is a harmless backlog item, never a stall.
-2. **Apply the rubric** — a candidate must sit in the intersection of *interview-signal* (exercises a load-bearing fundamental) ∩ *real-work* (a ticket that needed doing anyway) ∩ *TDD-fenceable* (a clean input→output contract a failing suite can pin), and must match one of the competency slugs. A ~30–90-minute task for a senior engineer.
-3. **Pick at most ONE** per epic. Hard cap of 1, regardless of epic size. If no leaf fits the rubric, label nothing — that is fine and common.
-4. For the chosen ticket:
-   - Add the label `sharpen-the-saw:<slug>` (the matched competency) via `ticket create --labels` at creation (step 9).
-   - **Write the justification into the body** — which competency, why it's cleanly TDD-fenceable, why it's ~30–90 min. Never label silently; the pipeline-runner reads this to decide keep-or-strip in seconds.
-   - **Reduce its Guided Walkthrough to hints only** — the tests will carry the spec (via the `sharpen-the-saw` companion skill) and the human does the implementation thinking. Don't hand them the solution.
-
-Stripping the label makes the ticket flow through the pipeline like any other — the label degrades gracefully.
-
-### 7. Preview the breakdown and get the go-ahead
+### 6. Preview the breakdown and get the go-ahead
 
 **Before authoring or creating anything**, present the proposed breakdown to the human and wait for an explicit go-ahead. Creating tracker nodes is irreversible — never skip this. Show the **shape**, not full bodies (those come next), so a wrong call is caught before the authoring effort:
 
 - The parent (milestone/epic) and each child's **title + one-line summary**.
 - The **dependency ordering** between children (what blocks what). On an initiative hop, the **proposed epic order**. Call out any **cross-epic edge** with its one-line justification, or say there are none.
-- The **Sharpen-the-Saw pick**, if any — which ticket, which competency, and why (or "none").
 - Any **assumptions or open judgment calls** you made during synthesis.
 - **Where the context will live** — the decisions list, and whether a technical artifact will be published, with its title.
 
 Ask plainly and wait for an answer: *"Here's the proposed breakdown — good to create these, or adjust?"* Revise on feedback and re-preview. Only proceed once the human says go.
 
-### 8. Author each child as a layered-body artifact
+### 7. Author each child as a layered-body artifact
 
 Run `flight-rules doc layered-body-format`, read the full output, and follow it exactly. Write the prose **directly** (there is no serializer):
 
@@ -198,7 +175,7 @@ Run `flight-rules doc layered-body-format`, read the full output, and follow it 
 
 Write each body to a temp file and pass it with `--body-file <file>` — the deterministic way to hand large layered-body markdown (fenced YAML, nested code) to the CLI without shell-escaping it. The temp file is a transport, not a reference: never name it in any body.
 
-### 9. Create and link via the CLI
+### 8. Create and link via the CLI
 
 Use only `flight-rules` — never the tracker's native API directly.
 
@@ -225,8 +202,6 @@ On an initiative hop, run it after each `epic create` that needs one. On an epic
 ```bash
 # for each ticket (auto-links to the epic as a sub-issue)
 flight-rules ticket create --title "<title>" --body-file ticket-N.md --epic-id <epicId>   # → { "id": <ticketId> }
-# the one Sharpen-the-Saw leaf (if any) additionally carries the label:
-flight-rules ticket create --title "<title>" --body-file ticket-saw.md --epic-id <epicId> --labels sharpen-the-saw:<slug>
 # then wire dependencies discovered during synthesis (blocker in the same epic)
 flight-rules ticket block <ticketId> --by <blockerTicketId>
 # only an edge that is absolutely necessary may leave the epic; the CLI refuses it without a reason
@@ -245,7 +220,7 @@ flight-rules ticket edit <ticketId> --body-file ticket.md
 
 Only pass `--epic-id` when this hop really does sit under an existing epic. Do **not** invent a wrapper epic to satisfy the flag — a ticket-sized RFC maps to one parentless ticket, and a single-child epic is hierarchy noise.
 
-### 10. Verify and stop
+### 9. Verify and stop
 
 For an epic hop, sanity-check the dependency graph:
 ```bash
@@ -257,7 +232,7 @@ Then check `crossEpicEdges`. **The breakdown fails this check if any entry has `
 
 For an initiative hop, there are no tickets yet. Check instead that the initiative body states the epic order and that no epic's writeup assumes work another epic owns.
 
-### 11. Read each node as a stranger
+### 10. Read each node as a stranger
 
 Fetch every node you created back from the tracker and read it as an engineer on a fresh machine who has never seen this conversation:
 
@@ -282,8 +257,7 @@ Report the created node ids and their links. **Stop — one altitude only.** Do 
 - **Never create nodes without the go-ahead.** Preview first (step 6); creating is irreversible.
 - **Check in when unsure, don't guess.** Ambiguity, RFC/code contradiction, real forks, and size mismatches are all stop-and-wait triggers (see "Working with the human").
 - **Everything through `flight-rules`.** The skill stays tracker-agnostic; the CLI resolves GitHub/Jira.
-- **Epics are self-contained.** Every blocked-by edge stays inside one epic. A cross-epic edge needs to be absolutely necessary and carry a one-line justification; an unjustified one fails step 10.
-- **At most one Sharpen-the-Saw leaf per epic** (step 6), only on a non-blocking leaf, always with a written justification. Never label silently; never exceed one.
+- **Epics are self-contained.** Every blocked-by edge stays inside one epic. A cross-epic edge needs to be absolutely necessary and carry a one-line justification; an unjustified one fails step 9.
 - **Portable context only.** No body references a local path, an unmerged file, or an unwritten decision. Never pass `--allow-local-paths` to get a context pointer past the CLI; publish the context instead.
 
 ## What Good Looks Like
@@ -294,6 +268,5 @@ Report the created node ids and their links. **Stop — one altitude only.** Do 
 - Tickets carry a Guided Walkthrough concrete enough for a standard-tier agent to execute; epics don't.
 - Children are natively linked (epics→milestone, tickets→epic sub-issues) with a clean, cycle-free dependency graph whose edges stay inside one epic, apart from any absolutely necessary edge that carries a recorded justification.
 - An initiative breakdown names an epic order that keeps one epic in flight at a time wherever it can.
-- An epic→ticket pass labels **at most one** leaf `sharpen-the-saw:<slug>`, with a justification and reduced walkthrough — or none, if nothing fits the rubric.
 - Each emitted node could itself be handed straight back into this skill for the next hop down.
 - An engineer on another machine could run `/execute-work` on any emitted ticket with no input beyond the ticket id. Every decision lives in a body or a published artifact, and every reference resolves from a fresh clone or a URL.

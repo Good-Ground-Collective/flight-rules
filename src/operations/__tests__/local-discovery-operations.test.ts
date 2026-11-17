@@ -24,7 +24,7 @@ beforeEach(() => {
   mkdirSync(join(root, ".agents"));
   writeFileSync(
     configPath,
-    "---\ntracker: github\nrepo: acme/project\ncompetencies:\n  - fixture-skill\n---\n",
+    "---\ntracker: github\nrepo: acme/project\n---\n",
   );
   core = createFlightRules({
     cwd: root,
@@ -61,10 +61,6 @@ describe("local discovery operations", () => {
       },
     });
 
-    await expect(registry.invoke("competencies", {})).resolves.toMatchObject({
-      status: "success",
-      data: ["fixture-skill"],
-    });
     await expect(registry.invoke("rfc-dir", {})).resolves.toMatchObject({
       status: "success",
       data: { path: join(root, "rfcs") },
@@ -151,7 +147,6 @@ describe("local discovery operations", () => {
     });
     const routes = [
       ["charter", { paths: ["sample.ts"] }],
-      ["competencies", {}],
       ["rfc-dir", {}],
       ["rfc-next-id", {}],
       ["qa-instructions", {}],
@@ -346,7 +341,6 @@ describe("local discovery operations", () => {
       );
 
       const routes = [
-        [["competencies"], "competencies", {}],
         [["rfc", "dir"], "rfc-dir", {}],
         [["rfc", "next-id"], "rfc-next-id", {}],
         [["qa", "instructions"], "qa-instructions", {}],

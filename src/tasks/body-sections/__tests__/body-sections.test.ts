@@ -37,8 +37,8 @@ const llmContext = [
 // GitHub returns the raw body including the LLM Context block; Jira strips it.
 const githubBody = [...prose, '', ...guidedWalkthrough, '', ...llmContext].join('\n')
 const jiraBody = [...prose, '', ...guidedWalkthrough].join('\n')
-// sharpen-the-saw tickets reduce the walkthrough to nothing.
-const sawBody = [...prose].join('\n')
+// A body with no Guided Walkthrough section at all.
+const noWalkthroughBody = [...prose].join('\n')
 
 const bugProse = [
   '## Symptom',
@@ -119,8 +119,8 @@ describe('BlobSectionSource.read (layered body)', () => {
     expect(jira.acceptanceCriteriaItems).toEqual(github.acceptanceCriteriaItems)
   })
 
-  it('tolerates an absent Guided Walkthrough (sharpen-the-saw body)', () => {
-    const s = blobSectionSource.read({ body: sawBody })
+  it('tolerates an absent Guided Walkthrough', () => {
+    const s = blobSectionSource.read({ body: noWalkthroughBody })
     expect(s.guidedWalkthrough).toBeUndefined()
     expect(s.problemStatement).toBe('Something is wrong.')
     expect(s.acceptanceCriteriaItems).toHaveLength(2)

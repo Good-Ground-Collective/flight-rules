@@ -237,8 +237,8 @@ describe("shared operations", () => {
       policy: new LaunchOperationAccessPolicy({ allowedEffects: ["read", "process", "network"] }),
     });
     const routes = cliRouteCoverage.check(program, registry);
-    expect(routes).toHaveLength(62);
-    expect(cliRouteCoverage.list().filter((item) => item.status === "supported")).toHaveLength(55);
+    expect(routes).toHaveLength(61);
+    expect(cliRouteCoverage.list().filter((item) => item.status === "supported")).toHaveLength(54);
     expect(
       cliRouteCoverage.list().filter((item) => item.status === "pending-migration"),
     ).toHaveLength(0);
@@ -265,7 +265,6 @@ describe("shared operations", () => {
     expect(registry.list().map((operation) => operation.id)).toEqual([
       "doc",
       "charter",
-      "competencies",
       "rfc-dir",
       "rfc-next-id",
       "qa-instructions",

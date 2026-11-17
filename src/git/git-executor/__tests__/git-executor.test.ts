@@ -143,12 +143,12 @@ describe("NodeGitExecutor.checkout", () => {
     const branch = await executor.checkout({
       type: "feat",
       scope: "25",
-      description: "sharpen-the-saw",
+      description: "branch-naming",
     });
-    expect(branch).toBe("feat/25-sharpen-the-saw");
+    expect(branch).toBe("feat/25-branch-naming");
     expect(exec).toHaveBeenCalledWith(
       "git",
-      ["checkout", "-b", "feat/25-sharpen-the-saw"],
+      ["checkout", "-b", "feat/25-branch-naming"],
       expect.any(Object),
     );
   });
@@ -165,12 +165,12 @@ describe("NodeGitExecutor.checkout", () => {
     const exec = makeExec();
     const executor = new NodeGitExecutor({ execFile: exec });
     await executor.checkout(
-      { type: "feat", scope: "25", description: "saw" },
+      { type: "feat", scope: "25", description: "sample" },
       "feat/22-research-agent",
     );
     expect(exec).toHaveBeenCalledWith(
       "git",
-      ["checkout", "-b", "feat/25-saw", "feat/22-research-agent"],
+      ["checkout", "-b", "feat/25-sample", "feat/22-research-agent"],
       expect.any(Object),
     );
   });
