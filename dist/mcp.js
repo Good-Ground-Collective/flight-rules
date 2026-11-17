@@ -210,20 +210,6 @@ import { z as z5 } from "zod";
 var JiraHostSchema = z5.string().transform((host) => host.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, ""));
 
 // src/shared/config.ts
-var seedCompetencies = [
-  "define-a-schema",
-  "wire-an-endpoint",
-  "write-a-migration",
-  "pure-transform",
-  "write-a-query",
-  "mapper-adapter",
-  "harden-edge-cases",
-  "business-rule",
-  "external-api-client",
-  "reducer-state",
-  "async-coordination",
-  "auth-check"
-];
 var usageHandoffThresholdSchema = z6.coerce.number().min(1).max(100).describe("Percent of a session or weekly usage window at which the usage-handoff hook hands the work to the other harness; defaults to 95");
 var usageHandoffMinResetMinutesSchema = z6.coerce.number().min(0).describe("Minutes left in a usage window below which the usage-handoff hook skips the handoff and just waits for the reset; defaults to 10");
 var ConfigSchema = z6.object({
@@ -248,7 +234,6 @@ var ConfigSchema = z6.object({
   qaRecipe: z6.string().optional().describe(
     "Deprecated: path to a legacy QA recipe, read only when no QA.md or AGENTS.md QA section exists; relative paths resolve against the directory holding this config file; defaults to flight-rules.qa.md beside it"
   ),
-  competencies: z6.array(z6.string()).default([...seedCompetencies]),
   usageHandoffThreshold: usageHandoffThresholdSchema.optional(),
   usageHandoffMinResetMinutes: usageHandoffMinResetMinutesSchema.optional()
 }).superRefine((cfg, ctx) => {
@@ -729,15 +714,6 @@ var DefaultLocalDiscoveryOperations = class {
           unmatched: z10.boolean()
         }),
         (input) => this.charter(input)
-      ),
-      this.descriptor(
-        "competencies",
-        "Read the configured worker competencies.",
-        ["read", "process"],
-        ["competencies"],
-        z10.object({}),
-        z10.array(z10.string()),
-        () => this.props.getConfig().competencies
       ),
       this.descriptor(
         "rfc-dir",

@@ -14,7 +14,6 @@ export declare class CommanderLocalDiscoveryCli implements LocalDiscoveryCommand
     constructor(props: LocalDiscoveryCliProps);
     addTo(program: Command): void;
     private addCharter;
-    private addCompetencies;
     private addRfc;
     private addQa;
     private addConfig;

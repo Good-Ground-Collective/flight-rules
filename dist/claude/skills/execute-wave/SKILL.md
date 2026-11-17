@@ -123,7 +123,6 @@ Then filter `waves[0]` down to what is genuinely startable:
 
 - **Keep** tickets in the tracker's to-do status.
 - **Drop** tickets already in-progress or in-review. They stay in the graph as blockers — that is correct and load-bearing, because a dependent must not start until the blocker merges — but they are not work. `execute-work` leaves a ticket in **in-review**, not closed, so an already-driven ticket reappears in `waves[0]` on every subsequent run. Re-driving it would cut a second branch for work that already has a PR.
-- **Drop** tickets labeled `sharpen-the-saw`. That work is reserved for a human, and `execute-work` redirects on the label anyway.
 
 **For an initiative, narrow to one epic.** Finish the in-flight epic before
 starting another, so the reviewer only ever holds one epic in their head:
@@ -140,8 +139,8 @@ starting another, so the reviewer only ever holds one epic in their head:
    Drop the others with the reason "another epic is in flight: <epic id>".
 3. **Open a second epic only when the in-flight epic is fully blocked on
    something outside the factory's control**: every one of its open tickets is
-   reserved for a human (`sharpen-the-saw`), parked on a question only a person
-   can answer, or blocked by a ticket or system outside this initiative. Waiting
+   parked on a question only a person can answer, or blocked by a ticket or
+   system outside this initiative. Waiting
    on the in-flight epic's own PRs to merge is **not** such a block. That is the
    normal wave boundary, so go to step 9 and stop. When you do open a second
    epic, take the next one in the epic order, say which epic is blocked and on

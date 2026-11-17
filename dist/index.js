@@ -1040,20 +1040,6 @@ import { z as z9 } from "zod";
 var JiraHostSchema = z9.string().transform((host) => host.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, ""));
 
 // src/shared/config.ts
-var seedCompetencies = [
-  "define-a-schema",
-  "wire-an-endpoint",
-  "write-a-migration",
-  "pure-transform",
-  "write-a-query",
-  "mapper-adapter",
-  "harden-edge-cases",
-  "business-rule",
-  "external-api-client",
-  "reducer-state",
-  "async-coordination",
-  "auth-check"
-];
 var usageHandoffThresholdSchema = z10.coerce.number().min(1).max(100).describe("Percent of a session or weekly usage window at which the usage-handoff hook hands the work to the other harness; defaults to 95");
 var usageHandoffMinResetMinutesSchema = z10.coerce.number().min(0).describe("Minutes left in a usage window below which the usage-handoff hook skips the handoff and just waits for the reset; defaults to 10");
 var ConfigSchema = z10.object({
@@ -1078,7 +1064,6 @@ var ConfigSchema = z10.object({
   qaRecipe: z10.string().optional().describe(
     "Deprecated: path to a legacy QA recipe, read only when no QA.md or AGENTS.md QA section exists; relative paths resolve against the directory holding this config file; defaults to flight-rules.qa.md beside it"
   ),
-  competencies: z10.array(z10.string()).default([...seedCompetencies]),
   usageHandoffThreshold: usageHandoffThresholdSchema.optional(),
   usageHandoffMinResetMinutes: usageHandoffMinResetMinutesSchema.optional()
 }).superRefine((cfg, ctx) => {
@@ -6121,15 +6106,6 @@ var DefaultLocalDiscoveryOperations = class {
         (input) => this.charter(input)
       ),
       this.descriptor(
-        "competencies",
-        "Read the configured worker competencies.",
-        ["read", "process"],
-        ["competencies"],
-        z34.object({}),
-        z34.array(z34.string()),
-        () => this.props.getConfig().competencies
-      ),
-      this.descriptor(
         "rfc-dir",
         "Resolve the RFC directory for this checkout.",
         ["read", "process"],
@@ -9118,7 +9094,7 @@ function createFlightRules(props = {}) {
 var settingsScopes = ["user", "project", "local"];
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "2.5.0";
+var appVersion = false ? "0.0.0-dev" : "3.0.0";
 
 // src/agents/agent-frontmatter/agent-frontmatter.ts
 import { parse as parseYaml4 } from "yaml";
@@ -9998,7 +9974,6 @@ export {
   readConfig,
   resolveConfigPath,
   sectionSelector,
-  seedCompetencies,
   semanticTypes,
   settingsScopes
 };

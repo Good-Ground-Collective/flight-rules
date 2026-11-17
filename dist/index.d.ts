@@ -42,7 +42,7 @@ export { TrackerEvidenceService, DuplicateEvidenceNameError, EvidenceUploadFailu
 export type { EvidenceService, EvidenceRequest, AttachedEvidence, } from "./tasks/evidence/evidence.js";
 export { NodeToolProbe, nodeToolProbe } from "./tasks/tool-probe/tool-probe.js";
 export type { ToolProbe, ToolCheck } from "./tasks/tool-probe/tool-probe.js";
-export { ConfigSchema, readConfig, resolveConfigPath, getRfcDir, getQaRecipePath, seedCompetencies, } from "./shared/config.js";
+export { ConfigSchema, readConfig, resolveConfigPath, getRfcDir, getQaRecipePath, } from "./shared/config.js";
 export type { Config } from "./shared/config.js";
 export { ConfigStore, configScopes } from "./shared/config-store.js";
 export type { ConfigScope, ConfigLayer, ConfigReport, ConfigInspection, ConfigStoreProps, } from "./shared/config-store.js";

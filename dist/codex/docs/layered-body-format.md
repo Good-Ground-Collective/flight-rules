@@ -46,8 +46,7 @@ are verbatim.
 <details><summary>Guided Walkthrough</summary>
 
 <Dense implementer walkthrough as PLAIN MARKDOWN — code fences, lists, links all
-render. This section is only present on tickets, and may be reduced to hints for
-a sharpen-the-saw ticket (the tests carry the spec).>
+render. This section is only present on tickets.>
 
 </details>
 

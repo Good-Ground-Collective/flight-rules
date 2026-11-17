@@ -1149,20 +1149,6 @@ import { z as z12 } from "zod";
 var JiraHostSchema = z12.string().transform((host) => host.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, ""));
 
 // src/shared/config.ts
-var seedCompetencies = [
-  "define-a-schema",
-  "wire-an-endpoint",
-  "write-a-migration",
-  "pure-transform",
-  "write-a-query",
-  "mapper-adapter",
-  "harden-edge-cases",
-  "business-rule",
-  "external-api-client",
-  "reducer-state",
-  "async-coordination",
-  "auth-check"
-];
 var usageHandoffThresholdSchema = z13.coerce.number().min(1).max(100).describe("Percent of a session or weekly usage window at which the usage-handoff hook hands the work to the other harness; defaults to 95");
 var usageHandoffMinResetMinutesSchema = z13.coerce.number().min(0).describe("Minutes left in a usage window below which the usage-handoff hook skips the handoff and just waits for the reset; defaults to 10");
 var ConfigSchema = z13.object({
@@ -1187,7 +1173,6 @@ var ConfigSchema = z13.object({
   qaRecipe: z13.string().optional().describe(
     "Deprecated: path to a legacy QA recipe, read only when no QA.md or AGENTS.md QA section exists; relative paths resolve against the directory holding this config file; defaults to flight-rules.qa.md beside it"
   ),
-  competencies: z13.array(z13.string()).default([...seedCompetencies]),
   usageHandoffThreshold: usageHandoffThresholdSchema.optional(),
   usageHandoffMinResetMinutes: usageHandoffMinResetMinutesSchema.optional()
 }).superRefine((cfg, ctx) => {
@@ -1451,15 +1436,6 @@ var DefaultLocalDiscoveryOperations = class {
           unmatched: z15.boolean()
         }),
         (input) => this.charter(input)
-      ),
-      this.descriptor(
-        "competencies",
-        "Read the configured worker competencies.",
-        ["read", "process"],
-        ["competencies"],
-        z15.object({}),
-        z15.array(z15.string()),
-        () => this.props.getConfig().competencies
       ),
       this.descriptor(
         "rfc-dir",
@@ -1747,7 +1723,6 @@ var CharterResultSchema = z25.object({
 });
 var ConfigPathResultSchema = z25.object({ path: z25.string() });
 var RfcIdResultSchema = z25.object({ id: z25.string() });
-var CompetenciesResultSchema = z25.array(z25.string());
 var ConfigInspectionResultSchema = z25.object({
   host: z25.string(),
   valid: z25.boolean(),
@@ -1780,7 +1755,6 @@ var CommanderLocalDiscoveryCli = class {
   }
   addTo(program) {
     this.addCharter(program);
-    this.addCompetencies(program);
     this.addRfc(program);
     this.addQa(program);
     this.addConfig(program);
@@ -1817,14 +1791,6 @@ var CommanderLocalDiscoveryCli = class {
         process.stdout.write(output);
       }
     );
-  }
-  addCompetencies(program) {
-    program.command("competencies").exitOverride().action(async () => {
-      process.stdout.write(
-        `${JSON.stringify(await this.invoke("competencies", {}, CompetenciesResultSchema))}
-`
-      );
-    });
   }
   addRfc(program) {
     const rfc = program.command("rfc");
@@ -2135,7 +2101,6 @@ var cliRouteCoverage = new ManifestCliRouteCoverage({
       ["initiative plan", "initiative-plan"],
       ["initiative review-plan", "initiative-review-plan"],
       ["charter", "charter"],
-      ["competencies", "competencies"],
       ["rfc dir", "rfc-dir"],
       ["rfc next-id", "rfc-next-id"],
       ["qa instructions", "qa-instructions"],
