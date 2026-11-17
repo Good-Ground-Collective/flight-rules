@@ -104,7 +104,7 @@ When you ask, be specific: state what's unclear, show what you found, and offer 
 
 ## Process
 
-Track your progress with your own to-do mechanism — one to-do per step, completed in order. This is *internal* progress-tracking, separate from the tracker nodes you **emit** in step 7.
+Track your progress with your own to-do mechanism — one to-do per step, completed in order. This is *internal* progress-tracking, separate from the tracker nodes you **emit** in step 8.
 
 ### 1. Read the work item and settle the input altitude
 
