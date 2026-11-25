@@ -90,8 +90,8 @@ describe('bundled charters', () => {
   })
   it('parse Tier A mandates from the Tier A table only', () => {
     const [core, typescript] = bundled.select(['src/index.ts'])
-    expect(core?.tierA).toEqual(['M-1', 'M-2', 'M-10', 'M-11', 'M-14'])
-    expect(typescript?.tierA).toEqual(['M-3', 'M-5', 'M-7'])
+    expect(core?.tierA).toEqual(['M-1', 'M-2', 'M-10', 'M-11', 'M-14', 'M-15', 'M-16', 'M-17', 'M-20'])
+    expect(typescript?.tierA).toEqual(['M-3', 'M-5', 'M-7', 'M-21', 'M-22', 'M-23', 'M-24', 'M-25'])
   })
   it('give TypeScript files the TypeScript charter', () => {
     expect(bundled.select(['src/index.ts']).map(charter => charter.id)).toContain('coding-charter-typescript')

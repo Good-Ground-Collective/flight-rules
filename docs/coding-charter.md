@@ -12,18 +12,17 @@ Banned tokens in production source: `Phase N`, `D-NN` decision codes, `T-X-NN` t
 
 **Where it belongs instead:** architectural rationale in the doc comment on the relevant declaration (JSDoc, ApexDoc, docstrings) *in application terms* ("Same-origin returnTo guards against open-redirect through the OAuth callback" — NOT "T-4-05 open-redirect defense"). Threat-model IDs, decision codes, and phase references stay in planning artifacts, never source.
 
-## M-2 — Doc comments on declarations, not paragraph block comments
+## M-2 — Doc comments on declarations; no other comments
 
-- Banned: multi-line `// ...` paragraph comments at file top. 
-- Banned: paragraph block comments above non-declaration code.
+The only comments allowed in source are doc comments (`/** ... */` in TypeScript, Apex and Java) directly above a declaration, and tool directives: lint and compiler suppressions, coverage and formatter pragmas, and annotations another lint rule requires. Explanatory line comments, block comments and why-this-line notes are banned. If a line needs explaining, rename it, extract it into a named method, or put the explanation in the doc comment of the declaration it belongs to.
 
-Required: file-level concepts as a doc comment on the primary exported declaration; class/method concepts as a doc comment (`/** ... */` in TypeScript, Apex and Java) directly above the declaration. Why-this-line comments are at most one short line, only when the *why* is non-obvious.
+No dumb comments. If a reader who knows the language and the codebase can derive the comment from the code, the comment is noise. **This applies inside doc comments too.** A doc comment on a declaration is allowed and often required for non-obvious framing, but its body still has to clear the no-dumb-comments bar. "Callers should pass a fresh snapshot" on a pure function that takes `state: AuthState` as a parameter is a dumb comment.
 
-No dumb comments. If a reader who knows the language and the codebase can derive the comment from the code, the comment is noise. **This applies inside doc comments too.** A doc comment on a declaration is allowed and often required for non-obvious framing, but its body still has to clear the no-dumb-comments bar. "Callers should pass a fresh snapshot" on a pure function that takes `state: AuthState` as a parameter is a dumb comment regardless of whether it lives in `// ...` or `/** ... */`.
-
-## M-8 — Method names use ordinary English
+## M-8 — Names say what a thing does
 
 Methods are named for what an English-speaking developer would call them. Bizarre verbs are banned (`installSession` for setting a session is banned; `applySession` or `setActiveSession` is preferred). Test: would a new hire understand this method name without context?
+
+A service, class or folder name is a noun for its role (`DeviceRegistry`, `OutboxReplay`), never a name that reads like the data it touches (`DeviceTokens`). Vague names (`platform`, `utils`, `helpers`) are banned.
 
 ## M-9 — Visual grouping with newlines
 
@@ -192,6 +191,35 @@ export class UploadFailureError extends FileProviderError {
 
 Dead code is never committed; version control is the history. Delete it.
 
+## M-15 — Layout follows the domain: module, then role, then concept
+
+Code is grouped by module first. Inside a module, a role folder says what kind of thing a file is (models, services, definitions, repositories, …), and a concept folder inside the role holds one concept's files. Submodules repeat the same shape. A file's path tells a reader what it is and which domain owns it.
+
+- Hierarchies are wide and nested. A folder that keeps growing is split by subdomain, not left as a flat list.
+- Only the folders and files the project declares sit at the source root. Everything else lives in a module.
+- A generic or platform module holds only mechanism. A domain's definitions, schemas and vendor wiring live in the subdomain that owns them, never in a central folder every domain writes into. Platform modules import nothing from the domains that use them.
+- Files live beside their consumers. Something only one feature needs is not a project-wide file.
+
+## M-16 — Small, single-topic files
+
+A file covers one topic. When a file grows past its topic, it becomes a folder named after it, with the interface, its props and types, and each implementation in separate files. Errors, schemas and types each get a file of their own rather than piling up at the top of a service.
+
+## M-17 — Tests are colocated, and named for what they test
+
+A test lives in a `__tests__/` folder directly beside the code it covers. A unit test is named for its source file (`schedule-builder.ts` → `__tests__/schedule-builder.test.ts`). Integration and cross-concept tests go in the parent module's `__tests__/`. There is no repository-level test tree and no top-level `__tests__/` folder.
+
+## M-18 — Tests prove behaviour, not tooling
+
+A test that only re-proves what a linter, the type checker or a schema library already guarantees is noise. Delete it and rely on the tool.
+
+## M-19 — Only shipped artifacts are committed
+
+Plans, agent scratch files, one-off backfill scripts and spec directories stay out of the repository. Rationale that matters goes in the PR body, an RFC, or a doc comment phrased in application terms (see M-1).
+
+## M-20 — Fix the finding, don't suppress it
+
+A lint suppression is a last resort: it names the rule, carries a reason, and is removed once the root cause can be fixed. A whole area of code living behind a suppression means the rule or the design is wrong. Fix one of them.
+
 ## Review tiers
 
 Autonomous review checks Tier A mandates on every instance and raises each Tier B mandate at most once, with representative examples. A rule named here _can_ enforce a mandate; whether it does for a given file is what the review method's coverage step measures. Core mandates apply to every changed file, so a file whose linter has no rule for a mandate is always reviewed by reading.
@@ -201,19 +229,27 @@ Autonomous review checks Tier A mandates on every instance and raises each Tier 
 | Mandate                                     | Enforceable by                                                      |
 | ------------------------------------------- | ------------------------------------------------------------------- |
 | M-1 no planning-system identifiers          | eslint: `preflight/no-planning-identifiers`                         |
-| M-2 structural: no paragraph block comments | eslint: `preflight/no-paragraph-comments`                           |
+| M-2 structural: only doc comments and directives | eslint: `preflight/no-comments`, `preflight/no-paragraph-comments` |
 | M-10 flat if-else over nested switch+if     | eslint: `preflight/no-switch-with-nested-if`                        |
 | M-11 typed errors thrown at the call site   | eslint: `preflight/no-throw-helpers`, `preflight/error-class-sets-name` |
-| M-14 no commented-out code                  | _(no rule — always reviewed by reading)_                            |
+| M-14 no commented-out code | eslint: `preflight/no-comments` |
+| M-15 module → role → concept layout | eslint: `preflight/module-layout` |
+| M-16 small, single-topic files (size) | eslint: `max-lines`, `preflight/max-directory-entries` |
+| M-17 colocated, named tests | eslint: `preflight/test-location`, `preflight/test-file-naming` |
+| M-20 suppressions carry a reason | eslint: `eslint-comments/require-description` |
 
 **Tier B — judgment**
 
 | Mandate                               | The judgment it needs                         |
 | ------------------------------------- | --------------------------------------------- |
 | M-2 quality: the no-dumb-comments bar | is this comment derivable from the code?      |
-| M-8 ordinary English method names     | would a new hire understand the name cold?    |
+| M-8 names say what a thing does       | would a new hire understand the name cold?    |
 | M-9 visual grouping with newlines     | does this read with any rhythm?               |
 | M-12 READMEs document concepts        | is this restating a linter rule?              |
 | M-13 the code models reality          | is this framed in domain terms or tool terms? |
+| M-15 generic modules stay generic | does this file name a domain or vendor concept? |
+| M-16 single topic | could this file split along a seam a reader would recognize? |
+| M-18 tests prove behaviour | would this test still matter with the linter and schema removed? |
+| M-19 only shipped artifacts | will anyone run or read this after the PR merges? |
 
 M-2 straddles both tiers on purpose. The structural ban — paragraph blocks above non-declarations — is mechanical and belongs in Tier A. "No dumb comments" is a judgment call about a specific comment's value.
