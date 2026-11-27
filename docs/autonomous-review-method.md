@@ -131,7 +131,12 @@ linters that config enables and disables:
 golangci-lint linters
 ```
 
-A linter in the enabled list is **enforced**. One the config names under
+A linter in the enabled list is **enforced** only for what its effective
+settings cover. Where a charter row depends on configuration, read the linter's
+block under `linters.settings` before calling the mandate enforced: depguard
+enforces only the packages its `deny` lists name, for the files its `files`
+globs select, and errcheck by default ignores results assigned to `_`. Behaviour
+the settings leave out is **reviewed**. One the config names under
 `linters.disable`, or excludes for the file's path under
 `linters.exclusions.rules`, is **waived**. One nothing selects is **reviewed**.
 For a mandate the charter pins to a single check inside a bundling linter
@@ -142,10 +147,14 @@ turns off is **waived**; a revive rule missing from an explicit `rules` list is
 **reviewed**. Formatters (`gofmt`, `goimports`) are listed under
 `formatters.enable`.
 
-golangci-lint lints packages, not files, so scope the run to the diff:
+golangci-lint lints packages, not files, so scope the run to the diff, and turn
+off its default issue limits, which otherwise drop repeated findings and all but
+one finding per line:
 
 ```bash
-golangci-lint run --new-from-merge-base=origin/<base> --output.json.path=stdout --output.text.path=/dev/null --show-stats=false ./...
+golangci-lint run --new-from-merge-base=origin/<base> \
+  --max-issues-per-linter=0 --max-same-issues=0 --uniq-by-line=false \
+  --output.json.path=stdout --output.text.path=/dev/null --show-stats=false ./...
 ```
 
 Each entry in `Issues` gives `FromLinter`, `Text` and `Pos` (`Filename`,

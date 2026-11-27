@@ -49,23 +49,23 @@ Source: [Interfaces](https://google.github.io/styleguide/go/decisions#interfaces
 
 ## G-4 — Errors are values, handled once
 
-- A function that can fail returns `error` as its last result. Every returned error is checked.
+- A function that can fail returns `error` as its last result. Every returned error is handled. Discarding one is a deliberate `_ =` on a call whose failure cannot matter (`_, _ = w.Write(b)` after the response has started), never a call left unassigned.
 - Context is added by wrapping: `fmt.Errorf("load order %s: %w", id, err)`. Error strings are lowercase with no trailing punctuation.
 - An error callers branch on is a package-level sentinel (`var ErrNotFound = errors.New("order not found")`) or a named type (`type ValidationError struct{...}`), and callers test it with `errors.Is` or `errors.As`, never `==`, a type switch on a wrapped error, or string matching.
 - An error is handled once: logged **or** returned, never both.
 - `panic` is for programmer errors and impossible states, and `Must` functions that run during initialization. Expected failures (bad input, missing rows, network errors) are returned.
 
-Source: [Errors](https://google.github.io/styleguide/go/decisions#errors), [Error handling](https://google.github.io/styleguide/go/best-practices#error-handling), [Logging errors](https://google.github.io/styleguide/go/best-practices#logging-errors), [Don't panic](https://google.github.io/styleguide/go/decisions#dont-panic), [Working with errors in Go 1.13](https://go.dev/blog/go1.13-errors).
+Source: [Errors](https://google.github.io/styleguide/go/decisions#errors), [Handle errors](https://google.github.io/styleguide/go/decisions#handle-errors), [Error handling](https://google.github.io/styleguide/go/best-practices#error-handling), [Logging errors](https://google.github.io/styleguide/go/best-practices#logging-errors), [Don't panic](https://google.github.io/styleguide/go/decisions#dont-panic), [Working with errors in Go 1.13](https://go.dev/blog/go1.13-errors).
 
 ## G-5 — Context flows through every call that waits
 
-A function that does I/O, blocks, or calls something that does takes `ctx context.Context` as its first parameter and passes it on. A context is never stored in a struct. `context.Background()` and `context.TODO()` appear only in `main`, in tests, and at the entry point of a process-wide background task. Outbound HTTP requests are built with `http.NewRequestWithContext`.
+A function that does I/O, blocks, or calls something that does takes `ctx context.Context` as its first parameter and passes it on. Where the signature is fixed by an interface the code implements, such as an `http.Handler`, the context comes from what the signature provides (`r.Context()`) and is passed on from there. A context is never stored in a struct. `context.Background()` and `context.TODO()` appear only in `main`, in tests, and at the entry point of a process-wide background task. Outbound HTTP requests are built with `http.NewRequestWithContext`.
 
 Source: [Contexts](https://google.github.io/styleguide/go/decisions#contexts), [Custom contexts](https://google.github.io/styleguide/go/decisions#custom-contexts).
 
 ## G-6 — Every goroutine has an owner and an exit
 
-The code that starts a goroutine also knows how it stops and waits for it: `errgroup`, `sync.WaitGroup`, or a cancelled context it watches. Fire-and-forget goroutines are banned.
+The code that starts a goroutine owns both how it stops and the wait for it. Stopping is a signal the goroutine watches, usually a cancelled context. Waiting is `errgroup.Group.Wait`, `sync.WaitGroup.Wait` or a completion channel, and it happens before the owner returns or releases anything the goroutine uses; cancelling alone is not waiting. Fire-and-forget goroutines are banned.
 
 APIs are synchronous; callers add concurrency when they need it. Shared state is guarded by a mutex. Channels hand off ownership or signal events, and are not used as a lock.
 
@@ -139,11 +139,11 @@ Rules named here are golangci-lint v2 linters, with staticcheck check IDs and re
 | G-2 no stutter                            | golangci-lint: revive `exported`                                                                                  |
 | G-2 banned package names and layout       | _(no rule — always reviewed by reading)_                                                                          |
 | G-3 return concrete types                 | golangci-lint: `ireturn`, `iface`                                                                                 |
-| G-4 every error checked                   | golangci-lint: `errcheck`                                                                                         |
+| G-4 no unassigned error results           | golangci-lint: `errcheck`                                                                                         |
 | G-4 wrapping, `errors.Is` and `errors.As` | golangci-lint: `errorlint`                                                                                        |
 | G-4 sentinel and error type names         | golangci-lint: `errname`                                                                                          |
 | G-4 error strings                         | golangci-lint: staticcheck `ST1005`                                                                               |
-| G-4 handled once, no `panic` for failures | _(no rule — always reviewed by reading)_                                                                          |
+| G-4 handled once, `_ =` discards justified, no `panic` for failures | _(no rule — always reviewed by reading)_                                   |
 | G-5 context passed, first, not stored     | golangci-lint: `noctx`, `contextcheck`, `containedctx`, revive `context-as-argument`                              |
 | G-7 banned old packages                   | golangci-lint: `depguard`                                                                                         |
 | G-7 current idioms                        | golangci-lint: `modernize`, `copyloopvar`, `usestdlibvars`, `sloglint`                                              |
@@ -165,7 +165,7 @@ Rules named here are golangci-lint v2 linters, with staticcheck check IDs and re
 | ------------------------------------ | ----------------------------------------------------------------------- |
 | G-2 package named for what it provides | would a caller know what `pkg.Name` does from the call site alone?    |
 | G-3 interface earns its place        | is there a second real implementation, or a consumer that needs it?     |
-| G-6 goroutine ownership              | can you point to the line that waits for this goroutine to stop?        |
+| G-6 goroutine ownership              | can you point to the signal that stops this goroutine and the line that waits for it? |
 | G-7 generics used for real           | is this code genuinely type-independent?                                |
 | G-10 test shape                      | would a failure message alone tell you what broke and for which input? |
 | G-12 options and zero values         | does this constructor or option exist only because another language would need it? |
