@@ -23,6 +23,7 @@ describe("review policy charters", () => {
   it("selects language charters for the changed paths", () => {
     expect(ids(["src/review.ts"])).toEqual(["coding-charter", "coding-charter-typescript"]);
     expect(ids(["README.md"])).toEqual(["coding-charter"]);
+    expect(ids(["internal/order/store.go"])).toEqual(["coding-charter", "coding-charter-go"]);
   });
   it("lists every Tier A mandate of the selected charters", () => {
     expect(policy.load({ paths: ["README.md"] }).tierA).toEqual(["M-1", "M-2", "M-10", "M-11", "M-14", "M-15", "M-16", "M-17", "M-20"]);
@@ -44,6 +45,10 @@ describe("review policy charters", () => {
       "M-23",
       "M-24",
       "M-25",
+    ]);
+    expect(policy.load({ paths: ["internal/order/store.go"] }).tierA).toEqual([
+      "M-1", "M-2", "M-10", "M-11", "M-14", "M-15", "M-16", "M-17", "M-20",
+      "G-1", "G-2", "G-3", "G-4", "G-5", "G-7", "G-8", "G-9", "G-10", "G-11", "G-12",
     ]);
   });
   it("renders the selected charters into one charter document, core first", () => {

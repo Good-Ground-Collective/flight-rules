@@ -121,6 +121,36 @@ sf code-analyzer run --rule-selector <the repo's selector> --target <changed fil
 
 Each violation gives the file, line, rule and message.
 
+### golangci-lint (Go)
+
+Coverage lives in the module's `.golangci.yml` (or `.golangci.yaml`, `.toml`,
+`.json`), which must be a version 2 config. `golangci-lint linters` prints the
+linters that config enables and disables:
+
+```bash
+golangci-lint linters
+```
+
+A linter in the enabled list is **enforced**. One the config names under
+`linters.disable`, or excludes for the file's path under
+`linters.exclusions.rules`, is **waived**. One nothing selects is **reviewed**.
+For a mandate the charter pins to a single check inside a bundling linter
+(a staticcheck ID such as `ST1003`, a revive rule, a gocritic check), read that
+linter's block under `linters.settings`: staticcheck's `checks` list, revive's
+`rules`, gocritic's `enabled-checks` and `disabled-checks`. A check the block
+turns off is **waived**; a revive rule missing from an explicit `rules` list is
+**reviewed**. Formatters (`gofmt`, `goimports`) are listed under
+`formatters.enable`.
+
+golangci-lint lints packages, not files, so scope the run to the diff:
+
+```bash
+golangci-lint run --new-from-merge-base=origin/<base> --output.json.path=stdout --output.text.path=/dev/null --show-stats=false ./...
+```
+
+Each entry in `Issues` gives `FromLinter`, `Text` and `Pos` (`Filename`,
+`Line`, `Column`).
+
 ### Waivers, and no linter at all
 
 **On waived mandates.** `flight-rules` itself waives four rules for
