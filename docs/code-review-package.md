@@ -119,3 +119,20 @@ tlp-actions keeps its Tier 1 High pilot hold separate from the core outcome.
 It owns prompt assembly, CI/bot triggers, posting/chunking, human-readable
 summary shortening, and its remediation round cap. The action and local skill
 must not run two independent reviewers and merge their opinions.
+
+## Changed lines
+
+`UnifiedDiffChanges` answers whether a finding's lines changed between two
+heads. Build it from a `git diff -U0` string with `UnifiedDiffChanges.parse(diff)`
+or from GitHub compare file entries with `UnifiedDiffChanges.fromFilePatches(files)`;
+equivalent input yields the same index. The diff must run from the last
+reviewed head to the current head, and the caller supplies it: the package does
+no git or GitHub I/O.
+
+`touches(path, line, startLine?)` is true when any line in the inclusive range
+`startLine..line` is an added or modified new-side line, or the file is wholly
+changed. It is false for paths absent from the diff. New files, binary files
+and entries without a `patch` are wholly changed; a deleted file has no new
+side; a pure rename is unchanged and indexed by its new path. A deletion-only
+hunk `@@ -a,b +c,0 @@` marks lines `c` and `c+1` as touched. Line 0 (PR-wide)
+and an inverted range count as changed, so a caller that is unsure posts.
