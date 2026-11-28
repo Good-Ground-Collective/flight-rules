@@ -56,3 +56,5 @@ export type {
   MandateState,
   LintStatus,
 } from "./flight-rules-extensions.js";
+export { ReviewEnsemble, VerdictSchema } from "./review-ensemble.js";
+export type { MergeTrace, Verdict, EnsembleMerge, VerdictApplication } from "./review-ensemble.js";
