@@ -158,7 +158,7 @@ export class GitHubTaskTracker implements TaskTracker {
                         number
                         title
                         repository { name owner { login } }
-                        labels(first: 50) { nodes { name } }
+                        labels(first: 100) { nodes { name } }
                       }
                     }
                   }
@@ -858,12 +858,10 @@ export class GitHubTaskTracker implements TaskTracker {
     title?: string,
   ): Promise<void> {
     await this.gql(
-      `mutation UpdateInitiative($projectId: ID!, $readme: String!, $title: String) {
-        updateProjectV2(input: { projectId: $projectId, readme: $readme, title: $title }) {
-          projectV2 { id }
-        }
+      `mutation UpdateInitiative($input: UpdateProjectV2Input!) {
+        updateProjectV2(input: $input) { projectV2 { id } }
       }`,
-      { projectId, readme, title: title ?? null },
+      { input: { projectId, readme, ...(title !== undefined ? { title } : {}) } },
     );
   }
 

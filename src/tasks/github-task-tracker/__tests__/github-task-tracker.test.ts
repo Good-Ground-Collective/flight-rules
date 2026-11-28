@@ -946,9 +946,7 @@ describe("GitHubTracker initiatives (GitHub Projects)", () => {
       title: "Q3 Platform",
     });
     expect(gql.mock.calls[2]?.[1]).toEqual({
-      projectId: "PVT_7",
-      readme: "The big push",
-      title: null,
+      input: { projectId: "PVT_7", readme: "The big push" },
     });
     expect(initiative).toEqual({
       id: "7",
@@ -1086,12 +1084,25 @@ describe("GitHubTracker initiatives (GitHub Projects)", () => {
     });
 
     expect(gql.mock.calls[1]?.[1]).toEqual({
-      projectId: "PVT_7",
-      readme: "new idea body",
-      title: "New Idea",
+      input: { projectId: "PVT_7", readme: "new idea body", title: "New Idea" },
     });
     expect(initiative.id).toBe("7");
     expect(initiative.size).toBe("initiative");
+  });
+
+  it("leaves the project title out of the update when no title is given", async () => {
+    const tracker = makeTracker();
+    const gql = gqlOf(tracker);
+    gql
+      .mockResolvedValueOnce({ repositoryOwner: { projectV2: { id: "PVT_7" } } } as never)
+      .mockResolvedValueOnce({} as never)
+      .mockResolvedValueOnce(projectPage([]) as never);
+
+    await tracker.updateInitiativeDescription("7", { body: "new idea body" });
+
+    expect(gql.mock.calls[1]?.[1]).toEqual({
+      input: { projectId: "PVT_7", readme: "new idea body" },
+    });
   });
 });
 
