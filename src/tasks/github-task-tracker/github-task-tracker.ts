@@ -150,7 +150,7 @@ export class GitHubTaskTracker implements TaskTracker {
               projectV2(number: $number) {
                 title
                 readme
-                items(first: 100, after: $after) {
+                items(first: 100, after: $after, archivedStates: [ARCHIVED, NOT_ARCHIVED]) {
                   pageInfo { hasNextPage endCursor }
                   nodes {
                     content {
@@ -176,7 +176,7 @@ export class GitHubTaskTracker implements TaskTracker {
       for (const item of project.items.nodes) {
         const issue = item?.content;
         if (!issue?.number || !issue.repository || !this.isThisRepo(issue.repository)) continue;
-        if (!issue.labels?.nodes.some((label) => label?.name === "epic")) continue;
+        if (!issue.labels?.nodes.some((label) => label?.name.toLowerCase() === "epic")) continue;
         epics.push({ id: String(issue.number), title: issue.title ?? "" });
       }
       after = project.items.pageInfo.hasNextPage ? project.items.pageInfo.endCursor : null;

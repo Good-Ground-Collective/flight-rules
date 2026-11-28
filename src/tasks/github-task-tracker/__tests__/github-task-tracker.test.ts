@@ -1009,6 +1009,17 @@ describe("GitHubTracker initiatives (GitHub Projects)", () => {
     });
   });
 
+  it("includes archived items and matches the epic label in any case", async () => {
+    const tracker = makeTracker();
+    const gql = gqlOf(tracker);
+    gql.mockResolvedValueOnce(projectPage([issueItem(19, "Decomposition", ["Epic"])]) as never);
+
+    const initiative = await tracker.getInitiative("7");
+
+    expect(gql.mock.calls[0]?.[0]).toContain("archivedStates: [ARCHIVED, NOT_ARCHIVED]");
+    expect(initiative.epics).toEqual([{ id: "19", title: "Decomposition" }]);
+  });
+
   it("throws when the owner has no project with that number", async () => {
     const tracker = makeTracker();
     gqlOf(tracker).mockResolvedValueOnce({ repositoryOwner: { projectV2: null } } as never);
