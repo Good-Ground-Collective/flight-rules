@@ -275,7 +275,12 @@ Consumer-specific fields go under `extensions.<consumer>` and never change core 
 - **`extensions.github_action`:**
   - the risk `dimensions` (the tiered rubric) and the review `mode` (`standard` or `comprehensive`);
   - a separately computed consumer approval gate, such as `{ status: "hold", reason: "Tier 1 High under the pilot safety policy", next_step: "Independent risk review required before automatic approval" }`. A Tier 1 High may hold automatic approval during the pilot even when the core outcome is `APPROVED`. The poster computes this gate from the action's validated rubric and policy; a model-supplied gate cannot override it. The summary shows both the core outcome and the gate. If a specific policy decision is actually required, emit a blocking `decide`; never manufacture one solely to encode the safety hold.
-- **`extensions.flight_rules`:** `charterCoverage`, `lint`, and the Tier A, Tier B and holistic counts.
+- **`extensions.flight_rules`:** the package exports its schema and checks (`FlightRulesExtensions`), so consumers do not redefine them.
+  - `charterCoverage`: the `charters` applied and, per Tier A mandate, `{ id, charter, state, files, note? }` where `state` is `enforced`, `waived`, `reviewed` or `not_applicable`.
+  - `lint`: `{ status, detail }` where `status` is `absent`, `ran` or `failed`.
+  - `counts`: the Tier A, Tier B and holistic counts.
+  - `coverage.files` (optional): one `{ path, state, hunks_reviewed?, note? }` per changed file, where `state` is `reviewed`, `skipped_generated`, `skipped_binary` or `not_applicable`. Deleted files need no entry; a renamed file uses its new path. The schema keeps it optional so older reviewer output stays valid; `fileCoverageProblems` reports changed paths missing from it and duplicate paths as INCOMPLETE problems.
+  - A consumer restricts the vocabulary with options, for example a consumer that runs no linter allows only lint status `absent` and forbids mandate state `enforced`. `withExtension` splices the (restricted) extension into the draft-07 transport schema with `extensions.flight_rules` required and `additionalProperties: false`, without mutating its input.
 
 ## 8. Remediation agent rules
 

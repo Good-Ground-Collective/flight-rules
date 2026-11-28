@@ -293,6 +293,10 @@ The reviewer returns contract_version: 1, schema_revision: 1, head_sha,
 review_complete, summary, outcome, outcome_reason, remaining_risk, findings,
 prior_findings and optional consumer extensions. No new finding has an ID;
 the poster assigns it. Include extensions.flight_rules charterCoverage (the
-charters applied and each Tier A mandate's state), lint and tier counts. The poster must validate the full contract, evidence,
+charters applied and each Tier A mandate's state), lint, tier counts and
+coverage.files: one entry per changed file (the new path for a rename, none
+for a deletion) stating whether you reviewed it or skipped it as generated,
+binary or not applicable. A changed file missing from coverage.files is
+reported as incomplete coverage. The poster must validate the full contract, evidence,
 authority and current head before persisting transitions and computing the
 outcome. Approval, when a consumer permits it, is the last write.
