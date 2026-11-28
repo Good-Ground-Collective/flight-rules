@@ -8,7 +8,12 @@ import type {
   MandateCoverage,
 } from "./flight-rules-extensions.js";
 import { InvalidReviewError, reviewContract } from "./review-contract.js";
-import type { NewFinding, PriorFinding, Review, ReviewOutcome } from "./review.schema.js";
+import type {
+  NewFinding,
+  PriorFinding,
+  Review,
+  ReviewOutcome,
+} from "./review.schema.js";
 
 export const VerdictSchema = z
   .strictObject({
@@ -16,10 +21,13 @@ export const VerdictSchema = z
     verdict: z.enum(["confirmed", "rejected"]),
     reason: z.string(),
   })
-  .refine((value) => value.verdict !== "rejected" || value.reason.trim().length > 0, {
-    message: "a rejected verdict requires a reason",
-    path: ["reason"],
-  });
+  .refine(
+    (value) => value.verdict !== "rejected" || value.reason.trim().length > 0,
+    {
+      message: "a rejected verdict requires a reason",
+      path: ["reason"],
+    },
+  );
 
 export type Verdict = z.infer<typeof VerdictSchema>;
 
@@ -40,14 +48,22 @@ export interface VerdictApplication {
   problems: string[];
 }
 
-type ActionFinding = Extract<NewFinding, { type: "fix" | "clarify" | "decide" }>;
+type ActionFinding = Extract<
+  NewFinding,
+  { type: "fix" | "clarify" | "decide" }
+>;
 type DecisionFinding = Extract<NewFinding, { type: "decide" }>;
 interface Member {
   finding: NewFinding;
   lens: number;
 }
 
-const mandateStrictness = { not_applicable: 0, waived: 1, reviewed: 2, enforced: 3 };
+const mandateStrictness = {
+  not_applicable: 0,
+  waived: 1,
+  reviewed: 2,
+  enforced: 3,
+};
 const fileStrictness = {
   not_applicable: 0,
   skipped_generated: 1,
@@ -65,7 +81,12 @@ const similarityThreshold = 0.5;
  */
 export class ReviewEnsemble {
   static key(finding: NewFinding): string {
-    const text = [finding.path, finding.start_line ?? "", finding.line, finding.subject].join("|");
+    const text = [
+      finding.path,
+      finding.start_line ?? "",
+      finding.line,
+      finding.subject,
+    ].join("|");
     return createHash("sha256").update(text).digest("hex").slice(0, 16);
   }
 
@@ -74,7 +95,8 @@ export class ReviewEnsemble {
     ReviewEnsemble.checkLenses(input.lenses, primary);
     const lenses = input.lenses.map((lens) => reviewContract.parse(lens));
     const lead = lenses[primary];
-    if (lead === undefined) throw new InvalidReviewError("primary lens index is out of range");
+    if (lead === undefined)
+      throw new InvalidReviewError("primary lens index is out of range");
 
     const groups = ReviewEnsemble.group(lenses);
     const trace: MergeTrace[] = [];
@@ -85,7 +107,9 @@ export class ReviewEnsemble {
       if (members.length > 1 && survivor !== undefined) {
         trace.push({
           survivor: ReviewEnsemble.key(survivor.finding),
-          merged: members.slice(1).map((member) => ReviewEnsemble.key(member.finding)),
+          merged: members
+            .slice(1)
+            .map((member) => ReviewEnsemble.key(member.finding)),
           lens_indexes: [...new Set(members.map((member) => member.lens))],
         });
       }
@@ -105,7 +129,9 @@ export class ReviewEnsemble {
       outcome_reason: lead.outcome_reason,
       remaining_risk: lead.remaining_risk,
       review_complete: incomplete.length === 0,
-      ...(incomplete.length === 0 ? {} : { incomplete_reason: [...new Set(reasons)].join("; ") }),
+      ...(incomplete.length === 0
+        ? {}
+        : { incomplete_reason: [...new Set(reasons)].join("; ") }),
       findings,
       prior_findings: ReviewEnsemble.priorFindings(lenses, primary),
       ...(extensions === undefined ? {} : { extensions }),
@@ -116,17 +142,23 @@ export class ReviewEnsemble {
     return { review: reviewContract.parse({ ...normalized, outcome }), trace };
   }
 
-  static applyVerdicts(review: Review, verdicts: Verdict[]): VerdictApplication {
+  static applyVerdicts(
+    review: Review,
+    verdicts: Verdict[],
+  ): VerdictApplication {
     const parsed = reviewContract.parse(review);
     const checked = z.array(VerdictSchema).parse(verdicts);
     const problems: string[] = [];
     const byKey = new Map<string, Verdict>();
     for (const verdict of checked) {
-      if (byKey.has(verdict.key)) problems.push(`duplicate verdict for key ${verdict.key}`);
+      if (byKey.has(verdict.key))
+        problems.push(`duplicate verdict for key ${verdict.key}`);
       else byKey.set(verdict.key, verdict);
     }
 
-    const known = new Set(parsed.findings.map((finding) => ReviewEnsemble.key(finding)));
+    const known = new Set(
+      parsed.findings.map((finding) => ReviewEnsemble.key(finding)),
+    );
     for (const key of byKey.keys()) {
       if (!known.has(key)) problems.push(`unknown verdict key ${key}`);
     }
@@ -142,7 +174,10 @@ export class ReviewEnsemble {
     if (dropped.length === 0) return { review: parsed, dropped, problems };
 
     const filtered = { ...parsed, findings: kept };
-    const outcome = ReviewEnsemble.outcome(reviewContract.parse(filtered), parsed.outcome);
+    const outcome = ReviewEnsemble.outcome(
+      reviewContract.parse(filtered),
+      parsed.outcome,
+    );
     return {
       review: reviewContract.parse({ ...filtered, outcome }),
       dropped,
@@ -152,7 +187,8 @@ export class ReviewEnsemble {
 
   private static checkLenses(lenses: Review[], primary: number): void {
     const first = lenses[0];
-    if (first === undefined) throw new InvalidReviewError("an ensemble needs at least one lens");
+    if (first === undefined)
+      throw new InvalidReviewError("an ensemble needs at least one lens");
     if (!Number.isInteger(primary) || primary < 0 || primary >= lenses.length) {
       throw new InvalidReviewError("primary lens index is out of range");
     }
@@ -175,7 +211,11 @@ export class ReviewEnsemble {
       for (const finding of lens.findings) {
         const home = groups.find((members) => {
           const survivor = members[0];
-          return survivor !== undefined && ReviewEnsemble.sameIssue(survivor.finding, finding);
+          return (
+            survivor !== undefined &&
+            members.every((member) => member.lens !== index) &&
+            ReviewEnsemble.sameIssue(survivor.finding, finding)
+          );
         });
         if (home === undefined) groups.push([{ finding, lens: index }]);
         else home.push({ finding, lens: index });
@@ -188,8 +228,12 @@ export class ReviewEnsemble {
     if (left.path !== right.path) return false;
     if ("type" in left !== "type" in right) return false;
     if (!ReviewEnsemble.overlaps(left, right)) return false;
-    if (left.category !== undefined && left.category === right.category) return true;
-    return ReviewEnsemble.similarity(left.subject, right.subject) >= similarityThreshold;
+    if (left.category !== undefined && left.category === right.category)
+      return true;
+    return (
+      ReviewEnsemble.similarity(left.subject, right.subject) >=
+      similarityThreshold
+    );
   }
 
   private static overlaps(left: NewFinding, right: NewFinding): boolean {
@@ -202,14 +246,17 @@ export class ReviewEnsemble {
   private static similarity(left: string, right: string): number {
     const leftTokens = new Set(left.toLowerCase().match(/[a-z0-9]+/g) ?? []);
     const rightTokens = new Set(right.toLowerCase().match(/[a-z0-9]+/g) ?? []);
-    const shared = [...leftTokens].filter((token) => rightTokens.has(token)).length;
+    const shared = [...leftTokens].filter((token) =>
+      rightTokens.has(token),
+    ).length;
     const union = leftTokens.size + rightTokens.size - shared;
     return union === 0 ? 0 : shared / union;
   }
 
   private static combine(members: Member[]): NewFinding {
     const survivor = members[0]?.finding;
-    if (survivor === undefined) throw new InvalidReviewError("cannot combine an empty group");
+    if (survivor === undefined)
+      throw new InvalidReviewError("cannot combine an empty group");
     if (!("type" in survivor)) return survivor;
 
     const actions = members
@@ -219,7 +266,8 @@ export class ReviewEnsemble {
     let severity = survivor.severity;
     for (const action of actions) {
       if (typeRank[action.type] > typeRank[winner]) winner = action.type;
-      if (severityRank[action.severity] > severityRank[severity]) severity = action.severity;
+      if (severityRank[action.severity] > severityRank[severity])
+        severity = action.severity;
     }
 
     const merged = {
@@ -228,9 +276,12 @@ export class ReviewEnsemble {
       severity,
       blocking: actions.some((action) => action.blocking),
     };
-    if (winner !== "decide" || survivor.type === "decide") return NewFindingSchema.parse(merged);
+    if (winner !== "decide" || survivor.type === "decide")
+      return NewFindingSchema.parse(merged);
 
-    const decision = actions.find((action): action is DecisionFinding => action.type === "decide");
+    const decision = actions.find(
+      (action): action is DecisionFinding => action.type === "decide",
+    );
     return NewFindingSchema.parse({
       ...merged,
       decision_owner: decision?.decision_owner,
@@ -238,7 +289,10 @@ export class ReviewEnsemble {
     });
   }
 
-  private static priorFindings(lenses: Review[], primary: number): PriorFinding[] {
+  private static priorFindings(
+    lenses: Review[],
+    primary: number,
+  ): PriorFinding[] {
     const lead = lenses[primary];
     if (lead === undefined) return [];
     return lead.prior_findings.map((entry) => {
@@ -278,9 +332,13 @@ export class ReviewEnsemble {
     return { ...own, flight_rules: merged };
   }
 
-  private static unionMandates(extensions: FlightRulesExtension[]): MandateCoverage[] {
+  private static unionMandates(
+    extensions: FlightRulesExtension[],
+  ): MandateCoverage[] {
     const union = new Map<string, MandateCoverage>();
-    for (const mandate of extensions.flatMap((entry) => entry.charterCoverage.mandates)) {
+    for (const mandate of extensions.flatMap(
+      (entry) => entry.charterCoverage.mandates,
+    )) {
       const current = union.get(mandate.id);
       if (current === undefined) {
         union.set(mandate.id, mandate);
@@ -288,14 +346,20 @@ export class ReviewEnsemble {
       }
       const files = [...new Set([...current.files, ...mandate.files])];
       const winner =
-        mandateStrictness[mandate.state] > mandateStrictness[current.state] ? mandate : current;
+        mandateStrictness[mandate.state] > mandateStrictness[current.state]
+          ? mandate
+          : current;
       union.set(mandate.id, { ...winner, files });
     }
     return [...union.values()];
   }
 
-  private static unionFiles(extensions: FlightRulesExtension[]): FileCoverage[] | undefined {
-    const lists = extensions.flatMap((entry) => (entry.coverage ? [entry.coverage.files] : []));
+  private static unionFiles(
+    extensions: FlightRulesExtension[],
+  ): FileCoverage[] | undefined {
+    const lists = extensions.flatMap((entry) =>
+      entry.coverage ? [entry.coverage.files] : [],
+    );
     if (lists.length === 0) return undefined;
 
     const union = new Map<string, FileCoverage>();
@@ -305,7 +369,10 @@ export class ReviewEnsemble {
         union.set(file.path, file);
         continue;
       }
-      const winner = fileStrictness[file.state] > fileStrictness[current.state] ? file : current;
+      const winner =
+        fileStrictness[file.state] > fileStrictness[current.state]
+          ? file
+          : current;
       const hunks = [current.hunks_reviewed, file.hunks_reviewed].filter(
         (count): count is number => count !== undefined,
       );
@@ -317,13 +384,20 @@ export class ReviewEnsemble {
     return [...union.values()];
   }
 
-  private static outcome(review: Review, claimed: ReviewOutcome): ReviewOutcome {
+  private static outcome(
+    review: Review,
+    claimed: ReviewOutcome,
+  ): ReviewOutcome {
     if (!review.review_complete) return "INCOMPLETE";
     const blockers = review.findings.filter((finding) => finding.blocking);
-    if (blockers.some((finding) => "type" in finding && finding.type === "decide")) {
+    if (
+      blockers.some((finding) => "type" in finding && finding.type === "decide")
+    ) {
       return "ESCALATE";
     }
     if (blockers.length > 0) return "CHANGES_NEEDED";
-    return claimed === "ESCALATE" ? "CHANGES_NEEDED" : claimed;
+    return claimed === "CHANGES_NEEDED" || claimed === "ESCALATE"
+      ? "APPROVED"
+      : claimed;
   }
 }

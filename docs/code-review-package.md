@@ -107,7 +107,9 @@ const {
 
 - `merge({ lenses, primary })` returns `{ review, trace }` and throws
   `InvalidReviewError` when lenses differ in head, contract version or schema
-  revision. The review is normalized through `reviewContract.parse`. Each
+  revision. Findings merge only across different lenses; one lens's own
+  findings are never combined. A review with no blocking finding never reports
+  `CHANGES_NEEDED` or `ESCALATE`; a claimed one becomes `APPROVED`. The review is normalized through `reviewContract.parse`. Each
   `trace` entry holds the surviving finding's key, the keys it absorbed and the
   lens indexes involved.
 - `key(finding)` is the first 16 hex characters of the SHA-256 of

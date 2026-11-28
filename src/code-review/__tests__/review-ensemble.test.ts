@@ -1,8 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { ReviewEnsemble } from "../review-ensemble.js";
-import { EvidenceReviewPlanner, ValidatedReviewVerifier } from "../review-planner.js";
+import {
+  EvidenceReviewPlanner,
+  ValidatedReviewVerifier,
+} from "../review-planner.js";
 import { InvalidReviewError, reviewContract } from "../review-contract.js";
-import { FindingRecordSchema, NewFindingSchema, ReviewSchema } from "../review.schema.js";
+import {
+  FindingRecordSchema,
+  NewFindingSchema,
+  ReviewSchema,
+} from "../review.schema.js";
 import type { Review } from "../review.schema.js";
 
 const head = "a".repeat(40);
@@ -50,8 +57,10 @@ const makeReview = (overrides: Record<string, unknown> = {}): Review =>
     prior_findings: [],
     ...overrides,
   });
-const lens = (findings: unknown[], overrides: Record<string, unknown> = {}): Review =>
-  makeReview({ findings, outcome: "CHANGES_NEEDED", ...overrides });
+const lens = (
+  findings: unknown[],
+  overrides: Record<string, unknown> = {},
+): Review => makeReview({ findings, outcome: "CHANGES_NEEDED", ...overrides });
 const priorId = "f-0000000001";
 const code = {
   kind: "code",
@@ -75,7 +84,9 @@ describe("merging lens findings", () => {
     });
     const key = ReviewEnsemble.key(NewFindingSchema.parse(fix));
     expect(review.findings).toHaveLength(1);
-    expect(trace).toEqual([{ survivor: key, merged: [key], lens_indexes: [0, 1] }]);
+    expect(trace).toEqual([
+      { survivor: key, merged: [key], lens_indexes: [0, 1] },
+    ]);
   });
 
   it("merges different categories when the subjects are similar", () => {
@@ -130,7 +141,10 @@ describe("merging lens findings", () => {
       label: "suggestion",
     };
     const { review } = ReviewEnsemble.merge({
-      lenses: [lens([low], { outcome: "APPROVED" }), lens([{ ...fix, severity: "critical" }])],
+      lenses: [
+        lens([low], { outcome: "APPROVED" }),
+        lens([{ ...fix, severity: "critical" }]),
+      ],
       primary: 0,
     });
     expect(review.findings[0]).toMatchObject({
@@ -162,12 +176,35 @@ describe("merging lens findings", () => {
     expect(review.findings[0]).toMatchObject({ type: "fix" });
   });
 
-  it("downgrades a primary escalation that no surviving decide supports", () => {
+  it("approves when a primary escalation has no surviving blocker", () => {
     const { review } = ReviewEnsemble.merge({
       lenses: [lens([], { outcome: "ESCALATE" }), lens([])],
       primary: 0,
     });
-    expect(review.outcome).toBe("CHANGES_NEEDED");
+    expect(review.outcome).toBe("APPROVED");
+  });
+});
+
+describe("same-lens findings", () => {
+  it("keeps two distinct same-category findings from one lens", () => {
+    const second = { ...fix, subject: "Add the cross-tenant regression test" };
+    const { review, trace } = ReviewEnsemble.merge({
+      lenses: [lens([fix, second])],
+      primary: 0,
+    });
+    expect(review.findings).toHaveLength(2);
+    expect(trace).toEqual([]);
+  });
+
+  it("still merges cross-lens duplicates with distinct lens indexes", () => {
+    const second = { ...fix, subject: "Add the cross-tenant regression test" };
+    const { review, trace } = ReviewEnsemble.merge({
+      lenses: [lens([fix, second]), lens([fix])],
+      primary: 0,
+    });
+    expect(review.findings).toHaveLength(2);
+    expect(trace).toHaveLength(1);
+    expect(trace[0]?.lens_indexes).toEqual([0, 1]);
   });
 });
 
@@ -227,7 +264,10 @@ describe("merging review state", () => {
       ...extension({
         charterCoverage: {
           charters: ["core"],
-          mandates: [mandate("M-1", "reviewed", ["a.ts"]), mandate("M-2", "waived", [])],
+          mandates: [
+            mandate("M-1", "reviewed", ["a.ts"]),
+            mandate("M-2", "waived", []),
+          ],
         },
         coverage: {
           files: [
@@ -241,7 +281,10 @@ describe("merging review state", () => {
     const right = extension({
       charterCoverage: {
         charters: ["core", "typescript"],
-        mandates: [mandate("M-1", "enforced", ["b.ts"]), mandate("M-3", "reviewed", ["b.ts"])],
+        mandates: [
+          mandate("M-1", "enforced", ["b.ts"]),
+          mandate("M-3", "reviewed", ["b.ts"]),
+        ],
       },
       lint: { status: "failed", detail: "other" },
       coverage: {
@@ -326,7 +369,9 @@ describe("merging review state", () => {
       }),
     });
     const withPrior = ReviewEnsemble.merge({
-      lenses: [lens([fix], { prior_findings: [{ ...prior("still_open", "Open.") }] })],
+      lenses: [
+        lens([fix], { prior_findings: [{ ...prior("still_open", "Open.") }] }),
+      ],
       primary: 0,
     }).review;
     expect(reviewContract.parse(review)).toEqual(review);
@@ -341,8 +386,10 @@ describe("merging review state", () => {
 });
 
 describe("verifier verdicts", () => {
-  const review = (): Review => lens([fix, { ...fix, path: "src/b.ts", subject: "Other issue" }]);
-  const keys = (): string[] => review().findings.map((finding) => ReviewEnsemble.key(finding));
+  const review = (): Review =>
+    lens([fix, { ...fix, path: "src/b.ts", subject: "Other issue" }]);
+  const keys = (): string[] =>
+    review().findings.map((finding) => ReviewEnsemble.key(finding));
 
   it("derives a 16 hex key from path, range, line and subject", () => {
     expect(keys()[0]).toMatch(/^[a-f0-9]{16}$/);
@@ -359,10 +406,16 @@ describe("verifier verdicts", () => {
       },
       { key: second ?? "", verdict: "confirmed", reason: "" },
     ]);
-    expect(result.review.findings.map((finding) => finding.path)).toEqual(["src/b.ts"]);
-    expect(result.dropped).toEqual([{ key: first, reason: "The query is already scoped." }]);
+    expect(result.review.findings.map((finding) => finding.path)).toEqual([
+      "src/b.ts",
+    ]);
+    expect(result.dropped).toEqual([
+      { key: first, reason: "The query is already scoped." },
+    ]);
     expect(result.problems).toEqual([]);
-    expect(ReviewEnsemble.applyVerdicts(review(), []).review.findings).toHaveLength(2);
+    expect(
+      ReviewEnsemble.applyVerdicts(review(), []).review.findings,
+    ).toHaveLength(2);
   });
 
   it("reports unknown keys as problems and requires a reason to reject", () => {
@@ -388,6 +441,51 @@ describe("verifier verdicts", () => {
       },
     ]);
     expect(result.review.findings).toEqual([]);
+    expect(result.review.outcome).toBe("APPROVED");
+  });
+
+  it("lets the planner accept a review whose only blocker was rejected", async () => {
+    const merged = ReviewEnsemble.merge({
+      lenses: [lens([fix]), lens([], { outcome: "APPROVED" })],
+      primary: 0,
+    }).review;
+    const result = ReviewEnsemble.applyVerdicts(merged, [
+      {
+        key: ReviewEnsemble.key(NewFindingSchema.parse(fix)),
+        verdict: "rejected",
+        reason: "False positive.",
+      },
+    ]);
+    const planner = new EvidenceReviewPlanner({
+      verifier: new ValidatedReviewVerifier({
+        verified: [],
+        authorizedDecisions: [],
+        dismissals: [],
+      }),
+    });
+    const plan = await planner.plan({
+      review: result.review,
+      records: [],
+      headSha: head,
+    });
+    expect(plan.outcome).not.toBe("INCOMPLETE");
+    expect(plan.problems).toEqual([]);
+  });
+
+  it("keeps CHANGES_NEEDED while one blocker remains after a partial rejection", () => {
+    const other = { ...fix, path: "src/other.ts" };
+    const merged = ReviewEnsemble.merge({
+      lenses: [lens([fix, other])],
+      primary: 0,
+    }).review;
+    const result = ReviewEnsemble.applyVerdicts(merged, [
+      {
+        key: ReviewEnsemble.key(NewFindingSchema.parse(fix)),
+        verdict: "rejected",
+        reason: "False positive.",
+      },
+    ]);
+    expect(result.review.findings).toHaveLength(1);
     expect(result.review.outcome).toBe("CHANGES_NEEDED");
   });
 });
