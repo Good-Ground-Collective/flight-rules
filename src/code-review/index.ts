@@ -39,3 +39,20 @@ export { FileReviewPolicy, ReviewPolicyError } from "./review-policy.js";
 export type { ReviewPolicy, LoadedReviewPolicy, RepositoryReviewContext } from "./review-policy.js";
 export { GitHubReviewVerifier, GhReviewGitHubApi } from "./github-review-verifier.js";
 export type { ReviewGitHubApi, GitHubReviewVerifierProps } from "./github-review-verifier.js";
+export {
+  FlightRulesExtensions,
+  FlightRulesExtensionSchema,
+  MandateCoverageSchema,
+  FileCoverageSchema,
+  MandateStateSchema,
+  LintStatusSchema,
+} from "./flight-rules-extensions.js";
+export type {
+  ReviewExtensionPolicy,
+  FlightRulesExtension,
+  FlightRulesExtensionOptions,
+  MandateCoverage,
+  FileCoverage,
+  MandateState,
+  LintStatus,
+} from "./flight-rules-extensions.js";
