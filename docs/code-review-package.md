@@ -85,6 +85,39 @@ Document references are structurally HTTPS URLs. The reviewer must actually
 read their content. A consumer that cannot supply a source retains the finding
 and reports the limitation; an unread link is not resolution evidence.
 
+## Lens ensembles
+
+`ReviewEnsemble` combines several lens reviews of one head into a single
+candidate review before it reaches the planner. The merge rules are in §1.1 of
+the findings contract.
+
+```js
+import { ReviewEnsemble } from "@good-ground-collective/flight-rules/review";
+
+const { review, trace } = ReviewEnsemble.merge({ lenses: [security, design], primary: 0 });
+const key = ReviewEnsemble.key(review.findings[0]);
+const {
+  review: verified,
+  dropped,
+  problems,
+} = ReviewEnsemble.applyVerdicts(review, [
+  { key, verdict: "rejected", reason: "The query is already tenant-scoped." },
+]);
+```
+
+- `merge({ lenses, primary })` returns `{ review, trace }` and throws
+  `InvalidReviewError` when lenses differ in head, contract version or schema
+  revision. Findings merge only across different lenses; one lens's own
+  findings are never combined. A review with no blocking finding never reports
+  `CHANGES_NEEDED` or `ESCALATE`; a claimed one becomes `APPROVED`. The review is normalized through `reviewContract.parse`. Each
+  `trace` entry holds the surviving finding's key, the keys it absorbed and the
+  lens indexes involved.
+- `key(finding)` is the first 16 hex characters of the SHA-256 of
+  `path|start_line|line|subject`; a missing `start_line` is empty.
+- `applyVerdicts(review, verdicts)` takes verdicts validated by
+  `VerdictSchema`. It drops rejected findings, keeps findings without a verdict
+  and returns unknown keys in `problems`. A rejection requires a reason.
+
 ## Repository context
 
 `FileReviewPolicy.repository({ cwd, trustedRef, contextPath })` reads the
