@@ -34,14 +34,15 @@ describe("packaged tracker entity composition", () => {
               rest: { issues: {
                 create: () => write('create'),
                 update: () => write('edit'),
-                updateMilestone: () => write('edit'),
                 get: async () => written ? failed() : { data: { body: '', labels: [] } },
-                getMilestone: failed, listForRepo: failed, listComments: failed,
+                listForRepo: failed, listComments: failed,
               } },
               request: failed,
             };
             tracker.gql = async (query) => {
               if (query.includes('query GetRepoAndCategory')) return { repository: { id: 'repo', discussionCategory: { id: 'category' } } };
+              if (query.includes('query InitiativeProjectId')) return { repositoryOwner: { projectV2: { id: 'project' } } };
+              if (query.includes('mutation UpdateInitiative')) return write('edit');
               if (query.includes('mutation CreateDiscussion')) {
                 await write('create');
                 return { createDiscussion: { discussion: { number: 901 } } };

@@ -163,7 +163,7 @@ export function createEpicCommand(
     .command("link-initiative")
     .exitOverride()
     .argument("<epicId>", "epic id")
-    .requiredOption("--initiative <id>", "initiative (milestone) id")
+    .requiredOption("--initiative <id>", "initiative id (GitHub Project number on GitHub)")
     .action(async (epicId: string, opts: { initiative: string }) => {
       await operations.invoke(
         "epic-link-initiative",
