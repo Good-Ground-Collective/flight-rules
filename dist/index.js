@@ -1923,12 +1923,22 @@ var UnsupportedTrackerOperationError = class extends Error {
 var IssueRefSchema = z18.object({ number: z18.number() });
 var IssueRefListSchema = z18.array(IssueRefSchema);
 var ParentNotFoundSchema = z18.object({ status: z18.literal(404) });
+var ProjectNotFoundSchema = z18.object({
+  errors: z18.array(
+    z18.object({
+      type: z18.string().optional(),
+      path: z18.array(z18.union([z18.string(), z18.number()])).optional()
+    })
+  )
+});
 var GitHubTaskTracker = class {
   octokit;
   gql;
   owner;
   repo;
   bodyMetadata = new BodyMetadataService();
+  linkVisibilityTimeoutMs = 1e4;
+  linkPollIntervalMs = 1e3;
   constructor(config) {
     this.octokit = new Octokit({ auth: config.token });
     this.gql = graphql.defaults({ headers: { authorization: `token ${config.token}` } });
@@ -1957,56 +1967,108 @@ var GitHubTaskTracker = class {
       updatedAt: data.updated_at
     };
   }
+  // Initiatives are GitHub Projects (v2) owned by the repo owner and linked to
+  // the repo. The layered body lives in the project README; epics are project
+  // items. Project numbers are owner-scoped, so they can collide with issue numbers.
   async createInitiative(input) {
-    const { data } = await this.octokit.rest.issues.createMilestone({
-      owner: this.owner,
-      repo: this.repo,
-      title: input.title,
-      description: input.body
-    });
-    return {
-      id: String(data.number),
-      size: "initiative",
-      title: data.title,
-      body: data.description ?? "",
-      epics: []
-    };
+    const { repository } = await this.gql(
+      `query InitiativeOwner($owner: String!, $repo: String!) {
+        repository(owner: $owner, name: $repo) { id owner { id } }
+      }`,
+      { owner: this.owner, repo: this.repo }
+    );
+    const { createProjectV2 } = await this.gql(
+      `mutation CreateInitiative($ownerId: ID!, $repositoryId: ID!, $title: String!) {
+        createProjectV2(input: { ownerId: $ownerId, repositoryId: $repositoryId, title: $title }) {
+          projectV2 { id number title }
+        }
+      }`,
+      { ownerId: repository.owner.id, repositoryId: repository.id, title: input.title }
+    );
+    const project = createProjectV2.projectV2;
+    const id = String(project.number);
+    try {
+      await this.updateProjectReadme(project.id, input.body);
+    } catch (cause) {
+      throw new TaskTrackerPartialWriteError({ id, cause });
+    }
+    return { id, size: "initiative", title: project.title, body: input.body, epics: [] };
   }
   async getInitiative(id) {
-    const milestoneNumber = parseInt(id, 10);
-    const [milestoneResponse, epicsResponse] = await Promise.all([
-      this.octokit.rest.issues.getMilestone({
-        owner: this.owner,
-        repo: this.repo,
-        milestone_number: milestoneNumber
-      }),
-      this.octokit.rest.issues.listForRepo({
-        owner: this.owner,
-        repo: this.repo,
-        milestone: String(milestoneNumber),
-        labels: "epic",
-        state: "all"
-      })
-    ]);
-    const milestone = milestoneResponse.data;
-    return {
-      id,
-      size: "initiative",
-      title: milestone.title,
-      body: milestone.description ?? "",
-      epics: epicsResponse.data.map((issue) => ({
-        id: String(issue.number),
-        title: issue.title
-      }))
-    };
+    const number = this.projectNumber(id);
+    let title;
+    let body;
+    const epics = [];
+    let after = null;
+    do {
+      const response = await this.projectQuery(
+        id,
+        `query GetInitiative($owner: String!, $number: Int!, $after: String) {
+          repositoryOwner(login: $owner) {
+            ... on ProjectV2Owner {
+              projectV2(number: $number) {
+                title
+                readme
+                items(first: 100, after: $after, archivedStates: [ARCHIVED, NOT_ARCHIVED]) {
+                  pageInfo { hasNextPage endCursor }
+                  nodes {
+                    content {
+                      ... on Issue {
+                        number
+                        title
+                        repository { name owner { login } }
+                        labels(first: 100) { nodes { name } }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }`,
+        { owner: this.owner, number, after }
+      );
+      const project = response.repositoryOwner?.projectV2;
+      if (!project) throw this.initiativeNotFound(id);
+      title = project.title;
+      body = project.readme ?? "";
+      for (const item of project.items.nodes) {
+        const issue = item?.content;
+        if (!issue?.number || !issue.repository || !this.isThisRepo(issue.repository)) continue;
+        if (!issue.labels?.nodes.some((label) => label?.name.toLowerCase() === "epic")) continue;
+        epics.push({ id: String(issue.number), title: issue.title ?? "" });
+      }
+      after = project.items.pageInfo.hasNextPage ? project.items.pageInfo.endCursor : null;
+    } while (after);
+    return { id, size: "initiative", title: title ?? "", body: body ?? "", epics };
   }
   async linkEpicToInitiative(epicId, initiativeId) {
-    await this.octokit.rest.issues.update({
-      owner: this.owner,
-      repo: this.repo,
-      issue_number: parseInt(epicId, 10),
-      milestone: parseInt(initiativeId, 10)
-    });
+    const { repositoryOwner, repository } = await this.projectQuery(
+      initiativeId,
+      `query LinkEpicTargets($owner: String!, $repo: String!, $number: Int!, $issue: Int!) {
+        repositoryOwner(login: $owner) {
+          ... on ProjectV2Owner { projectV2(number: $number) { id } }
+        }
+        repository(owner: $owner, name: $repo) { issue(number: $issue) { id } }
+      }`,
+      {
+        owner: this.owner,
+        repo: this.repo,
+        number: this.projectNumber(initiativeId),
+        issue: parseInt(epicId, 10)
+      }
+    );
+    const projectId = repositoryOwner?.projectV2?.id;
+    if (!projectId) throw this.initiativeNotFound(initiativeId);
+    if (!repository.issue)
+      throw new Error(`epic ${epicId} not found in ${this.owner}/${this.repo}`);
+    await this.gql(
+      `mutation LinkEpicToInitiative($projectId: ID!, $contentId: ID!) {
+        addProjectV2ItemById(input: { projectId: $projectId, contentId: $contentId }) { item { id } }
+      }`,
+      { projectId, contentId: repository.issue.id }
+    );
+    await this.waitForProjectItem(projectId, repository.issue.id);
   }
   async getEpic(id) {
     const issueNumber = parseInt(id, 10);
@@ -2267,13 +2329,8 @@ var GitHubTaskTracker = class {
     }
   }
   async updateInitiativeDescription(initiativeId, input) {
-    await this.octokit.rest.issues.updateMilestone({
-      owner: this.owner,
-      repo: this.repo,
-      milestone_number: parseInt(initiativeId, 10),
-      description: input.body,
-      ...input.title !== void 0 ? { title: input.title } : {}
-    });
+    const projectId = await this.projectNodeId(initiativeId);
+    await this.updateProjectReadme(projectId, input.body, input.title);
     try {
       return await this.getInitiative(initiativeId);
     } catch (cause) {
@@ -2489,6 +2546,90 @@ var GitHubTaskTracker = class {
       repo: this.repo,
       ...options?.signal === void 0 ? {} : { request: { signal: options.signal } }
     });
+  }
+  /**
+   * GitHub lists a new project item a few seconds after adding it, so a read
+   * straight after a link can miss the epic. Poll until it is listed, up to
+   * the timeout; the link has already succeeded, so a timeout is not an error.
+   */
+  async waitForProjectItem(projectId, contentId) {
+    const deadline = Date.now() + this.linkVisibilityTimeoutMs;
+    while (!await this.projectListsItem(projectId, contentId)) {
+      if (Date.now() >= deadline) return;
+      await new Promise((resolve12) => setTimeout(resolve12, this.linkPollIntervalMs));
+    }
+  }
+  async projectListsItem(projectId, contentId) {
+    let after = null;
+    do {
+      const response = await this.gql(
+        `query InitiativeItemIds($projectId: ID!, $after: String) {
+          node(id: $projectId) {
+            ... on ProjectV2 {
+              items(first: 100, after: $after, archivedStates: [ARCHIVED, NOT_ARCHIVED]) {
+                pageInfo { hasNextPage endCursor }
+                nodes { content { ... on Issue { id } } }
+              }
+            }
+          }
+        }`,
+        { projectId, after }
+      );
+      const items = response.node?.items;
+      if (!items) return false;
+      if (items.nodes.some((item) => item?.content?.id === contentId)) return true;
+      after = items.pageInfo.hasNextPage ? items.pageInfo.endCursor : null;
+    } while (after);
+    return false;
+  }
+  projectNumber(initiativeId) {
+    const number = Number(initiativeId);
+    if (!Number.isInteger(number) || number <= 0) {
+      throw new Error(`initiative id must be a GitHub Project number, got "${initiativeId}"`);
+    }
+    return number;
+  }
+  /** Runs a project lookup, mapping GitHub's NOT_FOUND on `projectV2` to a readable error. */
+  async projectQuery(initiativeId, query, variables) {
+    try {
+      return await this.gql(query, variables);
+    } catch (error) {
+      const parsed = ProjectNotFoundSchema.safeParse(error);
+      if (parsed.success && parsed.data.errors.some((e) => e.type === "NOT_FOUND" && e.path?.includes("projectV2"))) {
+        throw this.initiativeNotFound(initiativeId);
+      }
+      throw error;
+    }
+  }
+  initiativeNotFound(initiativeId) {
+    return new Error(
+      `initiative ${initiativeId} not found: no GitHub Project #${initiativeId} owned by ${this.owner}`
+    );
+  }
+  isThisRepo(repository) {
+    return repository.name.toLowerCase() === this.repo.toLowerCase() && repository.owner.login.toLowerCase() === this.owner.toLowerCase();
+  }
+  async projectNodeId(initiativeId) {
+    const { repositoryOwner } = await this.projectQuery(
+      initiativeId,
+      `query InitiativeProjectId($owner: String!, $number: Int!) {
+        repositoryOwner(login: $owner) {
+          ... on ProjectV2Owner { projectV2(number: $number) { id } }
+        }
+      }`,
+      { owner: this.owner, number: this.projectNumber(initiativeId) }
+    );
+    const projectId = repositoryOwner?.projectV2?.id;
+    if (!projectId) throw this.initiativeNotFound(initiativeId);
+    return projectId;
+  }
+  async updateProjectReadme(projectId, readme, title) {
+    await this.gql(
+      `mutation UpdateInitiative($input: UpdateProjectV2Input!) {
+        updateProjectV2(input: $input) { projectV2 { id } }
+      }`,
+      { input: { projectId, readme, ...title !== void 0 ? { title } : {} } }
+    );
   }
   async replaceIssueBody(id, role, input) {
     const issueNumber = parseInt(id, 10);
@@ -9094,7 +9235,7 @@ function createFlightRules(props = {}) {
 var settingsScopes = ["user", "project", "local"];
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "3.2.0";
+var appVersion = false ? "0.0.0-dev" : "3.3.0";
 
 // src/agents/agent-frontmatter/agent-frontmatter.ts
 import { parse as parseYaml4 } from "yaml";

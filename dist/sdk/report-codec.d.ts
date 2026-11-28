@@ -46,8 +46,8 @@ declare const QaReproduceSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 video: "video";
             }>;
             phase: z.ZodEnum<{
-                before: "before";
                 after: "after";
+                before: "before";
             }>;
             caption: z.ZodString;
         }, z.core.$strict>>;
@@ -68,8 +68,8 @@ declare const QaReproduceSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 video: "video";
             }>;
             phase: z.ZodEnum<{
-                before: "before";
                 after: "after";
+                before: "before";
             }>;
             caption: z.ZodString;
         }, z.core.$strict>>;
@@ -97,8 +97,8 @@ declare const QaVerifySchema: z.ZodObject<{
                 video: "video";
             }>;
             phase: z.ZodEnum<{
-                before: "before";
                 after: "after";
+                before: "before";
             }>;
             caption: z.ZodString;
         }, z.core.$strict>>;

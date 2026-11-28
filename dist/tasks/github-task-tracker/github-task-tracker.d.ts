@@ -10,6 +10,8 @@ export declare class GitHubTaskTracker implements TaskTracker {
     private owner;
     private repo;
     private readonly bodyMetadata;
+    private readonly linkVisibilityTimeoutMs;
+    private readonly linkPollIntervalMs;
     constructor(config: GitHubTrackerConfig);
     createEpic(input: CreateEpicInput): Promise<Epic>;
     createInitiative(input: CreateInitiativeInput): Promise<Initiative>;
@@ -49,6 +51,20 @@ export declare class GitHubTaskTracker implements TaskTracker {
     ping(options?: {
         signal?: AbortSignal;
     }): Promise<void>;
+    /**
+     * GitHub lists a new project item a few seconds after adding it, so a read
+     * straight after a link can miss the epic. Poll until it is listed, up to
+     * the timeout; the link has already succeeded, so a timeout is not an error.
+     */
+    private waitForProjectItem;
+    private projectListsItem;
+    private projectNumber;
+    /** Runs a project lookup, mapping GitHub's NOT_FOUND on `projectV2` to a readable error. */
+    private projectQuery;
+    private initiativeNotFound;
+    private isThisRepo;
+    private projectNodeId;
+    private updateProjectReadme;
     private replaceIssueBody;
     /**
      * The label set to write on an edit: the caller's labels plus the role
