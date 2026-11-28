@@ -68,12 +68,23 @@ type ProjectItemsResponse = {
   } | null;
 };
 
+type ProjectItemIdsResponse = {
+  node: {
+    items?: {
+      pageInfo: { hasNextPage: boolean; endCursor: string | null };
+      nodes: Array<{ content: { id?: string } | null } | null>;
+    };
+  } | null;
+};
+
 export class GitHubTaskTracker implements TaskTracker {
   private octokit: Octokit;
   private gql: ReturnType<typeof graphql.defaults>;
   private owner: string;
   private repo: string;
   private readonly bodyMetadata = new BodyMetadataService();
+  private readonly linkVisibilityTimeoutMs = 10_000;
+  private readonly linkPollIntervalMs = 1_000;
 
   constructor(config: GitHubTrackerConfig) {
     this.octokit = new Octokit({ auth: config.token });
@@ -213,6 +224,7 @@ export class GitHubTaskTracker implements TaskTracker {
       }`,
       { projectId, contentId: repository.issue.id },
     );
+    await this.waitForProjectItem(projectId, repository.issue.id);
   }
 
   async getEpic(id: string): Promise<Epic> {
@@ -792,6 +804,43 @@ export class GitHubTaskTracker implements TaskTracker {
       repo: this.repo,
       ...(options?.signal === undefined ? {} : { request: { signal: options.signal } }),
     });
+  }
+
+  /**
+   * GitHub lists a new project item a few seconds after adding it, so a read
+   * straight after a link can miss the epic. Poll until it is listed, up to
+   * the timeout; the link has already succeeded, so a timeout is not an error.
+   */
+  private async waitForProjectItem(projectId: string, contentId: string): Promise<void> {
+    const deadline = Date.now() + this.linkVisibilityTimeoutMs;
+    while (!(await this.projectListsItem(projectId, contentId))) {
+      if (Date.now() >= deadline) return;
+      await new Promise((resolve) => setTimeout(resolve, this.linkPollIntervalMs));
+    }
+  }
+
+  private async projectListsItem(projectId: string, contentId: string): Promise<boolean> {
+    let after: string | null = null;
+    do {
+      const response: ProjectItemIdsResponse = await this.gql<ProjectItemIdsResponse>(
+        `query InitiativeItemIds($projectId: ID!, $after: String) {
+          node(id: $projectId) {
+            ... on ProjectV2 {
+              items(first: 100, after: $after, archivedStates: [ARCHIVED, NOT_ARCHIVED]) {
+                pageInfo { hasNextPage endCursor }
+                nodes { content { ... on Issue { id } } }
+              }
+            }
+          }
+        }`,
+        { projectId, after },
+      );
+      const items = response.node?.items;
+      if (!items) return false;
+      if (items.nodes.some((item) => item?.content?.id === contentId)) return true;
+      after = items.pageInfo.hasNextPage ? items.pageInfo.endCursor : null;
+    } while (after);
+    return false;
   }
 
   private projectNumber(initiativeId: string): number {

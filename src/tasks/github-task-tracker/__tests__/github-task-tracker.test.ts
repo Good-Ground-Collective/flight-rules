@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { GitHubTaskTracker } from "../github-task-tracker.js";
 import { BodyMetadataService } from "../../body-metadata/body-metadata.js";
 import { UnsupportedTrackerOperationError } from "../../task-tracker/unsupported-tracker-operation-error.js";
@@ -913,6 +913,14 @@ describe("GitHubTracker initiatives (GitHub Projects)", () => {
     },
   });
 
+  const itemIds = (
+    ids: string[],
+    pageInfo: { hasNextPage: boolean; endCursor: string | null } = {
+      hasNextPage: false,
+      endCursor: null,
+    },
+  ) => ({ node: { items: { pageInfo, nodes: ids.map((id) => ({ content: { id } })) } } });
+
   const projectPage = (
     nodes: unknown[],
     pageInfo: { hasNextPage: boolean; endCursor: string | null } = {
@@ -1058,13 +1066,74 @@ describe("GitHubTracker initiatives (GitHub Projects)", () => {
         repositoryOwner: { projectV2: { id: "PVT_7" } },
         repository: { issue: { id: "I_19" } },
       } as never)
-      .mockResolvedValueOnce({} as never);
+      .mockResolvedValueOnce({} as never)
+      .mockResolvedValueOnce(itemIds(["I_19"]) as never);
 
     await tracker.linkEpicToInitiative("19", "7");
 
     expect(gql.mock.calls[0]?.[1]).toEqual({ owner: "acme", repo: "proj", number: 7, issue: 19 });
     expect(gql.mock.calls[1]?.[0]).toContain("addProjectV2ItemById");
     expect(gql.mock.calls[1]?.[1]).toEqual({ projectId: "PVT_7", contentId: "I_19" });
+    expect(gql.mock.calls[2]?.[1]).toEqual({ projectId: "PVT_7", after: null });
+  });
+
+  describe("waiting for the linked epic to be listed", () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    const linkTargets = {
+      repositoryOwner: { projectV2: { id: "PVT_7" } },
+      repository: { issue: { id: "I_19" } },
+    };
+
+    it("polls until the project lists the epic", async () => {
+      const tracker = makeTracker();
+      const gql = gqlOf(tracker);
+      gql
+        .mockResolvedValueOnce(linkTargets as never)
+        .mockResolvedValueOnce({} as never)
+        .mockResolvedValueOnce(itemIds([]) as never)
+        .mockResolvedValueOnce(itemIds(["I_other"]) as never)
+        .mockResolvedValueOnce(itemIds(["I_19"]) as never);
+
+      const link = tracker.linkEpicToInitiative("19", "7");
+      await vi.advanceTimersByTimeAsync(2_000);
+      await link;
+
+      expect(gql).toHaveBeenCalledTimes(5);
+    });
+
+    it("follows item pagination when looking for the epic", async () => {
+      const tracker = makeTracker();
+      const gql = gqlOf(tracker);
+      gql
+        .mockResolvedValueOnce(linkTargets as never)
+        .mockResolvedValueOnce({} as never)
+        .mockResolvedValueOnce(
+          itemIds(["I_other"], { hasNextPage: true, endCursor: "c1" }) as never,
+        )
+        .mockResolvedValueOnce(itemIds(["I_19"]) as never);
+
+      await tracker.linkEpicToInitiative("19", "7");
+
+      expect(gql.mock.calls[3]?.[1]).toEqual({ projectId: "PVT_7", after: "c1" });
+    });
+
+    it("stops waiting after about ten seconds without failing the link", async () => {
+      const tracker = makeTracker();
+      const gql = gqlOf(tracker);
+      gql
+        .mockResolvedValueOnce(linkTargets as never)
+        .mockResolvedValueOnce({} as never)
+        .mockResolvedValue(itemIds([]) as never);
+
+      const link = tracker.linkEpicToInitiative("19", "7");
+      await vi.advanceTimersByTimeAsync(10_000);
+      await expect(link).resolves.toBeUndefined();
+
+      const polls = gql.mock.calls.filter(([query]) => String(query).includes("InitiativeItemIds"));
+      expect(polls.length).toBe(11);
+    });
   });
 
   it("throws before mutating when the epic issue does not exist", async () => {
