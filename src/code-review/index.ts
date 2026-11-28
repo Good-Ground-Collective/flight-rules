@@ -39,3 +39,5 @@ export { FileReviewPolicy, ReviewPolicyError } from "./review-policy.js";
 export type { ReviewPolicy, LoadedReviewPolicy, RepositoryReviewContext } from "./review-policy.js";
 export { GitHubReviewVerifier, GhReviewGitHubApi } from "./github-review-verifier.js";
 export type { ReviewGitHubApi, GitHubReviewVerifierProps } from "./github-review-verifier.js";
+export { UnifiedDiffChanges } from "./diff-changes.js";
+export type { ComparedFile, UnifiedDiffChangesProps } from "./diff-changes.js";
