@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { UnifiedDiffChanges } from "../diff-lines.js";
+import { UnifiedDiffChanges } from "../diff-changes.js";
 
 const modify = `diff --git a/src/a.ts b/src/a.ts
 index 111..222 100644
@@ -196,6 +196,13 @@ describe("UnifiedDiffChanges.fromFilePatches", () => {
   it("treats a renamed file with edits but no patch as wholly changed", () => {
     const changes = UnifiedDiffChanges.fromFilePatches([
       { filename: "new.ts", previous_filename: "old.ts", status: "renamed", changes: 40 },
+    ]);
+    expect(changes.touches("new.ts", 3)).toBe(true);
+  });
+
+  it("treats a renamed file with no patch and no change count as wholly changed", () => {
+    const changes = UnifiedDiffChanges.fromFilePatches([
+      { filename: "new.ts", previous_filename: "old.ts", status: "renamed" },
     ]);
     expect(changes.touches("new.ts", 3)).toBe(true);
   });

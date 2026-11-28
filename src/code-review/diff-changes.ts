@@ -33,6 +33,9 @@ interface FileBlock {
  *
  * The diff must run from the last reviewed head to the current head; the
  * caller owns choosing that base. Nothing here reads git or GitHub.
+ * The diff passed to `parse()` must be generated with
+ * `--src-prefix=a/ --dst-prefix=b/ --no-color --no-ext-diff`, because only
+ * `a/` and `b/` prefixes are stripped.
  * A file counts as wholly changed when it is new, binary, or arrives without a
  * patch. A deleted file has no new side and is absent from the index.
  */
@@ -105,7 +108,7 @@ export class UnifiedDiffChanges {
 
     for (const file of FilePatchesSchema.parse(files)) {
       const pureRename =
-        file.status === "renamed" && file.patch === undefined && !(file.changes && file.changes > 0);
+        file.status === "renamed" && file.patch === undefined && file.changes === 0;
 
       if (file.status === "removed") {
         continue;

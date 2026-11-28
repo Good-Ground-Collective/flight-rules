@@ -127,7 +127,9 @@ heads. Build it from a `git diff -U0` string with `UnifiedDiffChanges.parse(diff
 or from GitHub compare file entries with `UnifiedDiffChanges.fromFilePatches(files)`;
 equivalent input yields the same index. The diff must run from the last
 reviewed head to the current head, and the caller supplies it: the package does
-no git or GitHub I/O.
+no git or GitHub I/O. The diff passed to `parse()` must be generated with
+`--src-prefix=a/ --dst-prefix=b/ --no-color --no-ext-diff`, because only `a/`
+and `b/` prefixes are stripped.
 
 `touches(path, line, startLine?)` is true when any line in the inclusive range
 `startLine..line` is an added or modified new-side line, or the file is wholly
