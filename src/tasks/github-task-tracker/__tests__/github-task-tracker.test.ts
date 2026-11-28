@@ -18,9 +18,6 @@ vi.mock("@octokit/rest", () => ({
           update: vi.fn(),
           createComment: vi.fn(),
           listComments: vi.fn(),
-          createMilestone: vi.fn(),
-          updateMilestone: vi.fn(),
-          getMilestone: vi.fn(),
           listForRepo: vi.fn(),
           addLabels: vi.fn(),
           removeLabel: vi.fn(),
@@ -598,41 +595,6 @@ describe("GitHubTracker.updateEpicDescription", () => {
   });
 });
 
-describe("GitHubTracker.updateInitiativeDescription", () => {
-  beforeEach(() => vi.clearAllMocks());
-
-  it("updates the milestone description and title, then returns the initiative", async () => {
-    const tracker = makeTracker();
-    // @ts-expect-error — accessing private field for test setup
-    const mockUpdateMilestone = vi.mocked(tracker.octokit.rest.issues.updateMilestone);
-    // @ts-expect-error — accessing private field for test setup
-    const mockGetMilestone = vi.mocked(tracker.octokit.rest.issues.getMilestone);
-    // @ts-expect-error — accessing private field for test setup
-    const mockListForRepo = vi.mocked(tracker.octokit.rest.issues.listForRepo);
-
-    mockUpdateMilestone.mockResolvedValue({} as never);
-    mockGetMilestone.mockResolvedValue({
-      data: { number: 7, title: "New Idea", description: "new idea body" },
-    } as never);
-    mockListForRepo.mockResolvedValue({ data: [] } as never);
-
-    const initiative = await tracker.updateInitiativeDescription("7", {
-      body: "new idea body",
-      title: "New Idea",
-    });
-
-    expect(mockUpdateMilestone).toHaveBeenCalledWith({
-      owner: "acme",
-      repo: "proj",
-      milestone_number: 7,
-      description: "new idea body",
-      title: "New Idea",
-    });
-    expect(initiative.title).toBe("New Idea");
-    expect(initiative.body).toBe("new idea body");
-  });
-});
-
 describe("GitHubTracker.updateTddMetadata", () => {
   beforeEach(() => vi.clearAllMocks());
 
@@ -935,27 +897,58 @@ describe("GitHubTracker.getUsers", () => {
   });
 });
 
-describe("GitHubTracker.createInitiative", () => {
+describe("GitHubTracker initiatives (GitHub Projects)", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("creates a milestone and maps it to an Initiative", async () => {
-    const tracker = makeTracker();
+  const gqlOf = (tracker: GitHubTaskTracker) =>
     // @ts-expect-error — accessing private field for test setup
-    const mockCreate = vi.mocked(tracker.octokit.rest.issues.createMilestone);
-    mockCreate.mockResolvedValueOnce({
-      data: { number: 7, title: "Q3 Platform", description: "The big push" },
-    } as never);
+    vi.mocked(tracker.gql);
+
+  const issueItem = (number: number, title: string, labels: string[], repo = "proj") => ({
+    content: {
+      number,
+      title,
+      repository: { name: repo, owner: { login: "acme" } },
+      labels: { nodes: labels.map((name) => ({ name })) },
+    },
+  });
+
+  const projectPage = (
+    nodes: unknown[],
+    pageInfo: { hasNextPage: boolean; endCursor: string | null } = {
+      hasNextPage: false,
+      endCursor: null,
+    },
+  ) => ({
+    repositoryOwner: {
+      projectV2: { title: "Q3 Platform", readme: "The big push", items: { pageInfo, nodes } },
+    },
+  });
+
+  it("creates a project linked to the repo and writes the body to its README", async () => {
+    const tracker = makeTracker();
+    const gql = gqlOf(tracker);
+    gql
+      .mockResolvedValueOnce({ repository: { id: "R_1", owner: { id: "O_1" } } } as never)
+      .mockResolvedValueOnce({
+        createProjectV2: { projectV2: { id: "PVT_7", number: 7, title: "Q3 Platform" } },
+      } as never)
+      .mockResolvedValueOnce({} as never);
 
     const initiative = await tracker.createInitiative({
       title: "Q3 Platform",
       body: "The big push",
     });
 
-    expect(mockCreate).toHaveBeenCalledWith({
-      owner: "acme",
-      repo: "proj",
+    expect(gql.mock.calls[1]?.[1]).toEqual({
+      ownerId: "O_1",
+      repositoryId: "R_1",
       title: "Q3 Platform",
-      description: "The big push",
+    });
+    expect(gql.mock.calls[2]?.[1]).toEqual({
+      projectId: "PVT_7",
+      readme: "The big push",
+      title: null,
     });
     expect(initiative).toEqual({
       id: "7",
@@ -965,61 +958,47 @@ describe("GitHubTracker.createInitiative", () => {
       epics: [],
     });
   });
-});
 
-describe("GitHubTracker.linkEpicToInitiative", () => {
-  beforeEach(() => vi.clearAllMocks());
-
-  it("sets the epic issue milestone to the initiative number", async () => {
+  it("reports a partial write when the README update fails after the project exists", async () => {
     const tracker = makeTracker();
-    // @ts-expect-error — accessing private field for test setup
-    const mockUpdate = vi.mocked(tracker.octokit.rest.issues.update);
-    mockUpdate.mockResolvedValueOnce({ data: {} } as never);
+    gqlOf(tracker)
+      .mockResolvedValueOnce({ repository: { id: "R_1", owner: { id: "O_1" } } } as never)
+      .mockResolvedValueOnce({
+        createProjectV2: { projectV2: { id: "PVT_7", number: 7, title: "Q3 Platform" } },
+      } as never)
+      .mockRejectedValueOnce(new Error("readme denied"));
 
-    await tracker.linkEpicToInitiative("19", "7");
-
-    expect(mockUpdate).toHaveBeenCalledWith({
-      owner: "acme",
-      repo: "proj",
-      issue_number: 19,
-      milestone: 7,
-    });
+    await expect(
+      tracker.createInitiative({ title: "Q3 Platform", body: "The big push" }),
+    ).rejects.toMatchObject({
+      name: "TaskTrackerPartialWriteError",
+      id: "7",
+      message: "readme denied",
+    } satisfies Partial<TaskTrackerPartialWriteError>);
   });
-});
 
-describe("GitHubTracker.getInitiative", () => {
-  beforeEach(() => vi.clearAllMocks());
-
-  it("returns the milestone with its epic-labelled issues", async () => {
+  it("returns the project README and its epic-labelled issues from this repo, across pages", async () => {
     const tracker = makeTracker();
-    // @ts-expect-error — accessing private field for test setup
-    const mockGetMilestone = vi.mocked(tracker.octokit.rest.issues.getMilestone);
-    // @ts-expect-error — accessing private field for test setup
-    const mockListForRepo = vi.mocked(tracker.octokit.rest.issues.listForRepo);
-    mockGetMilestone.mockResolvedValueOnce({
-      data: { number: 7, title: "Q3 Platform", description: "The big push" },
-    } as never);
-    mockListForRepo.mockResolvedValueOnce({
-      data: [
-        { number: 19, title: "Decomposition" },
-        { number: 30, title: "Rollout" },
-      ],
-    } as never);
+    const gql = gqlOf(tracker);
+    gql
+      .mockResolvedValueOnce(
+        projectPage(
+          [
+            issueItem(19, "Decomposition", ["epic"]),
+            issueItem(20, "A ticket", ["ticket"]),
+            issueItem(21, "Other repo epic", ["epic"], "elsewhere"),
+            { content: {} },
+            null,
+          ],
+          { hasNextPage: true, endCursor: "c1" },
+        ) as never,
+      )
+      .mockResolvedValueOnce(projectPage([issueItem(30, "Rollout", ["epic"])]) as never);
 
     const initiative = await tracker.getInitiative("7");
 
-    expect(mockGetMilestone).toHaveBeenCalledWith({
-      owner: "acme",
-      repo: "proj",
-      milestone_number: 7,
-    });
-    expect(mockListForRepo).toHaveBeenCalledWith({
-      owner: "acme",
-      repo: "proj",
-      milestone: "7",
-      labels: "epic",
-      state: "all",
-    });
+    expect(gql.mock.calls[0]?.[1]).toEqual({ owner: "acme", number: 7, after: null });
+    expect(gql.mock.calls[1]?.[1]).toEqual({ owner: "acme", number: 7, after: "c1" });
     expect(initiative).toEqual({
       id: "7",
       size: "initiative",
@@ -1030,6 +1009,89 @@ describe("GitHubTracker.getInitiative", () => {
         { id: "30", title: "Rollout" },
       ],
     });
+  });
+
+  it("throws when the owner has no project with that number", async () => {
+    const tracker = makeTracker();
+    gqlOf(tracker).mockResolvedValueOnce({ repositoryOwner: { projectV2: null } } as never);
+
+    await expect(tracker.getInitiative("7")).rejects.toThrow(
+      "initiative 7 not found: no GitHub Project #7 owned by acme",
+    );
+  });
+
+  it("maps GitHub's NOT_FOUND error on projectV2 to the same message", async () => {
+    const tracker = makeTracker();
+    gqlOf(tracker).mockRejectedValueOnce(
+      Object.assign(new Error("Could not resolve to a ProjectV2 with the number 7."), {
+        errors: [{ type: "NOT_FOUND", path: ["repositoryOwner", "projectV2"] }],
+      }),
+    );
+
+    await expect(tracker.linkEpicToInitiative("19", "7")).rejects.toThrow(
+      "initiative 7 not found: no GitHub Project #7 owned by acme",
+    );
+  });
+
+  it("rejects an initiative id that is not a project number", async () => {
+    const tracker = makeTracker();
+    await expect(tracker.getInitiative("PVT_7")).rejects.toThrow(
+      'initiative id must be a GitHub Project number, got "PVT_7"',
+    );
+    expect(gqlOf(tracker)).not.toHaveBeenCalled();
+  });
+
+  it("adds the epic issue to the project", async () => {
+    const tracker = makeTracker();
+    const gql = gqlOf(tracker);
+    gql
+      .mockResolvedValueOnce({
+        repositoryOwner: { projectV2: { id: "PVT_7" } },
+        repository: { issue: { id: "I_19" } },
+      } as never)
+      .mockResolvedValueOnce({} as never);
+
+    await tracker.linkEpicToInitiative("19", "7");
+
+    expect(gql.mock.calls[0]?.[1]).toEqual({ owner: "acme", repo: "proj", number: 7, issue: 19 });
+    expect(gql.mock.calls[1]?.[0]).toContain("addProjectV2ItemById");
+    expect(gql.mock.calls[1]?.[1]).toEqual({ projectId: "PVT_7", contentId: "I_19" });
+  });
+
+  it("throws before mutating when the epic issue does not exist", async () => {
+    const tracker = makeTracker();
+    const gql = gqlOf(tracker);
+    gql.mockResolvedValueOnce({
+      repositoryOwner: { projectV2: { id: "PVT_7" } },
+      repository: { issue: null },
+    } as never);
+
+    await expect(tracker.linkEpicToInitiative("19", "7")).rejects.toThrow(
+      "epic 19 not found in acme/proj",
+    );
+    expect(gql).toHaveBeenCalledTimes(1);
+  });
+
+  it("updates the project README and title, then returns the initiative", async () => {
+    const tracker = makeTracker();
+    const gql = gqlOf(tracker);
+    gql
+      .mockResolvedValueOnce({ repositoryOwner: { projectV2: { id: "PVT_7" } } } as never)
+      .mockResolvedValueOnce({} as never)
+      .mockResolvedValueOnce(projectPage([]) as never);
+
+    const initiative = await tracker.updateInitiativeDescription("7", {
+      body: "new idea body",
+      title: "New Idea",
+    });
+
+    expect(gql.mock.calls[1]?.[1]).toEqual({
+      projectId: "PVT_7",
+      readme: "new idea body",
+      title: "New Idea",
+    });
+    expect(initiative.id).toBe("7");
+    expect(initiative.size).toBe("initiative");
   });
 });
 

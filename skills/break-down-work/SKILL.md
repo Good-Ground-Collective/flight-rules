@@ -9,7 +9,7 @@ The stage after the RFC. It takes a piece of work at one altitude and produces t
 
 **One skill, one altitude-hop per invocation.** It is invoked repeatedly, walking the tree down:
 
-- **initiative → epics** — survey-depth, cross-repo shape. Create the initiative (milestone) and its epics, then **stop**.
+- **initiative → epics** — survey-depth, cross-repo shape. Create the initiative (a GitHub Project on GitHub) and its epics, then **stop**.
 - **epic → tickets** — deep, executable-grade analysis. Create tickets a standard-tier agent can build, and wire their dependencies.
 - **ticket** — no decomposition; run the deep pass directly and emit one executable ticket.
 
@@ -58,7 +58,7 @@ Two entry modes:
   flight-rules ticket get <id>
   ```
 
-  The type decides the getter, and the getter decides the returned `size`; `epic get` reports `epic` for any id, and on GitHub an initiative (a milestone) and an issue can share a number. So never infer the type from a getter's result. When you are given a bare id, ask which type it is. Read the sections from the body. **An emitted node's layered body is the RFC for the next hop** — that is what makes the recursion clean.
+  The type decides the getter, and the getter decides the returned `size`; `epic get` reports `epic` for any id, and on GitHub an initiative (a Project, numbered per owner) and an issue can share a number. So never infer the type from a getter's result. When you are given a bare id, ask which type it is. Read the sections from the body. **An emitted node's layered body is the RFC for the next hop** — that is what makes the recursion clean.
 
 If the input is ambiguous, resolve a real file path as an RFC file; otherwise treat it as a tracker node and settle its type first.
 
@@ -116,7 +116,7 @@ Read the RFC file or `flight-rules <type> get <id>`. Extract:
 
 | Input `size` | Produce | Depth | Then |
 |---|---|---|---|
-| initiative | epics | survey | create milestone + epics, **stop** |
+| initiative | epics | survey | create initiative + epics, **stop** |
 | epic | tickets | deep | create tickets + wire deps, **stop** |
 | ticket | one ticket | deep | emit the executable ticket, **stop** |
 
@@ -155,7 +155,7 @@ Every child ties back to the parent's Problem Statement. If the findings **contr
 
 **Before authoring or creating anything**, present the proposed breakdown to the human and wait for an explicit go-ahead. Creating tracker nodes is irreversible — never skip this. Show the **shape**, not full bodies (those come next), so a wrong call is caught before the authoring effort:
 
-- The parent (milestone/epic) and each child's **title + one-line summary**.
+- The parent (initiative/epic) and each child's **title + one-line summary**.
 - The **dependency ordering** between children (what blocks what). On an initiative hop, the **proposed epic order**. Call out any **cross-epic edge** with its one-line justification, or say there are none.
 - Any **assumptions or open judgment calls** you made during synthesis.
 - **Where the context will live** — the decisions list, and whether a technical artifact will be published, with its title.
@@ -184,10 +184,10 @@ Use only `flight-rules` — never the tracker's native API directly.
 **initiative → epics:**
 ```bash
 # 1. materialize the initiative
-flight-rules initiative create --title "<title>" --body-file initiative-body.md   # → { "id": <milestoneId> }
+flight-rules initiative create --title "<title>" --body-file initiative-body.md   # → { "id": <initiativeId> }
 # 2. for each epic
 flight-rules epic create --title "<title>" --body-file epic-N.md        # → { "id": <epicId> }
-flight-rules epic link-initiative <epicId> --initiative <milestoneId>
+flight-rules epic link-initiative <epicId> --initiative <initiativeId>
 ```
 
 **Publish the technical artifact first, when step 5 called for one.** It needs the epic's id, and tickets need its URL for their `Context:` line:
@@ -266,7 +266,7 @@ Report the created node ids and their links. **Stop — one altitude only.** Do 
 - Exactly one altitude was created; the invocation stopped there.
 - Every child is a layered-body artifact grounded in real code (its writeup cites what the research actually found, not guesses).
 - Tickets carry a Guided Walkthrough concrete enough for a standard-tier agent to execute; epics don't.
-- Children are natively linked (epics→milestone, tickets→epic sub-issues) with a clean, cycle-free dependency graph whose edges stay inside one epic, apart from any absolutely necessary edge that carries a recorded justification.
+- Children are natively linked (epics→initiative, tickets→epic sub-issues) with a clean, cycle-free dependency graph whose edges stay inside one epic, apart from any absolutely necessary edge that carries a recorded justification.
 - An initiative breakdown names an epic order that keeps one epic in flight at a time wherever it can.
 - Each emitted node could itself be handed straight back into this skill for the next hop down.
 - An engineer on another machine could run `/execute-work` on any emitted ticket with no input beyond the ticket id. Every decision lives in a body or a published artifact, and every reference resolves from a fresh clone or a URL.
