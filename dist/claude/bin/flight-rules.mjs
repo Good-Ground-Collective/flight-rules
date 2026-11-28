@@ -54781,7 +54781,7 @@ function createPrCommand(registry2) {
 }
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "3.3.0";
+var appVersion = false ? "0.0.0-dev" : "3.4.0";
 
 // src/plugins/commands/agents/command.ts
 function createAgentsCommand(getInstallation) {

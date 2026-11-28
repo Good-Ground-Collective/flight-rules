@@ -932,6 +932,280 @@ var GitHubReviewVerifier = class {
     return void 0;
   }
 };
+
+// src/code-review/diff-changes.ts
+import { z as z9 } from "zod";
+
+// src/code-review/diff-hunks.ts
+var hunkHeader = /^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
+var DiffHunks = class {
+  /** True when the line opens a hunk. */
+  static isHeader(line) {
+    return hunkHeader.test(line);
+  }
+  /**
+   * Consumes the hunk that starts at `lines[from]` and adds its changed new-side
+   * lines to `into`. Only `+` lines count as added, so context lines are safe.
+   * Removed lines mark the new-side lines on either side of the removal, which
+   * is `c` and `c+1` for a `-U0` header `+c,0`. Returns the index after the hunk.
+   */
+  static collect(lines, from, into) {
+    const header = hunkHeader.exec(lines[from] ?? "");
+    if (!header) {
+      return from + 1;
+    }
+    let newLine = header[3] === "0" ? Number(header[2]) + 1 : Number(header[2]);
+    let oldRemaining = header[1] === void 0 ? 1 : Number(header[1]);
+    let newRemaining = header[3] === void 0 ? 1 : Number(header[3]);
+    let removalPending = false;
+    let at = from + 1;
+    while (at < lines.length && (oldRemaining > 0 || newRemaining > 0)) {
+      const line = lines[at] ?? "";
+      at++;
+      if (line.startsWith("\\")) {
+        continue;
+      }
+      if (line.startsWith("+")) {
+        into.add(newLine);
+        newLine++;
+        newRemaining--;
+        removalPending = false;
+      } else if (line.startsWith("-")) {
+        oldRemaining--;
+        removalPending = true;
+      } else {
+        if (removalPending) {
+          into.add(newLine - 1);
+          into.add(newLine);
+          removalPending = false;
+        }
+        newLine++;
+        oldRemaining--;
+        newRemaining--;
+      }
+    }
+    if (removalPending) {
+      into.add(newLine - 1);
+      into.add(newLine);
+    }
+    while (at < lines.length && (lines[at] ?? "").startsWith("\\")) {
+      at++;
+    }
+    return at;
+  }
+};
+
+// src/code-review/git-path.ts
+var simpleEscapes = {
+  a: 7,
+  b: 8,
+  t: 9,
+  n: 10,
+  v: 11,
+  f: 12,
+  r: 13,
+  '"': 34,
+  "\\": 92
+};
+var GitPath = class _GitPath {
+  /** Decodes a path token, unquoting and unescaping it when git quoted it. */
+  static decode(token) {
+    if (token.length >= 2 && token.startsWith('"') && token.endsWith('"')) {
+      return _GitPath.unescape(token.slice(1, -1));
+    }
+    return token;
+  }
+  /** Removes the single-letter `a/` or `b/` side prefix git adds to diff paths. */
+  static stripSidePrefix(path) {
+    return /^[ab]\//.test(path) ? path.slice(2) : path;
+  }
+  /** Reads the path from a `---` or `+++` line, dropping the tab git appends after unquoted paths. */
+  static fromFileMarker(rest) {
+    const unquoted = rest.startsWith('"') ? rest : rest.split("	")[0] ?? rest;
+    return _GitPath.decode(unquoted);
+  }
+  /** Reads the new-side path from the arguments of a `diff --git` line. */
+  static fromDiffHeader(rest) {
+    if (rest.startsWith('"')) {
+      const end = _GitPath.closingQuote(rest);
+      const remainder = rest.slice(end + 1).trimStart();
+      return remainder === "" ? void 0 : _GitPath.stripSidePrefix(_GitPath.decode(remainder));
+    }
+    const quotedSplit = rest.indexOf(' "b/');
+    if (quotedSplit !== -1) {
+      return _GitPath.stripSidePrefix(_GitPath.decode(rest.slice(quotedSplit + 1)));
+    }
+    const splits = [];
+    for (let at = rest.indexOf(" b/"); at !== -1; at = rest.indexOf(" b/", at + 1)) {
+      splits.push(at);
+    }
+    const symmetric = splits.find((at) => rest.slice(2, at) === rest.slice(at + 3));
+    const chosen = symmetric ?? splits[splits.length - 1];
+    return chosen === void 0 ? void 0 : rest.slice(chosen + 3);
+  }
+  static closingQuote(text) {
+    for (let i = 1; i < text.length; i++) {
+      if (text[i] === "\\") {
+        i++;
+      } else if (text[i] === '"') {
+        return i;
+      }
+    }
+    return text.length - 1;
+  }
+  static unescape(body) {
+    const bytes = [];
+    for (let i = 0; i < body.length; i++) {
+      const char = body[i] ?? "";
+      const octal = /^[0-7]{1,3}/.exec(body.slice(i + 1, i + 4));
+      const simple = simpleEscapes[body[i + 1] ?? ""];
+      if (char !== "\\") {
+        bytes.push(...Buffer.from(char, "utf8"));
+      } else if (octal) {
+        bytes.push(parseInt(octal[0], 8) & 255);
+        i += octal[0].length;
+      } else if (simple !== void 0) {
+        bytes.push(simple);
+        i++;
+      } else {
+        bytes.push(92);
+      }
+    }
+    return Buffer.from(bytes).toString("utf8");
+  }
+};
+
+// src/code-review/diff-changes.ts
+var UnifiedDiffChangesPropsSchema = z9.strictObject({
+  entries: z9.map(z9.string(), z9.union([z9.literal("all"), z9.set(z9.number().int())]))
+});
+var FilePatchesSchema = z9.array(
+  z9.object({
+    filename: z9.string(),
+    previous_filename: z9.string().optional(),
+    status: z9.string(),
+    patch: z9.string().optional(),
+    changes: z9.number().int().nonnegative().optional()
+  })
+);
+var UnifiedDiffChanges = class _UnifiedDiffChanges {
+  entries;
+  constructor(props) {
+    this.entries = UnifiedDiffChangesPropsSchema.parse(props).entries;
+  }
+  /**
+   * True when any line in the inclusive range `startLine..line` is changed, or
+   * the file is wholly changed. Line 0 (a PR-wide finding) and an inverted
+   * range are treated as changed; a path absent from the diff is unchanged.
+   */
+  touches(path, line, startLine) {
+    const first = startLine ?? line;
+    if (line <= 0 || first > line) {
+      return true;
+    }
+    const entry = this.entries.get(path);
+    if (entry === void 0) {
+      return false;
+    }
+    if (entry === "all") {
+      return true;
+    }
+    return [...entry].some((changed) => changed >= first && changed <= line);
+  }
+  /** Builds the index from the text of a `git diff` (typically `-U0`). */
+  static parse(diff) {
+    const text = z9.string().parse(diff);
+    const lines = text.split(/\r?\n/);
+    const entries = /* @__PURE__ */ new Map();
+    let block;
+    let at = 0;
+    while (at < lines.length) {
+      const line = lines[at] ?? "";
+      if (line.startsWith("diff --git ")) {
+        _UnifiedDiffChanges.finish(entries, block);
+        block = _UnifiedDiffChanges.openBlock(GitPath.fromDiffHeader(line.slice(11)));
+        at++;
+      } else if (DiffHunks.isHeader(line)) {
+        block ??= _UnifiedDiffChanges.openBlock(void 0);
+        at = DiffHunks.collect(lines, at, block.lines);
+      } else {
+        if (line.startsWith("--- ") && (lines[at + 1] ?? "").startsWith("+++ ") && (!block || block.sawTarget)) {
+          _UnifiedDiffChanges.finish(entries, block);
+          block = _UnifiedDiffChanges.openBlock(void 0);
+        }
+        if (block) {
+          _UnifiedDiffChanges.readMetadata(block, line);
+        }
+        at++;
+      }
+    }
+    _UnifiedDiffChanges.finish(entries, block);
+    return new _UnifiedDiffChanges({ entries });
+  }
+  /** Builds the index from GitHub compare-API file entries. */
+  static fromFilePatches(files) {
+    const entries = /* @__PURE__ */ new Map();
+    for (const file of FilePatchesSchema.parse(files)) {
+      const pureRename = file.status === "renamed" && file.patch === void 0 && file.changes === 0;
+      if (file.status === "removed") {
+        continue;
+      }
+      if (pureRename) {
+        _UnifiedDiffChanges.merge(entries, file.filename, /* @__PURE__ */ new Set());
+      } else if (file.status === "added" || file.patch === void 0) {
+        _UnifiedDiffChanges.merge(entries, file.filename, "all");
+      } else {
+        const changed = /* @__PURE__ */ new Set();
+        const lines = file.patch.split(/\r?\n/);
+        for (let at = 0; at < lines.length; ) {
+          at = DiffHunks.isHeader(lines[at] ?? "") ? DiffHunks.collect(lines, at, changed) : at + 1;
+        }
+        _UnifiedDiffChanges.merge(entries, file.filename, changed);
+      }
+    }
+    return new _UnifiedDiffChanges({ entries });
+  }
+  static openBlock(path) {
+    return { path, wholeFile: false, deleted: false, sawTarget: false, lines: /* @__PURE__ */ new Set() };
+  }
+  static readMetadata(block, line) {
+    if (line.startsWith("new file mode ")) {
+      block.wholeFile = true;
+    } else if (line.startsWith("deleted file mode ")) {
+      block.deleted = true;
+    } else if (line.startsWith("rename to ")) {
+      block.path = GitPath.fromFileMarker(line.slice(10));
+    } else if (line.startsWith("Binary files ") || line.startsWith("GIT binary patch")) {
+      block.wholeFile = true;
+    } else if (line.startsWith("--- ")) {
+      if (GitPath.fromFileMarker(line.slice(4)) === "/dev/null") {
+        block.wholeFile = true;
+      }
+    } else if (line.startsWith("+++ ")) {
+      const target = GitPath.fromFileMarker(line.slice(4));
+      block.sawTarget = true;
+      if (target === "/dev/null") {
+        block.deleted = true;
+      } else {
+        block.path = GitPath.stripSidePrefix(target);
+      }
+    }
+  }
+  static finish(entries, block) {
+    if (!block || block.path === void 0 || block.deleted) {
+      return;
+    }
+    _UnifiedDiffChanges.merge(entries, block.path, block.wholeFile ? "all" : block.lines);
+  }
+  static merge(entries, path, change) {
+    const existing = entries.get(path);
+    if (existing === "all" || change === "all") {
+      entries.set(path, "all");
+    } else {
+      entries.set(path, /* @__PURE__ */ new Set([...existing ?? [], ...change]));
+    }
+  }
+};
 export {
   ActionableFindingSchema,
   DecisionAnswerSchema,
@@ -950,6 +1224,7 @@ export {
   ReviewStateSchema,
   StoredFindingSchema,
   TransportReviewSchema,
+  UnifiedDiffChanges,
   ValidatedReviewVerifier,
   ZodReviewContract,
   reviewContract,

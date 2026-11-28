@@ -9235,7 +9235,7 @@ function createFlightRules(props = {}) {
 var settingsScopes = ["user", "project", "local"];
 
 // src/version.ts
-var appVersion = false ? "0.0.0-dev" : "3.3.0";
+var appVersion = false ? "0.0.0-dev" : "3.4.0";
 
 // src/agents/agent-frontmatter/agent-frontmatter.ts
 import { parse as parseYaml4 } from "yaml";
